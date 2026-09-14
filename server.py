@@ -62,7 +62,7 @@ TZ = ZoneInfo('Asia/Shanghai')
 # MVP 的日期范围先开放到 2027-04-01（含当天）。统一由后端校验，避免
 # 浏览器绕过日期输入限制后创建超出当前产品范围的安排。
 CALENDAR_END = date(2027, 4, 1)
-TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'suggestions', 'audit', 'corrections', 'settings')
+TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages')
 
 # Agent capability boundary.  The future chat/browser adapter must use these
 # capabilities instead of exposing Store internals or the generic action API.
@@ -392,11 +392,23 @@ class Store:
             content = message.get('content', '')
         except (KeyError, IndexError, TypeError):
             raise Problem(502, 'LLM 响应缺少 choices.message.content')
+        # Keep a per-user transcript so the assistant panel can be reopened like
+        # a chat app and superadmin can review what the agent was asked to do.
+        last_user = next((item['content'] for item in reversed(messages) if item['role'] == 'user'), '')
+        if last_user:
+            self.record_agent_message(user['id'], 'user', last_user)
+        self.record_agent_message(user['id'], 'assistant', content)
         return {'content': content, 'model': result.get('model', model),
                 'usage': result.get('usage'), 'finishReason': choice.get('finish_reason')}
 
     def execute_agent_action(self, user, data):
-        """Execute a model-proposed business action after explicit confirmation."""
+        """Execute a model-proposed business action after explicit confirmation.
+
+        Only superadmin may drive the operator agent; members are read-only and
+        are rejected here even if a client forges the confirmation flag.
+        """
+        if not user.get('admin'):
+            raise Problem(403, '只有 superadmin 的 Agent 可以执行操作，成员仅可查询')
         action = str(data.get('action') or '').strip()
         tool = AGENT_ACTION_TO_TOOL.get(action)
         if not tool:
@@ -405,7 +417,32 @@ class Store:
         if capability['requiresConfirmation'] and not bool(data.get('confirmed')):
             return {'requiresConfirmation': True, 'action': action, 'tool': tool}
         payload = data.get('data') if isinstance(data.get('data'), dict) else {}
-        return self._action(user, action, payload)
+        result = self._action(user, action, payload)
+        self.record_agent_message(user['id'], 'action', f'已执行：{action}', {
+            'action': action, 'data': payload})
+        return result
+
+    def record_agent_message(self, user_id, role, content, extra=None):
+        """Persist one line of the embedded assistant transcript.
+
+        The record is scoped to a user so the chat history can be reopened and
+        so superadmin can review what the agent did on someone's behalf.
+        """
+        record = {'id': uid(), 'user': user_id, 'role': role,
+                  'content': str(content or '')[:12000], 'createdAt': timestamp()}
+        if isinstance(extra, dict):
+            record.update(extra)
+        return self.put('agent_messages', record)
+
+    def agent_history(self, user, data):
+        """Return the stored assistant transcript for one account."""
+        target = str(data.get('userId') or user['id'])
+        if target != user['id']:
+            self.admin(user)
+        rows = [m for m in self.all('agent_messages') if m.get('user') == target]
+        # all() already returns rows in insertion (rowid) order, which is the
+        # chronological transcript even when several records share a timestamp.
+        return {'userId': target, 'messages': rows[-400:]}
 
     def create_user(self, id, password, admin=False):
         if not id.isalnum() or not 3 <= len(id) <= 30 or len(password) < 6:
@@ -927,6 +964,18 @@ class Store:
             return self.llm_chat(user, d)
         if action=='agent.execute':
             return self.execute_agent_action(user, d)
+        if action=='agent.history':
+            return self.agent_history(user, d)
+        if action=='agent.history.clear':
+            target=str(d.get('userId') or user['id'])
+            if target!=user['id']:
+                self.admin(user)
+            with self.lock,self.db:
+                for message in self.all('agent_messages'):
+                    if message.get('user')==target:
+                        self.db.execute('DELETE FROM agent_messages WHERE id=?',(message['id'],))
+            self.audit(user['id'],'agent.history.clear',{'target':target})
+            return {'cleared':True,'userId':target}
         if action=='account.create':
             self.admin(user);self.create_user(required(d,'username'),required(d,'password'));return
         if action=='account.toggle':

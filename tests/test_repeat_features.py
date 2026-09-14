@@ -104,10 +104,26 @@ class RepeatFeatureTests(unittest.TestCase):
         applied = self.store.action(self.admin, 'agent.execute', {**proposal, 'confirmed': True})
         self.assertEqual(applied['name'], 'Agent 创建的任务')
         self.assertTrue(any(t.get('name') == 'Agent 创建的任务' for t in self.store.all('tasks')))
+        transcript = self.store.action(self.admin, 'agent.history', {})['messages']
+        self.assertTrue(any(m.get('role') == 'action' and m.get('action') == 'task.create' for m in transcript))
         with self.assertRaises(Problem):
             self.store.action(self.member, 'agent.execute', {**proposal, 'confirmed': True})
         with self.assertRaises(Problem):
             self.store.action(self.admin, 'agent.execute', {'action': 'shell.exec', 'confirmed': True})
+
+    def test_agent_history_is_private_and_clearable(self):
+        self.store.record_agent_message('superadmin', 'user', '帮我建任务')
+        self.store.record_agent_message('superadmin', 'assistant', '好的')
+        self.store.record_agent_message('test001', 'user', '我的查询')
+        mine = self.store.action(self.admin, 'agent.history', {})['messages']
+        self.assertEqual([m['content'] for m in mine], ['帮我建任务', '好的'])
+        other = self.store.action(self.admin, 'agent.history', {'userId': 'test001'})['messages']
+        self.assertEqual([m['content'] for m in other], ['我的查询'])
+        with self.assertRaises(Problem):
+            self.store.action(self.member, 'agent.history', {'userId': 'superadmin'})
+        self.store.action(self.member, 'agent.history.clear', {})
+        self.assertEqual(self.store.action(self.member, 'agent.history', {})['messages'], [])
+        self.assertEqual(len(self.store.action(self.admin, 'agent.history', {})['messages']), 2)
 
     def test_llm_config_is_admin_only_and_key_is_masked(self):
         with self.assertRaises(Problem):

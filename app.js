@@ -572,6 +572,41 @@ function agentAppend(role,content,kind=''){
   const list=$('#agentMessages');if(!list)return;
   const el=document.createElement('div');el.className=`agent-message ${role==='user'?'user':'assistant'} ${kind}`;el.textContent=content;list.appendChild(el);list.scrollTop=list.scrollHeight;
 }
+function agentFormatTime(iso){try{return new Date(iso).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}catch(_){return iso||''}}
+function agentMessageNode(m){
+  const node=document.createElement('div');
+  if(m.role==='action'){
+    const label=AGENT_ACTION_LABELS[m.action]||m.action||'操作';
+    node.className='agent-message assistant agent-action-record';
+    node.innerHTML=`<div class="agent-action-title">已执行 · ${escapeHTML(label)}</div><pre class="agent-action-payload">${escapeHTML(JSON.stringify(m.data||{},null,2))}</pre><small class="agent-time">${escapeHTML(agentFormatTime(m.createdAt))}</small>`;
+    return node;
+  }
+  node.className=`agent-message ${m.role==='user'?'user':'assistant'}`;
+  const text=document.createElement('span');text.textContent=m.content||'';node.appendChild(text);
+  const stamp=document.createElement('small');stamp.className='agent-time';stamp.textContent=agentFormatTime(m.createdAt);node.appendChild(stamp);
+  return node;
+}
+async function agentLoadOwnHistory(){
+  try{
+    const data=await api('/api/action',{action:'agent.history',data:{}});
+    const messages=data.messages||[],list=$('#agentMessages');if(!list)return;
+    list.innerHTML='';
+    if(!messages.length){list.innerHTML='<div class="agent-message assistant"><span>你好，我可以帮你查询工作台信息。配置自定义 API 后，也可以接入你的模型。</span></div>';return}
+    agentState.messages=messages.filter(m=>m.role==='user'||m.role==='assistant').map(m=>({role:m.role,content:m.content}));
+    messages.forEach(m=>list.appendChild(agentMessageNode(m)));
+    list.scrollTop=list.scrollHeight;
+  }catch(_){}
+}
+async function agentShowHistory(){
+  const admin=Boolean(S.user?.admin);
+  openModal(`<div class="eyebrow">WORK AGENT · 工作记录</div><h2>AI 工作记录</h2><p class="muted">记录保留每个账户与助手的对话及已执行操作，仅本人与 superadmin 可见。</p>${admin?`<label class="form-field">查看账户<select id="agentHistoryUser">${S.users.map(u=>`<option value="${escapeHTML(u.id)}">${escapeHTML(u.id)}</option>`).join('')}</select></label>`:''}<div id="agentHistoryList" class="agent-history-list"></div><div class="modal-footer"><button class="secondary-btn" id="agentHistoryClear">清空记录</button><button class="primary-btn" id="agentHistoryClose">关闭</button></div>`);
+  const target=()=>$('#agentHistoryUser')?.value||S.user.id;
+  const load=async()=>{const box=$('#agentHistoryList');box.innerHTML='<p class="muted">正在加载…</p>';try{const data=await api('/api/action',{action:'agent.history',data:{userId:target()}});const msgs=data.messages||[];box.innerHTML='';if(!msgs.length){box.innerHTML='<p class="muted">该账户暂无 AI 工作记录。</p>';return}msgs.forEach(m=>box.appendChild(agentMessageNode(m)))}catch(e){box.innerHTML=`<p class="muted">加载失败：${escapeHTML(e.message||'')}</p>`}};
+  $('#agentHistoryUser')?.addEventListener('change',load);
+  $('#agentHistoryClose').onclick=closeModal;
+  $('#agentHistoryClear').onclick=async()=>{if(!confirm(`确认清空 ${target()} 的 AI 工作记录？`))return;try{await api('/api/action',{action:'agent.history.clear',data:{userId:target()}});toast('记录已清空');await load()}catch(e){toast(e.message||'清空失败')}};
+  await load();
+}
 function agentSetConfigVisible(show){
   $('#agentConfig')?.classList.toggle('hidden',!show);
   if(show){const c=agentServerConfig||agentConfig();const provider=c.provider||'custom';$('#agentProvider').value=provider;agentRenderModelOptions(c.model||'');$('#agentEndpoint').value=c.baseUrl||c.endpoint||(provider==='opencode-go'?OPENCODE_GO_ENDPOINT:'');$('#agentApiKey').value='';$('#agentCustomModel').value=provider==='custom'?(c.model||''):'';agentSyncProviderUI()}
@@ -653,7 +688,8 @@ async function agentSubmit(){
   finally{agentState.busy=false;$('#agentSendBtn').disabled=false;$('#agentSendBtn').textContent='发送';input.focus()}
 }
 function initAgentUI(){
-  $('#agentBtn')?.addEventListener('click',async()=>{$('#agentPanel').classList.remove('hidden');renderAgentCapability();await agentLoadServerConfig();$('#agentInput').focus()});
+  $('#agentBtn')?.addEventListener('click',async()=>{$('#agentPanel').classList.remove('hidden');renderAgentCapability();await agentLoadOwnHistory();await agentLoadServerConfig();$('#agentInput').focus()});
+  $('#agentHistoryBtn')?.addEventListener('click',()=>agentShowHistory());
   $('#agentCloseBtn')?.addEventListener('click',()=>$('#agentPanel').classList.add('hidden'));
   $('#agentConfigBtn')?.addEventListener('click',()=>agentSetConfigVisible(true));
   $('#agentConfigClose')?.addEventListener('click',()=>agentSetConfigVisible(false));
