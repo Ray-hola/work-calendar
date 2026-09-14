@@ -1641,7 +1641,7 @@ def main():
     if store.initial_passwords:
         path=Path(args.db).parent/'initial-accounts.txt'
         fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
-        with os.fdopen(fd,'w') as f:
+        with os.fdopen(fd,'w',encoding='utf-8') as f:
             f.write('Work Calendar 本地核验账户（请勿上传或公开分享）\n')
             for id,pw in store.initial_passwords.items():f.write(f'{id}\t{pw}\n')
         print(f'账户密码已保存：{path}',flush=True)
