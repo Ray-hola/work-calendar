@@ -285,3 +285,21 @@ test('achievement archive is superadmin-only and sorts latest completed first', 
   a.run(`S.user={id:'test001',admin:0}`);
   assert.deepEqual(a.json(`completedProjects()`), []);
 });
+
+test('agent action envelopes are parsed and removed from the reply text', () => {
+  const a = app();
+  // The agent helpers live after the DOM-binding block, so load just the pure
+  // parser slice to keep this a unit test.
+  a.run(source.slice(source.indexOf('const AGENT_ACTION_LABELS'), source.indexOf('function agentRenderAction')));
+  const reply = a.json(`(()=>{
+    const r=agentSplitActions('我准备创建任务。\\n<action>{"action":"task.create","data":{"name":"整理周报","assignee":"test001"}}</action>');
+    return {clean:r.clean,action:r.actions[0]&&r.actions[0].action,name:r.actions[0]&&r.actions[0].data.name};
+  })()`);
+  assert.equal(reply.clean, '我准备创建任务。');
+  assert.equal(reply.action, 'task.create');
+  assert.equal(reply.name, '整理周报');
+  const malformed = a.json(`(()=>{const r=agentSplitActions('无效动作 <action>not json</action>');return {clean:r.clean,count:r.actions.length}})()`);
+  assert.equal(malformed.count, 0);
+  assert.equal(malformed.clean, '无效动作');
+  assert.equal(a.run("AGENT_ACTION_LABELS['task.create']"), '创建任务');
+});

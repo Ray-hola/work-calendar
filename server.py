@@ -326,6 +326,19 @@ class Store:
                   if user.get('admin') else
                   '你是 Work Calendar 查询助手。当前账户是普通成员，只能回答该成员有权看到的信息，'
                   '不能创建、删除、指派、调整或审批任何数据。')
+        if user.get('admin'):
+            # Teach the operator model the one structured envelope the browser
+            # knows how to turn into a confirmation card.  Without this the
+            # assistant can only describe an action and never apply it.
+            policy += ('\n当用户要求创建、指派、调整、审批或删除数据，且你能从上下文确定必填字段时，'
+                       '先在正文用一两句话说明拟执行内容，然后另起一行输出一个动作块：'
+                       '<action>{"action":"动作名","data":{...}}</action>。'
+                       '动作块必须是单行合法 JSON，不要放进 Markdown 代码围栏，也不要输出多个动作块。'
+                       f'可用动作名：{", ".join(sorted(AGENT_ACTION_TO_TOOL))}。'
+                       '创建任务的示例：'
+                       '<action>{"action":"task.create","data":{"name":"整理周报","projectId":"项目ID","assignee":"成员账户","date":"2026-09-14","duration":60,"priority":"P1"}}</action>。'
+                       '日期使用 YYYY-MM-DD，优先级为 P0/P1/P2。前端会解析动作块并请用户确认后再执行，'
+                       '所以只输出动作块即可，不要声称已经执行完成。')
         # A caller-supplied system message is untrusted input.  The policy is
         # placed first for provider compatibility and repeated last so it
         # remains authoritative if a custom prompt tries to override it.

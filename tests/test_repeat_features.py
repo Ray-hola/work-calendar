@@ -91,6 +91,24 @@ class RepeatFeatureTests(unittest.TestCase):
             with self.subTest(tool=tool), self.assertRaises(Problem):
                 self.store.action(self.member, 'agent.authorize', {'tool': tool})
 
+    def test_agent_execute_requires_confirmation_and_applies_action(self):
+        project = self.store.action(self.admin, 'project.create', {
+            'name': 'Agent 项目', 'owner': 'test001', 'members': ['test001'],
+            'start': self.today.isoformat(), 'cycle': 'infinite'})
+        proposal = {'action': 'task.create', 'data': {
+            'name': 'Agent 创建的任务', 'projectId': project['id'],
+            'assignee': 'test001', 'date': self.today.isoformat()}}
+        pending = self.store.action(self.admin, 'agent.execute', proposal)
+        self.assertTrue(pending['requiresConfirmation'])
+        self.assertFalse(any(t.get('name') == 'Agent 创建的任务' for t in self.store.all('tasks')))
+        applied = self.store.action(self.admin, 'agent.execute', {**proposal, 'confirmed': True})
+        self.assertEqual(applied['name'], 'Agent 创建的任务')
+        self.assertTrue(any(t.get('name') == 'Agent 创建的任务' for t in self.store.all('tasks')))
+        with self.assertRaises(Problem):
+            self.store.action(self.member, 'agent.execute', {**proposal, 'confirmed': True})
+        with self.assertRaises(Problem):
+            self.store.action(self.admin, 'agent.execute', {'action': 'shell.exec', 'confirmed': True})
+
     def test_llm_config_is_admin_only_and_key_is_masked(self):
         with self.assertRaises(Problem):
             self.store.action(self.member, 'agent.config.set', {

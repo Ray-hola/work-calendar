@@ -594,13 +594,61 @@ async function agentRequest(messages){
   const data=await api('/api/agent/chat',{messages,sessionId:agentState.sessionId});
   const text=agentExtractText(data);if(!text)throw new Error('服务端 Agent 未返回文本');return String(text);
 }
+const AGENT_ACTION_LABELS={
+  'task.create':'创建任务','task.update':'调整任务','task.delete':'删除任务','task.complete':'完成任务',
+  'task.review':'审批任务','task.edit_review':'审批修改申请','project.create':'创建项目',
+  'project.review':'审批项目','project.update':'调整项目','project.invite':'邀请协作者',
+  'project.complete_review':'审批项目结项','assignment.manual':'强行指派','repeat.create':'创建固定安排',
+  'repeat.update':'调整固定安排','repeat.skip':'挖空固定安排','account.create':'创建账户',
+  'account.toggle':'停用/启用账户','request.manage':'处理协作邀请','report.manage':'管理日报',
+  'automation.update':'更新自动化设置','collection.update':'更新补报时间','profile.correct':'修正成员画像',
+  'scheduler.run':'运行一次调度检查'
+};
+function agentSplitActions(text){
+  /* The operator model appends a single <action>{...}</action> envelope.  It is
+     parsed here so only the human-readable text is shown, and the payload turns
+     into a confirmation card instead of being executed silently. */
+  const actions=[];
+  const clean=String(text||'').replace(/<action>([\s\S]*?)<\/action>/gi,(_,body)=>{
+    try{const parsed=JSON.parse(body.trim());if(parsed&&typeof parsed.action==='string'&&parsed.action)actions.push(parsed)}catch(_){}
+    return '';
+  }).trim();
+  return {clean,actions};
+}
+function agentRenderAction(proposal){
+  const list=$('#agentMessages');if(!list)return;
+  const label=AGENT_ACTION_LABELS[proposal.action]||proposal.action;
+  const payload=(proposal.data&&typeof proposal.data==='object')?proposal.data:{};
+  const card=document.createElement('div');card.className='agent-message assistant agent-action';
+  card.innerHTML=`<div class="agent-action-title">待确认操作 · ${escapeHTML(label)}</div><pre class="agent-action-payload">${escapeHTML(JSON.stringify(payload,null,2))}</pre><div class="agent-action-buttons"><button class="ghost-btn agent-action-cancel">取消</button><button class="primary-btn agent-action-confirm">确认执行</button></div>`;
+  list.appendChild(card);list.scrollTop=list.scrollHeight;
+  card.querySelector('.agent-action-cancel').onclick=()=>{card.remove()};
+  card.querySelector('.agent-action-confirm').onclick=async e=>{
+    const btn=e.currentTarget;btn.disabled=true;btn.textContent='执行中…';
+    try{
+      await api('/api/action',{action:'agent.execute',data:{action:proposal.action,data:payload,confirmed:true}});
+      card.querySelector('.agent-action-buttons').innerHTML='<span class="agent-action-done">已执行</span>';
+      await refresh();toast(`已${label}`);
+      agentAppend('assistant',`已执行：${label}。`);
+    }catch(err){btn.disabled=false;btn.textContent='确认执行';toast(err.message||'执行失败')}
+  };
+}
 async function agentSubmit(){
   const input=$('#agentInput'),text=input?.value.trim();if(!text||agentState.busy)return;
   input.value='';agentAppend('user',text);agentState.busy=true;$('#agentSendBtn').disabled=true;$('#agentSendBtn').textContent='…';
   try{
     const context={role:S.agentCapabilities?.role||'member',mode:S.agentCapabilities?.mode||'readonly'};
-    const answer=await agentRequest([{role:'system',content:`你是 Work Calendar 工作助手。当前账户角色：${context.role}，权限模式：${context.mode}。遵守服务端权限边界，不要声称已执行未完成的操作。`},...agentState.messages.map(x=>({role:x.role,content:x.content}))]);
-    agentAppend('assistant',answer);
+    const rule=context.mode==='operator'?'用户要求改动数据时，按服务端约定输出单个 <action> 动作块，等待用户确认；不要声称已经执行完成。':'你是只读助手，不能创建、指派、修改或审批任何数据。';
+    const answer=await agentRequest([{role:'system',content:`你是 Work Calendar 工作助手。当前账户角色：${context.role}，权限模式：${context.mode}。遵守服务端权限边界：${rule}`},...agentState.messages.map(x=>({role:x.role,content:x.content}))]);
+    // Remove the pending user turn already echoed by agentAppend before parsing.
+    const {clean,actions}=agentSplitActions(answer);
+    if(clean)agentAppend('assistant',clean);
+    if(actions.length){
+      if(context.mode==='operator')actions.forEach(agentRenderAction);
+      else agentAppend('assistant','当前账户为只读权限，无法执行该操作。','error');
+    }else if(!clean){
+      agentAppend('assistant','Agent 未返回可执行内容。','error');
+    }
   }catch(e){agentAppend('assistant',e.message||'暂时无法连接 Agent 服务。','error')}
   finally{agentState.busy=false;$('#agentSendBtn').disabled=false;$('#agentSendBtn').textContent='发送';input.focus()}
 }
