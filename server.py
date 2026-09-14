@@ -939,6 +939,38 @@ class Store:
                 if owner!=user['id']:self.notify(owner,'项目 Owner 指派',f'superadmin 指定你负责「{p["name"]}」，可在项目下创建和分配任务。','project',p['id'])
             else:self.notify('superadmin','项目审批申请',f'{user["id"]} 申请创建「{p["name"]}」。','approval',p['id'])
             return p
+        if action=='project.delete':
+            # Destructive and irreversible: allowed for superadmin and the
+            # project owner, and only when the caller echoes the exact project
+            # name so an accidental click cannot erase a project.  The cascade
+            # removes the project's tasks and every record that pointed at the
+            # project or those tasks.
+            p=self.get('projects',d.get('id'))
+            self.project_owner(user,p)
+            if str(d.get('confirm','')).strip()!=p['name']:
+                raise Problem(400,'请输入完整的项目名称以确认删除')
+            tasks=[t for t in self.all('tasks') if t.get('projectId')==p['id']]
+            task_ids={t['id'] for t in tasks}
+            counts={'tasks':len(tasks),'done':len([t for t in tasks if t.get('status')=='done'])}
+            with self.lock,self.db:
+                for t in tasks:
+                    self.db.execute('DELETE FROM tasks WHERE id=?',(t['id'],))
+                for table in ('reports','suggestions','requests','edit_requests'):
+                    for row in self.all(table):
+                        if row.get('projectId')==p['id'] or row.get('taskId') in task_ids:
+                            self.db.execute(f'DELETE FROM {table} WHERE id=?',(row['id'],))
+                for log in self.all('logs'):
+                    if log.get('taskId') in task_ids:
+                        self.db.execute('DELETE FROM logs WHERE id=?',(log['id'],))
+                for notice in self.all('notifications'):
+                    if notice.get('reference')==p['id'] or notice.get('reference') in task_ids:
+                        self.db.execute('DELETE FROM notifications WHERE id=?',(notice['id'],))
+                self.db.execute('DELETE FROM projects WHERE id=?',(p['id'],))
+            self.audit(user['id'],'project.delete',{'project':p['name'],'projectId':p['id'],**counts})
+            for member,status in (p.get('members') or {}).items():
+                if member!=user['id'] and status=='accepted':
+                    self.notify(member,'项目已删除',f'{user["id"]} 删除了项目「{p["name"]}」及其全部子任务。','project',None)
+            return {'id':p['id'],'deleted':True,**counts}
         if action=='project.review':
             self.admin(user);p=self.get('projects',d['id'])
             if p['status']!='pending':raise Problem(409,'该申请已经处理')

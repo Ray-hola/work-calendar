@@ -472,5 +472,49 @@ class TaskApprovalTests(unittest.TestCase):
         with self.assertRaises(Problem): self.store.action(self.member,'task.edit_request',{'id':done['id'],'reason':'不能改','changes':{'name':'x'}})
 
 
+    def test_project_delete_requires_name_confirmation_and_cascades(self):
+        project = self.store.action(self.admin, 'project.create', {
+            'name': 'disposable project', 'owner': 'test001', 'members': ['test002'],
+            'start': self.day, 'cycle': 'infinite',
+        })
+        for request in self.store.all('requests'):
+            self.store.action(self.store.user(request['to']), 'request.respond', {'id': request['id'], 'accept': True})
+        task = self.store.action(self.admin, 'task.create', {
+            'name': 'child', 'projectId': project['id'], 'assignee': 'test002', 'date': self.day,
+        })
+        self.store.action(self.store.user('test002'), 'task.edit_request', {
+            'id': task['id'], 'reason': '调整', 'changes': {'name': 'child renamed'},
+        })
+        self.assertTrue(any(r.get('taskId') == task['id'] for r in self.store.all('edit_requests')))
+
+        with self.assertRaises(Problem) as wrong_name:
+            self.store.action(self.admin, 'project.delete', {'id': project['id'], 'confirm': 'nope'})
+        self.assertEqual(wrong_name.exception.status, 400)
+        with self.assertRaises(Problem) as missing_confirm:
+            self.store.action(self.store.user('test002'), 'project.delete', {'id': project['id']})
+        self.assertEqual(missing_confirm.exception.status, 403)
+
+        result = self.store.action(self.admin, 'project.delete', {'id': project['id'], 'confirm': project['name']})
+        self.assertEqual(result['deleted'], True)
+        self.assertEqual(result['tasks'], 1)
+        self.assertFalse(any(p['id'] == project['id'] for p in self.store.all('projects')))
+        self.assertFalse(any(t.get('projectId') == project['id'] for t in self.store.all('tasks')))
+        self.assertFalse(any(r.get('taskId') == task['id'] for r in self.store.all('edit_requests')))
+        self.assertFalse(any(n.get('reference') in (project['id'], task['id']) for n in self.store.all('notifications')))
+        self.assertTrue(any(a['action'] == 'project.delete' for a in self.store.all('audit')))
+
+    def test_project_owner_can_delete_own_project_with_confirmation(self):
+        project = self.store.action(self.admin, 'project.create', {
+            'name': 'owner cleanup', 'owner': 'test001', 'members': [],
+            'start': self.day, 'cycle': 'infinite',
+        })
+        owner = self.store.user('test001')
+        with self.assertRaises(Problem):
+            self.store.action(owner, 'project.delete', {'id': project['id'], 'confirm': 'wrong'})
+        result = self.store.action(owner, 'project.delete', {'id': project['id'], 'confirm': 'owner cleanup'})
+        self.assertEqual(result['deleted'], True)
+        self.assertFalse(any(p['id'] == project['id'] for p in self.store.all('projects')))
+
+
 if __name__ == '__main__':
     unittest.main()
