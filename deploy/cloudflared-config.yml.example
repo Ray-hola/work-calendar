@@ -1,0 +1,9 @@
+# Cloudflare Tunnel 配置示例。Tunnel 本身的 credentials-file
+# 由 cloudflared login/create 生成，不要提交到仓库。
+tunnel: YOUR_TUNNEL_ID
+credentials-file: /etc/cloudflared/YOUR_TUNNEL_ID.json
+
+ingress:
+  - hostname: work.your-domain.example
+    service: http://127.0.0.1:4173
+  - service: http_status:404

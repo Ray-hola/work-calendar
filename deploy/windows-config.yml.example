@@ -1,0 +1,8 @@
+# 将 YOUR_WINDOWS_USER 和实际 Tunnel ID 替换为 Windows 上的值。
+tunnel: YOUR_TUNNEL_ID
+credentials-file: C:\Users\YOUR_WINDOWS_USER\.cloudflared\YOUR_TUNNEL_ID.json
+
+ingress:
+  - hostname: work.your-domain.example
+    service: http://127.0.0.1:4173
+  - service: http_status:404

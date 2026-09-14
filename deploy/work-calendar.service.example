@@ -1,0 +1,23 @@
+[Unit]
+Description=Work Calendar MVP
+After=network.target
+
+[Service]
+Type=simple
+User=workcalendar
+Group=workcalendar
+WorkingDirectory=/opt/work-calendar
+Environment=PYTHONUNBUFFERED=1
+Environment=WORK_CALENDAR_HOST=127.0.0.1
+Environment=WORK_CALENDAR_PORT=4173
+Environment=WORK_CALENDAR_DB=/opt/work-calendar/data/work-calendar.sqlite3
+Environment=WORK_CALENDAR_ORIGINS=https://work.your-domain.example
+Environment=WORK_CALENDAR_SECURE_COOKIE=1
+ExecStart=/usr/bin/python3 /opt/work-calendar/server.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

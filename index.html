@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#101828" />
+  <title>Work Calendar · 工作台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23ff6b4a'/%3E%3Cpath d='M17 20h30v8H17zm0 14h21v8H17z' fill='white'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="styles.css?v=20260914-password" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="主导航">
+      <div class="brand"><span class="brand-mark">W</span><span>work<br><strong>calendar</strong></span></div>
+      <div class="workspace-switcher"><span class="avatar">林</span><span><small>个人工作区</small><strong>林默</strong></span><span class="chevron">⌄</span></div>
+      <nav class="nav-list">
+        <button class="nav-item" data-view="today"><span>◷</span>今日任务 <b id="todayCount">0</b></button>
+        <button class="nav-item active" data-view="calendar"><span>▦</span>周视图</button>
+        <button class="nav-item" data-view="summary"><span>✦</span>日记</button>
+        <button class="nav-item" data-view="projects"><span>◇</span>项目空间</button>
+        <button class="nav-item" data-view="timeline"><span>▰</span>项目时间轴</button>
+        <button class="nav-item admin-only-nav hidden" data-view="achievements"><span>✧</span>成果库</button>
+        <button class="nav-item" data-view="inbox"><span>▣</span>收件箱 <b id="inboxCount">3</b></button>
+        <button class="nav-item" data-view="accounts"><span>◎</span>账户管理</button>
+      </nav>
+      <div class="sidebar-section"><span class="section-label">快捷筛选</span><button class="filter-link" data-filter="P0"><i class="dot p0"></i> P0 重要任务 <b id="p0Count">0</b></button><button class="filter-link" data-filter="inprogress"><i class="dot inprogress"></i> 进行中 <b id="doingCount">0</b></button><button class="filter-link" data-filter="deferred"><i class="dot deferred"></i> 已递延 <b id="deferredCount">0</b></button></div>
+      <div class="sidebar-footer"><div class="focus-card"><span>今日专注</span><strong id="focusTime">02:15</strong><small>预计总时长</small><div class="progress"><i id="focusProgress"></i></div></div><div class="help-row"><span>⌘</span> 快捷键 <kbd>?</kbd></div></div>
+    </aside>
+    <main class="main-content">
+      <header class="topbar"><div class="breadcrumbs"><span id="crumbRoot">我的工作台</span><span id="crumbCurrent">/ 周视图</span></div><div class="top-actions"><button class="icon-btn" title="搜索">⌕</button><button class="icon-btn" id="inboxBtn" title="通知">♢<i class="notification-dot"></i></button><button class="agent-top-btn" id="agentBtn" title="打开 AI 工作助手">✦ AI 助手</button><button class="secondary-btn" id="addProjectTopBtn">＋ 新建项目</button><button class="primary-btn" id="addTaskBtn">＋ 新建任务</button></div></header>
+      <div id="scheduleScope" class="schedule-scope hidden" aria-label="管理员日程范围">
+        <div><strong id="scheduleScopeTitle">全部成员的安排</strong><span id="scheduleScopeHint"></span></div>
+        <label for="scheduleMember">查看成员<select id="scheduleMember"><option value="all">全部成员</option></select></label>
+      </div>
+      <section id="timelineView" class="view timeline-view">
+        <div class="page-intro"><div><div class="eyebrow">PROJECT TIMELINE</div><h1>项目时间轴</h1><p>在同一条时间刻度上，查看每个项目的起止与重叠。</p></div><button class="primary-btn" id="timelineAddProjectBtn">＋ 新建项目</button></div>
+        <div class="timeline-toolbar"><div><strong id="timelineProjectCount">0 个项目</strong><span id="timelineVisibleRange" aria-live="polite"></span></div><div class="timeline-controls"><button class="secondary-btn" id="timelinePrev" aria-label="时间轴向左滚动">←</button><button class="secondary-btn" id="timelineToday">回到今天</button><button class="secondary-btn" id="timelineNext" aria-label="时间轴向右滚动">→</button></div></div>
+        <div id="timelineScroll" class="timeline-scroll" tabindex="0" role="region" aria-label="项目时间轴，左右滑动或使用左右方向键浏览日期"><div id="timelineGrid" class="gantt-grid"></div></div>
+        <div id="timelineEmpty" class="empty-state hidden"><div class="empty-icon">◇</div><h3>还没有项目</h3><p>创建项目并设置起止日期，就会在这里显示。</p></div>
+        <div class="timeline-legend"><span><i class="legend-today"></i>今天</span><span><i class="legend-range"></i>项目起止</span><span><i class="legend-open"></i>虚线箭头：未设截止</span><span class="timeline-scroll-hint">← → 横向滑动浏览更多日期</span></div>
+      </section>
+      <section id="achievementsView" class="view achievements-view admin-only-view"><div class="page-intro"><div><div class="eyebrow">SUPERADMIN · PROJECT ARCHIVE</div><h1>成果库</h1><p>以生命周期回顾已经完成并通过结项审批的项目成果。</p></div><span class="achievement-scope-note">仅 superadmin 可见</span></div><div class="achievement-stats" id="achievementStats"></div><div id="achievementGrid" class="achievement-grid"></div><div id="achievementEmpty" class="empty-state hidden"><div class="empty-icon">✧</div><h3>还没有已完成项目</h3><p>项目通过 superadmin 的结项审批后，会自动进入成果库。</p></div></section>
+      <section id="todayView" class="view">
+        <div class="page-intro"><div><div class="eyebrow" id="todayLabel">星期四 · 9月11日</div><h1>今天做什么？</h1><p>把注意力放在最重要的一件事上。</p></div><div class="date-chip"><button id="prevDay">‹</button><span id="dateChip">9月11日</span><button id="nextDay">›</button></div></div>
+        <div class="daily-progress"><div><span>今日进度</span><strong id="progressText">0 / 0 已完成</strong></div><div class="progress wide"><i id="dayProgress"></i></div><span class="progress-percent" id="progressPercent">0%</span></div>
+        <div class="quick-tabs"><button class="quick-tab active" data-filter="all">全部 <b id="allTabCount">0</b></button><button class="quick-tab" data-filter="open">待处理 <b id="openTabCount">0</b></button><button class="quick-tab" data-filter="done">已完成 <b id="doneTabCount">0</b></button></div>
+        <div id="todayTaskList" class="task-list"></div>
+        <div class="empty-state hidden" id="todayEmpty"><div class="empty-icon">✓</div><h3 id="todayEmptyTitle">今天没有待处理任务</h3><p id="todayEmptyHint">把下一件重要的事放进日程吧。</p><button class="secondary-btn" id="emptyAddBtn">新建任务</button></div>
+      </section>
+      <section id="calendarView" class="view active-view"><div class="page-intro"><div><div class="eyebrow">横向滑动看同一周 · 纵向滚动切换周</div><h1>周视图</h1><p>选中的周会放大显示，悬停日期可抽取查看。</p></div><button class="secondary-btn" id="backTodayBtn">回到今天</button></div><div class="week-gesture-hint"><span>← → 左右滑动：周六至周五</span><span>↕ 上下滚动：上一周 / 下一周</span></div><div id="weekCarousel" class="week-carousel" aria-label="纵向周日程轴"></div></section>
+      <section id="summaryView" class="view"><div class="page-intro"><div><div class="eyebrow">工作复盘 · 日记</div><h1>日记</h1><p>周视图浏览每日记录，点击日期进入对应笔记本。</p></div><button class="secondary-btn" id="generateSummaryBtn">✦ 写今天日记</button></div><div id="diaryWorkspace"></div></section>
+      <section id="projectsView" class="view"><div class="page-intro"><div><div class="eyebrow">项目空间 · 3 个进行中</div><h1>项目进度</h1><p>查看进度、负荷与待审核的分配建议。</p></div><button class="primary-btn" id="addProjectBtn">＋ 新建项目</button></div><div id="projectGrid" class="project-grid"></div></section>
+      <section id="inboxView" class="view"><div class="page-intro"><div><div class="eyebrow">通知中心 · 3 条未读</div><h1>收件箱</h1><p>任务指派、项目审批和日记提醒都会在这里留下记录。</p></div><button class="secondary-btn" id="markAllReadBtn">全部标为已读</button></div><div id="inboxList" class="inbox-list"></div></section>
+      <section id="accountsView" class="view"><div class="page-intro"><div><div class="eyebrow">权限与成员 · 当前身份：<span id="currentRoleLabel">Super Admin</span></div><h1>账户管理</h1><p>Super Admin 可制定固定任务、强行指派或调整任务，系统会向相关成员发送通知。</p></div><button class="secondary-btn" id="createAccountBtn">＋ 添加账户</button><button class="primary-btn" id="createFixedBtn">＋ 制定固定任务</button></div><div class="account-banner"><div class="avatar large">S</div><div><strong>superadmin</strong><span>Super Admin · 全部项目与成员</span></div><span class="permission-pill">可强行指派 / 调整</span><button class="secondary-btn" id="forceAssignBtn">强行指派 / 调整</button></div><div id="accountList" class="account-list"></div><div class="repeat-admin-panel"><div class="panel-heading"><div><h2>固定任务规则</h2><span class="muted">可按周设置，并临时挖空某一天</span></div></div><div id="repeatList" class="repeat-list"></div></div><div class="automation-card"><div><span class="eyebrow">日记自动化规则</span><h2>日记统计与项目补报</h2><p>成员提交日记后同步给 Owner 与 superadmin。日记统计固定在每日 23:30 执行；下方时间仅控制项目 Owner 缺失汇报时的自动补报。</p></div><div class="automation-actions"><button class="secondary-btn" id="collectionSettingsBtn">设置项目补报时间</button><button class="secondary-btn" id="runAutomationBtn">立即运行一次检查</button></div></div></section>
+      <section id="dayDetailView" class="view"><div class="page-intro"><div><div class="eyebrow" id="dayDetailKicker">日期详情</div><h1 id="dayDetailTitle">当日任务</h1><p>点击任务进入详情，完成或递延会保留记录。</p></div><button class="secondary-btn" id="backWeekBtn">返回周视图</button></div><div id="dayDetailContent" class="task-list"></div></section>
+    </main>
+  </div>
+  <div id="taskDrawer" class="drawer-backdrop hidden"><aside class="task-drawer" role="dialog" aria-modal="true"><button class="close-btn" id="closeDrawer">×</button><div id="drawerContent"></div></aside></div>
+  <div id="modalBackdrop" class="modal-backdrop hidden"><div class="modal" role="dialog" aria-modal="true"><button class="close-btn" id="closeModal">×</button><div id="modalContent"></div></div></div>
+  <div id="toast" class="toast" role="status"></div>
+  <aside id="agentPanel" class="agent-panel hidden" aria-label="AI 工作助手" aria-live="polite">
+    <div class="agent-header"><div><span class="agent-kicker">WORK AGENT</span><strong>AI 工作助手</strong></div><div class="agent-header-actions"><button id="agentConfigBtn" class="agent-icon-btn" title="配置 API">⚙</button><button id="agentCloseBtn" class="agent-icon-btn" title="关闭">×</button></div></div>
+    <div id="agentCapability" class="agent-capability"></div>
+    <div id="agentMessages" class="agent-messages"><div class="agent-message assistant"><span>你好，我可以帮你查询工作台信息。配置自定义 API 后，也可以接入你的模型。</span></div></div>
+    <form id="agentForm" class="agent-form"><textarea id="agentInput" rows="2" placeholder="问我任务、项目、负载或收件箱…" aria-label="输入消息"></textarea><button class="primary-btn" type="submit" id="agentSendBtn">发送</button></form>
+    <div id="agentConfig" class="agent-config hidden"><div class="agent-config-title"><strong>AI 接入配置</strong><button id="agentConfigClose" class="agent-text-btn">收起</button></div><p>API Key 与模型由 superadmin 统一管理。支持 OpenCode Go 的 OpenAI 兼容 <code>/chat/completions</code> 接口，也可填写其他兼容服务。</p><label>服务商预设<select id="agentProvider"><option value="opencode-go">OpenCode Go（推荐）</option><option value="custom">自定义 OpenAI 兼容 API</option></select></label><label>API 地址<input id="agentEndpoint" placeholder="https://opencode.ai/zen/go/v1/chat/completions" autocomplete="url"></label><label>API Key<input id="agentApiKey" type="password" placeholder="留空表示保持原密钥" autocomplete="off"></label><label>模型<select id="agentModelSelect"></select><input id="agentCustomModel" class="hidden" placeholder="输入自定义模型 ID" autocomplete="off"></label><div class="agent-config-actions"><button type="button" class="secondary-btn" id="agentConfigReset">清除本机配置</button><button type="button" class="primary-btn" id="agentConfigSave">保存服务端配置</button></div></div>
+  </aside>
+  <script src="app.js?v=20260914-password"></script>
+</body>
+</html>

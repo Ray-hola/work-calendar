@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+APP_DIR=${WORK_CALENDAR_DIR:-/opt/work-calendar}
+BACKUP_DIR=${WORK_CALENDAR_BACKUP_DIR:-/var/backups/work-calendar}
+mkdir -p "$BACKUP_DIR"
+
+# 使用 SQLite 的在线 backup，不直接复制正在写入的 WAL 文件。
+stamp=$(date +%Y%m%d-%H%M%S)
+sqlite3 "$APP_DIR/data/work-calendar.sqlite3" ".backup '$BACKUP_DIR/work-calendar-$stamp.sqlite3'"
+find "$BACKUP_DIR" -type f -name 'work-calendar-*.sqlite3' -mtime +14 -delete

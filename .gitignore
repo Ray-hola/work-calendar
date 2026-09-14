@@ -1,0 +1,30 @@
+# Runtime data (accounts, database, WAL) must never be committed
+data/*.sqlite3
+data/*.sqlite3-shm
+data/*.sqlite3-wal
+data/initial-accounts.txt
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Local secrets and tunnel credentials
+*.pem
+*.json
+!package.json
+.env
+.env.*
+.cloudflared/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

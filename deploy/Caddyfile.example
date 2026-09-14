@@ -1,0 +1,5 @@
+# 将 your-domain.example 替换为你的域名；如改用子域名，请同步修改 Origin 配置。
+# Caddy 负责 HTTPS，Work Calendar 只监听本机 4173 端口。
+work.your-domain.example {
+    reverse_proxy 127.0.0.1:4173
+}

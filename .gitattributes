@@ -1,0 +1,16 @@
+# Normalize line endings in the repository
+* text=auto eol=lf
+
+# Windows scripts use CRLF for compatibility with legacy tooling
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.ico binary
+*.sqlite3 binary
+
+# Keep the placeholder in the runtime data directory
+data/.gitkeep text
