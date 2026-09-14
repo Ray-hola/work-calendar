@@ -368,7 +368,44 @@ function renderRepeats(){
   list.innerHTML=repeats.map(r=>{const days=(r.weekdays||[]).map(i=>dayNames[i]).join('、');const pattern=r.frequency==='daily'?'每天':r.frequency==='workdays'?'工作日':r.frequency==='dates'?'指定日期':days||'每周';const state=r.active===false?'已暂停':'启用中';return `<article class="repeat-admin-item"><div><strong>${escapeHTML(r.name)}</strong><span>${escapeHTML(pattern)} · ${escapeHTML(r.time||'09:00')} · ${escapeHTML((r.assignees||[]).join('、'))}</span><small>${state}${r.skipDates?.length?` · 已挖空 ${r.skipDates.length} 天`:''}</small></div><button class="ghost-btn skip-repeat" data-id="${escapeHTML(r.id)}">挖空本次</button></article>`}).join('')||'<p class="muted">还没有固定任务规则。</p>';
   $$('.skip-repeat').forEach(b=>b.onclick=()=>{const date=prompt('请输入本次不执行的日期（YYYY-MM-DD）',S.today);if(!date)return;act('repeat.skip',{id:b.dataset.id,date,skip:true}).catch(()=>{})});
 }
-function renderAccounts(){const u=S.users,admin=Boolean(S.user?.admin);$('#accountsView .repeat-admin-panel')?.classList.toggle('hidden',!admin);renderRepeats();$('#currentRoleLabel').textContent=admin?'Super Admin':S.projects.some(p=>p.owner===S.user.id)?'项目 Owner':'协作者';$('.account-banner .avatar').textContent=S.user.id[0].toUpperCase();$('.account-banner strong').textContent=S.user.id;$('.account-banner span').textContent=admin?'Super Admin · 全部项目与成员':`${S.user.id} · ${S.projects.some(p=>p.owner===S.user.id)?'项目 Owner':'项目协作者'}`;$('.account-banner .permission-pill').textContent=admin?'可强行指派 / 调整':'可查看已加入项目';$('#createFixedBtn').classList.toggle('hidden',!admin);$('#forceAssignBtn').classList.toggle('hidden',!admin);$('#runAutomationBtn').classList.toggle('hidden',!admin);$('#accountsView .automation-card').classList.toggle('hidden',!admin);$('#accountsView .page-intro p').textContent=admin?'Super Admin 可制定固定任务、强行指派或调整任务，系统会向相关成员发送通知。':'你可以切换核验账户；项目 Owner 可邀请协作者，成员可在收件箱接受项目邀请。';$('#accountList').innerHTML=u.map(x=>`<article class="account-item ${x.id===S.user.id?'current-account':''}"><div class="avatar">${x.id.slice(0,1).toUpperCase()}</div><div class="account-copy"><strong>${x.id}</strong><span>${x.admin?'Super Admin':S.projects.some(p=>p.owner===x.id)?'项目 Owner':'协作者'}</span><small>${x.id===S.user.id?'当前身份':x.active?'输入该账户密码后切换核验':'账户已停用'}</small></div>${x.id===S.user.id?`<span class="permission-pill">当前身份</span> <button class="ghost-btn change-password" data-user="${x.id}">修改密码</button>`:(admin?`<button class="ghost-btn toggle-admin" data-user="${x.id}" data-admin="${x.admin?1:0}">${x.admin?'撤销 superadmin':'设为 superadmin'}</button> <button class="ghost-btn reset-password" data-user="${x.id}">重置密码</button> <button class="ghost-btn toggle-account" data-user="${x.id}" data-active="${x.active?1:0}">${x.active?'停用':'启用'}</button> `:'')}${x.id===S.user.id?'':x.active?`<button class="ghost-btn switch-login" data-user="${x.id}">切换</button>`:'<span class="muted">不可用</span>'}</article>`).join('');$$('.switch-login').forEach(b=>b.onclick=async()=>{try{await api('/api/logout',{});showAuth();$('#loginUser').value=b.dataset.user;$('#loginPass').focus()}catch(e){toast(e.message)}});$$('.toggle-account').forEach(b=>b.onclick=async()=>{try{await act('account.toggle',{id:b.dataset.user,active:b.dataset.active==='0'});toast(b.dataset.active==='0'?'账户已启用':'账户已停用')}catch(e){}});$$('.toggle-admin').forEach(b=>b.onclick=async()=>{const grant=b.dataset.admin==='0';try{await api('/api/action',{action:'account.admin',data:{id:b.dataset.user,admin:grant}});await refresh();toast(grant?`${b.dataset.user} 已加入 superadmin 权限组`:`${b.dataset.user} 已移出 superadmin 权限组`)}catch(e){toast(e.message||'操作失败')}});$$('.change-password').forEach(b=>b.onclick=async()=>{const current=prompt('请输入当前密码');if(current===null)return;const pw=prompt('请输入新密码（至少6位）');if(!pw)return;try{await api('/api/password',{id:b.dataset.user,current,password:pw});toast('密码已更新')}catch(e){toast(e.message)}});$$('.reset-password').forEach(b=>b.onclick=async()=>{const pw=prompt(`为 ${b.dataset.user} 设置新密码（至少6位）`);if(!pw)return;try{await api('/api/password',{id:b.dataset.user,password:pw});toast('密码已重置，该账户需重新登录')}catch(e){toast(e.message)}})}
+function accountProjectRoles(id){const owned=S.projects.filter(p=>p.owner===id).map(p=>p.name),joined=S.projects.filter(p=>p.owner!==id&&(p.members||{})[id]==='accepted').map(p=>p.name);return {owned,joined}}
+function accountRoleLabel(x){
+  if(x.admin)return '全部项目、成员、审批与 AI 配置';
+  const {owned,joined}=accountProjectRoles(x.id);const parts=[];
+  if(owned.length)parts.push('Owner：'+owned.join('、'));
+  if(joined.length)parts.push('协作者：'+joined.join('、'));
+  if(!x.active)parts.push('账户已停用');
+  return parts.join('　')||'暂无项目归属';
+}
+function renderAccountItem(x,admin){
+  const self=x.id===S.user.id,roles=accountProjectRoles(x.id);
+  const shortRole=x.admin?'Super Admin':(roles.owned.length?'项目 Owner':'普通用户');
+  const actions=self?`<span class="permission-pill">当前身份</span> <button class="ghost-btn change-password" data-user="${x.id}">修改密码</button>`:(admin?`<button class="ghost-btn toggle-admin" data-user="${x.id}" data-admin="${x.admin?1:0}">${x.admin?'撤销 superadmin':'设为 superadmin'}</button> <button class="ghost-btn reset-password" data-user="${x.id}">重置密码</button> <button class="ghost-btn toggle-account" data-user="${x.id}" data-active="${x.active?1:0}">${x.active?'停用':'启用'}</button> `:'' );
+  const tail=self?'':(x.active?`<button class="ghost-btn switch-login" data-user="${x.id}">切换</button>`:'<span class="muted">不可用</span>');
+  return `<article class="account-item ${self?'current-account':''}"><div class="avatar">${x.id.slice(0,1).toUpperCase()}</div><div class="account-copy"><strong>${escapeHTML(x.id)}</strong><span>${escapeHTML(shortRole)}</span><small>${escapeHTML(accountRoleLabel(x))}</small></div>${actions}${tail}</article>`;
+}
+function renderAccounts(){
+  const u=S.users,admin=Boolean(S.user?.admin);
+  $('#accountsView .repeat-admin-panel')?.classList.toggle('hidden',!admin);renderRepeats();
+  $('#currentRoleLabel').textContent=admin?'Super Admin':S.projects.some(p=>p.owner===S.user.id)?'项目 Owner':'协作者';
+  $('.account-banner .avatar').textContent=S.user.id[0].toUpperCase();
+  $('.account-banner strong').textContent=S.user.id;
+  $('.account-banner span').textContent=admin?'Super Admin · 全部项目与成员':`${S.user.id} · ${S.projects.some(p=>p.owner===S.user.id)?'项目 Owner':'项目协作者'}`;
+  $('.account-banner .permission-pill').textContent=admin?'可强行指派 / 调整':'可查看已加入项目';
+  $('#createFixedBtn').classList.toggle('hidden',!admin);
+  $('#forceAssignBtn').classList.toggle('hidden',!admin);
+  $('#runAutomationBtn').classList.toggle('hidden',!admin);
+  $('#accountsView .automation-card').classList.toggle('hidden',!admin);
+  $('#accountsView .page-intro p').textContent=admin?'Super Admin 可制定固定任务、强行指派或调整任务，系统会向相关成员发送通知。':'你可以切换核验账户；项目 Owner 可邀请协作者，成员可在收件箱接受项目邀请。';
+  const admins=u.filter(x=>x.admin),members=u.filter(x=>!x.admin);
+  const section=(title,hint,list)=>`<div class="account-group"><div class="account-group-heading"><strong>${title}</strong><span>${list.length}</span><small>${hint}</small></div>${list.map(x=>renderAccountItem(x,admin)).join('')||'<p class="muted">暂无账户。</p>'}</div>`;
+  $('#accountList').innerHTML=section('superadmin 权限组','可管理全部项目、成员、审批与 AI 配置',admins)+section('普通用户','按项目归属以 Owner 或协作者身份参与',members);
+  $$('.switch-login').forEach(b=>b.onclick=async()=>{try{await api('/api/logout',{});showAuth();$('#loginUser').value=b.dataset.user;$('#loginPass').focus()}catch(e){toast(e.message)}});
+  $$('.toggle-account').forEach(b=>b.onclick=async()=>{try{await act('account.toggle',{id:b.dataset.user,active:b.dataset.active==='0'});toast(b.dataset.active==='0'?'账户已启用':'账户已停用')}catch(e){}});
+  $$('.toggle-admin').forEach(b=>b.onclick=async()=>{const grant=b.dataset.admin==='0';try{await api('/api/action',{action:'account.admin',data:{id:b.dataset.user,admin:grant}});await refresh();toast(grant?`${b.dataset.user} 已加入 superadmin 权限组`:`${b.dataset.user} 已移出 superadmin 权限组`)}catch(e){toast(e.message||'操作失败')}});
+  $$('.change-password').forEach(b=>b.onclick=async()=>{const current=prompt('请输入当前密码');if(current===null)return;const pw=prompt('请输入新密码（至少6位）');if(!pw)return;try{await api('/api/password',{id:b.dataset.user,current,password:pw});toast('密码已更新')}catch(e){toast(e.message)}});
+  $$('.reset-password').forEach(b=>b.onclick=async()=>{const pw=prompt(`为 ${b.dataset.user} 设置新密码（至少6位）`);if(!pw)return;try{await api('/api/password',{id:b.dataset.user,password:pw});toast('密码已重置，该账户需重新登录')}catch(e){toast(e.message)}});
+}
 async function act(action,data){try{await api('/api/action',{action,data});await refresh();toast('操作已完成')}catch(e){toast(e.message);throw e}}
 function openModal(html){$('#modalContent').innerHTML=html;$('#modalBackdrop').classList.remove('hidden')};function closeModal(){$('#modalBackdrop').classList.add('hidden')};function closeDrawer(){$('#taskDrawer').classList.add('hidden')}
 function newTask(projectId,initialDate){

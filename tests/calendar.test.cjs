@@ -286,6 +286,20 @@ test('achievement archive is superadmin-only and sorts latest completed first', 
   assert.deepEqual(a.json(`completedProjects()`), []);
 });
 
+test('account management groups superadmins and labels members by project role', () => {
+  const a = app();
+  a.run(`S.projects=[
+    {id:'p1',name:'项目甲',owner:'test001',members:{test001:'accepted',test002:'accepted'}},
+    {id:'p2',name:'项目乙',owner:'test003',members:{test003:'accepted'}}
+  ];S.user={id:'superadmin',admin:1};S.users=[
+    {id:'superadmin',admin:1,active:1},{id:'test001',admin:0,active:1},{id:'test002',admin:0,active:1}
+  ];`);
+  assert.equal(a.run("accountRoleLabel({id:'superadmin',admin:1,active:1})"), '全部项目、成员、审批与 AI 配置');
+  assert.equal(a.run("accountRoleLabel({id:'test001',admin:0,active:1})"), 'Owner：项目甲');
+  assert.equal(a.run("accountRoleLabel({id:'test002',admin:0,active:1})"), '协作者：项目甲');
+  assert.equal(a.run("accountRoleLabel({id:'promoted',admin:0,active:1})"), '暂无项目归属');
+});
+
 test('agent action envelopes are parsed and removed from the reply text', () => {
   const a = app();
   // The agent helpers live after the DOM-binding block, so load just the pure
