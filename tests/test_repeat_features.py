@@ -111,6 +111,28 @@ class RepeatFeatureTests(unittest.TestCase):
         with self.assertRaises(Problem):
             self.store.action(self.admin, 'agent.execute', {'action': 'shell.exec', 'confirmed': True})
 
+    def test_multiple_superadmins_and_last_admin_protection(self):
+        with self.assertRaises(Problem):
+            self.store.action(self.member, 'account.admin', {'id': 'test001', 'admin': True})
+        self.store.action(self.admin, 'account.admin', {'id': 'test001', 'admin': True})
+        promoted = self.store.user('test001')
+        self.assertTrue(promoted['admin'])
+        # A promoted operator gets the full operator tool set and can create accounts.
+        caps = self.store.action(promoted, 'agent.capabilities', {})
+        self.assertEqual(caps['mode'], 'operator')
+        self.store.action(promoted, 'account.create', {'username': 'test002', 'password': 'password-long'})
+        self.assertTrue(self.store.user('test002'))
+        self.assertFalse(self.store.user('test002')['admin'])
+        # Demotion is allowed while another active superadmin remains.
+        self.store.action(self.admin, 'account.admin', {'id': 'test001', 'admin': False})
+        self.assertFalse(self.store.user('test001')['admin'])
+        # The final active superadmin cannot be demoted or disabled.
+        with self.assertRaises(Problem):
+            self.store.action(self.store.user('superadmin'), 'account.admin', {'id': 'superadmin', 'admin': False})
+        with self.assertRaises(Problem):
+            self.store.action(self.store.user('superadmin'), 'account.toggle', {'id': 'superadmin', 'active': False})
+        self.assertTrue(self.store.user('superadmin')['admin'])
+
     def test_agent_history_is_private_and_clearable(self):
         self.store.record_agent_message('superadmin', 'user', '帮我建任务')
         self.store.record_agent_message('superadmin', 'assistant', '好的')

@@ -977,12 +977,42 @@ class Store:
             self.audit(user['id'],'agent.history.clear',{'target':target})
             return {'cleared':True,'userId':target}
         if action=='account.create':
-            self.admin(user);self.create_user(required(d,'username'),required(d,'password'));return
+            self.admin(user)
+            username=required(d,'username');password=required(d,'password')
+            is_admin=bool(d.get('admin'))
+            self.create_user(username,password,admin=is_admin)
+            self.audit(user['id'],'account.create',{'target':username,'admin':is_admin})
+            return
         if action=='account.toggle':
             self.admin(user)
-            if d['id']=='superadmin':raise Problem(400,'不能停用 superadmin')
             if not self.db.execute('SELECT 1 FROM users WHERE id=?',(d['id'],)).fetchone():raise Problem(404,'账户不存在')
-            self.db.execute('UPDATE users SET active=? WHERE id=?',(int(bool(d['active'])),d['id']));return
+            active=int(bool(d['active']))
+            if not active:
+                # Disabling the last active superadmin would lock everyone out of
+                # operator features, so it is rejected regardless of which
+                # account holds the role.
+                row=self.db.execute('SELECT admin FROM users WHERE id=?',(d['id'],)).fetchone()
+                if row and row['admin']:
+                    others=self.db.execute('SELECT COUNT(*) AS n FROM users WHERE admin=1 AND active=1 AND id<>?',(d['id'],)).fetchone()['n']
+                    if others==0:raise Problem(400,'不能停用最后一个 superadmin')
+            self.db.execute('UPDATE users SET active=? WHERE id=?',(active,d['id']))
+            self.audit(user['id'],'account.toggle',{'target':d['id'],'active':bool(active)})
+            return
+        if action=='account.admin':
+            # Grant or revoke the superadmin permission group.  The last active
+            # superadmin cannot be demoted, otherwise no account could approve,
+            # configure the assistant or manage members.
+            self.admin(user)
+            target=str(d.get('id') or '').strip()
+            row=self.db.execute('SELECT admin,active FROM users WHERE id=?',(target,)).fetchone()
+            if not row:raise Problem(404,'账户不存在')
+            grant=int(bool(d.get('admin')))
+            if not grant and row['admin']:
+                others=self.db.execute('SELECT COUNT(*) AS n FROM users WHERE admin=1 AND active=1 AND id<>?',(target,)).fetchone()['n']
+                if others==0:raise Problem(400,'不能撤销最后一个 superadmin')
+            self.db.execute('UPDATE users SET admin=? WHERE id=?',(grant,target))
+            self.audit(user['id'],'account.admin',{'target':target,'admin':bool(grant)})
+            return
         if action=='project.create':
             owner=d.get('owner',user['id']) if user['admin'] else user['id'];self.user(owner)
             members={m:'pending' for m in d.get('members',[]) if m!=owner};members[owner]='accepted'
