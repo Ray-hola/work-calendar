@@ -294,7 +294,8 @@ test('account management groups superadmins and labels members by project role',
   ];S.user={id:'superadmin',admin:1};S.users=[
     {id:'superadmin',admin:1,active:1},{id:'test001',admin:0,active:1},{id:'test002',admin:0,active:1}
   ];`);
-  assert.equal(a.run("accountRoleLabel({id:'superadmin',admin:1,active:1})"), '全部项目、成员、审批与 AI 配置');
+  assert.equal(a.run("accountRoleLabel({id:'superadmin',admin:1,role:'superadmin',active:1})"), '全部项目、成员、审批、AI 配置与账户管理');
+  assert.equal(a.run("accountRoleLabel({id:'boss',admin:1,role:'admin',active:1})"), '全部项目、成员、审批与 AI 配置（账户管理除外）');
   assert.equal(a.run("accountRoleLabel({id:'test001',admin:0,active:1})"), 'Owner：项目甲');
   assert.equal(a.run("accountRoleLabel({id:'test002',admin:0,active:1})"), '协作者：项目甲');
   assert.equal(a.run("accountRoleLabel({id:'promoted',admin:0,active:1})"), '暂无项目归属');

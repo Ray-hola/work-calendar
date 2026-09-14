@@ -370,39 +370,45 @@ function renderRepeats(){
 }
 function accountProjectRoles(id){const owned=S.projects.filter(p=>p.owner===id).map(p=>p.name),joined=S.projects.filter(p=>p.owner!==id&&(p.members||{})[id]==='accepted').map(p=>p.name);return {owned,joined}}
 function accountRoleLabel(x){
-  if(x.admin)return '全部项目、成员、审批与 AI 配置';
+  const role=roleOf(x);
+  if(role==='superadmin')return '全部项目、成员、审批、AI 配置与账户管理';
+  if(role==='admin')return '全部项目、成员、审批与 AI 配置（账户管理除外）';
   const {owned,joined}=accountProjectRoles(x.id);const parts=[];
   if(owned.length)parts.push('Owner：'+owned.join('、'));
   if(joined.length)parts.push('协作者：'+joined.join('、'));
   if(!x.active)parts.push('账户已停用');
   return parts.join('　')||'暂无项目归属';
 }
-function renderAccountItem(x,admin){
-  const self=x.id===S.user.id,roles=accountProjectRoles(x.id);
-  const shortRole=x.admin?'Super Admin':(roles.owned.length?'项目 Owner':'普通用户');
-  const actions=self?`<span class="permission-pill">当前身份</span> <button class="ghost-btn change-password" data-user="${x.id}">修改密码</button>`:(admin?`<button class="ghost-btn toggle-admin" data-user="${x.id}" data-admin="${x.admin?1:0}">${x.admin?'撤销 superadmin':'设为 superadmin'}</button> <button class="ghost-btn reset-password" data-user="${x.id}">重置密码</button> <button class="ghost-btn toggle-account" data-user="${x.id}" data-active="${x.active?1:0}">${x.active?'停用':'启用'}</button> `:'' );
+function roleOf(x){return x&&(x.role||(x.admin?'superadmin':'member'))}
+function roleText(x){const role=roleOf(x);return role==='superadmin'?'Super Admin':role==='admin'?'Admin':(accountProjectRoles(x.id).owned.length?'项目 Owner':'普通用户')}
+function renderAccountItem(x,owner,admin){
+  const self=x.id===S.user.id,role=roleOf(x);
+  const actions=self?`<span class="permission-pill">当前身份</span> <button class="ghost-btn change-password" data-user="${x.id}">修改密码</button>`
+    :owner?`<select class="role-select" data-user="${x.id}" title="权限组"><option value="superadmin"${role==='superadmin'?' selected':''}>superadmin</option><option value="admin"${role==='admin'?' selected':''}>admin</option><option value="member"${role==='member'?' selected':''}>普通用户</option></select> <button class="ghost-btn reset-password" data-user="${x.id}">重置密码</button> <button class="ghost-btn toggle-account" data-user="${x.id}" data-active="${x.active?1:0}">${x.active?'停用':'启用'}</button> `
+    :'';
   const tail=self?'':(x.active?`<button class="ghost-btn switch-login" data-user="${x.id}">切换</button>`:'<span class="muted">不可用</span>');
-  return `<article class="account-item ${self?'current-account':''}"><div class="avatar">${x.id.slice(0,1).toUpperCase()}</div><div class="account-copy"><strong>${escapeHTML(x.id)}</strong><span>${escapeHTML(shortRole)}</span><small>${escapeHTML(accountRoleLabel(x))}</small></div>${actions}${tail}</article>`;
+  return `<article class="account-item ${self?'current-account':''}"><div class="avatar">${x.id.slice(0,1).toUpperCase()}</div><div class="account-copy"><strong>${escapeHTML(x.id)}</strong><span>${escapeHTML(roleText(x))}</span><small>${escapeHTML(accountRoleLabel(x))}</small></div>${actions}${tail}</article>`;
 }
 function renderAccounts(){
-  const u=S.users,admin=Boolean(S.user?.admin);
+  const u=S.users,admin=Boolean(S.user?.admin),owner=S.user?.role==='superadmin';
   $('#accountsView .repeat-admin-panel')?.classList.toggle('hidden',!admin);renderRepeats();
-  $('#currentRoleLabel').textContent=admin?'Super Admin':S.projects.some(p=>p.owner===S.user.id)?'项目 Owner':'协作者';
+  const ownerProjects=S.projects.filter(p=>p.owner===S.user.id);
+  $('#currentRoleLabel').textContent=owner?'Super Admin':admin?'Admin':ownerProjects.length?'项目 Owner':'协作者';
   $('.account-banner .avatar').textContent=S.user.id[0].toUpperCase();
   $('.account-banner strong').textContent=S.user.id;
-  $('.account-banner span').textContent=admin?'Super Admin · 全部项目与成员':`${S.user.id} · ${S.projects.some(p=>p.owner===S.user.id)?'项目 Owner':'项目协作者'}`;
-  $('.account-banner .permission-pill').textContent=admin?'可强行指派 / 调整':'可查看已加入项目';
+  $('.account-banner span').textContent=owner?'Super Admin · 全部项目、成员与账户管理':admin?'Admin · 全部项目与成员':'';
+  $('.account-banner .permission-pill').textContent=owner?'可管理账户 / 角色 / 密码':admin?'可强行指派 / 调整':'可查看已加入项目';
   $('#createFixedBtn').classList.toggle('hidden',!admin);
   $('#forceAssignBtn').classList.toggle('hidden',!admin);
   $('#runAutomationBtn').classList.toggle('hidden',!admin);
   $('#accountsView .automation-card').classList.toggle('hidden',!admin);
-  $('#accountsView .page-intro p').textContent=admin?'Super Admin 可制定固定任务、强行指派或调整任务，系统会向相关成员发送通知。':'你可以切换核验账户；项目 Owner 可邀请协作者，成员可在收件箱接受项目邀请。';
-  const admins=u.filter(x=>x.admin),members=u.filter(x=>!x.admin);
-  const section=(title,hint,list)=>`<div class="account-group"><div class="account-group-heading"><strong>${title}</strong><span>${list.length}</span><small>${hint}</small></div>${list.map(x=>renderAccountItem(x,admin)).join('')||'<p class="muted">暂无账户。</p>'}</div>`;
-  $('#accountList').innerHTML=section('superadmin 权限组','可管理全部项目、成员、审批与 AI 配置',admins)+section('普通用户','按项目归属以 Owner 或协作者身份参与',members);
+  $('#accountsView .page-intro p').textContent=owner?'Super Admin 可制定固定任务、强行指派任务，并管理账户、权限组与密码。':admin?'Admin 可制定固定任务、强行指派或调整任务；账户与密码管理由 superadmin 负责。':'你可以切换核验账户；项目 Owner 可邀请协作者，成员可在收件箱接受项目邀请。';
+  const superadmins=u.filter(x=>roleOf(x)==='superadmin'),admins=u.filter(x=>roleOf(x)==='admin'),members=u.filter(x=>roleOf(x)==='member');
+  const section=(title,hint,list)=>`<div class="account-group"><div class="account-group-heading"><strong>${title}</strong><span>${list.length}</span><small>${hint}</small></div>${list.map(x=>renderAccountItem(x,owner,admin)).join('')||'<p class="muted">暂无账户。</p>'}</div>`;
+  $('#accountList').innerHTML=section('superadmin 权限组','全部权限，含账户、角色与密码管理',superadmins)+section('admin 权限组','全部业务与 AI 权限，账户管理除外',admins)+section('普通用户','按项目归属以 Owner 或协作者身份参与',members);
   $$('.switch-login').forEach(b=>b.onclick=async()=>{try{await api('/api/logout',{});showAuth();$('#loginUser').value=b.dataset.user;$('#loginPass').focus()}catch(e){toast(e.message)}});
   $$('.toggle-account').forEach(b=>b.onclick=async()=>{try{await act('account.toggle',{id:b.dataset.user,active:b.dataset.active==='0'});toast(b.dataset.active==='0'?'账户已启用':'账户已停用')}catch(e){}});
-  $$('.toggle-admin').forEach(b=>b.onclick=async()=>{const grant=b.dataset.admin==='0';try{await api('/api/action',{action:'account.admin',data:{id:b.dataset.user,admin:grant}});await refresh();toast(grant?`${b.dataset.user} 已加入 superadmin 权限组`:`${b.dataset.user} 已移出 superadmin 权限组`)}catch(e){toast(e.message||'操作失败')}});
+  $$('.role-select').forEach(sel=>sel.onchange=async()=>{const next=sel.value,prev=sel.dataset.changed||sel.querySelector(`option[selected]`)?.value;try{await api('/api/action',{action:'account.role',data:{id:sel.dataset.user,role:next}});await refresh();toast(`${sel.dataset.user} 已设为 ${next==='member'?'普通用户':next}`)}catch(e){toast(e.message||'操作失败');await refresh()}});
   $$('.change-password').forEach(b=>b.onclick=async()=>{const current=prompt('请输入当前密码');if(current===null)return;const pw=prompt('请输入新密码（至少6位）');if(!pw)return;try{await api('/api/password',{id:b.dataset.user,current,password:pw});toast('密码已更新')}catch(e){toast(e.message)}});
   $$('.reset-password').forEach(b=>b.onclick=async()=>{const pw=prompt(`为 ${b.dataset.user} 设置新密码（至少6位）`);if(!pw)return;try{await api('/api/password',{id:b.dataset.user,password:pw});toast('密码已重置，该账户需重新登录')}catch(e){toast(e.message)}});
 }
@@ -738,16 +744,21 @@ function initAgentUI(){
   renderAgentCapability();
 }
 initAgentUI();
-function ensureAccountCreateButton(){const admin=Boolean(S.user?.admin),host=$('#accountsView .page-intro');if(!host)return;let b=$('#createAccountBtn');if(!b){b=document.createElement('button');b.id='createAccountBtn';b.className='secondary-btn';b.textContent='＋ 添加账户';host.appendChild(b)}b.onclick=createAccountDialog;b.classList.toggle('hidden',!admin)}
+function ensureAccountCreateButton(){
+  const owner=Boolean(S.user?.role==='superadmin'),host=$('#accountsView .page-intro');if(!host)return;
+  let b=$('#createAccountBtn');
+  if(!b){b=document.createElement('button');b.id='createAccountBtn';b.className='secondary-btn';b.textContent='＋ 添加账户';host.appendChild(b)}
+  b.onclick=createAccountDialog;b.classList.toggle('hidden',!owner);
+}
 function createAccountDialog(){
-  const adminCount=S.users.filter(u=>u.admin&&u.active).length;
-  openModal(`<div class="eyebrow">账户管理 · 新建账户</div><h2>添加账户</h2><p class="muted">账户名 3–30 位字母数字，密码至少 6 位。可将新账户加入 superadmin 权限组。</p><label class="form-field">账户名<input id="newAccountName" autocomplete="off" placeholder="例如 zhangsan"></label><label class="form-field">初始密码<input id="newAccountPassword" type="password" autocomplete="new-password" placeholder="至少 6 位"></label><label class="danger-check" style="margin-top:12px"><input type="checkbox" id="newAccountAdmin"> 加入 superadmin 权限组（当前 ${adminCount} 个）——可管理全部项目、成员、审批与 AI 配置</label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmCreateAccount">创建账户</button></div>`);
+  const groups={superadmin:S.users.filter(u=>roleOf(u)==='superadmin').length,admin:S.users.filter(u=>roleOf(u)==='admin').length};
+  openModal(`<div class="eyebrow">账户管理 · 新建账户</div><h2>添加账户</h2><p class="muted">账户名 3–30 位字母数字，密码至少 6 位。所有角色都保留在账户列表，密码重置不会删除任何数据。</p><label class="form-field">账户名<input id="newAccountName" autocomplete="off" placeholder="例如 zhangsan"></label><label class="form-field">初始密码<input id="newAccountPassword" type="password" autocomplete="new-password" placeholder="至少 6 位"></label><label class="form-field">权限组<select id="newAccountRole"><option value="member">普通用户</option><option value="admin">admin · 全部业务与 AI 权限（账户管理除外，当前 ${groups.admin} 个）</option><option value="superadmin">superadmin · 全部权限（当前 ${groups.superadmin} 个）</option></select></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmCreateAccount">创建账户</button></div>`);
   $('#cancelAction').onclick=closeModal;
   $('#confirmCreateAccount').onclick=async()=>{
-    const username=$('#newAccountName').value.trim(),password=$('#newAccountPassword').value,isAdmin=$('#newAccountAdmin').checked;
+    const username=$('#newAccountName').value.trim(),password=$('#newAccountPassword').value,role=$('#newAccountRole').value;
     if(!username){toast('请填写账户名');return}
     if(password.length<6){toast('密码至少 6 位');return}
-    try{await api('/api/action',{action:'account.create',data:{username,password,admin:isAdmin}});closeModal();await refresh();toast(isAdmin?`已创建 superadmin 账户 ${username}`:`已创建账户 ${username}`)}
+    try{await api('/api/action',{action:'account.create',data:{username,password,role}});closeModal();await refresh();toast(role==='member'?'已创建普通账户 '+username:'已创建管理账户 '+username)}
     catch(e){toast(e.message||'创建失败')}
   };
 }

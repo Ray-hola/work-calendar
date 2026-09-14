@@ -111,6 +111,32 @@ class RepeatFeatureTests(unittest.TestCase):
         with self.assertRaises(Problem):
             self.store.action(self.admin, 'agent.execute', {'action': 'shell.exec', 'confirmed': True})
 
+    def test_admin_group_has_operations_but_not_account_management(self):
+        self.store.action(self.admin, 'account.role', {'id': 'test001', 'role': 'admin'})
+        mate = self.store.user('test001')
+        self.assertTrue(mate['admin'])
+        self.assertEqual(mate['role'], 'admin')
+        # Operational permissions match a superadmin: projects, reviews, agent execution.
+        project = self.store.action(mate, 'project.create', {
+            'name': 'admin project', 'owner': 'test001', 'members': [],
+            'start': self.today.isoformat(), 'cycle': 'infinite'})
+        self.assertEqual(project['status'], 'active')
+        caps = self.store.action(mate, 'agent.capabilities', {})
+        self.assertEqual((caps['role'], caps['mode']), ('admin', 'operator'))
+        task = self.store.action(mate, 'agent.execute', {'action': 'task.create', 'data': {
+            'name': 'admin task', 'projectId': project['id'], 'assignee': 'test001',
+            'date': self.today.isoformat()}, 'confirmed': True})
+        self.assertEqual(task['name'], 'admin task')
+        # Account, role and (via the password route) credential management stay superadmin-only.
+        for payload in (
+            {'action': 'account.create', 'data': {'username': 'test002', 'password': 'password-long'}},
+            {'action': 'account.role', 'data': {'id': 'superadmin', 'role': 'member'}},
+            {'action': 'account.toggle', 'data': {'id': 'superadmin', 'active': False}},
+        ):
+            with self.subTest(action=payload['action']), self.assertRaises(Problem):
+                self.store.action(mate, payload['action'], payload['data'])
+        self.assertEqual(self.store.user('superadmin')['role'], 'superadmin')
+
     def test_multiple_superadmins_and_last_admin_protection(self):
         with self.assertRaises(Problem):
             self.store.action(self.member, 'account.admin', {'id': 'test001', 'admin': True})

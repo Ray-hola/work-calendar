@@ -159,7 +159,13 @@ class Store:
         self.db = sqlite3.connect(self.path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.execute('PRAGMA journal_mode=WAL')
-        self.db.execute('CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, salt TEXT NOT NULL, hash TEXT NOT NULL, admin INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1)')
+        self.db.execute('CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, salt TEXT NOT NULL, hash TEXT NOT NULL, admin INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, role TEXT NOT NULL DEFAULT \'member\')')
+        # Existing databases predate the role column: default them to
+        # superadmin/member from the old boolean so operators keep working.
+        columns = {row['name'] for row in self.db.execute('PRAGMA table_info(users)')}
+        if 'role' not in columns:
+            self.db.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'member'")
+            self.db.execute("UPDATE users SET role=CASE WHEN admin=1 THEN 'superadmin' ELSE 'member' END")
         self.db.execute('CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires TEXT NOT NULL)')
         self.db.execute('CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, ran_at TEXT NOT NULL)')
         for table in TABLES:
@@ -201,7 +207,7 @@ class Store:
         return obj
 
     def users(self):
-        return [dict(r) for r in self.db.execute('SELECT id,admin,active FROM users ORDER BY admin DESC,id')]
+        return [dict(r) for r in self.db.execute('SELECT id,admin,active,role FROM users ORDER BY admin DESC,id')]
 
     def user(self, id):
         u = next((u for u in self.users() if u['id'] == id and u['active']), None)
@@ -210,14 +216,20 @@ class Store:
         return u
 
     def admin(self, user):
+        """Operational administrator: the superadmin and admin groups."""
         if not user['admin']:
+            raise Problem(403, '此操作需要管理员权限')
+
+    def superadmin(self, user):
+        """Account, role and password management stay with the superadmin group."""
+        if user.get('role') != 'superadmin':
             raise Problem(403, '此操作需要 superadmin 权限')
 
     def agent_capabilities(self, user):
         """Return the explicit capability contract for an embedded agent."""
         tools = AGENT_READ_TOOLS | (AGENT_WRITE_TOOLS if user.get('admin') else frozenset())
         return {
-            'role': 'superadmin' if user.get('admin') else 'member',
+            'role': user.get('role') or ('superadmin' if user.get('admin') else 'member'),
             'mode': 'operator' if user.get('admin') else 'readonly',
             'tools': sorted(tools),
             'requiresConfirmation': sorted(AGENT_WRITE_TOOLS) if user.get('admin') else [],
@@ -408,7 +420,7 @@ class Store:
         are rejected here even if a client forges the confirmation flag.
         """
         if not user.get('admin'):
-            raise Problem(403, '只有 superadmin 的 Agent 可以执行操作，成员仅可查询')
+            raise Problem(403, '只有管理员账户的 Agent 可以执行操作，成员仅可查询')
         action = str(data.get('action') or '').strip()
         tool = AGENT_ACTION_TO_TOOL.get(action)
         if not tool:
@@ -444,13 +456,18 @@ class Store:
         # chronological transcript even when several records share a timestamp.
         return {'userId': target, 'messages': rows[-400:]}
 
-    def create_user(self, id, password, admin=False):
+    def create_user(self, id, password, admin=False, role=None):
         if not id.isalnum() or not 3 <= len(id) <= 30 or len(password) < 6:
             raise Problem(400, '账户需为 3–30 位字母数字，密码至少 6 位')
+        if role is None:
+            role = 'superadmin' if admin else 'member'
+        if role not in ('superadmin', 'admin', 'member'):
+            raise Problem(400, '角色无效')
         salt = secrets.token_hex(16)
         digest = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=16384, r=8, p=1).hex()
         try:
-            self.db.execute('INSERT INTO users(id,salt,hash,admin) VALUES(?,?,?,?)', (id, salt, digest, int(admin)))
+            self.db.execute('INSERT INTO users(id,salt,hash,admin,role) VALUES(?,?,?,?,?)',
+                            (id, salt, digest, int(role in ('superadmin', 'admin')), role))
         except sqlite3.IntegrityError:
             raise Problem(409, '账户已存在')
         self.db.commit()
@@ -977,41 +994,54 @@ class Store:
             self.audit(user['id'],'agent.history.clear',{'target':target})
             return {'cleared':True,'userId':target}
         if action=='account.create':
-            self.admin(user)
+            # Only the superadmin group manages accounts and roles.
+            self.superadmin(user)
             username=required(d,'username');password=required(d,'password')
-            is_admin=bool(d.get('admin'))
-            self.create_user(username,password,admin=is_admin)
-            self.audit(user['id'],'account.create',{'target':username,'admin':is_admin})
+            role=str(d.get('role') or ('superadmin' if d.get('admin') else 'member'))
+            self.create_user(username,password,role=role)
+            self.audit(user['id'],'account.create',{'target':username,'role':role})
             return
         if action=='account.toggle':
-            self.admin(user)
-            if not self.db.execute('SELECT 1 FROM users WHERE id=?',(d['id'],)).fetchone():raise Problem(404,'账户不存在')
+            self.superadmin(user)
+            row=self.db.execute('SELECT admin,role FROM users WHERE id=?',(d['id'],)).fetchone()
+            if not row:raise Problem(404,'账户不存在')
             active=int(bool(d['active']))
-            if not active:
-                # Disabling the last active superadmin would lock everyone out of
-                # operator features, so it is rejected regardless of which
-                # account holds the role.
-                row=self.db.execute('SELECT admin FROM users WHERE id=?',(d['id'],)).fetchone()
-                if row and row['admin']:
-                    others=self.db.execute('SELECT COUNT(*) AS n FROM users WHERE admin=1 AND active=1 AND id<>?',(d['id'],)).fetchone()['n']
-                    if others==0:raise Problem(400,'不能停用最后一个 superadmin')
+            if not active and row['role']=='superadmin':
+                # The last active superadmin must stay usable, otherwise no
+                # account could manage roles or reset passwords.
+                others=self.db.execute("SELECT COUNT(*) AS n FROM users WHERE role='superadmin' AND active=1 AND id<>?",(d['id'],)).fetchone()['n']
+                if others==0:raise Problem(400,'不能停用最后一个 superadmin')
             self.db.execute('UPDATE users SET active=? WHERE id=?',(active,d['id']))
             self.audit(user['id'],'account.toggle',{'target':d['id'],'active':bool(active)})
             return
-        if action=='account.admin':
-            # Grant or revoke the superadmin permission group.  The last active
-            # superadmin cannot be demoted, otherwise no account could approve,
-            # configure the assistant or manage members.
-            self.admin(user)
+        if action=='account.role':
+            # superadmin-only: move an account between the superadmin, admin and
+            # member groups without touching its data or password.
+            self.superadmin(user)
             target=str(d.get('id') or '').strip()
-            row=self.db.execute('SELECT admin,active FROM users WHERE id=?',(target,)).fetchone()
+            role=str(d.get('role') or '').strip()
+            if role not in ('superadmin','admin','member'):
+                raise Problem(400,'角色无效')
+            row=self.db.execute('SELECT role,active FROM users WHERE id=?',(target,)).fetchone()
             if not row:raise Problem(404,'账户不存在')
-            grant=int(bool(d.get('admin')))
-            if not grant and row['admin']:
-                others=self.db.execute('SELECT COUNT(*) AS n FROM users WHERE admin=1 AND active=1 AND id<>?',(target,)).fetchone()['n']
+            if row['role']=='superadmin' and role!='superadmin':
+                others=self.db.execute("SELECT COUNT(*) AS n FROM users WHERE role='superadmin' AND active=1 AND id<>?",(target,)).fetchone()['n']
                 if others==0:raise Problem(400,'不能撤销最后一个 superadmin')
-            self.db.execute('UPDATE users SET admin=? WHERE id=?',(grant,target))
-            self.audit(user['id'],'account.admin',{'target':target,'admin':bool(grant)})
+            self.db.execute('UPDATE users SET admin=?,role=? WHERE id=?',(int(role in ('superadmin','admin')),role,target))
+            self.audit(user['id'],'account.role',{'target':target,'role':role})
+            return
+        if action=='account.admin':
+            # Backwards-compatible alias for granting/revoking the superadmin group.
+            self.superadmin(user)
+            target=str(d.get('id') or '').strip()
+            row=self.db.execute('SELECT role,active FROM users WHERE id=?',(target,)).fetchone()
+            if not row:raise Problem(404,'账户不存在')
+            role='superadmin' if bool(d.get('admin')) else 'member'
+            if row['role']=='superadmin' and role!='superadmin':
+                others=self.db.execute("SELECT COUNT(*) AS n FROM users WHERE role='superadmin' AND active=1 AND id<>?",(target,)).fetchone()['n']
+                if others==0:raise Problem(400,'不能撤销最后一个 superadmin')
+            self.db.execute('UPDATE users SET admin=?,role=? WHERE id=?',(int(role in ('superadmin','admin')),role,target))
+            self.audit(user['id'],'account.admin',{'target':target,'role':role})
             return
         if action=='project.create':
             owner=d.get('owner',user['id']) if user['admin'] else user['id'];self.user(owner)
@@ -1778,10 +1808,10 @@ def main():
                     store.user(target)
                     newpw=str(d.get('password',''))
                     if target!=user['id']:
-                        store.admin(user)
+                        store.superadmin(user)
                         store.set_password(target,newpw)
                         with store.lock,store.db:store.db.execute('DELETE FROM sessions WHERE user_id=?',(target,))
-                        store.audit(user['id'],'account.password',{'target':target,'by':'admin'})
+                        store.audit(user['id'],'account.password',{'target':target,'by':'superadmin'})
                         self.send(200,{'ok':True,'forced':True});return
                     if not store.check_password(user['id'],str(d.get('current',''))):
                         raise Problem(400,'当前密码不正确')
