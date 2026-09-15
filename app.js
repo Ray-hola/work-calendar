@@ -391,18 +391,16 @@ function renderAccountItem(x,owner,admin){
 }
 function renderAccounts(){
   const u=S.users,admin=Boolean(S.user?.admin),owner=S.user?.role==='superadmin';
-  $('#accountsView .repeat-admin-panel')?.classList.toggle('hidden',!admin);renderRepeats();
   const ownerProjects=S.projects.filter(p=>p.owner===S.user.id);
   $('#currentRoleLabel').textContent=owner?'Super Admin':admin?'Admin':ownerProjects.length?'项目 Owner':'协作者';
   $('.account-banner .avatar').textContent=S.user.id[0].toUpperCase();
   $('.account-banner strong').textContent=S.user.id;
   $('.account-banner span').textContent=owner?'Super Admin · 全部项目、成员与账户管理':admin?'Admin · 全部项目与成员':'';
   $('.account-banner .permission-pill').textContent=owner?'可管理账户 / 角色 / 密码':admin?'可强行指派 / 调整':'可查看已加入项目';
-  $('#createFixedBtn').classList.toggle('hidden',!admin);
   $('#forceAssignBtn').classList.toggle('hidden',!admin);
   $('#runAutomationBtn').classList.toggle('hidden',!admin);
   $('#accountsView .automation-card').classList.toggle('hidden',!admin);
-  $('#accountsView .page-intro p').textContent=owner?'Super Admin 可制定固定任务、强行指派任务，并管理账户、权限组与密码。':admin?'Admin 可制定固定任务、强行指派或调整任务；账户与密码管理由 superadmin 负责。':'你可以切换核验账户；项目 Owner 可邀请协作者，成员可在收件箱接受项目邀请。';
+  $('#accountsView .page-intro p').textContent=owner?'Super Admin 可强行指派或调整任务，并管理账户、权限组与密码。':admin?'Admin 可强行指派或调整任务；账户与密码管理由 superadmin 负责。':'你可以切换核验账户；项目 Owner 可邀请协作者，成员可在收件箱接受项目邀请。';
   const superadmins=u.filter(x=>roleOf(x)==='superadmin'),admins=u.filter(x=>roleOf(x)==='admin'),members=u.filter(x=>roleOf(x)==='member');
   const section=(title,hint,list)=>`<div class="account-group"><div class="account-group-heading"><strong>${title}</strong><span>${list.length}</span><small>${hint}</small></div>${list.map(x=>renderAccountItem(x,owner,admin)).join('')||'<p class="muted">暂无账户。</p>'}</div>`;
   $('#accountList').innerHTML=section('superadmin 权限组','全部权限，含账户、角色与密码管理',superadmins)+section('admin 权限组','全部业务与 AI 权限，账户管理除外',admins)+section('普通用户','按项目归属以 Owner 或协作者身份参与',members);
@@ -417,8 +415,9 @@ function openModal(html){$('#modalContent').innerHTML=html;$('#modalBackdrop').c
 function newTask(projectId,initialDate){
   const projects=manageableProjects().filter(p=>!isProjectHidden(p)),locked=typeof projectId==='string',initial=projects.find(p=>p.id===projectId)?.id||projects[0]?.id;
   if(!projects.length){toast('请先创建项目并等待审批，项目 Owner 或管理员可分配任务');switchView('projects');return}
-  openModal(`<div class="eyebrow">${S.user.admin?'管理员':'项目 Owner'} · 项目子任务</div><h2>新建并指派任务</h2><label class="form-field">所属项目<select id="taskProject" ${locked?'disabled':''}>${projects.map(p=>`<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('')}</select></label><label class="form-field">任务名称<input id="taskName" maxlength="120"></label><label class="form-field">任务描述<textarea id="taskDesc"></textarea></label><label class="form-field">指派给<select id="taskAssignee"></select><div id="taskAssigneeLoad" class="assignee-load-hint"></div></label><div class="task-form-grid"><label class="form-field">安排日期<input id="taskDate" type="date" max="${DATE_HORIZON}" value="${initialDate||(UI.view==='dayDetail'?UI.detailDate:displayDay())}"></label><label class="form-field">时间<input id="taskTime" type="time" value="09:00"></label><label class="form-field">预计时长<input id="taskDuration" type="number" min="1" max="1440" value="30"></label><label class="form-field">优先级<select id="taskPriority"><option>P0</option><option selected>P1</option><option>P2</option></select></label></div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmTask">创建并指派</button></div>`);
+  openModal(`<div class="eyebrow">${S.user.admin?'管理员':'项目 Owner'} · ${S.user.admin?'项目任务 / 固定任务':'项目子任务'}</div><h2>新建并指派任务</h2>${S.user.admin?'<div class="task-kind-switch"><button type="button" class="task-kind-btn active">项目任务</button><button type="button" class="task-kind-btn" id="kindFixedTask">固定任务</button></div>':''}<label class="form-field">所属项目<select id="taskProject" ${locked?'disabled':''}>${projects.map(p=>`<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('')}</select></label><label class="form-field">任务名称<input id="taskName" maxlength="120"></label><label class="form-field">任务描述<textarea id="taskDesc"></textarea></label><label class="form-field">指派给<select id="taskAssignee"></select><div id="taskAssigneeLoad" class="assignee-load-hint"></div></label><div class="task-form-grid"><label class="form-field">安排日期<input id="taskDate" type="date" max="${DATE_HORIZON}" value="${initialDate||(UI.view==='dayDetail'?UI.detailDate:displayDay())}"></label><label class="form-field">时间<input id="taskTime" type="time" value="09:00"></label><label class="form-field">预计时长<input id="taskDuration" type="number" min="1" max="1440" value="30"></label><label class="form-field">优先级<select id="taskPriority"><option>P0</option><option selected>P1</option><option>P2</option></select></label></div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmTask">创建并指派</button></div>`);
   const updateUsers=()=>{const p=projects.find(p=>p.id===$('#taskProject').value),users=projectAssignees(p),start=p?.start||S.today,end=p?.end||'9999-12-31';$('#taskAssignee').innerHTML=users.map(u=>{const ts=S.tasks.filter(t=>t.assignee===u.id&&t.date>=start&&t.date<=end&&t.status!=='skipped'),done=ts.filter(t=>t.status==='done').length,mins=ts.reduce((n,t)=>n+Number(t.duration||0),0);return `<option value="${escapeHTML(u.id)}">${escapeHTML(u.id)}${u.id===p.owner?' · Owner':''} · ${ts.length} 项 / ${Math.round(mins/60*10)/10}h</option>`}).join('');$('#taskAssigneeLoad').innerHTML=users.length?`项目周期 ${escapeHTML(start)} 至 ${p?.end?escapeHTML(p.end):'未设截止'} · 显示每位成员该周期任务总数与预计负载；已完成 ${users.map(u=>{const ts=S.tasks.filter(t=>t.assignee===u.id&&t.date>=start&&t.date<=end&&t.status!=='skipped');return `${u.id} ${ts.filter(t=>t.status==='done').length}/${ts.length}`}).join('、')}`:'项目暂无已接受成员，请先添加协作者';$('#confirmTask').disabled=!users.length};
+  $('#kindFixedTask')?.addEventListener('click',fixedTask);
   $('#taskProject').value=initial;$('#taskProject').onchange=updateUsers;updateUsers();$('#cancelAction').onclick=closeModal;
   $('#confirmTask').onclick=async()=>{if(!$('#taskName').value.trim()){toast('请填写任务名称');return}const data={name:$('#taskName').value,desc:$('#taskDesc').value,projectId:$('#taskProject').value,assignee:$('#taskAssignee').value,date:$('#taskDate').value,time:$('#taskTime').value,duration:Number($('#taskDuration').value),priority:$('#taskPriority').value};try{await act('task.create',data);closeModal()}catch(e){}};
 }
@@ -459,6 +458,9 @@ function renderAll(){
   const canAssign=Boolean(S.user.admin||manageableProjects().length);
   $('#addTaskBtn').textContent='＋ 指派项目任务';$('#addTaskBtn').classList.toggle('hidden',!canAssign);
   $('#emptyAddBtn').classList.toggle('hidden',!canAssign);
+  $('#createFixedBtn')?.classList.toggle('hidden',!S.user.admin);
+  $('#repeatAdminPanel')?.classList.toggle('hidden',!S.user.admin);
+  renderRepeats();
   $('#forceAssignBtn').textContent='管理项目与任务';
   $('[data-view="today"]').removeAttribute('disabled');
   $('.workspace-switcher .avatar').textContent=S.user.id[0].toUpperCase();
