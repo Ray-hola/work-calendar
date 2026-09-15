@@ -91,6 +91,7 @@ AGENT_WRITE_TOOLS = frozenset({
 # authorization rules.
 AGENT_ACTION_TO_TOOL = {
     'account.create': 'account.manage', 'account.toggle': 'account.manage',
+    'account.delete': 'account.manage',
     'project.create': 'project.create', 'project.review': 'project.review',
     'project.update': 'project.update', 'project.invite': 'project.invite',
     'project.complete_request': 'project.complete_request',
@@ -1043,6 +1044,59 @@ class Store:
             self.db.execute('UPDATE users SET admin=?,role=? WHERE id=?',(int(role in ('superadmin','admin')),role,target))
             self.audit(user['id'],'account.admin',{'target':target,'role':role})
             return
+        if action=='account.delete':
+            # Destructive and irreversible, superadmin-only, with the same typed
+            # confirmation as project deletion.  Safe mode refuses to remove an
+            # account that still owns active work, so nothing is left pointing
+            # at a missing member; historical (done/archived) records are kept.
+            self.superadmin(user)
+            target=str(d.get('id') or '').strip()
+            if target=='superadmin':
+                raise Problem(400,'内置 superadmin 账户不能删除')
+            if target==user['id']:
+                raise Problem(400,'不能删除当前登录账户')
+            row=self.db.execute('SELECT role,active FROM users WHERE id=?',(target,)).fetchone()
+            if not row:raise Problem(404,'账户不存在')
+            if row['role']=='superadmin':
+                others=self.db.execute("SELECT COUNT(*) AS n FROM users WHERE role='superadmin' AND active=1 AND id<>?",(target,)).fetchone()['n']
+                if others==0:raise Problem(400,'不能删除最后一个 superadmin')
+            if str(d.get('confirm','')).strip()!=target:
+                raise Problem(400,'请输入完整的账户名以确认删除')
+            terminal_tasks=('done','deferred','skipped','rejected')
+            owned=[p['name'] for p in self.all('projects') if p.get('owner')==target and p.get('status') not in ('done','archived','rejected')]
+            assigned=[t for t in self.all('tasks') if t.get('assignee')==target and t.get('status') not in terminal_tasks]
+            active_repeats=[r for r in self.all('repeats') if r.get('active') and target in (r.get('assignees') or [])]
+            pending_suggestions=[s for s in self.all('suggestions') if s.get('status')=='pending' and s.get('assignee')==target]
+            pending_edits=[e for e in self.all('edit_requests') if e.get('status')=='pending' and e.get('requester')==target]
+            blockers=[]
+            if owned:blockers.append(f'仍负责 {len(owned)} 个进行中的项目（'+ '、'.join(owned[:5]) +'）')
+            if assigned:blockers.append(f'仍有 {len(assigned)} 项未完成任务')
+            if active_repeats:blockers.append(f'仍在 {len(active_repeats)} 条固定任务规则中')
+            if pending_suggestions:blockers.append(f'有 {len(pending_suggestions)} 条待处理的分配建议')
+            if pending_edits:blockers.append(f'有 {len(pending_edits)} 条待审批的任务修改申请')
+            if blockers:
+                raise Problem(409,'请先转交该账户的职责后再删除：'+ '；'.join(blockers))
+            with self.lock,self.db:
+                self.db.execute('DELETE FROM users WHERE id=?',(target,))
+                self.db.execute('DELETE FROM sessions WHERE user_id=?',(target,))
+                for message in self.all('agent_messages'):
+                    if message.get('user')==target:self.db.execute('DELETE FROM agent_messages WHERE id=?',(message['id'],))
+                for diary in self.all('diaries'):
+                    if diary.get('author')==target:self.db.execute('DELETE FROM diaries WHERE id=?',(diary['id'],))
+                for notice in self.all('notifications'):
+                    if notice.get('to')==target:self.db.execute('DELETE FROM notifications WHERE id=?',(notice['id'],))
+                for request in self.all('requests'):
+                    if request.get('to')==target:self.db.execute('DELETE FROM requests WHERE id=?',(request['id'],))
+                for repeat in self.all('repeats'):
+                    if target in (repeat.get('assignees') or []):
+                        repeat['assignees']=[a for a in repeat['assignees'] if a!=target]
+                        if repeat['assignees']:self.put('repeats',repeat)
+                        else:self.db.execute('DELETE FROM repeats WHERE id=?',(repeat['id'],))
+                for project in self.all('projects'):
+                    if target in (project.get('members') or {}):
+                        project['members'].pop(target,None);self.put('projects',project)
+            self.audit(user['id'],'account.delete',{'target':target})
+            return {'id':target,'deleted':True}
         if action=='project.create':
             owner=d.get('owner',user['id']) if user['admin'] else user['id'];self.user(owner)
             members={m:'pending' for m in d.get('members',[]) if m!=owner};members[owner]='accepted'

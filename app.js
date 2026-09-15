@@ -384,7 +384,7 @@ function roleText(x){const role=roleOf(x);return role==='superadmin'?'Super Admi
 function renderAccountItem(x,owner,admin){
   const self=x.id===S.user.id,role=roleOf(x);
   const actions=self?`<span class="permission-pill">当前身份</span> <button class="ghost-btn change-password" data-user="${x.id}">修改密码</button>`
-    :owner?`<select class="role-select" data-user="${x.id}" title="权限组"><option value="superadmin"${role==='superadmin'?' selected':''}>superadmin</option><option value="admin"${role==='admin'?' selected':''}>admin</option><option value="member"${role==='member'?' selected':''}>普通用户</option></select> <button class="ghost-btn reset-password" data-user="${x.id}">重置密码</button> <button class="ghost-btn toggle-account" data-user="${x.id}" data-active="${x.active?1:0}">${x.active?'停用':'启用'}</button> `
+    :owner?`<select class="role-select" data-user="${x.id}" title="权限组"><option value="superadmin"${role==='superadmin'?' selected':''}>superadmin</option><option value="admin"${role==='admin'?' selected':''}>admin</option><option value="member"${role==='member'?' selected':''}>普通用户</option></select> <button class="ghost-btn reset-password" data-user="${x.id}">重置密码</button> <button class="ghost-btn toggle-account" data-user="${x.id}" data-active="${x.active?1:0}">${x.active?'停用':'启用'}</button> ${x.id!=='superadmin'?`<button class="ghost-btn delete-account" data-user="${x.id}">删除</button>`:''} `
     :'';
   const tail=self?'':(x.active?`<button class="ghost-btn switch-login" data-user="${x.id}">切换</button>`:'<span class="muted">不可用</span>');
   return `<article class="account-item ${self?'current-account':''}"><div class="avatar">${x.id.slice(0,1).toUpperCase()}</div><div class="account-copy"><strong>${escapeHTML(x.id)}</strong><span>${escapeHTML(roleText(x))}</span><small>${escapeHTML(accountRoleLabel(x))}</small></div>${actions}${tail}</article>`;
@@ -409,6 +409,25 @@ function renderAccounts(){
   $$('.role-select').forEach(sel=>sel.onchange=async()=>{const next=sel.value,prev=sel.dataset.changed||sel.querySelector(`option[selected]`)?.value;try{await api('/api/action',{action:'account.role',data:{id:sel.dataset.user,role:next}});await refresh();toast(`${sel.dataset.user} 已设为 ${next==='member'?'普通用户':next}`)}catch(e){toast(e.message||'操作失败');await refresh()}});
   $$('.change-password').forEach(b=>b.onclick=async()=>{const current=prompt('请输入当前密码');if(current===null)return;const pw=prompt('请输入新密码（至少6位）');if(!pw)return;try{await api('/api/password',{id:b.dataset.user,current,password:pw});toast('密码已更新')}catch(e){toast(e.message)}});
   $$('.reset-password').forEach(b=>b.onclick=async()=>{const pw=prompt(`为 ${b.dataset.user} 设置新密码（至少6位）`);if(!pw)return;try{await api('/api/password',{id:b.dataset.user,password:pw});toast('密码已重置，该账户需重新登录')}catch(e){toast(e.message)}});
+  $$('.delete-account').forEach(b=>b.onclick=()=>deleteAccount(b.dataset.user));
+}
+function deleteAccount(id){
+  const x=S.users.find(u=>u.id===id);
+  if(!x){toast('账户不存在');return}
+  if(x.id===S.user.id){toast('不能删除当前登录账户');return}
+  if(x.id==='superadmin'){toast('内置 superadmin 账户不能删除');return}
+  const role=roleOf(x),roleLabel=role==='superadmin'?'Super Admin':role==='admin'?'Admin':'普通用户';
+  openModal(`<div class="eyebrow danger-eyebrow">危险操作 · 不可撤销</div><h2>删除账户「${escapeHTML(x.id)}」</h2><div class="danger-panel"><p>此操作将永久删除该账户，并清除它的登录会话、AI 工作记录、日记、通知与项目邀请，删除后无法恢复。</p><ul class="danger-impact"><li>权限组：<strong>${roleLabel}</strong></li><li>若该账户仍负责进行中的项目或有未完成任务，删除会被拒绝，请先转交职责</li><li>历史审计记录会保留</li></ul></div><label class="danger-check"><input type="checkbox" id="deleteAccountAck"> 我已了解该账户及其个人数据将被永久删除，且无法恢复</label><label class="danger-confirm">请输入账户名 <code>${escapeHTML(x.id)}</code> 以继续<input id="deleteAccountConfirm" autocomplete="off" spellcheck="false" placeholder="${escapeHTML(x.id)}"></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="danger-btn" id="confirmDeleteAccount" disabled>永久删除账户</button></div>`);
+  const ack=$('#deleteAccountAck'),text=$('#deleteAccountConfirm'),btn=$('#confirmDeleteAccount');
+  const sync=()=>{btn.disabled=!(ack.checked&&text.value.trim()===x.id)};
+  ack.onchange=sync;text.oninput=sync;
+  $('#cancelAction').onclick=closeModal;
+  btn.onclick=async()=>{
+    if(btn.disabled)return;
+    btn.disabled=true;btn.textContent='正在删除…';
+    try{await act('account.delete',{id:x.id,confirm:text.value.trim()});closeModal();toast('账户已删除')}
+    catch(e){btn.disabled=false;btn.textContent='永久删除账户'}
+  };
 }
 async function act(action,data){try{await api('/api/action',{action,data});await refresh();toast('操作已完成')}catch(e){toast(e.message);throw e}}
 function openModal(html){$('#modalContent').innerHTML=html;$('#modalBackdrop').classList.remove('hidden')};function closeModal(){$('#modalBackdrop').classList.add('hidden')};function closeDrawer(){$('#taskDrawer').classList.add('hidden')}
@@ -680,7 +699,7 @@ const AGENT_ACTION_LABELS={
   'project.review':'审批项目','project.update':'调整项目','project.invite':'邀请协作者',
   'project.complete_review':'审批项目结项','assignment.manual':'强行指派','repeat.create':'创建固定安排',
   'repeat.update':'调整固定安排','repeat.skip':'挖空固定安排','account.create':'创建账户',
-  'account.toggle':'停用/启用账户','request.manage':'处理协作邀请','report.manage':'管理日报',
+  'account.toggle':'停用/启用账户','account.delete':'删除账户','request.manage':'处理协作邀请','report.manage':'管理日报',
   'automation.update':'更新自动化设置','collection.update':'更新补报时间','profile.correct':'修正成员画像',
   'scheduler.run':'运行一次调度检查'
 };

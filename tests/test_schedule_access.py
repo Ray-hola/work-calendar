@@ -515,6 +515,64 @@ class TaskApprovalTests(unittest.TestCase):
         self.assertEqual(result['deleted'], True)
         self.assertFalse(any(p['id'] == project['id'] for p in self.store.all('projects')))
 
+    def test_account_delete_protects_builtin_self_and_open_work(self):
+        self.store.create_user('extra', 'test-only-password')
+        self.store.create_user('busy', 'test-only-password')
+        self.store.put('tasks', {'name': 'busy task', 'date': self.day, 'duration': 30, 'assignee': 'busy',
+                                 'projectId': None, 'priority': 'P1', 'status': 'todo', 'fixed': False, 'type': '通用'})
+        self.store.db.commit()
+        # The built-in superadmin account can never be removed.
+        with self.assertRaises(Problem):
+            self.store.action(self.admin, 'account.delete', {'id': 'superadmin', 'confirm': 'superadmin'})
+        # A typed confirmation is required before anything is deleted.
+        with self.assertRaises(Problem):
+            self.store.action(self.admin, 'account.delete', {'id': 'extra', 'confirm': 'nope'})
+        self.assertTrue(any(u['id'] == 'extra' for u in self.store.users()))
+        # An account with open work is refused so its responsibilities can be handed over.
+        with self.assertRaises(Problem) as blocked:
+            self.store.action(self.admin, 'account.delete', {'id': 'busy', 'confirm': 'busy'})
+        self.assertEqual(blocked.exception.status, 409)
+        self.assertTrue(any(u['id'] == 'busy' for u in self.store.users()))
+        # A clean account is removed and the action is audited.
+        result = self.store.action(self.admin, 'account.delete', {'id': 'extra', 'confirm': 'extra'})
+        self.assertEqual(result['deleted'], True)
+        self.assertFalse(any(u['id'] == 'extra' for u in self.store.users()))
+        self.assertTrue(any(a['action'] == 'account.delete' for a in self.store.all('audit')))
+
+    def test_account_delete_blocks_active_project_ownership(self):
+        self.store.create_user('boss', 'test-only-password')
+        self.store.action(self.admin, 'project.create', {
+            'name': 'owned project', 'owner': 'boss', 'members': [],
+            'start': self.day, 'cycle': 'infinite',
+        })
+        with self.assertRaises(Problem) as blocked:
+            self.store.action(self.admin, 'account.delete', {'id': 'boss', 'confirm': 'boss'})
+        self.assertEqual(blocked.exception.status, 409)
+        self.assertTrue(any(u['id'] == 'boss' for u in self.store.users()))
+
+    def test_account_delete_clears_personal_data_and_membership(self):
+        self.store.create_user('extra', 'test-only-password')
+        project = self.store.action(self.admin, 'project.create', {
+            'name': 'member project', 'owner': 'test001', 'members': ['extra'],
+            'start': self.day, 'cycle': 'infinite',
+        })
+        self.assertEqual(self.store.get('projects', project['id'])['members'].get('extra'), 'accepted')
+        self.store.login('extra', 'test-only-password')
+        self.store.put('agent_messages', {'user': 'extra', 'role': 'user', 'content': 'hi'})
+        self.store.put('diaries', {'id': f'diary:extra:{self.day}', 'author': 'extra', 'date': self.day, 'content': 'note'})
+        self.store.put('notifications', {'to': 'extra', 'title': 't', 'body': 'b', 'kind': 'task', 'read': False})
+        self.store.put('requests', {'projectId': project['id'], 'to': 'extra', 'status': 'pending', 'read': False})
+        self.store.db.commit()
+        result = self.store.action(self.admin, 'account.delete', {'id': 'extra', 'confirm': 'extra'})
+        self.assertEqual(result['deleted'], True)
+        self.assertFalse(any(u['id'] == 'extra' for u in self.store.users()))
+        self.assertFalse(any(m.get('user') == 'extra' for m in self.store.all('agent_messages')))
+        self.assertFalse(any(d.get('author') == 'extra' for d in self.store.all('diaries')))
+        self.assertFalse(any(n.get('to') == 'extra' for n in self.store.all('notifications')))
+        self.assertFalse(any(r.get('to') == 'extra' for r in self.store.all('requests')))
+        self.assertFalse(any(r['user_id'] == 'extra' for r in self.store.db.execute('SELECT user_id FROM sessions')))
+        self.assertNotIn('extra', self.store.get('projects', project['id'])['members'])
+
 
 if __name__ == '__main__':
     unittest.main()
