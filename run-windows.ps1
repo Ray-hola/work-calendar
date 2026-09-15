@@ -1,5 +1,10 @@
 $ErrorActionPreference = 'Stop'
 $AppDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+# Optional machine-local overrides (gitignored). Keep real domains / secrets here, not in tracked files.
+$LocalOverride = Join-Path $AppDir 'run-windows.local.ps1'
+if (Test-Path -LiteralPath $LocalOverride) { . $LocalOverride }
+
 $env:WORK_CALENDAR_HOST = '127.0.0.1'
 $env:WORK_CALENDAR_PORT = '4173'
 $env:WORK_CALENDAR_DB = Join-Path $AppDir 'data\work-calendar.sqlite3'

@@ -24,7 +24,7 @@ $shell = (Get-Command powershell.exe).Source
 $appAction = New-ScheduledTaskAction -Execute $shell -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$runner`""
 $cfAction = New-ScheduledTaskAction -Execute $cloudflaredPath -Argument "tunnel --config `"$cfConfig`" run work-calendar"
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-$taskPrincipal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+$taskPrincipal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType InteractiveToken -RunLevel Highest
 
 Register-ScheduledTask -TaskName 'Work Calendar' -Action $appAction -Trigger $trigger -Principal $taskPrincipal -Force | Out-Null
 Register-ScheduledTask -TaskName 'Work Calendar Cloudflare Tunnel' -Action $cfAction -Trigger $trigger -Principal $taskPrincipal -Force | Out-Null

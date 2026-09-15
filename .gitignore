@@ -22,6 +22,8 @@ npm-debug.log*
 .env
 .env.*
 .cloudflared/
+run-windows.local.ps1
+*.local.ps1
 
 # Editors / OS
 .vscode/
