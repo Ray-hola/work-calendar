@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#F0EEE6" />
   <title>战略小组台账</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23D97757'/%3E%3Cpath d='M17 20h30v8H17zm0 14h21v8H17z' fill='%23FFFDF9'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="styles.css?v=20260916-blankfix" />
+  <link rel="stylesheet" href="styles.css?v=20260916-weekrail" />
 </head>
 <body>
   <div class="app-shell">
@@ -47,7 +47,7 @@
         <div id="todayTaskList" class="task-list"></div>
         <div class="empty-state hidden" id="todayEmpty"><div class="empty-icon"><span class="icon-slot" data-icon="check"></span></div><h3 id="todayEmptyTitle">今天没有待处理任务</h3><p id="todayEmptyHint">把下一件重要的事放进日程吧。</p><button class="secondary-btn" id="emptyAddBtn">新建任务</button></div>
       </section>
-      <section id="calendarView" class="view active-view"><div class="page-intro"><div><div class="eyebrow">横向滑动看同一周 · 纵向滚动切换周</div><h1>周视图</h1><p>滚轮或滑动切换周，悬停日期可抽取查看。</p></div><button class="secondary-btn" id="backTodayBtn">回到今天</button></div><div class="week-gesture-hint"><span>← → 左右滑动：周六至周五</span><span>↕ 上下滚动：上一周 / 下一周</span></div><div id="weekCarousel" class="week-carousel" aria-label="纵向周日程轴"></div></section>
+      <section id="calendarView" class="view active-view"><div class="page-intro"><div><div class="eyebrow">整周一屏 · 纵向滚动切换周</div><h1>周视图</h1><p>一周七天都摆在一屏里，上下滚动切换周，悬停某天就看当天的安排。</p></div><button class="secondary-btn" id="backTodayBtn">回到今天</button></div><div class="week-gesture-hint"><span>↕ 上下滚动切换周</span><span>悬停看当天 · 点击钉住</span></div><div id="weekCarousel" class="week-carousel" aria-label="纵向周日程轴"></div></section>
       <section id="summaryView" class="view"><div class="page-intro"><div><div class="eyebrow">工作复盘 · 日记</div><h1>日记</h1><p>周视图浏览每日记录，点击日期进入对应笔记本。</p></div><button class="secondary-btn" id="generateSummaryBtn"><span class="icon-slot" data-icon="sparkles"></span>写今天日记</button></div><div id="diaryWorkspace"></div></section>
       <section id="projectsView" class="view"><div class="page-intro"><div><div class="eyebrow">项目空间 · 3 个进行中</div><h1>项目进度</h1><p>查看进度、负荷与待审核的分配建议。</p></div><button class="primary-btn" id="addProjectBtn"><span class="icon-slot" data-icon="plus"></span>新建项目</button></div><div id="projectGrid" class="project-grid"></div><div class="repeat-admin-panel" id="repeatAdminPanel"><div class="panel-heading"><div><h2>固定任务规则</h2><span class="muted">按周或按月重复，可设置持续天数，并可临时挖空某一天</span></div><button class="secondary-btn" id="createFixedBtn"><span class="icon-slot" data-icon="plus"></span>制定固定任务</button></div><div id="repeatList" class="repeat-list"></div></div></section>
       <section id="inboxView" class="view"><div class="page-intro"><div><div class="eyebrow">通知中心 · 3 条未读</div><h1>收件箱</h1><p>任务指派、项目审批和日记提醒都会在这里留下记录。</p></div><button class="secondary-btn" id="markAllReadBtn">全部标为已读</button></div><div id="inboxList" class="inbox-list"></div></section>
@@ -66,6 +66,6 @@
     <div class="agent-composer"><div class="agent-tools"><button type="button" class="agent-plan-toggle" id="agentPlanBtn" aria-pressed="false" title="点一下，下一条消息会自动带上 ✦ 前缀：助手只把它拆成一组待确认的任务，你确认后才创建；再点一下取消"><span class="icon-slot" data-icon="sparkles"></span>规划任务</button><div class="agent-mode" role="group" aria-label="执行方式"><button type="button" class="agent-mode-opt" data-mode="step" aria-pressed="true" title="每做一步都先等你确认">逐步确认</button><button type="button" class="agent-mode-opt" data-mode="auto" aria-pressed="false" title="确认之后交给它一路做完">替我确认</button></div></div><p class="agent-intent-hint hidden" id="agentPlanHint">下一条消息会按「规划任务」处理：只出清单，你确认后再创建。</p><form id="agentForm" class="agent-form"><textarea id="agentInput" rows="2" placeholder="问我任务、项目、负载或收件箱…" aria-label="输入消息"></textarea><button class="secondary-btn hidden" type="button" id="agentStopBtn">停止</button><button class="primary-btn" type="submit" id="agentSendBtn">发送</button></form></div>
     <div id="agentConfig" class="agent-config hidden"><div class="agent-config-title"><strong>AI 接入配置</strong><button id="agentConfigClose" class="agent-text-btn">收起</button></div><p>API Key 与模型由 superadmin 统一管理。支持 OpenCode Go 的 OpenAI 兼容 <code>/chat/completions</code> 接口，也可填写其他兼容服务。</p><label>服务商预设<select id="agentProvider"><option value="opencode-go">OpenCode Go（推荐）</option><option value="custom">自定义 OpenAI 兼容 API</option></select></label><label>API 地址<input id="agentEndpoint" placeholder="https://opencode.ai/zen/go/v1/chat/completions" autocomplete="url"></label><label>API Key<input id="agentApiKey" type="password" placeholder="留空表示保持原密钥" autocomplete="off"></label><label>模型<select id="agentModelSelect"></select><input id="agentCustomModel" class="hidden" placeholder="输入自定义模型 ID" autocomplete="off"></label><div class="agent-config-actions"><button type="button" class="secondary-btn" id="agentConfigReset">清除本机配置</button><button type="button" class="primary-btn" id="agentConfigSave">保存服务端配置</button></div></div>
   </aside>
-  <script src="app.js?v=20260916-blankfix"></script>
+  <script src="app.js?v=20260916-weekrail"></script>
 </body>
 </html>

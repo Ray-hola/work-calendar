@@ -102,6 +102,9 @@ function switchView(view){
   if(view==='achievements'&&!S.user?.admin){view='calendar'}
   const changed=UI.view!==view;
   hideFloat(true);UI.view=view;
+  /* Returning to the week rail should show the current week, not whichever
+     panel the rail happened to be parked on last. */
+  if(view==='calendar'&&changed)UI.selectedWeek=0;
   if(view!=='calendar'){weekObserver?.disconnect();weekObserver=null}
   $$('.view').forEach(v=>v.classList.toggle('active-view',v.id===`${view}View`));
   $$('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.view===view));
@@ -169,37 +172,83 @@ function dailyTaskGroups(tasks){
 }
 function bindTaskCards(root){$$(root+' .task-card').forEach(e=>{e.onclick=()=>openDrawer(e.dataset.id);e.onkeydown=x=>{if(x.key==='Enter')openDrawer(e.dataset.id)}})}
 function renderToday(){const day=displayDay(),deferredView=UI.filter==='deferred';renderStats(day);$('#todayLabel').textContent=deferredView?'递延任务':`${wd(day)} · ${fmt(day)}`;$('#dateChip').textContent=deferredView?'全部日期':fmt(day);$$('.quick-tab').forEach(b=>b.classList.toggle('active',b.dataset.filter===UI.filter));let ts=(deferredView?scheduleTasks():scheduleTasks().filter(t=>taskActiveOn(t,day)));if(UI.filter==='open')ts=ts.filter(t=>!isArchivedTask(t)&&t.status!=='done');if(UI.filter==='done')ts=ts.filter(t=>t.status==='done');if(UI.filter==='P0')ts=ts.filter(t=>t.priority==='P0');if(UI.filter==='inprogress')ts=ts.filter(t=>t.status==='doing');if(deferredView)ts=ts.filter(t=>t.status==='deferred');const emptyCopy=UI.filter==='inprogress'?['暂无进行中的任务','打开待处理任务并点击“开始任务”，任务就会出现在这里。']:deferredView?['暂无递延记录','未完成的任务递延后，会在这里保留历史记录。']:['今天没有待处理任务','把下一件重要的事放进日程吧。'];$('#todayEmptyTitle').textContent=emptyCopy[0];$('#todayEmptyHint').textContent=emptyCopy[1];$('#todayTaskList').innerHTML=dailyTaskGroups(ts);$('#todayEmpty').classList.toggle('hidden',ts.length>0);bindTaskCards('#todayTaskList')}
-let floatHideTimer=null,floatCard=null,floatSource=null;
+/* ---------------------------------------------------------------------------
+   One day card unfolds on demand. The panel is placed in viewport space rather
+   than inside the rail: the rail clips its own overflow, so a card that grew in
+   place would be cut off exactly when it finally had something to say.
+   Hovering previews it; clicking pins it so the tasks inside can be used.
+   ------------------------------------------------------------------------- */
+let floatHideTimer=null,floatCard=null,floatSource=null,floatPinned=false,floatOutside=null;
 function removeFloat(){
   if(floatHideTimer){clearTimeout(floatHideTimer);floatHideTimer=null}
+  if(floatOutside){document.removeEventListener('click',floatOutside);floatOutside=null}
   floatCard?.remove();
-  floatCard=null;
-  floatSource=null;
+  floatCard=null;floatSource=null;floatPinned=false;
+  $$('#weekCarousel .axis-day.pinned').forEach(d=>d.classList.remove('pinned'));
 }
-function showFloat(el){
-  if(floatHideTimer){clearTimeout(floatHideTimer);floatHideTimer=null}
-  // Keep one preview instance per source card; repeated mouseenter events must
-  // not remove and recreate it while the pointer crosses child content.
-  if(floatSource===el&&floatCard?.isConnected)return;
-  removeFloat();
-  const iso=el.dataset.date,ts=sortTasks(scheduleTasks().filter(t=>taskActiveOn(t,iso))),r=el.getBoundingClientRect(),f=document.createElement('div');
-  floatSource=el;floatCard=f;
+/* Sit under the card, or above it when the card is too close to the bottom.
+   The panel is capped to whatever room that side actually has, so a short
+   window scrolls the task list instead of letting the panel cover the card
+   it belongs to. */
+function placeFloat(el,f){
+  const r=el.getBoundingClientRect(),w=f.offsetWidth,gap=10;
+  const roomBelow=innerHeight-r.bottom-gap-14,roomAbove=r.top-gap-14;
+  const flip=roomBelow<Math.min(f.scrollHeight,300)&&roomAbove>roomBelow;
+  f.classList.toggle('flip',flip);
+  f.style.maxHeight=`${Math.round(Math.min(520,Math.max(190,flip?roomAbove:roomBelow)))}px`;
+  const h=f.offsetHeight;
+  f.style.top=`${Math.round(flip?Math.max(14,r.top-gap-h):Math.min(innerHeight-h-14,r.bottom+gap))}px`;
+  f.style.left=`${Math.round(Math.min(Math.max(14,r.left+r.width/2-w/2),innerWidth-w-14))}px`;
+}
+function dayPeekHTML(iso){
+  const ts=sortTasks(scheduleTasks().filter(t=>taskActiveOn(t,iso)));
+  const done=ts.filter(t=>t.status==='done').length;
   const canAdd=Boolean(S.user?.admin);
-  f.className=`floating-day-card${canAdd?' has-add':''}`;
-  f.innerHTML=`${canAdd?`<button class="floating-add-task" data-date="${iso}" type="button">${icon('plus')}添加任务</button>`:''}<div class="floating-head"><span>${wd(iso)}</span><strong>${fmt(iso)}</strong></div><div class="floating-meta">${ts.length?`${ts.length} 项任务 · 完成 ${ts.filter(t=>t.status==='done').length}`:'暂无安排'}</div>${ts.slice(0,4).map(t=>`<div class="floating-task ${t.priority}"><b>${t.priority}</b> ${escapeHTML(t.name)}<small class="floating-assignee">${escapeHTML(t.assignee)}</small></div>`).join('')}`;
+  return `<div class="peek-head"><span>${wd(iso)}</span><strong>${fmt(iso)}</strong>${iso===S.today?'<em>今天</em>':''}</div>`
+    +`<div class="peek-meta">${ts.length?`${ts.length} 项任务 · 完成 ${done}`:'这一天还没有安排'}</div>`
+    +`<div class="peek-tasks">${ts.length?ts.map(t=>`<button class="peek-task ${escapeHTML(t.priority)}" data-task="${escapeHTML(t.id)}" type="button"><span class="priority ${escapeHTML(t.priority)}">${escapeHTML(t.priority)}</span><b>${escapeHTML(t.name)}</b><small>${escapeHTML(nameOf(t.assignee))} · ${t.duration} 分钟 · ${status(t)[1]}${isMultiDay(t)?` · ${spanDays(t)} 天`:''}</small></button>`).join(''):'<div class="peek-empty">这一天还是空的</div>'}</div>`
+    +`<div class="peek-actions">${canAdd?`<button class="peek-add" data-date="${iso}" type="button">${icon('plus')}添加任务</button>`:''}<button class="peek-detail" data-date="${iso}" type="button">查看详情${icon('arrow-right')}</button></div>`;
+}
+/* Clicking anywhere else drops a pinned panel. */
+function bindFloatOutside(el,f){
+  floatOutside=e=>{
+    if(f.isConnected&&!f.contains(e.target)&&!el.contains(e.target))removeFloat();
+  };
+  setTimeout(()=>{if(floatCard===f)document.addEventListener('click',floatOutside)},0);
+}
+function showFloat(el,pin=false){
+  if(floatHideTimer){clearTimeout(floatHideTimer);floatHideTimer=null}
+  /* Already open on this card: just pin or unpin, without rebuilding it. */
+  if(floatSource===el&&floatCard?.isConnected){
+    if(pin===floatPinned)return;
+    floatPinned=pin;
+    el.classList.toggle('pinned',pin);
+    if(pin)bindFloatOutside(el,floatCard);
+    return;
+  }
+  removeFloat();
+  const iso=el.dataset.date,f=document.createElement('section');
+  floatSource=el;floatCard=f;floatPinned=pin;
+  f.className='day-peek';
+  f.dataset.date=iso;
+  f.innerHTML=dayPeekHTML(iso);
   document.body.appendChild(f);
-  f.style.left=`${Math.min(Math.max(12,r.left+r.width/2-135),innerWidth-282)}px`;
-  f.style.top=`${Math.max(12,Math.min(r.top-16,innerHeight-220))}px`;
+  el.classList.toggle('pinned',pin);
+  placeFloat(el,f);
   f.addEventListener('mouseenter',()=>{if(floatHideTimer){clearTimeout(floatHideTimer);floatHideTimer=null}});
-  f.addEventListener('mouseleave',()=>hideFloat());
-  f.querySelector('.floating-add-task')?.addEventListener('click',e=>{e.stopPropagation();hideFloat(true);newTask(null,iso)});
-  requestAnimationFrame(()=>f.classList.add('show'));
+  f.addEventListener('mouseleave',()=>{if(!floatPinned)hideFloat()});
+  $$('.day-peek [data-task]').forEach(b=>b.onclick=e=>{e.stopPropagation();removeFloat();openDrawer(b.dataset.task)});
+  $('.day-peek .peek-add')?.addEventListener('click',e=>{e.stopPropagation();const d=e.currentTarget.dataset.date;removeFloat();newTask(null,d)});
+  $('.day-peek .peek-detail')?.addEventListener('click',e=>{e.stopPropagation();const d=e.currentTarget.dataset.date;removeFloat();renderDayDetail(d)});
+  if(pin)bindFloatOutside(el,f);
+  requestAnimationFrame(()=>{if(floatCard===f)f.classList.add('show')});
 }
 function hideFloat(immediate=false){
   if(floatHideTimer){clearTimeout(floatHideTimer);floatHideTimer=null}
+  if(floatPinned&&!immediate)return;
   if(immediate){removeFloat();return}
-  // Give the pointer time to travel from the source to the fixed preview.
-  floatHideTimer=setTimeout(removeFloat,260);
+  /* Give the pointer time to travel from the card into the panel. */
+  floatHideTimer=setTimeout(removeFloat,240);
 }
 /* Scrolling the rail is never intercepted — a wheel or a trackpad behaves
    exactly as the OS intends. What gives it the feel of a dial is that the rail
@@ -228,8 +277,29 @@ function focusWeek(n){
     if(k)k.textContent=on?'正在查看':'滚动查看';
   });
 }
+/* Park the chosen week in the middle of the rail. The rail used to lean on
+   scrollIntoView, which a just-revealed panel (height 0) cannot honour — the
+   view landed three weeks away from today. */
+function alignWeekRail(){
+  const car=$('#weekCarousel');
+  if(!car||!car.clientHeight)return;
+  measureWeekPanels();
+  const m=(weekMetrics||[]).find(x=>Number(x.el.dataset.week)===UI.selectedWeek);
+  if(!m)return;
+  const max=Math.max(0,car.scrollHeight-car.clientHeight);
+  const target=Math.min(Math.max(0,m.top+m.h/2-car.clientHeight/2),max);
+  if(Math.abs(target-car.scrollTop)<2)return;
+  car.scrollTop=target;
+}
 function updateWeekFocus(){
   weekWheelFrame=0;
+  /* Glue an open panel to its card while the rail turns — the settle glide
+     fires scroll events of its own, and dropping the panel on those would pull
+     it out from under the pointer that just opened it. */
+  if(floatCard&&floatSource){
+    const r=floatSource.getBoundingClientRect();
+    if(r.bottom<8||r.top>innerHeight-8)removeFloat();else placeFloat(floatSource,floatCard);
+  }
   const car=$('#weekCarousel');
   if(!car||!weekMetrics||!weekMetrics.length)return;
   /* One cheap read tells us whether anything has shifted the panels since they
@@ -258,7 +328,9 @@ function settleWeekRail(){
   const el=car.querySelector(`.week-panel[data-week="${UI.selectedWeek}"]`);
   if(!el)return;
   const offset=(el.offsetTop+el.offsetHeight/2)-(car.scrollTop+car.clientHeight/2);
-  if(Math.abs(offset)<2)return;
+  /* A rail that stopped roughly on a week should be left alone. Only a real
+     halfway stop is worth correcting, otherwise the glide steals the gesture. */
+  if(Math.abs(offset)<el.offsetHeight*0.2)return;
   /* The glide below fires scroll events of its own; the lock keeps the settle
      from re-scheduling itself until it has finished. */
   weekSettleLock=true;
@@ -266,7 +338,7 @@ function settleWeekRail(){
   /* Once the glide is done, look again in case the gesture resumed and stopped
      inside the locked window — that last stop would have missed its settle.
      A rail already centred returns immediately, so this cannot loop. */
-  setTimeout(()=>{weekSettleLock=false;settleWeekRail()},520);
+  setTimeout(()=>{weekSettleLock=false;settleWeekRail()},340);
 }
 function scheduleWeekWheel(){
   const car=$('#weekCarousel');
@@ -283,7 +355,44 @@ function scheduleWeekWheel(){
   clearTimeout(weekSettleTimer);
   weekSettleTimer=setTimeout(settleWeekRail,150);
 }
-function renderCalendar(){weekObserver?.disconnect();const horizonOffset=weekOffsetFor(DATE_HORIZON);const focus=Math.min(Math.max(UI.selectedWeek||0,-2),horizonOffset);UI.selectedWeek=focus;const minOffset=Math.min(-2,focus-2),maxOffset=Math.max(2,horizonOffset);const offsets=Array.from({length:maxOffset-minOffset+1},(_,i)=>minOffset+i);$('#weekCarousel').innerHTML=offsets.map(off=>{const ds=week(off).filter(d=>d<=DATE_HORIZON),ts=scheduleTasks().filter(t=>ds.some(d=>taskActiveOn(t,d))),is=off===focus;if(!ds.length)return '';return `<section class="week-panel ${is?'focus-week':'compact-week'}" data-week="${off}"><div class="week-panel-header"><div><span class="week-kicker">${is?'正在查看':'滚动查看'}</span><h2>${fmt(ds[0])} — ${fmt(ds.at(-1))}</h2></div><div class="week-totals"><strong>${ts.length}</strong><span>项任务 · 完成 ${ts.filter(t=>t.status==='done').length}</span></div></div><div class="week-days"><div class="week-days-track">${ds.map(iso=>{const a=sortTasks(scheduleTasks().filter(t=>taskActiveOn(t,iso)));return `<article class="axis-day ${iso===S.today?'today-day':''}" data-date="${iso}" tabindex="0"><div class="axis-day-head"><span>${wd(iso)}</span><strong>${new Date(`${iso}T12:00:00`).getDate()}</strong>${iso===S.today?'<em>今天</em>':''}</div><div class="axis-day-count">${a.length?`${a.length} 项 · 完成 ${a.filter(t=>t.status==='done').length}`:'暂无安排'}</div>${scheduleMemberLabels(a)}<div class="hover-peek">${a[0]?`<span class="priority ${a[0].priority}">${a[0].priority}</span><strong>${a[0].name}</strong>`:'<strong>暂无安排</strong>'}<small>悬停预览 · 点击进入详情</small></div><div class="axis-task-list">${a.length?a.map(t=>`<button class="axis-task ${t.priority}" data-task="${t.id}"><span class="priority ${t.priority}">${t.priority}</span><span>${escapeHTML(t.name)}${isMultiDay(t)?`<em class="axis-span">${spanDays(t)}天</em>`:''}</span><small>${escapeHTML(t.assignee)} · ${t.duration} 分钟 · ${status(t)[1]}</small></button>`).join(''):'<div class="axis-empty">这一天还没有安排</div>'}</div>${S.user?.admin?`<button class="axis-day-add" data-date="${iso}">${icon('plus')}添加任务</button>`:''}</article>`}).join('')}</div></div></section>`}).join('');const focusEl=$('#weekCarousel .focus-week');if(focusEl)requestAnimationFrame(()=>focusEl.scrollIntoView({block:'center'}));measureWeekPanels();if(!weekWheelBound){weekWheelBound=true;window.addEventListener('resize',()=>{measureWeekPanels();scheduleWeekWheel()},{passive:true})}$('#weekCarousel').onscroll=scheduleWeekWheel;scheduleWeekWheel();$$('#weekCarousel .axis-day').forEach(d=>{d.onmouseenter=()=>showFloat(d);d.onmouseleave=()=>hideFloat();d.onclick=e=>{if(!e.target.closest('[data-task],.axis-day-add'))renderDayDetail(d.dataset.date)};d.onkeydown=e=>{if(e.key==='Enter')renderDayDetail(d.dataset.date)}});$$('#weekCarousel .axis-day-add').forEach(b=>b.onclick=e=>{e.stopPropagation();newTask(null,b.dataset.date)});$$('#weekCarousel [data-task]').forEach(b=>b.onclick=()=>openDrawer(b.dataset.task))}
+function renderCalendar(){
+  weekObserver?.disconnect();
+  const horizonOffset=weekOffsetFor(DATE_HORIZON);
+  const focus=Math.min(Math.max(UI.selectedWeek||0,-2),horizonOffset);
+  UI.selectedWeek=focus;
+  const minOffset=Math.min(-2,focus-2),maxOffset=Math.max(2,horizonOffset);
+  const offsets=Array.from({length:maxOffset-minOffset+1},(_,i)=>minOffset+i);
+  $('#weekCarousel').innerHTML=offsets.map(off=>{
+    const ds=week(off).filter(d=>d<=DATE_HORIZON),ts=scheduleTasks().filter(t=>ds.some(d=>taskActiveOn(t,d))),is=off===focus;
+    if(!ds.length)return '';
+    return `<section class="week-panel ${is?'focus-week':'compact-week'}" data-week="${off}">`
+      +`<div class="week-panel-header"><div><span class="week-kicker">${is?'正在查看':'滚动查看'}</span><h2>${fmt(ds[0])} — ${fmt(ds.at(-1))}</h2></div>`
+      +`<div class="week-totals"><strong>${ts.length}</strong><span>项任务 · 完成 ${ts.filter(t=>t.status==='done').length}</span></div></div>`
+      +`<div class="week-days"><div class="week-days-track">${ds.map(iso=>{
+        const a=sortTasks(scheduleTasks().filter(t=>taskActiveOn(t,iso)));
+        const today=iso===S.today;
+        return `<article class="axis-day${today?' today-day':''}" data-date="${iso}" tabindex="0" role="button" aria-expanded="false">`
+          +`<div class="axis-day-head"><span>${wd(iso)}</span><strong>${new Date(`${iso}T12:00:00`).getDate()}</strong>${today?'<em>今天</em>':''}</div>`
+          +`<div class="axis-day-count">${a.length?`${a.length} 项 · 完成 ${a.filter(t=>t.status==='done').length}`:'暂无安排'}</div>`
+          +`${scheduleMemberLabels(a)}</article>`}).join('')}</div></div></section>`}).join('');
+  measureWeekPanels();
+  /* Park the current week before anything reads a position, then again once the
+     web font has settled the real panel heights. */
+  alignWeekRail();
+  requestAnimationFrame(()=>{measureWeekPanels();alignWeekRail()});
+  setTimeout(alignWeekRail,150);
+  if(!weekWheelBound){weekWheelBound=true;window.addEventListener('resize',()=>{measureWeekPanels();scheduleWeekWheel()},{passive:true})}
+  $('#weekCarousel').onscroll=scheduleWeekWheel;
+  scheduleWeekWheel();
+  $$('#weekCarousel .axis-day').forEach(d=>{
+    d.onmouseenter=()=>showFloat(d);
+    d.onmouseleave=()=>hideFloat();
+    d.onfocus=()=>showFloat(d);
+    d.onblur=()=>hideFloat();
+    d.onclick=()=>showFloat(d,!floatPinned||floatSource!==d);
+    d.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();showFloat(d,true)}else if(e.key==='Escape'){removeFloat()}};
+  });
+}
 function renderDayDetail(iso){UI.detailDate=iso;switchView('dayDetail')}
 function renderDayContent(){
   const iso=UI.detailDate||displayDay();
@@ -910,7 +1019,7 @@ function memberTaskCount(userId,project){
 function scheduleMemberLabels(tasks){
   if(!S.user?.admin||!tasks.length)return '';
   const members=[...new Set(tasks.map(t=>t.assignee))];
-  return `<div class="axis-members">${members.slice(0,2).map(id=>`<span>${escapeHTML(id)}</span>`).join('')}${members.length>2?`<small>+${members.length-2} 人</small>`:''}</div>`;
+  return `<div class="axis-members" title="${escapeHTML(members.map(id=>nameOf(id)).join('、'))}">${members.slice(0,4).map(id=>`<i>${escapeHTML(avatarSeed(id))}</i>`).join('')}${members.length>4?`<small>+${members.length-4}</small>`:''}</div>`;
 }
 function renderScheduleScope(){
   const visible=Boolean(S.user?.admin&&['today','calendar','dayDetail'].includes(UI.view));
