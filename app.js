@@ -193,11 +193,72 @@ function hideFloat(immediate=false){
   // Give the pointer time to travel from the source to the fixed preview.
   floatHideTimer=setTimeout(removeFloat,260);
 }
-function renderCalendar(){weekObserver?.disconnect();const horizonOffset=weekOffsetFor(DATE_HORIZON);const focus=Math.min(Math.max(UI.selectedWeek||0,-2),horizonOffset);UI.selectedWeek=focus;const minOffset=Math.min(-2,focus-2),maxOffset=Math.max(2,horizonOffset);const offsets=Array.from({length:maxOffset-minOffset+1},(_,i)=>minOffset+i);$('#weekCarousel').innerHTML=offsets.map(off=>{const ds=week(off).filter(d=>d<=DATE_HORIZON),ts=scheduleTasks().filter(t=>ds.some(d=>taskActiveOn(t,d))),is=off===focus;if(!ds.length)return '';return `<section class="week-panel ${is?'focus-week':'compact-week'}" data-week="${off}"><div class="week-panel-header"><div><span class="week-kicker">${is?'正在查看':'滚动查看'}</span><h2>${fmt(ds[0])} — ${fmt(ds.at(-1))}</h2></div><div class="week-totals"><strong>${ts.length}</strong><span>项任务 · 完成 ${ts.filter(t=>t.status==='done').length}</span></div></div><div class="week-days"><div class="week-days-track">${ds.map(iso=>{const a=sortTasks(scheduleTasks().filter(t=>taskActiveOn(t,iso)));return `<article class="axis-day ${iso===S.today?'today-day':''}" data-date="${iso}" tabindex="0"><div class="axis-day-head"><span>${wd(iso)}</span><strong>${new Date(`${iso}T12:00:00`).getDate()}</strong>${iso===S.today?'<em>今天</em>':''}</div><div class="axis-day-count">${a.length?`${a.length} 项 · 完成 ${a.filter(t=>t.status==='done').length}`:'暂无安排'}</div>${scheduleMemberLabels(a)}<div class="hover-peek">${a[0]?`<span class="priority ${a[0].priority}">${a[0].priority}</span><strong>${a[0].name}</strong>`:'<strong>暂无安排</strong>'}<small>悬停预览 · 点击进入详情</small></div><div class="axis-task-list">${a.length?a.map(t=>`<button class="axis-task ${t.priority}" data-task="${t.id}"><span class="priority ${t.priority}">${t.priority}</span><span>${escapeHTML(t.name)}${isMultiDay(t)?`<em class="axis-span">${spanDays(t)}天</em>`:''}</span><small>${escapeHTML(t.assignee)} · ${t.duration} 分钟 · ${status(t)[1]}</small></button>`).join(''):'<div class="axis-empty">这一天还没有安排</div>'}</div>${S.user?.admin?`<button class="axis-day-add" data-date="${iso}">${icon('plus')}添加任务</button>`:''}</article>`}).join('')}</div></div></section>`}).join('');const focusEl=$('#weekCarousel .focus-week');if(focusEl)requestAnimationFrame(()=>focusEl.scrollIntoView({block:'center'}));weekObserver=new IntersectionObserver(es=>{const v=es.filter(e=>e.isIntersecting).sort((a,b)=>b.intersectionRatio-a.intersectionRatio)[0];if(!v)return;const n=Math.min(Math.max(Number(v.target.dataset.week),-2),horizonOffset);if(n===UI.selectedWeek)return;const prev=UI.selectedWeek;UI.selectedWeek=n;renderScheduleScope();
-  /* Touch only the two panels whose state actually changed. The previous code
-     walked all 31 panels on every crossing, which is a lot of class and text
-     writes while the user is mid-scroll. */
-  [prev,n].forEach(w=>{const p=document.querySelector(`#weekCarousel .week-panel[data-week="${w}"]`);if(!p)return;const on=Number(p.dataset.week)===n;p.classList.toggle('focus-week',on);p.classList.toggle('compact-week',!on);const k=p.querySelector('.week-kicker');if(k)k.textContent=on?'正在查看':'滚动查看'})}, {root:$('#weekCarousel'),threshold:.6});$$('#weekCarousel .week-panel').forEach(p=>weekObserver.observe(p));$$('#weekCarousel .axis-day').forEach(d=>{d.onmouseenter=()=>showFloat(d);d.onmouseleave=()=>hideFloat();d.onclick=e=>{if(!e.target.closest('[data-task],.axis-day-add'))renderDayDetail(d.dataset.date)};d.onkeydown=e=>{if(e.key==='Enter')renderDayDetail(d.dataset.date)}});$$('#weekCarousel .axis-day-add').forEach(b=>b.onclick=e=>{e.stopPropagation();newTask(null,b.dataset.date)});$$('#weekCarousel [data-task]').forEach(b=>b.onclick=()=>openDrawer(b.dataset.task))}
+/* The week rail reads like a wheel: whichever week sits under the centre faces
+   the reader, and the neighbours tilt away. Distances are normalised against
+   half the viewport height, so roughly three weeks are in view at a time. */
+let weekMetrics=null,weekWheelFrame=0,weekWheelBound=false;
+function measureWeekPanels(){
+  const car=$('#weekCarousel');
+  if(!car){weekMetrics=null;return}
+  weekMetrics=[...car.querySelectorAll('.week-panel')].map(p=>({el:p,top:p.offsetTop,h:p.offsetHeight}));
+}
+function focusWeek(n){
+  if(n===UI.selectedWeek)return;
+  const prev=UI.selectedWeek;
+  UI.selectedWeek=n;
+  renderScheduleScope();
+  /* Only the two panels whose state actually changed are touched, rather than
+     walking all 31 on every crossing. */
+  [prev,n].forEach(w=>{
+    const p=document.querySelector(`#weekCarousel .week-panel[data-week="${w}"]`);
+    if(!p)return;
+    const on=Number(p.dataset.week)===n;
+    p.classList.toggle('focus-week',on);
+    p.classList.toggle('compact-week',!on);
+    const k=p.querySelector('.week-kicker');
+    if(k)k.textContent=on?'正在查看':'滚动查看';
+  });
+}
+function updateWeekWheel(){
+  weekWheelFrame=0;
+  const car=$('#weekCarousel');
+  if(!car||!weekMetrics||!weekMetrics.length)return;
+  const calm=typeof matchMedia==='function'&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+  /* One cheap read tells us whether anything has shifted the panels since they
+     were measured — a web font landing, a panel's height settling. If it has,
+     re-measure before using stale positions. */
+  if(weekMetrics.length&&Math.abs(weekMetrics[0].el.offsetTop-weekMetrics[0].top)>2)measureWeekPanels();
+  const mid=car.scrollTop+car.clientHeight/2;
+  const half=Math.max(1,car.clientHeight/2);
+  /* Picking the week nearest the centre is both what the eye reads and what
+     the wheel maths already computes — and unlike an intersection ratio it
+     stays unambiguous when three weeks are fully in view. */
+  let nearest=null,nearestDist=Infinity;
+  for(const m of weekMetrics){
+    const raw=Math.abs(((m.top+m.h/2)-mid)/half);
+    if(raw<nearestDist){nearestDist=raw;nearest=Number(m.el.dataset.week)}
+    const d=((m.top+m.h/2)-mid)/half;
+    const t=Math.max(-1,Math.min(1,d));
+    if(Math.abs(d)>1.35){
+      if(m.el.style.transform)m.el.style.transform='';
+      if(m.el.style.opacity)m.el.style.opacity='';
+      continue;
+    }
+    m.el.style.opacity=String(Math.max(.3,1-Math.abs(t)*.42));
+    if(calm){m.el.style.transform='';continue}
+    /* Three weeks fit in view, so a neighbour sits about 0.69 away from the
+       centre. This gain lands it near 36 degrees — clearly tilted, still
+       readable — and the cap keeps the far edge from cartwheeling. */
+    const rot=Math.max(-55,Math.min(55,-t*52));
+    m.el.style.transform=`rotateX(${rot.toFixed(2)}deg) translateZ(${(-Math.abs(t)*95).toFixed(1)}px)`;
+  }
+  if(nearest!==null)focusWeek(nearest);
+}
+function scheduleWeekWheel(){
+  if(weekWheelFrame)return;
+  weekWheelFrame=requestAnimationFrame(updateWeekWheel);
+}
+function renderCalendar(){weekObserver?.disconnect();const horizonOffset=weekOffsetFor(DATE_HORIZON);const focus=Math.min(Math.max(UI.selectedWeek||0,-2),horizonOffset);UI.selectedWeek=focus;const minOffset=Math.min(-2,focus-2),maxOffset=Math.max(2,horizonOffset);const offsets=Array.from({length:maxOffset-minOffset+1},(_,i)=>minOffset+i);$('#weekCarousel').innerHTML=offsets.map(off=>{const ds=week(off).filter(d=>d<=DATE_HORIZON),ts=scheduleTasks().filter(t=>ds.some(d=>taskActiveOn(t,d))),is=off===focus;if(!ds.length)return '';return `<section class="week-panel ${is?'focus-week':'compact-week'}" data-week="${off}"><div class="week-panel-header"><div><span class="week-kicker">${is?'正在查看':'滚动查看'}</span><h2>${fmt(ds[0])} — ${fmt(ds.at(-1))}</h2></div><div class="week-totals"><strong>${ts.length}</strong><span>项任务 · 完成 ${ts.filter(t=>t.status==='done').length}</span></div></div><div class="week-days"><div class="week-days-track">${ds.map(iso=>{const a=sortTasks(scheduleTasks().filter(t=>taskActiveOn(t,iso)));return `<article class="axis-day ${iso===S.today?'today-day':''}" data-date="${iso}" tabindex="0"><div class="axis-day-head"><span>${wd(iso)}</span><strong>${new Date(`${iso}T12:00:00`).getDate()}</strong>${iso===S.today?'<em>今天</em>':''}</div><div class="axis-day-count">${a.length?`${a.length} 项 · 完成 ${a.filter(t=>t.status==='done').length}`:'暂无安排'}</div>${scheduleMemberLabels(a)}<div class="hover-peek">${a[0]?`<span class="priority ${a[0].priority}">${a[0].priority}</span><strong>${a[0].name}</strong>`:'<strong>暂无安排</strong>'}<small>悬停预览 · 点击进入详情</small></div><div class="axis-task-list">${a.length?a.map(t=>`<button class="axis-task ${t.priority}" data-task="${t.id}"><span class="priority ${t.priority}">${t.priority}</span><span>${escapeHTML(t.name)}${isMultiDay(t)?`<em class="axis-span">${spanDays(t)}天</em>`:''}</span><small>${escapeHTML(t.assignee)} · ${t.duration} 分钟 · ${status(t)[1]}</small></button>`).join(''):'<div class="axis-empty">这一天还没有安排</div>'}</div>${S.user?.admin?`<button class="axis-day-add" data-date="${iso}">${icon('plus')}添加任务</button>`:''}</article>`}).join('')}</div></div></section>`}).join('');const focusEl=$('#weekCarousel .focus-week');if(focusEl)requestAnimationFrame(()=>focusEl.scrollIntoView({block:'center'}));measureWeekPanels();if(!weekWheelBound){weekWheelBound=true;window.addEventListener('resize',()=>{measureWeekPanels();scheduleWeekWheel()},{passive:true})}$('#weekCarousel').onscroll=scheduleWeekWheel;scheduleWeekWheel();$$('#weekCarousel .axis-day').forEach(d=>{d.onmouseenter=()=>showFloat(d);d.onmouseleave=()=>hideFloat();d.onclick=e=>{if(!e.target.closest('[data-task],.axis-day-add'))renderDayDetail(d.dataset.date)};d.onkeydown=e=>{if(e.key==='Enter')renderDayDetail(d.dataset.date)}});$$('#weekCarousel .axis-day-add').forEach(b=>b.onclick=e=>{e.stopPropagation();newTask(null,b.dataset.date)});$$('#weekCarousel [data-task]').forEach(b=>b.onclick=()=>openDrawer(b.dataset.task))}
 function renderDayDetail(iso){UI.detailDate=iso;switchView('dayDetail')}
 function renderDayContent(){
   const iso=UI.detailDate||displayDay();

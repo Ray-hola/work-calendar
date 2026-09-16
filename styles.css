@@ -873,21 +873,30 @@ select:focus {
   overscroll-behavior-y: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
+  /* The rail behaves like a wheel: the container supplies the perspective and
+     each panel is rotated around X by scroll position (see updateWeekWheel). */
+  perspective: 1400px;
 }
 
 /* Thirty-one weeks render at once, so keep the off-screen ones out of layout
    and raster work entirely. */
 .week-panel {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 215px;
-  transition: opacity var(--t) var(--ease), border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
+  /* No content-visibility here: it makes off-screen panels report an estimated
+     height, which throws off the wheel maths — the panels' measured positions
+     have to be exact, so all 31 are laid out for real. */
+  transform-origin: center center;
+  backface-visibility: hidden;
+  /* transform and opacity are written per frame while scrolling, so they must
+     not carry a transition — it would lag behind the wheel. */
+  transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
 }
 
 /* Tell the current week apart with tone and elevation instead of a scale
    transform. Scaling every panel promoted all 31 of them to composited layers,
    so the rail looked like it was breathing while you scrolled. */
+/* Depth is expressed by rotation and opacity from the wheel calculation, so
+   the classes only carry the flat-state styling now. */
 .compact-week {
-  opacity: .68;
   box-shadow: none;
 }
 .focus-week {
