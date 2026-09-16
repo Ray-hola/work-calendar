@@ -1240,13 +1240,22 @@ async function agentLoadOwnHistory(){
     const data=await api('/api/action',{action:'agent.history',data:{}});
     const messages=data.messages||[],list=$('#agentMessages');if(!list)return;
     list.innerHTML='';
-    if(!messages.length){agentRenderEmptyState(list);return}
+    /* A card still waiting for a click is not part of the stored transcript,
+       so rebuilding the list used to erase it while the run kept waiting on
+       it — the run stayed busy forever and every later message was dropped in
+       silence. Attach it back rather than losing the run. */
+    const restoreCard=()=>{
+      const card=agentState.pendingCard;
+      if(card&&agentState.pendingResolve&&!card.isConnected)list.appendChild(card);
+    };
+    if(!messages.length){agentRenderEmptyState(list);restoreCard();list.scrollTop=list.scrollHeight;return}
     /* A blank line is not a turn. One used to be stored whenever the model
        came back empty, and replaying it made the server refuse every later
        request — the transcript must never carry it forward. */
     const turns=messages.filter(m=>(m.role==='user'||m.role==='assistant')&&String(m.content||'').trim());
     agentState.messages=turns.map(m=>({role:m.role,content:m.content}));
     messages.forEach(m=>{const node=agentMessageNode(m);if(node)list.appendChild(node)});
+    restoreCard();
     list.scrollTop=list.scrollHeight;
   }catch(_){}
 }
@@ -1462,9 +1471,16 @@ function agentRecordStep(display,forModel){
   agentShowStep(display);
 }
 function agentUpdateBusy(){
-  const send=$('#agentSendBtn'),stop=$('#agentStopBtn');
+  const send=$('#agentSendBtn'),stop=$('#agentStopBtn'),input=$('#agentInput');
   if(send){send.disabled=agentState.busy;send.textContent=agentState.busy?'…':'发送'}
   if(stop){stop.classList.toggle('hidden',!agentState.busy);stop.textContent=agentState.steps?`停止（已执行 ${agentState.steps} 步）`:'停止'}
+  /* Say on the composer itself what the run is waiting for, so a paused card
+     is never mistaken for a composer that ate the message. */
+  if(input){
+    input.placeholder=agentState.pendingResolve?'上一步在等你确认：点卡片上的按钮，或点「停止」'
+      :agentState.busy?'助手正在处理上一条…（点「停止」可以打断）'
+      :'问我任务、项目、负载或收件箱…';
+  }
 }
 function agentHalt(note){
   agentState.stop=true;agentState.autoRun=false;
@@ -1489,8 +1505,21 @@ function agentRunOne(proposal){
       +`<pre class="agent-action-payload">${escapeHTML(JSON.stringify(payload,null,2))}</pre>`
       +'<div class="agent-action-buttons"></div>';
     list.appendChild(card);list.scrollTop=list.scrollHeight;
-    const finish=value=>{agentState.pendingResolve=null;resolve(value)};
+    /* The card is a piece of live UI, not a line of the stored transcript.
+       Both it and the proposal it stands for are held here so replaying the
+       history can put the card back instead of erasing the only button that
+       can finish this run. */
+    const finish=value=>{
+      agentState.pendingResolve=null;agentState.pendingProposal=null;agentState.pendingCard=null;
+      /* The card stays in the transcript as a record of what was proposed, but
+         once nothing is waiting on it, it must stop looking clickable. */
+      if(card.isConnected&&buttons&&!buttons.querySelector('.agent-action-done'))
+        buttons.innerHTML='<span class="agent-action-done">已取消</span>';
+      resolve(value);
+    };
     agentState.pendingResolve=finish;
+    agentState.pendingProposal=proposal;
+    agentState.pendingCard=card;
     const buttons=card.querySelector('.agent-action-buttons');
     const cancel=()=>{card.remove();agentHalt();finish({cancelled:true})};
     const execute=async()=>{
@@ -1529,6 +1558,8 @@ function agentRunOne(proposal){
     buttons.innerHTML='<button class="ghost-btn agent-action-cancel">取消</button>'
       +'<button class="ghost-btn agent-action-handover hidden">后续自动做完</button>'
       +'<button class="primary-btn agent-action-confirm">确认执行</button>';
+    /* The composer now reads as busy while this card waits, so refresh it. */
+    agentUpdateBusy();
     buttons.querySelector('.agent-action-cancel').onclick=cancel;
     buttons.querySelector('.agent-action-confirm').onclick=execute;
     const hand=buttons.querySelector('.agent-action-handover');
@@ -1585,7 +1616,14 @@ async function agentLoop(context){
   return steps;
 }
 async function agentSubmit(){
-  const input=$('#agentInput'),text=input?.value.trim();if(!text||agentState.busy)return;
+  const input=$('#agentInput'),text=input?.value.trim();if(!text)return;
+  /* Dropping this on the floor is what made a stuck run look like it was
+     eating messages: the text stayed in the box and nothing happened. */
+  if(agentState.busy){
+    toast(agentState.pendingResolve?'上一步还在等你确认：点卡片上的按钮，或点「停止」结束这次执行'
+                               :'助手还在处理上一条消息，点「停止」可以打断它');
+    return;
+  }
   const intent=agentPlanIntent(text);
   /* The mark is the request itself — no separate mode to remember. */
   if(intent.plan){input.value='';agentSyncPlanButton();return agentPlanSubmit(intent.body)}
@@ -1610,7 +1648,12 @@ async function agentPlanSubmit(body){
   const input=$('#agentInput');
   const source=body===undefined?(input?.value||''):body;
   const text=agentPlanIntent(source).body.trim();
-  if(!text||agentState.busy){if(!text)toast('先在输入框里写下你的安排');return}
+  if(!text){toast('先在输入框里写下你的安排');return}
+  if(agentState.busy){
+    toast(agentState.pendingResolve?'上一步还在等你确认：点卡片上的按钮，或点「停止」结束这次执行'
+                               :'助手还在处理上一条消息，点「停止」可以打断它');
+    return;
+  }
   const shown=AGENT_PLAN_MARK+' '+text;
   input.value='';agentSyncPlanButton();
   agentAppend('user',shown,'','plan');
