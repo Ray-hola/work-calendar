@@ -646,12 +646,27 @@ select:focus {
   background: hsl(var(--avatar-hue, 18) 38% 56%);
   color: var(--surface);
   overflow: hidden;
+  /* Avatars are fixed-size marks: without this a long name in the same flex
+     row shrinks them, and a squashed box is no longer a circle. */
+  flex: none;
   transition: background var(--t) var(--ease);
 }
 .account-banner .avatar,
 .workspace-switcher .avatar { background: hsl(var(--avatar-hue, 18) 38% 56%); }
 
 .avatar.has-image { background: var(--surface-sunk); }
+
+/* Fixed-size marks must never be squeezed by a long sibling label — a squashed
+   circle stops reading as a circle. `.project-color` already carried this. */
+.brand-mark,
+.status-dot,
+.dot,
+.legend-today,
+.legend-range,
+.legend-open {
+  flex: none;
+}
+
 .avatar.has-image img {
   width: 100%;
   height: 100%;
