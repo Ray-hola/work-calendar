@@ -358,11 +358,15 @@ const AGENT_LOOP_SOURCE = source.match(/async function agentLoop\(context\)\{[\s
 const AGENT_MAX_STEPS = Number(source.match(/const AGENT_MAX_STEPS=(\d+)/)[1]);
 const AGENT_MAX_FAILURES = Number(source.match(/const AGENT_MAX_FAILURES=(\d+)/)[1]);
 const AGENT_MAX_REPEATS = Number(source.match(/const AGENT_MAX_REPEATS=(\d+)/)[1]);
-/* Nothing runs until the first card is answered, and the answer is a choice:
-   confirm each step, or hand the rest of the run over. */
-const FIRST_CARD_CHOOSES = /const chooses=agentState\.mode===null;/.test(source)
-  && /agent-action-step">逐步确认/.test(source)
-  && /agent-action-auto">替我全部做完/.test(source);
+/* The pace is a standing switch beside the composer, remembered per browser,
+   rather than a question the first card asks on every run. */
+const STANDING_MODE_SWITCH = /const AGENT_MODE_KEY=/.test(source)
+  && /function agentPref\(\)/.test(source)
+  && /localStorage\.setItem\(AGENT_MODE_KEY/.test(source)
+  && /agentState\.mode=agentPref\(\);/.test(source)
+  && !/const chooses=agentState\.mode===null/.test(source);
+const SPLIT_PLAN_SOURCE = source.match(/function agentSplitPlan\(text\)\{[\s\S]*?\n\}/)[0];
+const splitPlan = new Function(SPLIT_PLAN_SOURCE + '\nreturn agentSplitPlan;')();
 
 function agentHarness(queue, verdicts) {
   const trace = [];
@@ -432,10 +436,24 @@ test('cancelling the first card still stops the run outright', async () => {
   assert.deepEqual(h.ran(), []);
 });
 
-test('the first card asks how the run should proceed', () => {
-  assert.ok(FIRST_CARD_CHOOSES,
-    '第一张卡片必须让用户选「逐步确认」还是「替我全部做完」');
+test('the run pace is a standing switch instead of a per-run question', () => {
+  assert.ok(STANDING_MODE_SWITCH,
+    '执行方式应做成常驻开关并记住，卡片不应每轮再问一次');
   assert.ok(AGENT_MAX_STEPS >= 100, '步数上限应远高于原来的 12');
+});
+
+test('planning parses a <plan> array and keeps it out of the reply text', () => {
+  const {clean, plan} = splitPlan('我把它拆成两个任务。\n<plan>[{"name":"A","assignee":"wang00"},{"name":"B"}]</plan>');
+  assert.deepEqual(plan.map(t => t.name), ['A', 'B'], '应解析出计划里的每一项');
+  assert.ok(!clean.includes('<plan>'), '正文里不应残留计划块');
+  assert.equal(clean, '我把它拆成两个任务。');
+});
+
+test('a malformed or non-array plan is ignored rather than half-applied', () => {
+  assert.deepEqual(splitPlan('<plan>{"name":"不是数组"}</plan>').plan, [], '非数组应被忽略');
+  assert.deepEqual(splitPlan('<plan>[{坏 JSON</plan>').plan, [], '坏 JSON 应被忽略');
+  assert.deepEqual(splitPlan('<plan>[{"nope":1}]</plan>').plan, [], '没有任务名的条目应被丢掉');
+  assert.deepEqual(splitPlan('一段没有计划块的回复').plan, []);
 });
 
 test('a long run is no longer cut short by the old step ceiling', async () => {

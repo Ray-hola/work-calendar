@@ -1091,6 +1091,43 @@ function agentSplitActions(text){
   }).trim();
   return {clean,actions};
 }
+/* How a run should proceed is a standing preference, not a per-run question.
+   It is remembered per browser so the answer only has to be given once. */
+const AGENT_MODE_KEY='wc-agent-mode';
+function agentPref(){try{return localStorage.getItem(AGENT_MODE_KEY)==='auto'?'auto':'step'}catch(_){return 'step'}}
+function agentSetPref(mode){
+  const next=mode==='auto'?'auto':'step';
+  try{localStorage.setItem(AGENT_MODE_KEY,next)}catch(_){}
+  agentRenderModeOptions();
+  toast(next==='auto'?'助手会一路做完，不再逐步问你':'助手每做一步都会先等你确认');
+}
+function agentRenderModeOptions(){
+  $$('#agentPanel .agent-mode-opt').forEach(b=>{
+    const on=b.dataset.mode===agentPref();
+    b.classList.toggle('is-on',on);
+    b.setAttribute('aria-pressed',on?'true':'false');
+  });
+}
+/* Planning asks the model for the same fields a task needs, but stops short of
+   executing: the array comes back as a <plan> block that the user approves. */
+const AGENT_PLAN_PROMPT=text=>'把下面这段安排拆成一组标准任务。这一步只做规划，不要输出任何 <action> 动作，也不要声称已经创建。\n'
+  +'先用一两句话说明你的拆解思路，然后另起一行输出一个 <plan> 块，块里是一个单行 JSON 数组：\n'
+  +'<plan>[{"name":"任务名","projectId":"项目ID","assignee":"负责人账户","date":"YYYY-MM-DD","deadline":"可选","priority":"P0/P1/P2","duration":分钟数}]</plan>\n'
+  +'规则：projectId 与 assignee 必须用数据里真实存在的 id（负责人写账户 id，不是中文名）；date 不早于今天、不晚于可排期上限；'
+  +'宁可少拆几个也不要编造不存在的项目或账户；确实无法确定负责人时，用当前账户。\n'
+  +'---\n'+text;
+function agentSplitPlan(text){
+  let plan=[];
+  const clean=String(text||'').replace(/<plan>([\s\S]*?)<\/plan>/gi,(_,body)=>{
+    try{
+      const parsed=JSON.parse(body.trim());
+      if(Array.isArray(parsed))plan=parsed.filter(x=>x&&typeof x==='object'&&x.name);
+    }catch(_){}
+    return '';
+  }).trim();
+  return {clean,plan};
+}
+
 /* Runs are meant to go the distance for a real job, so the ceiling sits far
    above anything a sane task needs. What actually prevents a runaway is the
    refusal budget and the repeat detector below, not the step count. */
@@ -1158,11 +1195,14 @@ function agentSummarize(result){
 }
 /* A step line is replayed to the model as a user turn but rendered as a quiet
    receipt, so the transcript stays readable while the model keeps its context. */
-function agentRecordStep(display,forModel){
-  agentState.messages.push({role:'user',content:forModel});
+function agentShowStep(display){
   const list=$('#agentMessages');if(!list)return;
   const el=document.createElement('div');el.className='agent-step';el.textContent=display;
   list.appendChild(el);list.scrollTop=list.scrollHeight;
+}
+function agentRecordStep(display,forModel){
+  agentState.messages.push({role:'user',content:forModel});
+  agentShowStep(display);
 }
 function agentUpdateBusy(){
   const send=$('#agentSendBtn'),stop=$('#agentStopBtn');
@@ -1184,12 +1224,12 @@ function agentRunOne(proposal){
     if(!list){resolve({cancelled:true});return}
     const label=AGENT_ACTION_LABELS[proposal.action]||proposal.action;
     const payload=(proposal.data&&typeof proposal.data==='object')?proposal.data:{};
-    const chooses=agentState.mode===null;
+    /* The pace comes from the standing switch beside the input, so the card
+       only has to show what is about to happen. */
     const card=document.createElement('div');
     card.className='agent-message assistant agent-action';
-    card.innerHTML=`<div class="agent-action-title">${chooses?'待执行的第一个操作':'待确认操作'} · ${escapeHTML(label)}</div>`
+    card.innerHTML=`<div class="agent-action-title">待确认操作 · ${escapeHTML(label)}</div>`
       +`<pre class="agent-action-payload">${escapeHTML(JSON.stringify(payload,null,2))}</pre>`
-      +(chooses?`<p class="agent-action-note">先选一种执行方式，助手再动手。<strong>逐步确认</strong>：每一步都贴出来等你点。<strong>替我全部做完</strong>：确认第一屏之后就交给它，后面的步骤自己跑完，随时可以按停止。</p>`:'')
       +'<div class="agent-action-buttons"></div>';
     list.appendChild(card);list.scrollTop=list.scrollHeight;
     const finish=value=>{agentState.pendingResolve=null;resolve(value)};
@@ -1229,27 +1269,18 @@ function agentRunOne(proposal){
         finish({failed:true});
       }
     };
-    if(chooses){
-      buttons.innerHTML='<button class="ghost-btn agent-action-cancel">取消</button>'
-        +'<button class="secondary-btn agent-action-step">逐步确认</button>'
-        +'<button class="primary-btn agent-action-auto">替我全部做完</button>';
-      buttons.querySelector('.agent-action-cancel').onclick=cancel;
-      buttons.querySelector('.agent-action-step').onclick=()=>{agentState.mode='step';execute()};
-      buttons.querySelector('.agent-action-auto').onclick=()=>{agentState.mode='auto';execute()};
-    }else{
-      buttons.innerHTML='<button class="ghost-btn agent-action-cancel">取消</button>'
-        +'<button class="ghost-btn agent-action-handover hidden">后续自动做完</button>'
-        +'<button class="primary-btn agent-action-confirm">确认执行</button>';
-      buttons.querySelector('.agent-action-cancel').onclick=cancel;
-      buttons.querySelector('.agent-action-confirm').onclick=execute;
-      const hand=buttons.querySelector('.agent-action-handover');
-      /* Mid-run change of mind: the remaining steps stop asking. */
-      if(agentState.mode==='step'){
-        hand.classList.remove('hidden');
-        hand.onclick=()=>{agentState.mode='auto';execute()};
-      }
-      if(agentState.mode==='auto'&&!agentState.stop)buttons.querySelector('.agent-action-confirm').click();
+    buttons.innerHTML='<button class="ghost-btn agent-action-cancel">取消</button>'
+      +'<button class="ghost-btn agent-action-handover hidden">后续自动做完</button>'
+      +'<button class="primary-btn agent-action-confirm">确认执行</button>';
+    buttons.querySelector('.agent-action-cancel').onclick=cancel;
+    buttons.querySelector('.agent-action-confirm').onclick=execute;
+    const hand=buttons.querySelector('.agent-action-handover');
+    /* Mid-run change of mind: the remaining steps stop asking. */
+    if(agentState.mode==='step'){
+      hand.classList.remove('hidden');
+      hand.onclick=()=>{agentState.mode='auto';execute()};
     }
+    if(agentState.mode==='auto'&&!agentState.stop)buttons.querySelector('.agent-action-confirm').click();
   });
 }
 async function agentLoop(context){
@@ -1300,7 +1331,7 @@ async function agentSubmit(){
   const input=$('#agentInput'),text=input?.value.trim();if(!text||agentState.busy)return;
   input.value='';agentAppend('user',text);
   agentState.autoRun=false;agentState.stop=false;agentState.steps=0;agentState.failures=0;
-  agentState.mode=null;agentState.lastActionKey='';agentState.repeats=0;
+  agentState.mode=agentPref();agentState.lastActionKey='';agentState.repeats=0;
   agentState.pendingResolve=null;
   agentState.busy=true;agentUpdateBusy();
   try{
@@ -1313,11 +1344,86 @@ async function agentSubmit(){
   agentUpdateBusy();
   input.focus();
 }
+/* Plan a set of tasks from free text. The model returns a <plan> array, the
+   user approves a rendered table, and only then does anything get written. */
+async function agentPlanSubmit(){
+  const input=$('#agentInput'),text=input?.value.trim();
+  if(!text||agentState.busy){if(!text)toast('先在输入框里写下你的安排');return}
+  input.value='';
+  agentAppend('user',text);
+  /* The transcript shows what the user typed; the model gets the instruction
+     wrapped around it. */
+  agentState.messages[agentState.messages.length-1].content=AGENT_PLAN_PROMPT(text);
+  agentState.busy=true;agentUpdateBusy();
+  agentState.stop=false;agentState.steps=0;agentState.failures=0;agentState.mode=agentPref();
+  agentState.lastActionKey='';agentState.repeats=0;agentState.pendingResolve=null;
+  try{
+    const answer=await agentRequest([{role:'system',content:agentSystemPrompt(agentContext())},...agentRecentMessages()]);
+    const {clean,plan}=agentSplitPlan(answer);
+    if(clean)agentAppend('assistant',clean);
+    if(!plan.length)agentAppend('assistant','没能从这段内容里拆出任务。可以写得更具体一点，比如「下周三给 wang00 安排一次 2 小时的季度复盘」。','error');
+    else agentPlanCard(plan);
+  }catch(e){
+    agentAppend('assistant',e?.message||'暂时无法连接 Agent 服务。','error');
+  }
+  agentState.busy=false;agentUpdateBusy();
+  input.focus();
+}
+function agentPlanCard(items){
+  const list=$('#agentMessages');if(!list)return;
+  const projectName=id=>{const hit=(S.projects||[]).find(x=>x.id===id);return hit?hit.name:(id||'—')};
+  /* The panel is about 380px wide; a six-column table ran off the edge and
+     needed sideways scrolling, so each task gets a compact two-line block. */
+  const rows=items.map(t=>`<div class="agent-plan-item">`
+    +`<div class="agent-plan-head"><span class="agent-plan-name">${escapeHTML(t.name||'')}</span>`
+    +`<span class="priority ${escapeHTML(t.priority||'P1')}">${escapeHTML(t.priority||'P1')}</span></div>`
+    +`<div class="agent-plan-meta">${escapeHTML(projectName(t.projectId))} · ${escapeHTML(nameOf(t.assignee))} · `
+    +(t.date?escapeHTML(fmt(t.date)):'待定')+(t.deadline?` → ${escapeHTML(fmt(t.deadline))}`:'')+`</div></div>`).join('');
+  const card=document.createElement('div');
+  card.className='agent-message assistant agent-plan';
+  card.innerHTML=`<div class="agent-action-title">计划 · ${items.length} 个任务</div>`
+    +`<div class="agent-plan-list">${rows}</div>`
+    +`<div class="agent-action-buttons"><button class="ghost-btn agent-plan-cancel">取消</button>`
+    +`<button class="primary-btn agent-plan-create">按此创建 ${items.length} 个任务</button></div>`;
+  list.appendChild(card);list.scrollTop=list.scrollHeight;
+  const bar=card.querySelector('.agent-action-buttons');
+  card.querySelector('.agent-plan-cancel').onclick=()=>{bar.innerHTML='<span class="agent-action-done">已取消，没有创建任何任务</span>'};
+  card.querySelector('.agent-plan-create').onclick=async()=>{
+    if(agentState.busy)return;
+    agentState.busy=true;agentUpdateBusy();
+    bar.innerHTML='<span class="agent-action-done">创建中…</span>';
+    const done=await agentRunPlan(items);
+    bar.innerHTML=`<span class="agent-action-done">已创建 ${done.created} 个${done.failed?` · 失败 ${done.failed}`:''}</span>`;
+    agentState.busy=false;agentUpdateBusy();
+  };
+}
+async function agentRunPlan(items){
+  const failures=[];
+  let created=0;
+  for(const item of items){
+    try{
+      await api('/api/action',{action:'agent.execute',data:{action:'task.create',data:item,confirmed:true}});
+      created+=1;
+      agentShowStep(`已创建 · ${item.name||''}`);
+    }catch(e){
+      failures.push(`「${item.name||''}」${e?.message||'创建失败'}`);
+      agentShowStep(`未创建 · ${item.name||''}：${e?.message||'创建失败'}`);
+    }
+  }
+  try{await refresh()}catch(_){}
+  agentAppend('assistant',failures.length
+    ? `按计划创建了 ${created} 个任务，有 ${failures.length} 个没成功：${failures.join('；')}`
+    : `计划里的 ${created} 个任务都已创建。`,'');
+  return {created,failed:failures.length};
+}
 function initAgentUI(){
   $('#agentBtn')?.addEventListener('click',async()=>{$('#agentPanel').classList.remove('hidden');renderAgentCapability();await agentLoadOwnHistory();await agentLoadServerConfig();$('#agentInput').focus()});
   $('#agentHistoryBtn')?.addEventListener('click',()=>agentShowHistory());
   $('#agentCloseBtn')?.addEventListener('click',()=>$('#agentPanel').classList.add('hidden'));
   $('#agentStopBtn')?.addEventListener('click',()=>agentHalt('已停止连续执行。'));
+  $('#agentPlanBtn')?.addEventListener('click',()=>agentPlanSubmit());
+  $$('#agentPanel .agent-mode-opt').forEach(b=>b.addEventListener('click',()=>agentSetPref(b.dataset.mode)));
+  agentRenderModeOptions();
   $('#agentConfigBtn')?.addEventListener('click',()=>agentSetConfigVisible(true));
   $('#agentConfigClose')?.addEventListener('click',()=>agentSetConfigVisible(false));
   $('#agentProvider')?.addEventListener('change',()=>agentSyncProviderUI());

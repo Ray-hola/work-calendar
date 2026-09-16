@@ -582,6 +582,78 @@ select:focus {
    14 · Assistant run
    -------------------------------------------------------------------------- */
 
+/* The planning button and the standing 逐步确认 / 替我确认 switch sit above the
+   composer, so the pace is visible without having to answer a card first. */
+.agent-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.agent-tools .ghost-btn { height: 28px; padding: 0 10px; font-size: 12px; }
+
+.agent-mode {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--surface-sunk);
+}
+.agent-mode-opt {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  padding: 7px 11px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background var(--t) var(--ease), color var(--t) var(--ease);
+}
+.agent-mode-opt:hover { color: var(--ink); }
+.agent-mode-opt.is-on {
+  background: var(--surface);
+  color: var(--accent-dark);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+/* The parsed plan: what the assistant understood, before anything is written.
+   Blocks rather than a table — the panel is too narrow for six columns. */
+.agent-plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-bottom: 10px;
+  background: var(--line-soft);
+}
+.agent-plan-item { background: var(--surface); padding: 8px 10px; }
+.agent-plan-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.agent-plan-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1.4;
+}
+.agent-plan-head .priority { flex: none; }
+.agent-plan-meta {
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--faint);
+}
+
 /* The first card of a run explains the two ways to proceed. */
 .agent-action-note {
   margin: 0 0 10px;
