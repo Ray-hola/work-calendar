@@ -873,30 +873,22 @@ select:focus {
   overscroll-behavior-y: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
-  /* The rail behaves like a wheel: the container supplies the perspective and
-     each panel is rotated around X by scroll position (see updateWeekWheel). */
-  perspective: 1400px;
 }
 
-/* Thirty-one weeks render at once, so keep the off-screen ones out of layout
-   and raster work entirely. */
 .week-panel {
-  /* No content-visibility here: it makes off-screen panels report an estimated
-     height, which throws off the wheel maths — the panels' measured positions
-     have to be exact, so all 31 are laid out for real. */
-  transform-origin: center center;
-  backface-visibility: hidden;
-  /* transform and opacity are written per frame while scrolling, so they must
-     not carry a transition — it would lag behind the wheel. */
-  transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
+  /* No content-visibility here: off-screen panels would report an estimated
+     height, and the rail needs their real positions to know which week sits
+     under the centre. Thirty-one panels is a price worth paying for that. */
+  transition: opacity var(--t) var(--ease), border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
 }
 
 /* Tell the current week apart with tone and elevation instead of a scale
    transform. Scaling every panel promoted all 31 of them to composited layers,
    so the rail looked like it was breathing while you scrolled. */
-/* Depth is expressed by rotation and opacity from the wheel calculation, so
-   the classes only carry the flat-state styling now. */
+/* Depth is gone: the rail is a flat stack of cards again. What keeps it
+   legible while scrolling is that only one week reads as current. */
 .compact-week {
+  opacity: .68;
   box-shadow: none;
 }
 .focus-week {
@@ -926,8 +918,14 @@ select:focus {
   background: var(--line-strong);
   border: 3px solid var(--paper);
   border-radius: 99px;
+  transition: background var(--t) var(--ease);
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+/* While the week rail is in motion its scrollbar picks up the accent, then
+   settles back — the track is the thing you are actually turning. */
+.week-carousel.scrolling { scrollbar-color: var(--accent) transparent; }
+.week-carousel.scrolling::-webkit-scrollbar-thumb { background: var(--accent); }
 
 /* --------------------------------------------------------------------------
    20 · Accessibility: honour reduced motion
