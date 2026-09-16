@@ -648,3 +648,66 @@ test('only one room is marked read at a time', () => {
   assert.ok(/delete byChannel\[channel\]/.test(read),
     '本地只清掉刚读过的那个房间');
 });
+
+/* renderChatMembers sits past the sandbox cut-off too, so it is lifted and run
+   in the sandbox with a fake element sink. */
+const CHAT_PRESENCE_SOURCE = ['CHAT_PRESENCE_SHOWN', 'chatClock', 'renderChatMembers']
+  .map(liftFunction).join('\n');
+
+function presenceStrip(presence) {
+  const a = app();
+  const elements = {};
+  a.context.document = {
+    querySelector: s => elements[s] || (elements[s] = {}),
+    querySelectorAll: () => [],
+  };
+  a.run(`S.user={id:'superadmin',admin:1};S.users=[
+    {id:'superadmin',displayName:'管理员',active:1},
+    {id:'wang00',displayName:'王零零',active:1},
+    {id:'linyujie',displayName:'林雨杰',active:1}];`);
+  a.run(`var chatPresence=${JSON.stringify(presence)};`);
+  a.run(CHAT_PRESENCE_SOURCE);
+  a.run('renderChatMembers()');
+  return elements['#chatMembers'].innerHTML;
+}
+
+test('the presence strip shows who is away, not only who is here', () => {
+  const html = presenceStrip({
+    superadmin: {at: '2026-09-16T19:00:00+08:00', online: true},
+    wang00: {at: '', online: false},
+    linyujie: {at: '2026-09-16T12:00:00+08:00', online: false},
+  });
+  assert.ok(html.includes('1/3 在线'), '应显示在线比例：' + html);
+  assert.equal((html.match(/class="chat-presence /g) || []).length, 3, '三个人都要出现');
+  assert.equal((html.match(/chat-presence is-on/g) || []).length, 1, '只有一个人是在线态');
+  assert.ok(html.includes('还没来过'), '从没露过面的人要有说明');
+  assert.ok(html.includes('最后活跃 12:00'), '离线的人显示最后活跃时间');
+});
+
+test('the online ones come first, however many there are', () => {
+  const presence = {};
+  for (let i = 0; i < 6; i++) {
+    presence['m' + i] = {at: '2026-09-16T1' + i + ':00:00+08:00', online: i > 3};
+  }
+  presence.superadmin = {at: '2026-09-16T20:00:00+08:00', online: true};
+  const html = presenceStrip(presence);
+  /* i=4,5 are online in the fixture, plus superadmin. */
+  assert.ok(html.startsWith('<span class="chat-online">3/7 在线</span>'), '先说清楚几个在线：' + html.slice(0, 90));
+  const firstTwo = html.split('<span class="chat-presence ').slice(1, 3).join('');
+  assert.equal((firstTwo.match(/is-on/g) || []).length, 2, '在线的排在最前');
+});
+
+test('leaving a project is offered to a collaborator, and is leaving the workspace', () => {
+  assert.ok(/\(p\.members\|\|\{\}\)\[S\.user\.id\]==='accepted'/.test(source),
+    '退出项目只给已经加入的协作者');
+  assert.ok(/class="ghost-btn leave-project"/.test(source), '协作者要有退出入口');
+  const fn = source.match(/function leaveProject\(projectId\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/project\.member\.remove/.test(fn), '退出走 project.member.remove');
+  assert.ok(/chatChannel===projectId/.test(fn), '退出后要离开它在沟通区里的工作区');
+});
+
+test('the invite dialog also manages who is already on the project', () => {
+  assert.ok(/id="currentMembers"/.test(source), '要列出当前协作者');
+  assert.ok(/class="ghost-btn remove-member"/.test(source), '每位协作者旁要有移出按钮');
+  assert.ok(/再点一次确认/.test(source), '移除是不可逆的，需要二次确认');
+});

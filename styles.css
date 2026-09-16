@@ -1457,3 +1457,42 @@ select:focus {
   .chat-channel-side { flex-direction: row; align-items: center; gap: 6px; }
   .chat-mark { width: 22px; height: 22px; border-radius: 7px; }
 }
+
+/* Everyone in the room, with whoever is away left dimmed by .chat-presence. */
+.chat-members {
+  max-width: 62%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.chat-members::-webkit-scrollbar { display: none; }
+.chat-presence-more {
+  flex: none;
+  font-size: 11px;
+  color: var(--faint);
+  padding: 0 2px;
+  white-space: nowrap;
+}
+
+/* The collaborator list inside the invite dialog. */
+.member-checkboxes .member-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface-sunk);
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 12px;
+}
+.member-checkboxes .member-row strong { font-weight: 600; }
+.member-checkboxes .member-row small { margin-left: auto; color: var(--muted); font-size: 10px; }
+.member-checkboxes .member-row .remove-member {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 12px;
+  flex: none;
+}
+.member-checkboxes .member-row .remove-member.is-armed {
+  color: var(--danger);
+  border-color: var(--danger-line);
+  background: var(--accent-soft-2);
+}

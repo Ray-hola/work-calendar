@@ -1028,10 +1028,25 @@ class Store:
         channel = str(message.get('channel') or CHAT_DEFAULT)
         return CHAT_DEFAULT if channel == CHAT_LEGACY else channel
 
-    def chat_scope(self, data, writing=False):
-        """A room is either one of the standing channels or a project's channel.
+    def chat_can_open(self, user, project):
+        """Whether this account belongs in a project's workspace.
 
-        Reading a finished project's channel stays allowed — that is how the
+        Membership is never maintained separately from the project: accepting a
+        collaboration is what joins you to the workspace, and anything that ends
+        it — being removed, or the project finishing — is what takes you back
+        out. There is nothing to keep in sync, and so nothing to fall out of
+        sync. Admins keep their override, as everywhere else.
+        """
+        if user['admin']:
+            return True
+        if project.get('owner') == user['id'] or project.get('creator') == user['id']:
+            return True
+        return (project.get('members') or {}).get(user['id']) == 'accepted'
+
+    def chat_scope(self, user, data, writing=False):
+        """A room is either one of the standing channels or a project workspace.
+
+        Reading a finished project's workspace stays allowed — that is how the
         archive in 成果库 works — but writing to it does not.
         """
         channel = str(data.get('channel') or CHAT_DEFAULT)
@@ -1042,16 +1057,19 @@ class Store:
         project = next((p for p in self.all('projects') if p['id'] == channel), None)
         if not project:
             raise Problem(400, '频道不存在')
+        if not self.chat_can_open(user, project):
+            raise Problem(403, '只有「%s」的项目成员可以进入这个工作区' % project['name'])
         if writing and project['status'] != 'active':
             raise Problem(409, '项目已归档，「%s」的沟通记录改在成果库里查看' % project['name'])
         return channel
 
-    def chat_visible_channels(self):
-        """The rooms a visitor can actually open: the standing two, plus live
-        projects. A finished project is deliberately absent, so its history
-        cannot sit in someone's badge forever."""
+    def chat_visible_channels(self, user):
+        """The rooms this account can actually open: the standing two, plus the
+        live projects they are part of. A project they have left and a finished
+        one are both absent, so neither can sit in their badge forever."""
         ids = [cid for cid, _ in CHAT_CHANNELS]
-        ids += [p['id'] for p in self.all('projects') if p['status'] == 'active']
+        ids += [p['id'] for p in self.all('projects')
+                if p['status'] == 'active' and self.chat_can_open(user, p)]
         return ids
 
     def chat_read_at(self, account, channel):
@@ -1076,7 +1094,7 @@ class Store:
         cannot reassign work can still say something about it.
         """
         since = str(data.get('since') or '')
-        channel = self.chat_scope(data)
+        channel = self.chat_scope(user, data)
         try:
             limit = max(1, min(300, int(data.get('limit') or 120)))
         except (TypeError, ValueError):
@@ -1086,16 +1104,16 @@ class Store:
                 and (not since or str(m.get('createdAt', '')) > since)]
         rows.sort(key=lambda m: m.get('createdAt', ''))
         return {'messages': rows[-limit:], 'now': timestamp(), 'channel': channel,
-                'previews': self.chat_previews()}
+                'previews': self.chat_previews(user)}
 
-    def chat_previews(self):
+    def chat_previews(self, user):
         """One line of the newest message per room, for the conversation list.
 
         Restricted to rooms a visitor can open, so an archived project's history
         never surfaces outside 成果库 — and trimmed hard, because this travels
         with every poll.
         """
-        visible = set(self.chat_visible_channels())
+        visible = set(self.chat_visible_channels(user))
         previews = {}
         for m in self.all('messages'):
             channel = self.chat_normalize(m)
@@ -1114,7 +1132,7 @@ class Store:
             raise Problem(400, '消息不能为空')
         if len(body) > 1000:
             raise Problem(400, '单条消息不能超过 1000 字')
-        channel = self.chat_scope(data, writing=True)
+        channel = self.chat_scope(user, data, writing=True)
         # The mentions travel with the message so the notice does not depend on
         # parsing the text back into accounts later.
         mentions = []
@@ -1151,7 +1169,7 @@ class Store:
         return message
 
     def chat_mark_read(self, user, data):
-        channel = self.chat_scope(data)
+        channel = self.chat_scope(user, data)
         at = str(data.get('at') or timestamp())
         state = self.chat_settings('chat-read')
         raw = state.get(user['id'])
@@ -1160,7 +1178,7 @@ class Store:
         else:
             # First write since the room gained channels: seed every room that
             # exists now with the old all-covering watermark.
-            seeded = set(self.chat_visible_channels())
+            seeded = set(self.chat_visible_channels(user))
             seeded.update(self.chat_normalize(m) for m in self.all('messages'))
             book = {cid: str(raw or '') for cid in seeded}
         book[channel] = at
@@ -1174,16 +1192,19 @@ class Store:
         state = self.chat_settings('chat-presence')
         state[user['id']] = timestamp()
         self.put('settings', {'id': 'chat-presence', 'value': state, 'updatedAt': timestamp()})
-        active = {u['id'] for u in self.users() if u['active']}
         current = now()
         result = {}
-        for account, at in state.items():
-            if account not in active:
-                continue
-            try:
-                away = (current - datetime.fromisoformat(at)).total_seconds()
-            except (TypeError, ValueError):
-                away = 1e9
+        # Every active account is listed, not only the ones who have been in the
+        # room. A strip that answers "who is around" is only telling the truth
+        # if it also shows who is not.
+        for account in [u['id'] for u in self.users() if u['active']]:
+            at = state.get(account, '')
+            away = 1e9
+            if at:
+                try:
+                    away = (current - datetime.fromisoformat(at)).total_seconds()
+                except (TypeError, ValueError):
+                    away = 1e9
             result[account] = {'at': at, 'online': away < 120}
         return result
 
@@ -1194,7 +1215,7 @@ class Store:
         something happened, not where, and the room has several doors.
         """
         rows = self.all('messages')
-        visible = set(self.chat_visible_channels())
+        visible = set(self.chat_visible_channels(user))
         by_channel = {}
         for m in rows:
             if m.get('author') == user['id']:
@@ -1517,6 +1538,40 @@ class Store:
                 if p['members'].get(member)=='accepted':continue
                 p['members'][member]='pending'
             self.put('projects',p);self.invite(p);return p
+        if action=='project.member.remove':
+            p=self.get('projects',d['id'])
+            member=required(d,'member')
+            self.user(member)
+            if member==p.get('owner'):
+                raise Problem(400,'项目 Owner 不能退出，请先移交 Owner')
+            if p['status']!='active':
+                raise Problem(409,'项目不在进行中，无需调整成员')
+            if member not in (p.get('members') or {}):
+                raise Problem(404,'该成员不在项目里')
+            quitting=member==user['id']
+            if not quitting:
+                # Removing someone else is a management act.
+                self.project_owner(user,p)
+            elif not self.chat_can_open(user,p):
+                raise Problem(403,'你不在这个项目里')
+            p['members'].pop(member)
+            # Their workspace access follows from this and nothing else, so it
+            # is already gone. Tasks already assigned stay put — reassigning
+            # them is the Owner's call, not a side effect of leaving.
+            self.put('projects',p)
+            if quitting:
+                self.notify(p['owner'],'协作者退出',
+                            '%s 已退出「%s」，该项目的工作区不再对他开放。'%(self.display_name(member),p['name']),
+                            'project',p['id'])
+            else:
+                self.notify(member,'已被移出项目',
+                            '%s 已将你移出「%s」，该项目的工作区不再对你开放。'%(self.display_name(user['id']),p['name']),
+                            'project',p['id'])
+                if p['owner']!=user['id']:
+                    self.notify(p['owner'],'协作者变动',
+                                '%s 已将 %s 移出「%s」。'%(self.display_name(user['id']),self.display_name(member),p['name']),
+                                'project',p['id'])
+            return p
         if action=='project.member_loads':
             p=self.get('projects',d['id']);self.project_owner(user,p)
             if p['status']!='active':raise Problem(409,'只能查看进行中项目的成员负载')

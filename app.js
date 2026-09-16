@@ -446,7 +446,7 @@ function renderProjects(){
     const tasks=sortTasks(S.tasks.filter(t=>t.projectId===p.id)),done=tasks.filter(t=>t.status==='done').length;
     const accepted=Object.entries(p.members||{}).filter(([,v])=>v==='accepted').map(([id])=>id),pending=Object.entries(p.members||{}).filter(([,v])=>v==='pending').map(([id])=>id);
     const manage=canManageProject(p)&&p.status==='active',hasSlot=S.users.some(u=>u.active&&!u.admin&&u.id!==p.owner&&!accepted.includes(u.id)&&(admin||!pending.includes(u.id)));
-    return `<article class="project-card project-node"><div class="project-node-heading"><div><div class="project-title"><h3>${escapeHTML(p.name)}</h3><span class="project-status">${projectStatus(p)}</span></div><p>${escapeHTML(p.desc||'暂无描述')}</p></div><div class="project-node-actions">${manage?`<button class="primary-btn add-project-task" data-project="${escapeHTML(p.id)}">${icon('plus')}新建并指派任务</button>`:''}${manage&&hasSlot?`<button class="secondary-btn invite-members" data-id="${escapeHTML(p.id)}">${admin?'直接添加协作者':'邀请协作者'}</button>`:''}${p.status==='pending'&&admin?`<button class="secondary-btn approve-project" data-id="${escapeHTML(p.id)}">审批项目</button>`:''}${p.status==='active'&&manage&&!admin&&projectTasksComplete(p)?`<button class="secondary-btn request-project-completion" data-id="${escapeHTML(p.id)}">申请项目结项</button>`:''}${p.status==='active'&&manage&&!admin&&!projectTasksComplete(p)?`<span class="muted project-completion-hint">${tasks.length?'完成全部子任务后可结项':'创建子任务后可结项'}</span>`:''}${p.status==='pending_completion'&&admin?`<button class="secondary-btn approve-project-completion" data-id="${escapeHTML(p.id)}">审批项目完成</button>`:''}${canManageProject(p)?`<button class="ghost-btn delete-project" data-id="${escapeHTML(p.id)}">删除项目</button>`:''}</div></div><div class="project-members"><span>Owner · ${escapeHTML(p.owner)}　协作者：${accepted.filter(id=>id!==p.owner).map(escapeHTML).join('、')||'暂无'}${pending.length?`　待确认：${pending.map(escapeHTML).join('、')}`:''}</span><span>${canManageProject(p)?'项目':'我的任务'} ${done}/${tasks.length} 已完成 · 截止 ${escapeHTML(p.end||'未设置')}</span></div><div class="project-task-tree"><div class="project-tree-label">${canManageProject(p)?'项目任务':'分配给我的任务'} <span>${tasks.length}</span></div>${tasks.map(t=>`<div class="project-child-row"><button class="project-task-open" data-id="${escapeHTML(t.id)}"><span class="priority ${escapeHTML(t.priority)}">${escapeHTML(t.priority)}</span><strong>${escapeHTML(t.name)}</strong><span class="child-assignee">${escapeHTML(t.assignee)}</span><span class="child-date">${escapeHTML(t.date)}</span><span>${status(t)[1]}</span><span aria-hidden="true">${icon('chevron-right')}</span></button>${manage&&['todo','doing'].includes(t.status)?`<button class="ghost-btn assign-project-task" data-id="${escapeHTML(t.id)}">调整指派</button>`:''}</div>`).join('')||`<p class="project-task-empty">${manage?'还没有任务，从这里安排第一项工作。':p.status==='pending'?'项目审批通过后，Owner 可创建和指派任务。':'暂无分配给你的任务。'}</p>`}</div></article>`;
+    return `<article class="project-card project-node"><div class="project-node-heading"><div><div class="project-title"><h3>${escapeHTML(p.name)}</h3><span class="project-status">${projectStatus(p)}</span></div><p>${escapeHTML(p.desc||'暂无描述')}</p></div><div class="project-node-actions">${manage?`<button class="primary-btn add-project-task" data-project="${escapeHTML(p.id)}">${icon('plus')}新建并指派任务</button>`:''}${manage&&hasSlot?`<button class="secondary-btn invite-members" data-id="${escapeHTML(p.id)}">${admin?'直接添加协作者':'邀请协作者'}</button>`:''}${p.status==='active'&&!manage&&(p.members||{})[S.user.id]==='accepted'?`<button class="ghost-btn leave-project" data-id="${escapeHTML(p.id)}">退出项目</button>`:''}${p.status==='pending'&&admin?`<button class="secondary-btn approve-project" data-id="${escapeHTML(p.id)}">审批项目</button>`:''}${p.status==='active'&&manage&&!admin&&projectTasksComplete(p)?`<button class="secondary-btn request-project-completion" data-id="${escapeHTML(p.id)}">申请项目结项</button>`:''}${p.status==='active'&&manage&&!admin&&!projectTasksComplete(p)?`<span class="muted project-completion-hint">${tasks.length?'完成全部子任务后可结项':'创建子任务后可结项'}</span>`:''}${p.status==='pending_completion'&&admin?`<button class="secondary-btn approve-project-completion" data-id="${escapeHTML(p.id)}">审批项目完成</button>`:''}${canManageProject(p)?`<button class="ghost-btn delete-project" data-id="${escapeHTML(p.id)}">删除项目</button>`:''}</div></div><div class="project-members"><span>Owner · ${escapeHTML(p.owner)}　协作者：${accepted.filter(id=>id!==p.owner).map(escapeHTML).join('、')||'暂无'}${pending.length?`　待确认：${pending.map(escapeHTML).join('、')}`:''}</span><span>${canManageProject(p)?'项目':'我的任务'} ${done}/${tasks.length} 已完成 · 截止 ${escapeHTML(p.end||'未设置')}</span></div><div class="project-task-tree"><div class="project-tree-label">${canManageProject(p)?'项目任务':'分配给我的任务'} <span>${tasks.length}</span></div>${tasks.map(t=>`<div class="project-child-row"><button class="project-task-open" data-id="${escapeHTML(t.id)}"><span class="priority ${escapeHTML(t.priority)}">${escapeHTML(t.priority)}</span><strong>${escapeHTML(t.name)}</strong><span class="child-assignee">${escapeHTML(t.assignee)}</span><span class="child-date">${escapeHTML(t.date)}</span><span>${status(t)[1]}</span><span aria-hidden="true">${icon('chevron-right')}</span></button>${manage&&['todo','doing'].includes(t.status)?`<button class="ghost-btn assign-project-task" data-id="${escapeHTML(t.id)}">调整指派</button>`:''}</div>`).join('')||`<p class="project-task-empty">${manage?'还没有任务，从这里安排第一项工作。':p.status==='pending'?'项目审批通过后，Owner 可创建和指派任务。':'暂无分配给你的任务。'}</p>`}</div></article>`;
   }).join('')||'<div class="empty-state">暂无项目，可先申请创建项目。</div>';
   $$('.add-project-task').forEach(b=>b.onclick=()=>newTask(b.dataset.project));
   $$('.project-task-open').forEach(b=>b.onclick=()=>openDrawer(b.dataset.id));
@@ -455,6 +455,7 @@ function renderProjects(){
   $$('.request-project-completion').forEach(b=>b.onclick=()=>requestProjectCompletion(b.dataset.id));
   $$('.approve-project-completion').forEach(b=>b.onclick=()=>{const n=S.notifications.find(n=>n.kind==='project_completion'&&n.reference===b.dataset.id);if(n)openNotification(n.id)});
   $$('.invite-members').forEach(b=>b.onclick=()=>inviteCollaborators(b.dataset.id));
+  $$('.leave-project').forEach(b=>b.onclick=()=>leaveProject(b.dataset.id));
   $$('.delete-project').forEach(b=>b.onclick=()=>deleteProject(b.dataset.id));
 }
 function deleteProject(projectId){
@@ -475,13 +476,46 @@ function deleteProject(projectId){
     catch(e){btn.disabled=false;btn.textContent='永久删除项目'}
   };
 }
+/* Leaving a project is leaving its workspace: there is no separate membership
+   to cancel, the channel simply stops being yours. */
+function leaveProject(projectId){
+  const p=S.projects.find(x=>x.id===projectId);if(!p)return;
+  openModal(`<div class="eyebrow">${escapeHTML(p.name)} · 退出项目</div><h2>退出这个项目？</h2>`
+    +`<p>退出后你不再是这个项目的协作者，它的工作区（沟通频道）会从你的沟通区里消失，也不会再有未读。`
+    +`已经指派给你的任务不会被删除，需要 Owner 重新安排。</p>`
+    +`<div class="modal-footer"><button class="secondary-btn" id="cancelAction">再想想</button>`
+    +`<button class="primary-btn" id="confirmLeaveProject">确认退出</button></div>`);
+  $('#cancelAction').onclick=closeModal;
+  $('#confirmLeaveProject').onclick=async()=>{
+    try{
+      await act('project.member.remove',{id:projectId,member:S.user.id});
+      if(chatChannel===projectId)chatChannel='general';
+      closeModal();toast('已退出「'+p.name+'」');
+    }catch(e){}
+  };
+}
 function inviteCollaborators(projectId){
   const p=S.projects.find(x=>x.id===projectId),admin=Boolean(S.user?.admin),existing=p?.members||{};
   if(!canManageProject(p)||p.status!=='active'){toast('只有项目 Owner 或 superadmin 可管理进行中的项目');return}
   const candidates=S.users.filter(u=>u.active&&!u.admin&&u.id!==p.owner&&existing[u.id]!=='accepted'&&(admin||existing[u.id]!=='pending'));
-  openModal(`<div class="eyebrow">${escapeHTML(p.name)} · ${admin?'管理员直接指派':'Owner 协作邀请'}</div><h2>${admin?'直接添加协作者':'邀请协作者'}</h2><p>${admin?'添加后立即加入项目，无需成员确认。系统会通知协作者和 Owner。':'成员在收件箱接受邀请后加入项目，随后可为其指派任务。以下只显示项目时间范围内的任务总数。'}</p><div class="member-checkboxes">${candidates.map(u=>`<label><input type="checkbox" name="inviteMember" value="${escapeHTML(u.id)}"> <strong>${escapeHTML(u.id)}</strong><small>${existing[u.id]==='pending'?'当前待确认 · 可直接加入':'成员'} · 时间范围内 <b data-member-load="${escapeHTML(u.id)}">${memberTaskCount(u.id,p)}</b> 项任务</small></label>`).join('')||'<p class="muted">暂无可添加成员</p>'}</div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmInvite" ${candidates.length?'':'disabled'}>${admin?'直接添加并通知':'发送邀请'}</button></div>`);
+  const current=Object.entries(existing).filter(([id,v])=>v==='accepted'&&id!==p.owner).map(([id])=>id);
+  openModal(`<div class="eyebrow">${escapeHTML(p.name)} · ${admin?'管理员直接指派':'Owner 协作邀请'}</div><h2>${admin?'直接添加协作者':'邀请协作者'}</h2><p>${admin?'添加后立即加入项目，无需成员确认。系统会通知协作者和 Owner。':'成员在收件箱接受邀请后加入项目，随后可为其指派任务。以下只显示项目时间范围内的任务总数。'}</p><fieldset class="member-checkboxes" id="currentMembers"><legend>当前协作者（${current.length}）</legend>${current.map(id=>`<div class="member-row"><strong>${escapeHTML(nameOf(id))}</strong><small>${escapeHTML(id)} · 时间范围内 <b>${memberTaskCount(id,p)}</b> 项任务</small><button type="button" class="ghost-btn remove-member" data-member="${escapeHTML(id)}">移出</button></div>`).join('')||'<p class="muted">还没有协作者</p>'}</fieldset><div class="member-checkboxes">${candidates.map(u=>`<label><input type="checkbox" name="inviteMember" value="${escapeHTML(u.id)}"> <strong>${escapeHTML(u.id)}</strong><small>${existing[u.id]==='pending'?'当前待确认 · 可直接加入':'成员'} · 时间范围内 <b data-member-load="${escapeHTML(u.id)}">${memberTaskCount(u.id,p)}</b> 项任务</small></label>`).join('')||'<p class="muted">暂无可添加成员</p>'}</div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmInvite" ${candidates.length?'':'disabled'}>${admin?'直接添加并通知':'发送邀请'}</button></div>`);
   $('#cancelAction').onclick=closeModal;
   $('#confirmInvite').onclick=async()=>{const members=$$('input[name="inviteMember"]:checked').map(x=>x.value);if(!members.length){toast('至少选择一位协作者');return}try{await act('project.invite',{id:projectId,members});closeModal()}catch(e){}};
+  /* Removing someone is destructive and irreversible from this dialog, so it
+     asks for a second click rather than a nested confirmation. */
+  $$('#currentMembers .remove-member').forEach(b=>b.onclick=async()=>{
+    if(!b.dataset.armed){
+      b.dataset.armed='1';b.textContent='再点一次确认';b.classList.add('is-armed');
+      setTimeout(()=>{if(b.isConnected){delete b.dataset.armed;b.textContent='移出';b.classList.remove('is-armed')}},3000);
+      return;
+    }
+    const who=b.dataset.member;
+    try{
+      await act('project.member.remove',{id:projectId,member:who});
+      closeModal();toast('已移出 '+nameOf(who)+'，他的沟通区里不再有这个工作区');
+    }catch(e){}
+  });
   api('/api/action',{action:'project.member_loads',data:{id:projectId}}).then(result=>{
     if($('#modalBackdrop')?.classList.contains('hidden'))return;
     for(const [id,total] of Object.entries(result.counts||{})){const el=$$('[data-member-load]').find(node=>node.dataset.memberLoad===id);if(el)el.textContent=total}
@@ -1639,15 +1673,24 @@ async function refreshChatPresence(){
     renderChatMembers();
   }catch(_){}
 }
+/* Everyone active is listed, not only whoever is around right now: a strip
+   that answers "who is here" is only telling the truth if it also shows who
+   is not, and the dimmed faces are how you tell at a glance. */
+const CHAT_PRESENCE_SHOWN=14;
 function renderChatMembers(){
   const bar=$('#chatMembers');if(!bar)return;
-  const ids=Object.keys(chatPresence||{});
+  const ids=Object.keys(chatPresence||{}).sort((a,b)=>{
+    const online=(chatPresence[b].online?1:0)-(chatPresence[a].online?1:0);
+    if(online)return online;
+    return String(chatPresence[b].at||'').localeCompare(String(chatPresence[a].at||''));
+  });
   const online=ids.filter(id=>chatPresence[id].online).length;
-  const order=ids.sort((a,b)=>(chatPresence[b].online?1:0)-(chatPresence[a].online?1:0));
-  bar.innerHTML=`<span class="chat-online">${online} 人在线</span>`+order.map(id=>{
+  const shown=ids.slice(0,CHAT_PRESENCE_SHOWN),rest=ids.length-shown.length;
+  bar.innerHTML=`<span class="chat-online">${online}/${ids.length} 在线</span>`+shown.map(id=>{
     const state=chatPresence[id];
-    return `<span class="chat-presence ${state.online?'is-on':''}" title="${escapeHTML(nameOf(id))} · 最后活跃 ${escapeHTML(chatClock(state.at))}">${avatarHTML(id)}</span>`;
-  }).join('');
+    const label=state.online?'在线':(state.at?`最后活跃 ${chatClock(state.at)}`:'还没来过');
+    return `<span class="chat-presence ${state.online?'is-on':''}" title="${escapeHTML(nameOf(id))} · ${escapeHTML(label)}">${avatarHTML(id)}</span>`;
+  }).join('')+(rest>0?`<span class="chat-presence-more" title="还有 ${rest} 位成员">+${rest}</span>`:'');
 }
 function startChatPolling(){
   stopChatPolling();

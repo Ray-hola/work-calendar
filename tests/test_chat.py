@@ -19,6 +19,12 @@ class ChatTests(unittest.TestCase):
         self.store.close()
         self.tmp.cleanup()
 
+    def add_member(self, project, member='member1'):
+        """Put someone on a project. There is no separate step for the
+        workspace — the same act is what joins it."""
+        self.store.action(self.admin, 'project.invite', {'id': project['id'], 'members': [member]})
+        return self.store.get('projects', project['id'])
+
     def test_a_member_can_talk_even_without_task_permissions(self):
         sent = self.store.action(self.member, 'chat.send', {'body': '今天的周报我晚点交'})
         self.assertEqual(sent['author'], 'member1')
@@ -66,6 +72,7 @@ class ChatTests(unittest.TestCase):
     def test_a_project_channel_keeps_its_own_messages(self):
         project = self.store.action(self.admin, 'project.create', {
             'name': '渠道测试', 'owner': 'superadmin', 'cycle': 'infinite'})
+        self.add_member(project)
         self.store.action(self.member, 'chat.send', {'body': '大厅的话'})
         self.store.action(self.member, 'chat.send', {'body': '项目里的话', 'channel': project['id']})
         hall = [m['body'] for m in self.store.action(self.admin, 'chat.list', {})['messages']]
@@ -98,13 +105,18 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(self.store.snapshot(self.admin)['chat']['unread'], 0, '标记已读后应清零')
         self.assertEqual(self.store.snapshot(self.member)['chat']['unread'], 1, '成员自己那边仍有一条未读')
 
-    def test_presence_reports_active_accounts_only(self):
+    def test_presence_lists_everyone_including_who_is_away(self):
         seen = self.store.action(self.admin, 'chat.presence', {})
-        self.assertEqual(list(seen), ['superadmin'])
+        self.assertEqual(sorted(seen), ['member1', 'superadmin'],
+                         '所有人都要在名单里，包括从没进过沟通区的人')
         self.assertTrue(seen['superadmin']['online'])
-        self.assertIn('at', seen['superadmin'], '应带上最后活跃时间')
+        self.assertFalse(seen['member1']['online'], '没露过面的人就是离线')
+        self.assertEqual(seen['member1']['at'], '', '没有活跃时间就不要编一个出来')
+
         self.store.action(self.member, 'chat.presence', {})
-        self.assertEqual(set(self.store.action(self.admin, 'chat.presence', {})), {'superadmin', 'member1'})
+        after = self.store.action(self.admin, 'chat.presence', {})
+        self.assertTrue(after['member1']['online'], '露过面之后变成在线')
+        self.assertIn('at', after['member1'])
 
     def test_mentions_must_be_real_accounts(self):
         sent = self.store.action(self.member, 'chat.send', {'body': '嗨', 'mentions': ['superadmin', 'nobody', 'superadmin']})
@@ -131,6 +143,7 @@ class ChatTests(unittest.TestCase):
     def test_a_finished_project_keeps_its_history_readable_but_not_writable(self):
         project = self.store.action(self.admin, 'project.create', {
             'name': '要归档的项目', 'owner': 'superadmin', 'cycle': 'infinite'})
+        self.add_member(project)
         self.store.action(self.member, 'chat.send', {'body': '项目进行中的讨论', 'channel': project['id']})
         # Finishing a project has its own coverage elsewhere; this case is about
         # what happens to its channel once it is no longer live.
@@ -167,6 +180,7 @@ class ChatTests(unittest.TestCase):
     def test_a_mention_notice_remembers_its_room(self):
         project = self.store.action(self.admin, 'project.create', {
             'name': '看板', 'owner': 'superadmin', 'cycle': 'infinite'})
+        self.add_member(project)
         self.store.action(self.member, 'chat.send',
                           {'body': '看这里 @superadmin', 'mentions': ['superadmin'],
                            'channel': project['id']})
@@ -194,6 +208,7 @@ class ChatTests(unittest.TestCase):
     def test_a_finished_project_drops_out_of_the_badge(self):
         project = self.store.action(self.admin, 'project.create', {
             'name': '结项后不该还亮着', 'owner': 'superadmin', 'cycle': 'infinite'})
+        self.add_member(project)
         self.store.action(self.member, 'chat.send', {'body': '结项前说的', 'channel': project['id']})
         self.assertEqual(self.store.snapshot(self.admin)['chat']['byChannel'].get(project['id']), 1)
 
@@ -230,6 +245,7 @@ class ChatTests(unittest.TestCase):
     def test_the_list_carries_a_preview_of_each_room(self):
         project = self.store.action(self.admin, 'project.create', {
             'name': '看板', 'owner': 'superadmin', 'cycle': 'infinite'})
+        self.add_member(project)
         self.store.action(self.member, 'chat.send', {'body': '大厅第一条'})
         self.store.action(self.admin, 'chat.send', {'body': '大厅最新的'})
         self.store.action(self.member, 'chat.send', {'body': '项目里的', 'channel': project['id']})
@@ -250,12 +266,103 @@ class ChatTests(unittest.TestCase):
 
         project = self.store.action(self.admin, 'project.create', {
             'name': '要归档的', 'owner': 'superadmin', 'cycle': 'infinite'})
+        self.add_member(project)
         self.store.action(self.member, 'chat.send', {'body': '归档前的话', 'channel': project['id']})
         archived = self.store.get('projects', project['id'])
         archived['status'] = 'done'
         self.store.put('projects', archived)
         self.assertNotIn(project['id'], self.store.action(self.member, 'chat.list', {})['previews'],
                          '已归档的频道不该出现在会话列表里')
+
+    # ------------------------------------------------ 项目工作区 = 项目成员
+    def make_project(self, name='工作区测试'):
+        return self.store.action(self.admin, 'project.create', {
+            'name': name, 'owner': 'superadmin', 'cycle': 'infinite'})
+
+    def test_a_workspace_belongs_to_the_people_on_the_project(self):
+        project = self.make_project()
+        with self.assertRaises(Problem) as caught:
+            self.store.action(self.member, 'chat.list', {'channel': project['id']})
+        self.assertIn('项目成员', str(caught.exception.message))
+        with self.assertRaises(Problem):
+            self.store.action(self.member, 'chat.send', {'body': '我进来了吗', 'channel': project['id']})
+
+        # 接受协作邀请就是加入工作区，没有第二步
+        self.add_member(project)
+        self.store.action(self.member, 'chat.send', {'body': '我进来了', 'channel': project['id']})
+        room = self.store.action(self.member, 'chat.list', {'channel': project['id']})['messages']
+        self.assertEqual([m['body'] for m in room], ['我进来了'])
+
+    def test_an_invitation_still_pending_does_not_open_the_workspace(self):
+        project = self.make_project('待确认的项目')
+        # 非管理员邀请会写成 pending，成员还没答应
+        self.store.action(self.admin, 'project.update', {'id': project['id'], 'owner': 'superadmin'})
+        invited = self.store.action(self.admin, 'project.invite',
+                                    {'id': project['id'], 'members': ['member1']})
+        self.assertEqual(invited['members']['member1'], 'accepted',
+                         'superadmin 的指派立即生效')
+        # 换一个仍然 pending 的人
+        self.store.create_user('member2', 'password-long', False)
+        self.member2_user = self.store.user('member2')
+        owner_only = self.make_project('只属于 owner 的项目')
+        with self.assertRaises(Problem):
+            self.store.action(self.member2_user, 'chat.list', {'channel': owner_only['id']})
+
+    def test_leaving_a_project_takes_the_workspace_with_it(self):
+        project = self.add_member(self.make_project('会退出的项目'))
+        self.store.action(self.admin, 'chat.send', {'body': 'Owner 在项目里说话', 'channel': project['id']})
+        self.assertIn(project['id'], self.store.snapshot(self.member)['chat']['byChannel'],
+                      '在项目里时该工作区的未读要计入')
+
+        self.store.action(self.member, 'project.member.remove',
+                          {'id': project['id'], 'member': 'member1'})
+
+        self.assertNotIn('member1', self.store.get('projects', project['id'])['members'],
+                         '退出后不该还挂在项目成员里')
+        with self.assertRaises(Problem):
+            self.store.action(self.member, 'chat.list', {'channel': project['id']})
+        with self.assertRaises(Problem):
+            self.store.action(self.member, 'chat.send', {'body': '还能说吗', 'channel': project['id']})
+        self.assertNotIn(project['id'], self.store.snapshot(self.member)['chat']['byChannel'],
+                         '退出后这个工作区不该再挂在徽标上')
+        notices = [n for n in self.store.all('notifications') if n['to'] == 'superadmin']
+        self.assertTrue(any('退出' in n['title'] for n in notices), 'Owner 应被告知')
+
+    def test_only_a_manager_removes_someone_else(self):
+        self.store.create_user('member2', 'password-long', False)
+        other = self.store.user('member2')
+        project = self.add_member(self.make_project('人员变动'))
+        self.store.action(self.admin, 'project.invite', {'id': project['id'], 'members': ['member2']})
+
+        with self.assertRaises(Problem) as caught:
+            self.store.action(self.member, 'project.member.remove',
+                              {'id': project['id'], 'member': 'member2'})
+        self.assertEqual(caught.exception.status, 403, '普通协作者不能移除别人')
+
+        self.store.action(self.admin, 'project.member.remove',
+                          {'id': project['id'], 'member': 'member2'})
+        self.assertNotIn('member2', self.store.get('projects', project['id'])['members'])
+        self.assertTrue(any('移出' in n['title'] for n in self.store.all('notifications')
+                            if n['to'] == 'member2'), '被移出的人应被告知')
+
+    def test_the_owner_cannot_quit_the_project_and_a_stranger_cannot_either(self):
+        project = self.make_project('Owner 不退出')
+        with self.assertRaises(Problem) as caught:
+            self.store.action(self.admin, 'project.member.remove',
+                              {'id': project['id'], 'member': 'superadmin'})
+        self.assertEqual(caught.exception.status, 400)
+        with self.assertRaises(Problem):
+            self.store.action(self.member, 'project.member.remove',
+                              {'id': project['id'], 'member': 'member1'})
+
+    def test_the_project_owner_and_creator_are_in_the_workspace_by_definition(self):
+        project = self.make_project('Owner 自然在内')
+        rooms = self.store.action(self.admin, 'chat.list', {})['previews']
+        self.assertNotIn(project['id'], rooms, '还没人说话的工作区没有摘要')
+        self.store.action(self.admin, 'chat.send', {'body': 'Owner 说话', 'channel': project['id']})
+        self.assertIn(project['id'],
+                      self.store.action(self.admin, 'chat.list', {})['previews'],
+                      'Owner 不需要被邀请就能用这个工作区')
 
 if __name__ == '__main__':
     unittest.main()
