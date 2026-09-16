@@ -12,7 +12,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from server import Store
+from server import Store, MAX_MESSAGE_CHARS, MAX_TRANSCRIPT_CHARS
 
 
 class _Stub(BaseHTTPRequestHandler):
@@ -57,6 +57,9 @@ class AssistantChatTests(unittest.TestCase):
 
     def tearDown(self):
         self.server.shutdown()
+        # shutdown() stops the loop but leaves the socket open, which shows up
+        # as a ResourceWarning on every run.
+        self.server.server_close()
         self.store.close()
         self.tmp.cleanup()
 
@@ -134,19 +137,54 @@ class AssistantChatTests(unittest.TestCase):
 
     def test_an_oversized_message_says_how_long_it_was(self):
         with self.assertRaises(Exception) as caught:
-            self.store.llm_chat(self.admin, {'messages': [{'role': 'user', 'content': 'x' * 12001}]})
+            self.store.llm_chat(self.admin, {'messages': [{'role': 'user', 'content': 'x' * (MAX_MESSAGE_CHARS + 1)}]})
         self.assertEqual(caught.exception.status, 400)
-        self.assertIn('12000', caught.exception.message)
-        self.assertIn('12001', caught.exception.message, '报错要说清这条到底多长')
+        self.assertIn(str(MAX_MESSAGE_CHARS), caught.exception.message)
+        self.assertIn(str(MAX_MESSAGE_CHARS + 1), caught.exception.message, '报错要说清这条到底多长')
 
     def test_a_message_at_the_ceiling_is_accepted(self):
-        """The store truncates to the same 12000 the proxy enforces, so a
+        """The store truncates to the same cap the proxy enforces, so a
         replayed record can never be rejected for length."""
-        exact = 'x' * 12000
+        exact = 'x' * MAX_MESSAGE_CHARS
         self.store.llm_chat(self.admin, {'messages': [{'role': 'user', 'content': exact}]})
         # 服务端会在末尾再补一条策略消息，所以不能只看最后一条。
         forwarded = [m['content'] for m in _Stub.seen[-1]['messages']]
         self.assertIn(exact, forwarded, '正好到上限的消息应原样转发')
+
+    def test_the_store_truncates_to_exactly_what_the_proxy_accepts(self):
+        saved = self.store.record_agent_message('superadmin', 'assistant', 'y' * (MAX_MESSAGE_CHARS + 500))
+        self.assertEqual(len(saved['content']), MAX_MESSAGE_CHARS,
+                         '存的时候截到上限，回放就永远不会因为长度被拒')
+
+    def test_a_long_conversation_loses_its_oldest_turns_not_the_newest(self):
+        turns = []
+        for i in range(12):
+            turns.append({'role': 'user', 'content': ('问题 %d ' % i) + 'x' * 6000})
+            turns.append({'role': 'assistant', 'content': ('答复 %d ' % i) + 'y' * 6000})
+        turns.append({'role': 'user', 'content': '最新的一句'})
+        self.store.llm_chat(self.admin, {'messages': turns})
+
+        forwarded = _Stub.seen[-1]['messages']
+        contents = [m['content'] for m in forwarded]
+        self.assertIn('最新的一句', contents, '最新一条永远不能被丢掉')
+        self.assertNotIn(('问题 0 ' + 'x' * 6000), contents, '最早的一轮应被省略')
+        kept = sum(len(c) for c in contents if not c.startswith('你是'))
+        self.assertLessEqual(kept, MAX_TRANSCRIPT_CHARS + 2000,
+                             '保留下来的对话要落回预算之内：%d' % kept)
+        self.assertTrue(any('已省略' in c and '轮对话' in c for c in contents),
+                        '要告诉模型有内容被省略，而不是让它自己编')
+
+    def test_trimming_is_reported_back_to_the_caller(self):
+        turns = [{'role': 'user', 'content': 'x' * 8000} for _ in range(8)]
+        result = self.store.llm_chat(self.admin, {'messages': turns})
+        self.assertGreater(result['trimmed'], 0, '省略了几轮应能被调用方看到')
+
+    def test_a_conversation_inside_the_budget_is_left_alone(self):
+        turns = [{'role': 'user', 'content': 'x' * 1000} for _ in range(6)]
+        result = self.store.llm_chat(self.admin, {'messages': turns})
+        self.assertEqual(result['trimmed'], 0, '没超预算就不要动它')
+        forwarded = [m['content'] for m in _Stub.seen[-1]['messages']]
+        self.assertEqual(len([c for c in forwarded if c.startswith('x' * 10)]), 6)
 
 if __name__ == '__main__':
     unittest.main()

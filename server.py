@@ -70,6 +70,24 @@ CHAT_CHANNELS = (('general', '沟通'), ('lounge', '闲聊'))
 CHAT_DEFAULT = 'general'
 CHAT_LEGACY = 'all'          # the pre-channel hall; folded into 沟通
 CHAT_EVERYONE = '*'          # a broadcast, not an account id
+
+# The assistant proxy is the one place a browser can make the server send a body
+# it did not write, so its size is bounded twice, for two different reasons.
+#
+#   MAX_MESSAGE_CHARS   one turn. A user may paste a document, so this is large
+#                       on purpose; it is here to catch a dump, not to shape a
+#                       conversation.
+#   MAX_TRANSCRIPT_CHARS the whole conversation. This is what the model has to
+#                       fit in context, and what is re-sent on every step of a
+#                       run — so the sum, not any single line, is the thing that
+#                       actually costs money.
+#
+# Both sit inside the 200KB request door in do_POST, which is the outer bound
+# and the reason "no limit at all" is not an option: a limit that is removed
+# here simply becomes a 413 there, with a worse message and no idea which turn
+# was at fault.
+MAX_MESSAGE_CHARS = 40_000
+MAX_TRANSCRIPT_CHARS = 40_000
 TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages', 'messages')
 
 # Agent capability boundary.  The future chat/browser adapter must use these
@@ -354,8 +372,9 @@ class Store:
             if not isinstance(item, dict) or item.get('role') not in ('system', 'user', 'assistant'):
                 raise Problem(400, '消息格式无效')
             content = str(item.get('content', ''))
-            if len(content) > 12000:
-                raise Problem(400, '单条消息不能超过 12000 字符（这条有 %d 字符）' % len(content))
+            if len(content) > MAX_MESSAGE_CHARS:
+                raise Problem(400, '单条消息不能超过 %d 字符（这条有 %d 字符）'
+                              % (MAX_MESSAGE_CHARS, len(content)))
             if not content.strip():
                 # A blank line among earlier turns can only have come from a
                 # stored transcript, so it is dropped rather than allowed to
@@ -365,6 +384,19 @@ class Store:
                     raise Problem(400, '消息内容不能为空')
                 continue
             messages.append({'role': item['role'], 'content': content})
+
+        # The newest turns are the ones being talked about, so an over-long
+        # conversation loses its oldest turns rather than being refused. The
+        # final message is never dropped, and the model is told that something
+        # was left out instead of being left to invent the missing context.
+        head = 1 if messages and messages[0]['role'] == 'system' else 0
+        dropped = 0
+        while len(messages) > head + 1 and sum(len(m['content']) for m in messages) > MAX_TRANSCRIPT_CHARS:
+            messages.pop(head)
+            dropped += 1
+        if dropped:
+            messages.insert(head, {'role': 'system', 'content':
+                                   '（更早的 %d 轮对话因长度限制已省略，必要时先向用户确认。）' % dropped})
         # Keep the permission contract in the model context as a second line of
         # defence; actual mutations still go through Store.action authorization.
         policy = ('你是「战略小组台账」助手。当前账户是 superadmin，可协助查询并提出管理操作；'
@@ -493,7 +525,10 @@ class Store:
             self.record_agent_message(user['id'], 'user', last_user)
         self.record_agent_message(user['id'], 'assistant', content)
         return {'content': content, 'model': result.get('model', model),
-                'usage': result.get('usage'), 'finishReason': choice.get('finish_reason')}
+                'usage': result.get('usage'), 'finishReason': choice.get('finish_reason'),
+                # How many older turns were left out, so a caller can tell that
+                # the model was given less than it sent.
+                'trimmed': dropped}
 
     def execute_agent_action(self, user, data):
         """Execute a model-proposed business action after explicit confirmation.
@@ -529,7 +564,9 @@ class Store:
         if role in ('user', 'assistant') and not str(content or '').strip():
             return None
         record = {'id': uid(), 'user': user_id, 'role': role,
-                  'content': str(content or '')[:12000], 'createdAt': timestamp()}
+                  # Truncate to exactly what the proxy will accept, so a
+                  # replayed record can never be refused for length.
+                  'content': str(content or '')[:MAX_MESSAGE_CHARS], 'createdAt': timestamp()}
         if isinstance(extra, dict):
             record.update(extra)
         return self.put('agent_messages', record)
