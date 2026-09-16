@@ -1038,15 +1038,26 @@ select:focus {
   border-color: var(--rail-line);
   color: var(--rail-strong);
 }
+/* A count, not a dot: the number is what tells you whether it is worth going in. */
 .brand-chat .chat-dot {
   position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
+  top: -3px;
+  right: -3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  display: grid;
+  place-items: center;
+  border-radius: 99px;
   background: var(--accent);
+  color: var(--surface);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
   box-shadow: 0 0 0 1.5px var(--rail);
+  animation: wcPop var(--t) var(--ease-spring) both;
 }
 .chat-hint { font-size: 12px; color: var(--faint); }
 
@@ -1155,6 +1166,120 @@ select:focus {
 @media (max-width: 640px) {
   .chat-message { max-width: 92%; }
 }
+
+/* Channels, presence and @ completion. */
+.chat-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-sunk);
+}
+.chat-channels {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.chat-channels::-webkit-scrollbar { display: none; }
+.chat-channel {
+  flex: none;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 10px;
+  border-radius: 99px;
+  cursor: pointer;
+  transition: background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease);
+}
+.chat-channel:hover { color: var(--ink); }
+.chat-channel.is-on {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--accent-dark);
+  font-weight: 600;
+}
+
+.chat-members {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.chat-online { font-size: 11px; color: var(--faint); margin-right: 4px; white-space: nowrap; }
+.chat-presence {
+  display: inline-grid;
+  place-items: center;
+  position: relative;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  filter: saturate(.35);
+  opacity: .55;
+  transition: opacity var(--t) var(--ease), filter var(--t) var(--ease);
+}
+.chat-presence.is-on { filter: none; opacity: 1; }
+.chat-presence.is-on::after {
+  content: "";
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 1.5px var(--surface-sunk);
+}
+.chat-presence .avatar { flex: none; width: 22px; height: 22px; font-size: 10px; }
+
+/* The mention picked out of the message body. */
+.chat-mention {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  border-radius: 4px;
+  padding: 0 3px;
+}
+
+/* @ completion, floating above the composer. */
+.chat-compose { position: relative; }
+.chat-mention-menu {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(100% + 6px);
+  z-index: 5;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  animation: wcRiseIn var(--t) var(--ease-out) both;
+}
+.chat-mention-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  padding: 7px 10px;
+  cursor: pointer;
+  color: var(--ink);
+}
+.chat-mention-option + .chat-mention-option { border-top: 1px solid var(--line-soft); }
+.chat-mention-option.is-on { background: var(--accent-soft); }
+.chat-mention-option .avatar { flex: none; width: 22px; height: 22px; font-size: 10px; }
+.chat-mention-option small { margin-left: auto; color: var(--faint); font-size: 11px; }
 
 /* --------------------------------------------------------------------------
    21 · Accessibility: honour reduced motion

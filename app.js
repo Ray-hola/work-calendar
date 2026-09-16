@@ -117,7 +117,7 @@ function switchView(view){
   if(view==='achievements')renderAchievements();
   if(view==='inbox'){renderInbox();refreshInboxState();}
   if(view==='accounts')renderAccounts();
-  if(view==='chat'){loadChat(true);startChatPolling()}else{stopChatPolling()}
+  if(view==='chat'){renderChatChannels();loadChat(true);refreshChatPresence();startChatPolling()}else{stopChatPolling()}
   if(changed)window.scrollTo({top:0,left:0,behavior:'instant'});
 }
 const isArchivedTask=t=>['deferred','skipped','rejected'].includes(t.status);
@@ -485,11 +485,11 @@ function inviteCollaborators(projectId){
 }
 function renderInbox(){
   const notifications=S.notifications||[],requests=(S.requests||[]).filter(r=>r.status==='pending');
-  const approvalInfo=x=>{const p=S.projects.find(p=>p.id===x.reference);const editReq=(S.editRequests||[]).find(r=>r.id===x.reference);const task=S.tasks.find(t=>t.id===x.reference||t.id===editReq?.taskId);const projectPending=Boolean(S.user?.admin&&x.kind==='approval'&&x.title==='项目审批申请'&&p?.status==='pending');const projectCompletionPending=Boolean(S.user?.admin&&x.kind==='project_completion'&&p?.status==='pending_completion');const taskPending=Boolean(x.kind==='task_approval'&&task&&canReviewTask(task)&&['pending_approval','awaiting_approval','submitted'].includes(task.status));const editPending=Boolean(x.kind==='task_edit_approval'&&editReq&&editReq.status==='pending'&&editReq.approver===S.user?.id&&task);return {project:p,task,editReq,projectPending,projectCompletionPending,taskPending,editPending,pending:projectPending||projectCompletionPending||taskPending||editPending}};
+  const approvalInfo=x=>{const chatMention=x.kind==='chat_mention';const p=S.projects.find(p=>p.id===x.reference);const editReq=(S.editRequests||[]).find(r=>r.id===x.reference);const task=S.tasks.find(t=>t.id===x.reference||t.id===editReq?.taskId);const projectPending=Boolean(S.user?.admin&&x.kind==='approval'&&x.title==='项目审批申请'&&p?.status==='pending');const projectCompletionPending=Boolean(S.user?.admin&&x.kind==='project_completion'&&p?.status==='pending_completion');const taskPending=Boolean(x.kind==='task_approval'&&task&&canReviewTask(task)&&['pending_approval','awaiting_approval','submitted'].includes(task.status));const editPending=Boolean(x.kind==='task_edit_approval'&&editReq&&editReq.status==='pending'&&editReq.approver===S.user?.id&&task);return {project:p,task,editReq,projectPending,projectCompletionPending,taskPending,editPending,chatMention,pending:projectPending||projectCompletionPending||taskPending||editPending}};
   const unreadRequests=requests.filter(r=>!r.read).length;
   const unreadNotifications=notifications.filter(x=>!x.read).length;
   const unreadCount=unreadRequests+unreadNotifications;$('#inboxCount').textContent=unreadCount;$('.notification-dot').classList.toggle('hidden',unreadCount===0);$('#inboxView .eyebrow').textContent=`通知中心 · ${unreadCount} 条未读`;
-  const cards=[...requests.map(r=>{const p=S.projects.find(x=>x.id===r.projectId);const unread=!r.read;return {priority:2,time:r.createdAt,html:`<article class="inbox-item request-inbox-item ${unread?'unread':''}" data-request="${escapeHTML(r.id)}"><div class="inbox-icon">${icon('folder')}</div><div class="inbox-copy"><strong>项目协作邀请</strong>${unread?'<i class="unread-dot"></i>':''}<p>邀请你加入「${escapeHTML(p?.name||'项目')}」。接受后项目任务才会进入你的日程。</p><small>${escapeHTML(r.createdAt)}</small><div class="inbox-actions"><button class="primary-btn accept-request" data-id="${escapeHTML(r.id)}">接受</button><button class="secondary-btn reject-request" data-id="${escapeHTML(r.id)}">拒绝</button></div></div></article>`}}),...notifications.map(x=>{const {project,task,projectPending,projectCompletionPending,taskPending,editPending,pending}=approvalInfo(x);const unread=!x.read||pending;const actions=projectPending?`<div class="inbox-actions"><button class="primary-btn approve-project-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意创建</button><button class="secondary-btn reject-project-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:projectCompletionPending?`<div class="inbox-actions"><button class="primary-btn approve-project-completion-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意完成</button><button class="secondary-btn reject-project-completion-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:taskPending?`<div class="inbox-actions"><button class="primary-btn approve-task-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">审批通过</button><button class="secondary-btn reject-task-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回并建议</button></div>`:editPending?`<div class="inbox-actions"><button class="primary-btn approve-edit-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意修改</button><button class="secondary-btn reject-edit-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:'';return {priority:pending?2:unread?1:0,time:x.createdAt,html:`<article class="inbox-item ${unread?'unread':''} ${pending?'approval-pending':''}" data-id="${escapeHTML(x.id)}"><div class="inbox-icon">${editPending?icon('edit'):projectCompletionPending?icon('diamond'):taskPending?icon('check'):x.kind==='report'?icon('clock'):x.kind==='approval'?icon('folder'):x.kind==='request'?icon('mail'):icon('trend')}</div><div class="inbox-copy"><strong>${escapeHTML(x.title)}</strong>${unread?'<i class="unread-dot"></i>':''}<p>${escapeHTML(x.body)}</p><small>${escapeHTML(x.createdAt)}</small>${actions}</div><span class="task-arrow">${icon('chevron-right')}</span></article>`}})].sort((a,b)=>(b.priority-a.priority)||String(b.time).localeCompare(String(a.time)));
+  const cards=[...requests.map(r=>{const p=S.projects.find(x=>x.id===r.projectId);const unread=!r.read;return {priority:2,time:r.createdAt,html:`<article class="inbox-item request-inbox-item ${unread?'unread':''}" data-request="${escapeHTML(r.id)}"><div class="inbox-icon">${icon('folder')}</div><div class="inbox-copy"><strong>项目协作邀请</strong>${unread?'<i class="unread-dot"></i>':''}<p>邀请你加入「${escapeHTML(p?.name||'项目')}」。接受后项目任务才会进入你的日程。</p><small>${escapeHTML(r.createdAt)}</small><div class="inbox-actions"><button class="primary-btn accept-request" data-id="${escapeHTML(r.id)}">接受</button><button class="secondary-btn reject-request" data-id="${escapeHTML(r.id)}">拒绝</button></div></div></article>`}}),...notifications.map(x=>{const {project,task,projectPending,projectCompletionPending,taskPending,editPending,chatMention,pending}=approvalInfo(x);const unread=!x.read||pending;const actions=chatMention?`<div class="inbox-actions"><button class="primary-btn open-chat-from-mention">去沟通区</button></div>`:projectPending?`<div class="inbox-actions"><button class="primary-btn approve-project-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意创建</button><button class="secondary-btn reject-project-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:projectCompletionPending?`<div class="inbox-actions"><button class="primary-btn approve-project-completion-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意完成</button><button class="secondary-btn reject-project-completion-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:taskPending?`<div class="inbox-actions"><button class="primary-btn approve-task-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">审批通过</button><button class="secondary-btn reject-task-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回并建议</button></div>`:editPending?`<div class="inbox-actions"><button class="primary-btn approve-edit-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意修改</button><button class="secondary-btn reject-edit-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:'';return {priority:pending?2:unread?1:0,time:x.createdAt,html:`<article class="inbox-item ${unread?'unread':''} ${pending?'approval-pending':''}" data-id="${escapeHTML(x.id)}"><div class="inbox-icon">${editPending?icon('edit'):projectCompletionPending?icon('diamond'):taskPending?icon('check'):x.kind==='report'?icon('clock'):x.kind==='approval'?icon('folder'):x.kind==='request'?icon('mail'):icon('trend')}</div><div class="inbox-copy"><strong>${escapeHTML(x.title)}</strong>${unread?'<i class="unread-dot"></i>':''}<p>${escapeHTML(x.body)}</p><small>${escapeHTML(x.createdAt)}</small>${actions}</div><span class="task-arrow">${icon('chevron-right')}</span></article>`}})].sort((a,b)=>(b.priority-a.priority)||String(b.time).localeCompare(String(a.time)));
   $('#inboxList').innerHTML=cards.map(x=>x.html).join('')||'<div class="empty-state">收件箱很安静</div>';
   $$('#inboxList .inbox-item').forEach(e=>{e.tabIndex=0;e.onkeydown=ev=>{if(ev.key==='Enter'&&!ev.target.closest('.inbox-actions')){if(e.dataset.id)openNotification(e.dataset.id);else openRequest(e.dataset.request)}}});
   $$('#inboxList .inbox-item[data-id]').forEach(e=>e.onclick=ev=>{if(ev.target.closest('.inbox-actions'))return;openNotification(e.dataset.id)});
@@ -1421,20 +1421,21 @@ async function agentRunPlan(items){
   return {created,failed:failures.length};
 }
 /* ---------------------------------------------------------------- 沟通区 --
-   A single team room. Chat deliberately sits outside the task permission
-   model: a member who cannot reassign work can still say something about it. */
-const CHAT_SEEN_KEY='wc-chat-seen';
-let chatPollTimer=0,chatLastAt='',chatLastDay='';
+   One shared room, plus a channel per project. Chat deliberately sits outside
+   the task permission model: a member who cannot reassign work can still say
+   something about it. */
 const CHAT_POLL_MS=4000;
-function chatSeenAt(){try{return localStorage.getItem(CHAT_SEEN_KEY)||''}catch(_){return ''}}
-function chatMarkSeen(at){try{localStorage.setItem(CHAT_SEEN_KEY,at||'')}catch(_){}updateChatDot()}
+const CHAT_PRESENCE_MS=15000;
+let chatPollTimer=0,chatPresenceTimer=0,chatLastAt='',chatLastDay='';
+let chatChannel='all',chatPresence={},chatMentionQuery=null,chatMentionIndex=0;
+
 function updateChatDot(){
   const dot=$('#chatDot');if(!dot)return;
-  const chat=S.chat||{};
-  /* Unread only counts when someone else wrote it and you are not looking. */
-  const unseen=Boolean(chat.lastAt)&&chat.lastAt!==chatSeenAt()
-    &&chat.lastBy!==S.user?.id&&UI.view!=='chat';
-  dot.classList.toggle('hidden',!unseen);
+  const unread=Number((S.chat||{}).unread||0);
+  /* Not while you are looking at the room — you are reading it, not missing it. */
+  const show=unread>0&&UI.view!=='chat';
+  dot.classList.toggle('hidden',!show);
+  dot.textContent=show?(unread>99?'99+':String(unread)):'';
 }
 function chatDayLabel(iso){
   const d=new Date(iso),today=new Date();
@@ -1448,19 +1449,55 @@ function chatClock(iso){
   const d=new Date(iso);
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
+function chatChannelList(){
+  const items=[{id:'all',name:'全部'}];
+  (S.projects||[]).filter(pr=>pr.status==='active').forEach(pr=>items.push({id:pr.id,name:pr.name}));
+  return items;
+}
+function renderChatChannels(){
+  const bar=$('#chatChannels');if(!bar)return;
+  const items=chatChannelList();
+  if(!items.some(c=>c.id===chatChannel))chatChannel='all';
+  bar.innerHTML=items.map(c=>`<button type="button" class="chat-channel ${c.id===chatChannel?'is-on':''}" data-channel="${escapeHTML(c.id)}">${escapeHTML(c.name)}</button>`).join('');
+  $$('#chatChannels .chat-channel').forEach(b=>b.onclick=()=>{
+    if(chatChannel===b.dataset.channel)return;
+    chatChannel=b.dataset.channel;
+    renderChatChannels();loadChat(true);
+  });
+}
+/* Mentions are read back out of the text, so a hand-typed @名字 works exactly
+   like one picked from the menu. */
+function chatParseMentions(text){
+  const found=[];
+  (S.users||[]).forEach(u=>{
+    const name=u.displayName||u.id;
+    if(text.includes('@'+name)||text.includes('@'+u.id))if(!found.includes(u.id))found.push(u.id);
+  });
+  return found;
+}
+function chatBodyHTML(text){
+  let html=escapeHTML(text);
+  chatParseMentions(text).forEach(id=>{
+    const name=escapeHTML(nameOf(id));
+    const safe=name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    html=html.replace(new RegExp('@'+safe,'g'),`<em class="chat-mention">@${name}</em>`);
+  });
+  return html;
+}
 function chatBubble(m,withDay){
   const mine=m.author===S.user?.id;
   const day=withDay?`<div class="chat-day">${escapeHTML(chatDayLabel(m.createdAt))}</div>`:'';
   return day+`<div class="chat-message ${mine?'mine':''}">${avatarHTML(m.author)}`
     +`<div class="chat-body"><div class="chat-meta"><strong>${escapeHTML(nameOf(m.author))}</strong>`
     +`<time>${escapeHTML(chatClock(m.createdAt))}</time></div>`
-    +`<div class="chat-text">${escapeHTML(m.body)}</div></div></div>`;
+    +`<div class="chat-text">${chatBodyHTML(m.body)}</div></div></div>`;
 }
 async function loadChat(reset){
   const log=$('#chatLog');if(!log)return;
   let rows=[];
   try{
-    const data=await api('/api/action',{action:'chat.list',data:reset?{}:{since:chatLastAt}});
+    const scope={channel:chatChannel};
+    const data=await api('/api/action',{action:'chat.list',data:reset?scope:{...scope,since:chatLastAt}});
     rows=data.messages||[];
   }catch(e){
     if(reset)log.innerHTML=`<p class="chat-empty">读不到消息：${escapeHTML(e?.message||'加载失败')}</p>`;
@@ -1468,7 +1505,9 @@ async function loadChat(reset){
   }
   if(reset){log.innerHTML='';chatLastAt='';chatLastDay=''}
   if(!rows.length){
-    if(reset)log.innerHTML='<p class="chat-empty">还没有人说话，发第一条吧。</p>';
+    if(reset)log.innerHTML=chatChannel==='all'
+      ?'<p class="chat-empty">还没有人说话，发第一条吧。</p>'
+      :'<p class="chat-empty">这个频道还没有消息，说点什么吧。</p>';
     return;
   }
   /* Follow the newest line, but do not yank the reader back down if they have
@@ -1482,22 +1521,90 @@ async function loadChat(reset){
     if(m.createdAt)chatLastAt=m.createdAt;
   });
   if(reset||nearBottom)log.scrollTop=log.scrollHeight;
-  chatMarkSeen(chatLastAt);
+  reportChatRead(chatLastAt);
+}
+async function reportChatRead(at){
+  try{
+    await api('/api/action',{action:'chat.read',data:{at:at||''}});
+    S.chat={...(S.chat||{}),unread:0};
+    updateChatDot();
+  }catch(_){}
+}
+async function refreshChatPresence(){
+  try{
+    chatPresence=await api('/api/action',{action:'chat.presence',data:{}});
+    renderChatMembers();
+  }catch(_){}
+}
+function renderChatMembers(){
+  const bar=$('#chatMembers');if(!bar)return;
+  const ids=Object.keys(chatPresence||{});
+  const online=ids.filter(id=>chatPresence[id].online).length;
+  const order=ids.sort((a,b)=>(chatPresence[b].online?1:0)-(chatPresence[a].online?1:0));
+  bar.innerHTML=`<span class="chat-online">${online} 人在线</span>`+order.map(id=>{
+    const state=chatPresence[id];
+    return `<span class="chat-presence ${state.online?'is-on':''}" title="${escapeHTML(nameOf(id))} · 最后活跃 ${escapeHTML(chatClock(state.at))}">${avatarHTML(id)}</span>`;
+  }).join('');
 }
 function startChatPolling(){
   stopChatPolling();
   chatPollTimer=setInterval(()=>{loadChat(false)},CHAT_POLL_MS);
+  chatPresenceTimer=setInterval(()=>{refreshChatPresence()},CHAT_PRESENCE_MS);
 }
 function stopChatPolling(){
   if(chatPollTimer)clearInterval(chatPollTimer);
-  chatPollTimer=0;
+  if(chatPresenceTimer)clearInterval(chatPresenceTimer);
+  chatPollTimer=0;chatPresenceTimer=0;
+}
+/* --- @ completion --- */
+function chatMentionContext(input){
+  const pos=input.selectionStart;
+  if(pos==null)return null;
+  const before=input.value.slice(0,pos);
+  const hit=before.match(/@([^\s@]{0,12})$/);
+  if(!hit)return null;
+  const at=pos-hit[0].length;
+  /* Only after a line start or a space, so an email address stays an address. */
+  if(at>0&&!/\s/.test(input.value[at-1]))return null;
+  return {query:hit[1],start:at,end:pos};
+}
+function chatMentionCandidates(query){
+  const q=(query||'').toLowerCase();
+  return (S.users||[]).filter(u=>u.active&&u.id!==S.user?.id)
+    .filter(u=>!q||(u.displayName||'').toLowerCase().includes(q)||u.id.toLowerCase().includes(q))
+    .slice(0,6);
+}
+function renderChatMentionMenu(){
+  const menu=$('#chatMentionMenu');if(!menu)return;
+  const list=chatMentionQuery===null?[]:chatMentionCandidates(chatMentionQuery);
+  if(!list.length){menu.classList.add('hidden');menu.innerHTML='';return}
+  if(chatMentionIndex>=list.length)chatMentionIndex=0;
+  menu.innerHTML=list.map((u,i)=>`<button type="button" role="option" aria-selected="${i===chatMentionIndex}" class="chat-mention-option ${i===chatMentionIndex?'is-on':''}" data-id="${escapeHTML(u.id)}">`
+    +`${avatarHTML(u.id)}<span class="chat-mention-name">${escapeHTML(u.displayName||u.id)}</span><small>${escapeHTML(u.id)}</small></button>`).join('');
+  menu.classList.remove('hidden');
+  $$('#chatMentionMenu .chat-mention-option').forEach(b=>b.onclick=()=>chatApplyMention(b.dataset.id));
+}
+function chatApplyMention(id){
+  const input=$('#chatInput');if(!input)return;
+  const info=chatMentionContext(input);if(!info)return;
+  const name=nameOf(id);
+  input.value=input.value.slice(0,info.start)+'@'+name+' '+input.value.slice(info.end);
+  const caret=info.start+name.length+2;
+  input.setSelectionRange(caret,caret);
+  chatMentionQuery=null;chatMentionIndex=0;renderChatMentionMenu();
+  input.focus();resizeChatInput();
+}
+function resizeChatInput(){
+  const input=$('#chatInput');if(!input)return;
+  input.style.height='auto';
+  input.style.height=Math.min(120,input.scrollHeight)+'px';
 }
 async function chatSend(){
   const input=$('#chatInput'),text=input?.value.trim();
   if(!text)return;
-  input.value='';input.style.height='';
+  input.value='';input.style.height='';chatMentionQuery=null;renderChatMentionMenu();
   try{
-    await api('/api/action',{action:'chat.send',data:{body:text}});
+    await api('/api/action',{action:'chat.send',data:{body:text,channel:chatChannel,mentions:chatParseMentions(text)}});
     await loadChat(false);
     input.focus();
   }catch(e){
@@ -1509,14 +1616,31 @@ function initChatUI(){
   $('#chatEntryBtn')?.addEventListener('click',()=>switchView('chat'));
   $('#chatForm')?.addEventListener('submit',e=>{e.preventDefault();chatSend()});
   const input=$('#chatInput');
+  input?.addEventListener('input',()=>{
+    const info=chatMentionContext(input);
+    chatMentionQuery=info?info.query:null;
+    chatMentionIndex=0;
+    renderChatMentionMenu();
+    resizeChatInput();
+  });
   input?.addEventListener('keydown',e=>{
+    const menu=$('#chatMentionMenu');
+    const open=menu&&!menu.classList.contains('hidden');
+    if(open){
+      const list=chatMentionCandidates(chatMentionQuery||'');
+      if(e.key==='ArrowDown'&&list.length){e.preventDefault();chatMentionIndex=(chatMentionIndex+1)%list.length;renderChatMentionMenu();return}
+      if(e.key==='ArrowUp'&&list.length){e.preventDefault();chatMentionIndex=(chatMentionIndex-1+list.length)%list.length;renderChatMentionMenu();return}
+      if((e.key==='Enter'||e.key==='Tab')&&list.length){e.preventDefault();chatApplyMention(list[chatMentionIndex].id);return}
+      if(e.key==='Escape'){e.preventDefault();chatMentionQuery=null;renderChatMentionMenu();return}
+    }
     /* isComposing keeps the Enter that confirms a Chinese IME candidate from
        sending a half-finished message. */
     if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();chatSend()}
   });
-  input?.addEventListener('input',()=>{
-    input.style.height='auto';
-    input.style.height=Math.min(120,input.scrollHeight)+'px';
+  input?.addEventListener('blur',()=>setTimeout(()=>{chatMentionQuery=null;renderChatMentionMenu()},150));
+  /* Delegated, so it keeps working across inbox re-renders. */
+  document.addEventListener('click',e=>{
+    if(e.target.closest?.('.open-chat-from-mention'))switchView('chat');
   });
   updateChatDot();
 }

@@ -865,7 +865,7 @@ class Store:
             diaries=[d for d in self.all('diaries') if user['admin'] or d.get('author')==user['id']]
             edit_requests=[r for r in self.all('edit_requests') if user['admin'] or r.get('requester')==user['id'] or r.get('approver')==user['id']]
             automation=next((x.get('value',{}) for x in self.all('settings') if x.get('id')=='automation'),{})
-            return {'user':user,'users':self.users(),'today':now().date().isoformat(),'projects':projects,'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees']],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':[n for n in self.all('notifications') if n['to']==user['id'] and '12:00 初稿' not in str(n.get('title',''))], 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or self.get('projects',s['projectId'])['owner']==user['id'])], 'chat':self.chat_summary(),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.all('audit')[-60:] if user['admin'] else []}
+            return {'user':user,'users':self.users(),'today':now().date().isoformat(),'projects':projects,'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees']],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':[n for n in self.all('notifications') if n['to']==user['id'] and '12:00 初稿' not in str(n.get('title',''))], 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or self.get('projects',s['projectId'])['owner']==user['id'])], 'chat':self.chat_summary(user),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.all('audit')[-60:] if user['admin'] else []}
 
     def diary_statistics(self, viewer, start=None, end=None):
         """Return daily completion/load summaries for the diary dashboard.
@@ -1001,20 +1001,39 @@ class Store:
                                             if k not in ('password', 'apiKey', 'messages')})
             return result or {'ok':True}
 
-    def chat_list(self, user, data):
-        """The team room. Every signed-in account reads and writes the same one.
+    ALL_ROOM = 'all'
 
-        Chat is deliberately outside the task permission model: a member who
+    def display_name(self, account):
+        """What the team calls this account — 中文名称 when it has one."""
+        row = next((u for u in self.users() if u['id'] == account), None)
+        return (row or {}).get('displayName') or account
+
+    def chat_scope(self, data):
+        """A room is either the shared one or one project's channel."""
+        channel = str(data.get('channel') or self.ALL_ROOM)
+        if channel != self.ALL_ROOM and not any(p['id'] == channel for p in self.all('projects')):
+            raise Problem(400, '频道不存在')
+        return channel
+
+    def chat_settings(self, key):
+        record = next((s.get('value', {}) for s in self.all('settings') if s.get('id') == key), {})
+        return dict(record) if isinstance(record, dict) else {}
+
+    def chat_list(self, user, data):
+        """Team chat. Outside the task permission model on purpose: a member who
         cannot reassign work can still say something about it.
         """
         since = str(data.get('since') or '')
+        channel = self.chat_scope(data)
         try:
             limit = max(1, min(300, int(data.get('limit') or 120)))
         except (TypeError, ValueError):
             limit = 120
-        rows = [m for m in self.all('messages') if not since or str(m.get('createdAt', '')) > since]
+        rows = [m for m in self.all('messages')
+                if (m.get('channel') or self.ALL_ROOM) == channel
+                and (not since or str(m.get('createdAt', '')) > since)]
         rows.sort(key=lambda m: m.get('createdAt', ''))
-        return {'messages': rows[-limit:], 'now': timestamp()}
+        return {'messages': rows[-limit:], 'now': timestamp(), 'channel': channel}
 
     def chat_send(self, user, data):
         body = str(data.get('body') or '').strip()
@@ -1022,18 +1041,63 @@ class Store:
             raise Problem(400, '消息不能为空')
         if len(body) > 1000:
             raise Problem(400, '单条消息不能超过 1000 字')
-        message = {'author': user['id'], 'body': body, 'createdAt': timestamp()}
+        channel = self.chat_scope(data)
+        # The mentions travel with the message so the notice does not depend on
+        # parsing the text back into accounts later.
+        mentions = []
+        for raw in (data.get('mentions') or [])[:20]:
+            target = str(raw)
+            if target == user['id'] or target in mentions:
+                continue
+            if not any(u['id'] == target and u['active'] for u in self.users()):
+                continue
+            mentions.append(target)
+        message = {'author': user['id'], 'body': body, 'channel': channel,
+                   'mentions': mentions, 'createdAt': timestamp()}
         self.put('messages', message)
+        where = '沟通区' if channel == self.ALL_ROOM else '「%s」频道' % self.get('projects', channel)['name']
+        for target in mentions:
+            self.notify(target, '有人在沟通区提到了你',
+                        '%s 在%s里 @ 了你：%s' % (self.display_name(user['id']), where, body[:60]),
+                        'chat_mention', message['id'])
         return message
 
-    def chat_summary(self):
-        """Cheap counters for the unread dot — never the bodies themselves."""
-        row = self.db.execute('SELECT COUNT(*) AS n FROM messages').fetchone()
-        last = self.db.execute('SELECT data FROM messages ORDER BY rowid DESC LIMIT 1').fetchone()
-        latest = json.loads(last['data']) if last else {}
-        return {'count': (row['n'] if row else 0),
-                'lastAt': latest.get('createdAt', ''),
-                'lastBy': latest.get('author', '')}
+    def chat_mark_read(self, user, data):
+        state = self.chat_settings('chat-read')
+        state[user['id']] = str(data.get('at') or timestamp())
+        self.put('settings', {'id': 'chat-read', 'value': state, 'updatedAt': timestamp()})
+        return {'at': state[user['id']]}
+
+    def chat_presence(self, user, data):
+        """Heartbeat plus who else is around. Kept vague on purpose: this shows
+        who is reachable, not a read receipt per message."""
+        state = self.chat_settings('chat-presence')
+        state[user['id']] = timestamp()
+        self.put('settings', {'id': 'chat-presence', 'value': state, 'updatedAt': timestamp()})
+        active = {u['id'] for u in self.users() if u['active']}
+        current = now()
+        result = {}
+        for account, at in state.items():
+            if account not in active:
+                continue
+            try:
+                away = (current - datetime.fromisoformat(at)).total_seconds()
+            except (TypeError, ValueError):
+                away = 1e9
+            result[account] = {'at': at, 'online': away < 120}
+        return result
+
+    def chat_summary(self, user):
+        """Cheap counters for the unread badge — never the bodies themselves."""
+        rows = self.all('messages')
+        last_read = self.chat_settings('chat-read').get(user['id'], '')
+        unread = sum(1 for m in rows
+                     if m.get('author') != user['id']
+                     and str(m.get('createdAt', '')) > last_read)
+        last = rows[-1] if rows else {}
+        return {'count': len(rows), 'unread': unread,
+                'lastAt': last.get('createdAt', ''),
+                'lastBy': last.get('author', '')}
 
     def reconcile_task_approvals(self):
         """Keep persisted pending approvals and inbox delivery in sync with the Owner.
@@ -1093,6 +1157,10 @@ class Store:
             return self.chat_list(user, d)
         if action=='chat.send':
             return self.chat_send(user, d)
+        if action=='chat.read':
+            return self.chat_mark_read(user, d)
+        if action=='chat.presence':
+            return self.chat_presence(user, d)
         if action=='achievement.read':
             return self.achievements(user)
         if action=='agent.capabilities':

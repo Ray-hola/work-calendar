@@ -63,5 +63,53 @@ class ChatTests(unittest.TestCase):
         self.assertNotIn('body', summary, '摘要不应带消息正文')
 
 
+    def test_a_project_channel_keeps_its_own_messages(self):
+        project = self.store.action(self.admin, 'project.create', {
+            'name': '渠道测试', 'owner': 'superadmin', 'cycle': 'infinite'})
+        self.store.action(self.member, 'chat.send', {'body': '大厅的话'})
+        self.store.action(self.member, 'chat.send', {'body': '项目里的话', 'channel': project['id']})
+        hall = [m['body'] for m in self.store.action(self.admin, 'chat.list', {})['messages']]
+        room = [m['body'] for m in self.store.action(self.admin, 'chat.list', {'channel': project['id']})['messages']]
+        self.assertEqual(hall, ['大厅的话'], '默认频道只应看到大厅')
+        self.assertEqual(room, ['项目里的话'], '项目频道只应看到本频道')
+
+    def test_an_unknown_channel_is_refused(self):
+        with self.assertRaises(Problem):
+            self.store.action(self.member, 'chat.send', {'body': 'x', 'channel': 'nope'})
+        with self.assertRaises(Problem):
+            self.store.action(self.admin, 'chat.list', {'channel': 'nope'})
+
+    def test_a_mention_notifies_the_other_person_but_never_yourself(self):
+        sent = self.store.action(self.admin, 'chat.send', {
+            'body': '@王零零 周报麻烦今天交', 'mentions': ['member1', 'superadmin', 'ghost']})
+        self.assertEqual(sent['mentions'], ['member1'], '自己与不存在的账户都不该进 mentions')
+        notices = [n for n in self.store.all('notifications') if n.get('kind') == 'chat_mention']
+        self.assertEqual([n['to'] for n in notices], ['member1'])
+        self.assertIn('周报麻烦今天交', notices[0]['body'])
+        self.assertEqual(notices[0]['reference'], sent['id'])
+
+    def test_unread_counts_other_people_only_and_clears_on_read(self):
+        self.assertEqual(self.store.snapshot(self.admin)['chat']['unread'], 0)
+        self.store.action(self.admin, 'chat.send', {'body': '我自己发的'})
+        self.assertEqual(self.store.snapshot(self.admin)['chat']['unread'], 0, '自己发的不算未读')
+        sent = self.store.action(self.member, 'chat.send', {'body': '别人发的'})
+        self.assertEqual(self.store.snapshot(self.admin)['chat']['unread'], 1)
+        self.store.action(self.admin, 'chat.read', {'at': sent['createdAt']})
+        self.assertEqual(self.store.snapshot(self.admin)['chat']['unread'], 0, '标记已读后应清零')
+        self.assertEqual(self.store.snapshot(self.member)['chat']['unread'], 1, '成员自己那边仍有一条未读')
+
+    def test_presence_reports_active_accounts_only(self):
+        seen = self.store.action(self.admin, 'chat.presence', {})
+        self.assertEqual(list(seen), ['superadmin'])
+        self.assertTrue(seen['superadmin']['online'])
+        self.assertIn('at', seen['superadmin'], '应带上最后活跃时间')
+        self.store.action(self.member, 'chat.presence', {})
+        self.assertEqual(set(self.store.action(self.admin, 'chat.presence', {})), {'superadmin', 'member1'})
+
+    def test_mentions_must_be_real_accounts(self):
+        sent = self.store.action(self.member, 'chat.send', {'body': '嗨', 'mentions': ['superadmin', 'nobody', 'superadmin']})
+        self.assertEqual(sent['mentions'], ['superadmin'], '重复与不存在的账户应被丢掉')
+
+
 if __name__ == '__main__':
     unittest.main()
