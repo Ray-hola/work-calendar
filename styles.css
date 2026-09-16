@@ -1167,6 +1167,17 @@ select:focus {
   .chat-message { max-width: 92%; }
 }
 
+/* The archived room, opened from 成果库. */
+.achievement-actions { margin: 0 0 14px; }
+.chat-log.chat-archive {
+  flex: none;
+  max-height: 46vh;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-sunk);
+  padding: 14px 16px;
+}
+
 /* Channels, presence and @ completion. */
 .chat-bar {
   display: flex;

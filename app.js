@@ -916,7 +916,7 @@ function renderAchievements(){
   if(!grid)return;
   grid.innerHTML=projects.map(p=>{
     const tasks=sortTasks(projectTasks(p)),done=tasks.filter(t=>t.status==='done').length,stages=achievementLifecycle(p,tasks);
-    return `<article class="achievement-card" data-project="${escapeHTML(p.id)}"><div class="achievement-card-head"><div><span class="achievement-kicker">已归档成果</span><h2>${escapeHTML(p.name)}</h2><p>${escapeHTML(p.desc||'暂无项目描述')}</p></div><span class="achievement-status">${projectStatus(p)}</span></div><div class="achievement-meta"><span>Owner · <b>${escapeHTML(p.owner||'—')}</b></span><span>任务完成 · <b>${done}/${tasks.length}</b></span><span>完成于 · <b>${escapeHTML(String(p.completedAt||p.end||'—').slice(0,10))}</b></span></div><ol class="achievement-lifecycle">${stages.map((s,i)=>`<li class="${s.at?'is-complete':''}"><i></i><span><b>${escapeHTML(s.label)}</b><small>${escapeHTML(s.at||'未记录')}${s.meta?` · ${escapeHTML(s.meta)}`:''}</small></span>${i<stages.length-1?'<em></em>':''}</li>`).join('')}</ol>${p.completionReport?`<div class="achievement-report"><span>结项报告</span><p>${escapeHTML(p.completionReport)}</p></div>`:''}<div class="achievement-actions"><button class="secondary-btn achievement-open" data-project="${escapeHTML(p.id)}">查看项目详情</button></div></article>`;
+    return `<article class="achievement-card" data-project="${escapeHTML(p.id)}"><div class="achievement-card-head"><div><span class="achievement-kicker">已归档成果</span><h2>${escapeHTML(p.name)}</h2><p>${escapeHTML(p.desc||'暂无项目描述')}</p></div><span class="achievement-status">${projectStatus(p)}</span></div><div class="achievement-meta"><span>Owner · <b>${escapeHTML(p.owner||'—')}</b></span><span>任务完成 · <b>${done}/${tasks.length}</b></span><span>完成于 · <b>${escapeHTML(String(p.completedAt||p.end||'—').slice(0,10))}</b></span></div><div class="achievement-actions"><button class="ghost-btn open-channel-archive" data-project="${escapeHTML(p.id)}" data-name="${escapeHTML(p.name)}">沟通记录</button></div><ol class="achievement-lifecycle">${stages.map((s,i)=>`<li class="${s.at?'is-complete':''}"><i></i><span><b>${escapeHTML(s.label)}</b><small>${escapeHTML(s.at||'未记录')}${s.meta?` · ${escapeHTML(s.meta)}`:''}</small></span>${i<stages.length-1?'<em></em>':''}</li>`).join('')}</ol>${p.completionReport?`<div class="achievement-report"><span>结项报告</span><p>${escapeHTML(p.completionReport)}</p></div>`:''}<div class="achievement-actions"><button class="secondary-btn achievement-open" data-project="${escapeHTML(p.id)}">查看项目详情</button></div></article>`;
   }).join('');
   $$('#achievementGrid .achievement-open').forEach(b=>b.onclick=()=>openWorkLogDetail('',b.dataset.project,'project'));
 }
@@ -1427,7 +1427,7 @@ async function agentRunPlan(items){
 const CHAT_POLL_MS=4000;
 const CHAT_PRESENCE_MS=15000;
 let chatPollTimer=0,chatPresenceTimer=0,chatLastAt='',chatLastDay='';
-let chatChannel='all',chatPresence={},chatMentionQuery=null,chatMentionIndex=0;
+let chatChannel='general',chatPresence={},chatMentionQuery=null,chatMentionIndex=0;
 
 function updateChatDot(){
   const dot=$('#chatDot');if(!dot)return;
@@ -1449,15 +1449,18 @@ function chatClock(iso){
   const d=new Date(iso);
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
+/* The two standing rooms first, then a channel per live project. A finished
+   project drops off this list and its history moves to 成果库. */
 function chatChannelList(){
-  const items=[{id:'all',name:'全部'}];
+  const items=[{id:'general',name:'沟通'},{id:'lounge',name:'闲聊'}];
   (S.projects||[]).filter(pr=>pr.status==='active').forEach(pr=>items.push({id:pr.id,name:pr.name}));
   return items;
 }
 function renderChatChannels(){
   const bar=$('#chatChannels');if(!bar)return;
   const items=chatChannelList();
-  if(!items.some(c=>c.id===chatChannel))chatChannel='all';
+  /* A project can finish while you are sitting in its channel. */
+  if(!items.some(c=>c.id===chatChannel))chatChannel='general';
   bar.innerHTML=items.map(c=>`<button type="button" class="chat-channel ${c.id===chatChannel?'is-on':''}" data-channel="${escapeHTML(c.id)}">${escapeHTML(c.name)}</button>`).join('');
   $$('#chatChannels .chat-channel').forEach(b=>b.onclick=()=>{
     if(chatChannel===b.dataset.channel)return;
@@ -1505,7 +1508,7 @@ async function loadChat(reset){
   }
   if(reset){log.innerHTML='';chatLastAt='';chatLastDay=''}
   if(!rows.length){
-    if(reset)log.innerHTML=chatChannel==='all'
+    if(reset)log.innerHTML=chatChannel==='general'
       ?'<p class="chat-empty">还没有人说话，发第一条吧。</p>'
       :'<p class="chat-empty">这个频道还没有消息，说点什么吧。</p>';
     return;
@@ -1612,6 +1615,27 @@ async function chatSend(){
     input.value=text;                     /* keep the draft rather than losing it */
   }
 }
+/* Reading a finished project's channel: the messages stay where they are, they
+   just stop being reachable from the room and become part of 成果库. */
+async function openChannelArchive(projectId,projectName){
+  let rows=[];
+  try{
+    const data=await api('/api/action',{action:'chat.list',data:{channel:projectId,limit:300}});
+    rows=data.messages||[];
+  }catch(e){toast(e?.message||'读不到归档消息');return}
+  let dayKey='';
+  const body=rows.map(m=>{
+    const day=(m.createdAt||'').slice(0,10);
+    const withDay=Boolean(day)&&day!==dayKey;
+    if(day)dayKey=day;
+    return chatBubble(m,withDay);
+  }).join('');
+  openModal(`<div class="eyebrow">归档 · ${escapeHTML(projectName||'')}</div><h2>沟通记录</h2>`
+    +`<p>${rows.length?`共 ${rows.length} 条消息，随项目一起归档，仅供查阅。`:'这个项目没有留下沟通记录。'}</p>`
+    +`<div class="chat-log chat-archive">${body}</div>`
+    +`<div class="modal-footer"><button class="secondary-btn" id="cancelAction">关闭</button></div>`);
+  $('#cancelAction').onclick=closeModal;
+}
 function initChatUI(){
   $('#chatEntryBtn')?.addEventListener('click',()=>switchView('chat'));
   $('#chatForm')?.addEventListener('submit',e=>{e.preventDefault();chatSend()});
@@ -1641,6 +1665,8 @@ function initChatUI(){
   /* Delegated, so it keeps working across inbox re-renders. */
   document.addEventListener('click',e=>{
     if(e.target.closest?.('.open-chat-from-mention'))switchView('chat');
+    const archive=e.target.closest?.('.open-channel-archive');
+    if(archive)openChannelArchive(archive.dataset.project,archive.dataset.name);
   });
   updateChatDot();
 }

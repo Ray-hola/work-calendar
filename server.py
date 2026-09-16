@@ -64,6 +64,11 @@ TZ = ZoneInfo('Asia/Shanghai')
 # MVP 的日期范围先开放到 2027-04-30（含当天）。统一由后端校验，避免
 # 浏览器绕过日期输入限制后创建超出当前产品范围的安排。
 CALENDAR_END = date(2027, 4, 30)
+# The two rooms that always exist, in the order they are shown. Every other
+# channel is a project, and a project's channel is archived with it.
+CHAT_CHANNELS = (('general', '沟通'), ('lounge', '闲聊'))
+CHAT_DEFAULT = 'general'
+CHAT_LEGACY = 'all'          # the pre-channel hall; folded into 沟通
 TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages', 'messages')
 
 # Agent capability boundary.  The future chat/browser adapter must use these
@@ -1001,18 +1006,39 @@ class Store:
                                             if k not in ('password', 'apiKey', 'messages')})
             return result or {'ok':True}
 
-    ALL_ROOM = 'all'
-
     def display_name(self, account):
         """What the team calls this account — 中文名称 when it has one."""
         row = next((u for u in self.users() if u['id'] == account), None)
         return (row or {}).get('displayName') or account
 
-    def chat_scope(self, data):
-        """A room is either the shared one or one project's channel."""
-        channel = str(data.get('channel') or self.ALL_ROOM)
-        if channel != self.ALL_ROOM and not any(p['id'] == channel for p in self.all('projects')):
+    def chat_channel_name(self, channel):
+        for cid, name in CHAT_CHANNELS:
+            if cid == channel:
+                return name
+        project = next((p for p in self.all('projects') if p['id'] == channel), None)
+        return project['name'] if project else channel
+
+    def chat_normalize(self, message):
+        """Messages written before channels existed belong to 沟通."""
+        channel = str(message.get('channel') or CHAT_DEFAULT)
+        return CHAT_DEFAULT if channel == CHAT_LEGACY else channel
+
+    def chat_scope(self, data, writing=False):
+        """A room is either one of the standing channels or a project's channel.
+
+        Reading a finished project's channel stays allowed — that is how the
+        archive in 成果库 works — but writing to it does not.
+        """
+        channel = str(data.get('channel') or CHAT_DEFAULT)
+        if channel == CHAT_LEGACY:
+            channel = CHAT_DEFAULT
+        if any(cid == channel for cid, _ in CHAT_CHANNELS):
+            return channel
+        project = next((p for p in self.all('projects') if p['id'] == channel), None)
+        if not project:
             raise Problem(400, '频道不存在')
+        if writing and project['status'] != 'active':
+            raise Problem(409, '项目已归档，「%s」的沟通记录改在成果库里查看' % project['name'])
         return channel
 
     def chat_settings(self, key):
@@ -1030,7 +1056,7 @@ class Store:
         except (TypeError, ValueError):
             limit = 120
         rows = [m for m in self.all('messages')
-                if (m.get('channel') or self.ALL_ROOM) == channel
+                if self.chat_normalize(m) == channel
                 and (not since or str(m.get('createdAt', '')) > since)]
         rows.sort(key=lambda m: m.get('createdAt', ''))
         return {'messages': rows[-limit:], 'now': timestamp(), 'channel': channel}
@@ -1041,7 +1067,7 @@ class Store:
             raise Problem(400, '消息不能为空')
         if len(body) > 1000:
             raise Problem(400, '单条消息不能超过 1000 字')
-        channel = self.chat_scope(data)
+        channel = self.chat_scope(data, writing=True)
         # The mentions travel with the message so the notice does not depend on
         # parsing the text back into accounts later.
         mentions = []
@@ -1055,7 +1081,7 @@ class Store:
         message = {'author': user['id'], 'body': body, 'channel': channel,
                    'mentions': mentions, 'createdAt': timestamp()}
         self.put('messages', message)
-        where = '沟通区' if channel == self.ALL_ROOM else '「%s」频道' % self.get('projects', channel)['name']
+        where = '「%s」' % self.chat_channel_name(channel)
         for target in mentions:
             self.notify(target, '有人在沟通区提到了你',
                         '%s 在%s里 @ 了你：%s' % (self.display_name(user['id']), where, body[:60]),

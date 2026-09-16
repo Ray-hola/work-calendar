@@ -111,5 +111,39 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(sent['mentions'], ['superadmin'], '重复与不存在的账户应被丢掉')
 
 
+    def test_the_two_standing_channels_are_always_writable(self):
+        self.store.action(self.member, 'chat.send', {'body': '工作的事', 'channel': 'general'})
+        self.store.action(self.member, 'chat.send', {'body': '摸鱼的事', 'channel': 'lounge'})
+        self.assertEqual([m['body'] for m in self.store.action(self.admin, 'chat.list', {'channel': 'general'})['messages']],
+                         ['工作的事'])
+        self.assertEqual([m['body'] for m in self.store.action(self.admin, 'chat.list', {'channel': 'lounge'})['messages']],
+                         ['摸鱼的事'])
+        self.assertEqual([m['body'] for m in self.store.action(self.admin, 'chat.list', {})['messages']],
+                         ['工作的事'], '不传频道时默认落在「沟通」')
+
+    def test_messages_from_before_channels_belong_to_the_default_room(self):
+        legacy = self.store.action(self.member, 'chat.send', {'body': '老消息'})
+        legacy['channel'] = 'all'
+        self.store.put('messages', legacy)
+        listed = self.store.action(self.admin, 'chat.list', {'channel': 'general'})['messages']
+        self.assertEqual([m['body'] for m in listed], ['老消息'], '旧大厅消息应归入「沟通」')
+
+    def test_a_finished_project_keeps_its_history_readable_but_not_writable(self):
+        project = self.store.action(self.admin, 'project.create', {
+            'name': '要归档的项目', 'owner': 'superadmin', 'cycle': 'infinite'})
+        self.store.action(self.member, 'chat.send', {'body': '项目进行中的讨论', 'channel': project['id']})
+        # Finishing a project has its own coverage elsewhere; this case is about
+        # what happens to its channel once it is no longer live.
+        archived = self.store.get('projects', project['id'])
+        archived['status'] = 'done'
+        self.store.put('projects', archived)
+        self.assertNotEqual(archived['status'], 'active', '项目应已归档')
+        with self.assertRaises(Problem) as caught:
+            self.store.action(self.member, 'chat.send', {'body': '还能说吗', 'channel': project['id']})
+        self.assertIn('成果库', str(caught.exception.message))
+        listed = self.store.action(self.admin, 'chat.list', {'channel': project['id']})['messages']
+        self.assertEqual([m['body'] for m in listed], ['项目进行中的讨论'], '归档后仍应可读')
+
+
 if __name__ == '__main__':
     unittest.main()
