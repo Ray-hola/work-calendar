@@ -579,7 +579,36 @@ select:focus {
 }
 
 /* --------------------------------------------------------------------------
-   14 · Scrollbars
+   14 · Assistant run
+   -------------------------------------------------------------------------- */
+
+/* One quiet receipt per executed step, so a multi-step run stays scannable. */
+.agent-step {
+  align-self: stretch;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--surface-sunk);
+  border-left: 2px solid var(--accent-line);
+  border-radius: 0 7px 7px 0;
+  padding: 7px 10px;
+  animation: wcRiseIn var(--t-slow) var(--ease-out) both;
+}
+
+.agent-form .secondary-btn {
+  height: 36px;
+  padding: 0 12px;
+  flex-shrink: 0;
+  color: var(--danger);
+  border-color: var(--danger-line);
+  background: var(--accent-soft-2);
+}
+.agent-form .secondary-btn:hover {
+  border-color: var(--danger);
+  background: var(--accent-soft-2);
+}
+
+/* --------------------------------------------------------------------------
+   15 · Scrollbars
    -------------------------------------------------------------------------- */
 
 * { scrollbar-color: var(--line-strong) transparent; }
@@ -594,7 +623,7 @@ select:focus {
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 
 /* --------------------------------------------------------------------------
-   15 · Accessibility: honour reduced motion
+   16 · Accessibility: honour reduced motion
    -------------------------------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {

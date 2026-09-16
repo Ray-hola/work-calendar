@@ -305,7 +305,7 @@ test('agent action envelopes are parsed and removed from the reply text', () => 
   const a = app();
   // The agent helpers live after the DOM-binding block, so load just the pure
   // parser slice to keep this a unit test.
-  a.run(source.slice(source.indexOf('const AGENT_ACTION_LABELS'), source.indexOf('function agentRenderAction')));
+  a.run(source.slice(source.indexOf('const AGENT_ACTION_LABELS'), source.indexOf('function agentRunOne')));
   const reply = a.json(`(()=>{
     const r=agentSplitActions('我准备创建任务。\\n<action>{"action":"task.create","data":{"name":"整理周报","assignee":"test001"}}</action>');
     return {clean:r.clean,action:r.actions[0]&&r.actions[0].action,name:r.actions[0]&&r.actions[0].data.name};

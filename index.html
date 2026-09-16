@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#F0EEE6" />
   <title>Work Calendar · 工作台</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23D97757'/%3E%3Cpath d='M17 20h30v8H17zm0 14h21v8H17z' fill='%23FFFDF9'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="styles.css?v=20260916-repeat" />
+  <link rel="stylesheet" href="styles.css?v=20260916-agentchain" />
 </head>
 <body>
   <div class="app-shell">
@@ -62,9 +62,9 @@
     <div class="agent-header"><div><span class="agent-kicker">WORK AGENT</span><strong>AI 工作助手</strong></div><div class="agent-header-actions"><button id="agentHistoryBtn" class="agent-icon-btn" title="AI 工作记录">🗂</button><button id="agentConfigBtn" class="agent-icon-btn" title="配置 API">⚙</button><button id="agentCloseBtn" class="agent-icon-btn" title="关闭">×</button></div></div>
     <div id="agentCapability" class="agent-capability"></div>
     <div id="agentMessages" class="agent-messages"><div class="agent-message assistant"><span>你好，我可以帮你查询工作台信息。配置自定义 API 后，也可以接入你的模型。</span></div></div>
-    <form id="agentForm" class="agent-form"><textarea id="agentInput" rows="2" placeholder="问我任务、项目、负载或收件箱…" aria-label="输入消息"></textarea><button class="primary-btn" type="submit" id="agentSendBtn">发送</button></form>
+    <form id="agentForm" class="agent-form"><textarea id="agentInput" rows="2" placeholder="问我任务、项目、负载或收件箱…" aria-label="输入消息"></textarea><button class="secondary-btn hidden" type="button" id="agentStopBtn">停止</button><button class="primary-btn" type="submit" id="agentSendBtn">发送</button></form>
     <div id="agentConfig" class="agent-config hidden"><div class="agent-config-title"><strong>AI 接入配置</strong><button id="agentConfigClose" class="agent-text-btn">收起</button></div><p>API Key 与模型由 superadmin 统一管理。支持 OpenCode Go 的 OpenAI 兼容 <code>/chat/completions</code> 接口，也可填写其他兼容服务。</p><label>服务商预设<select id="agentProvider"><option value="opencode-go">OpenCode Go（推荐）</option><option value="custom">自定义 OpenAI 兼容 API</option></select></label><label>API 地址<input id="agentEndpoint" placeholder="https://opencode.ai/zen/go/v1/chat/completions" autocomplete="url"></label><label>API Key<input id="agentApiKey" type="password" placeholder="留空表示保持原密钥" autocomplete="off"></label><label>模型<select id="agentModelSelect"></select><input id="agentCustomModel" class="hidden" placeholder="输入自定义模型 ID" autocomplete="off"></label><div class="agent-config-actions"><button type="button" class="secondary-btn" id="agentConfigReset">清除本机配置</button><button type="button" class="primary-btn" id="agentConfigSave">保存服务端配置</button></div></div>
   </aside>
-  <script src="app.js?v=20260916-repeat"></script>
+  <script src="app.js?v=20260916-agentchain"></script>
 </body>
 </html>

@@ -698,7 +698,7 @@ if(location.protocol==='file:'){showAuth()}else{refresh()}
 const AGENT_CONFIG_KEY='work-calendar-agent-config-v1';
 const OPENCODE_GO_ENDPOINT='https://opencode.ai/zen/go/v1/chat/completions';
 const OPENCODE_GO_MODELS=['glm-5.3-flash','glm-5.3','glm-5.2','glm-5.1','kimi-k3','kimi-k2.7-code','kimi-k2.6','longcat-2.0','deepseek-v4.1-flash','deepseek-v4-pro','deepseek-v4-flash','deepseek-v4-flash-vision-exp','mimo-v2.5','mimo-v2.5-pro','hy4-preview','hy3','grok-4.5'];
-const agentState={messages:[],busy:false,sessionId:(globalThis.crypto?.randomUUID?.()||`wc-${Date.now()}-${Math.random().toString(36).slice(2)}`)};
+const agentState={messages:[],busy:false,steps:0,autoRun:false,stop:false,pendingResolve:null,sessionId:(globalThis.crypto?.randomUUID?.()||`wc-${Date.now()}-${Math.random().toString(36).slice(2)}`)};
 let agentServerConfig=null;
 function agentConfig(){
   try{return JSON.parse(localStorage.getItem(AGENT_CONFIG_KEY)||'{}')}catch(_){return {}}
@@ -795,47 +795,143 @@ function agentSplitActions(text){
   }).trim();
   return {clean,actions};
 }
-function agentRenderAction(proposal){
+const AGENT_MAX_STEPS=12;      /* hard stop so a run can never loop forever */
+const AGENT_CONTEXT_LIMIT=24;  /* how many turns we replay back to the model */
+
+function agentContext(){
+  return {role:S.agentCapabilities?.role||'member',mode:S.agentCapabilities?.mode||'readonly'};
+}
+function agentSystemPrompt(context){
+  const rule=context.mode==='operator'
+    ?'用户要求改动数据时，输出一个 <action>{"action":"…","data":{…}}</action> 动作块，一次只输出一个动作，然后停下来等待系统回执。系统会把执行结果以【系统回执】的形式发给你，收到后判断：如果用户的目标还没完成，继续输出下一个动作；如果已经完成，用一句话总结并明确结束。绝对不要在收到回执之前声称操作已经完成。'
+    :'你是只读助手，不能创建、指派、修改或审批任何数据。';
+  return `你是 Work Calendar 工作助手。当前账户角色：${context.role}，权限模式：${context.mode}。遵守服务端权限边界：${rule}`;
+}
+function agentRecentMessages(){
+  return agentState.messages.slice(-AGENT_CONTEXT_LIMIT).map(x=>({role:x.role,content:x.content}));
+}
+async function agentNext(context){
+  const answer=await agentRequest([{role:'system',content:agentSystemPrompt(context)},...agentRecentMessages()]);
+  const {clean,actions}=agentSplitActions(answer);
+  if(clean)agentAppend('assistant',clean);
+  return actions;
+}
+function agentSummarize(result){
+  if(result==null)return '已完成';
+  if(typeof result!=='object')return String(result).slice(0,300);
+  if(result.deleted)return '已删除';
+  if(result.id)return `记录 ${result.id}`;
+  try{return JSON.stringify(result).slice(0,300)}catch(_){return '已完成'}
+}
+/* A step line is replayed to the model as a user turn but rendered as a quiet
+   receipt, so the transcript stays readable while the model keeps its context. */
+function agentRecordStep(display,forModel){
+  agentState.messages.push({role:'user',content:forModel});
   const list=$('#agentMessages');if(!list)return;
-  const label=AGENT_ACTION_LABELS[proposal.action]||proposal.action;
-  const payload=(proposal.data&&typeof proposal.data==='object')?proposal.data:{};
-  const card=document.createElement('div');card.className='agent-message assistant agent-action';
-  card.innerHTML=`<div class="agent-action-title">待确认操作 · ${escapeHTML(label)}</div><pre class="agent-action-payload">${escapeHTML(JSON.stringify(payload,null,2))}</pre><div class="agent-action-buttons"><button class="ghost-btn agent-action-cancel">取消</button><button class="primary-btn agent-action-confirm">确认执行</button></div>`;
-  list.appendChild(card);list.scrollTop=list.scrollHeight;
-  card.querySelector('.agent-action-cancel').onclick=()=>{card.remove()};
-  card.querySelector('.agent-action-confirm').onclick=async e=>{
-    const btn=e.currentTarget;btn.disabled=true;btn.textContent='执行中…';
-    try{
-      await api('/api/action',{action:'agent.execute',data:{action:proposal.action,data:payload,confirmed:true}});
-      card.querySelector('.agent-action-buttons').innerHTML='<span class="agent-action-done">已执行</span>';
-      await refresh();toast(`已${label}`);
-      agentAppend('assistant',`已执行：${label}。`);
-    }catch(err){btn.disabled=false;btn.textContent='确认执行';toast(err.message||'执行失败')}
-  };
+  const el=document.createElement('div');el.className='agent-step';el.textContent=display;
+  list.appendChild(el);list.scrollTop=list.scrollHeight;
+}
+function agentUpdateBusy(){
+  const send=$('#agentSendBtn'),stop=$('#agentStopBtn');
+  if(send){send.disabled=agentState.busy;send.textContent=agentState.busy?'…':'发送'}
+  if(stop){stop.classList.toggle('hidden',!agentState.busy);stop.textContent=agentState.steps?`停止（已执行 ${agentState.steps} 步）`:'停止'}
+}
+function agentHalt(note){
+  agentState.stop=true;agentState.autoRun=false;
+  const pending=agentState.pendingResolve;
+  agentState.pendingResolve=null;
+  if(pending)pending({cancelled:true});
+  if(note)agentAppend('assistant',note,'');
+}
+function agentRunOne(proposal){
+  /* Renders one confirmation card. The first card always waits for the user;
+     once they confirm, the run switches to automatic and later cards execute
+     on their own until the model stops proposing actions. */
+  return new Promise(resolve=>{
+    const list=$('#agentMessages');
+    if(!list){resolve({cancelled:true});return}
+    const label=AGENT_ACTION_LABELS[proposal.action]||proposal.action;
+    const payload=(proposal.data&&typeof proposal.data==='object')?proposal.data:{};
+    const card=document.createElement('div');
+    card.className='agent-message assistant agent-action';
+    card.innerHTML=`<div class="agent-action-title">待确认操作 · ${escapeHTML(label)}</div><pre class="agent-action-payload">${escapeHTML(JSON.stringify(payload,null,2))}</pre><div class="agent-action-buttons"><button class="ghost-btn agent-action-cancel">取消</button><button class="primary-btn agent-action-confirm">确认执行</button></div>`;
+    list.appendChild(card);list.scrollTop=list.scrollHeight;
+    const finish=value=>{agentState.pendingResolve=null;resolve(value)};
+    agentState.pendingResolve=finish;
+    const buttons=card.querySelector('.agent-action-buttons');
+    const confirm=card.querySelector('.agent-action-confirm');
+    card.querySelector('.agent-action-cancel').onclick=()=>{card.remove();agentHalt();finish({cancelled:true})};
+    confirm.onclick=async()=>{
+      confirm.disabled=true;confirm.textContent='执行中…';
+      try{
+        const result=await api('/api/action',{action:'agent.execute',data:{action:proposal.action,data:payload,confirmed:true}});
+        buttons.innerHTML='<span class="agent-action-done">已执行</span>';
+        await refresh();toast(`已${label}`);
+        agentState.autoRun=true;
+        const summary=agentSummarize(result);
+        agentRecordStep(`已${label} · ${summary}`,`【系统回执】${label} 执行成功，返回：${summary}`);
+        finish({label,result});
+      }catch(err){
+        confirm.disabled=false;confirm.textContent='确认执行';
+        const message=err?.message||'执行失败';
+        toast(message);
+        agentAppend('assistant',`执行失败：${message}`,'error');
+        agentState.autoRun=false;
+        finish({error:true});
+      }
+    };
+    if(agentState.autoRun&&!agentState.stop)confirm.click();
+  });
+}
+async function agentLoop(context){
+  /* One pass = ask the model for its next move, then run the actions it
+     proposed. Keeps going while the model still proposes work and the user's
+     confirmation has put the run into automatic mode. */
+  let steps=0;
+  while(steps<AGENT_MAX_STEPS&&!agentState.stop){
+    const actions=await agentNext(context);
+    if(!actions.length)break;
+    if(context.mode!=='operator'){
+      agentAppend('assistant','当前账户为只读权限，无法执行该操作。','error');
+      break;
+    }
+    let stalled=false;
+    for(const proposal of actions){
+      if(agentState.stop)break;
+      const outcome=await agentRunOne(proposal);
+      if(outcome.cancelled||outcome.error){stalled=true;break}
+      steps+=1;
+      agentState.steps=steps;agentUpdateBusy();
+      if(steps>=AGENT_MAX_STEPS)break;
+      if(!agentState.autoRun){stalled=true;break}
+    }
+    if(stalled)break;
+    if(!agentState.autoRun)break;
+  }
+  if(steps>=AGENT_MAX_STEPS)agentAppend('assistant',`已连续执行 ${steps} 步，为安全起见先停在这里。你可以继续追问，我会接着往下做。`,'');
+  return steps;
 }
 async function agentSubmit(){
   const input=$('#agentInput'),text=input?.value.trim();if(!text||agentState.busy)return;
-  input.value='';agentAppend('user',text);agentState.busy=true;$('#agentSendBtn').disabled=true;$('#agentSendBtn').textContent='…';
+  input.value='';agentAppend('user',text);
+  agentState.autoRun=false;agentState.stop=false;agentState.steps=0;
+  agentState.pendingResolve=null;
+  agentState.busy=true;agentUpdateBusy();
   try{
-    const context={role:S.agentCapabilities?.role||'member',mode:S.agentCapabilities?.mode||'readonly'};
-    const rule=context.mode==='operator'?'用户要求改动数据时，按服务端约定输出单个 <action> 动作块，等待用户确认；不要声称已经执行完成。':'你是只读助手，不能创建、指派、修改或审批任何数据。';
-    const answer=await agentRequest([{role:'system',content:`你是 Work Calendar 工作助手。当前账户角色：${context.role}，权限模式：${context.mode}。遵守服务端权限边界：${rule}`},...agentState.messages.map(x=>({role:x.role,content:x.content}))]);
-    // Remove the pending user turn already echoed by agentAppend before parsing.
-    const {clean,actions}=agentSplitActions(answer);
-    if(clean)agentAppend('assistant',clean);
-    if(actions.length){
-      if(context.mode==='operator')actions.forEach(agentRenderAction);
-      else agentAppend('assistant','当前账户为只读权限，无法执行该操作。','error');
-    }else if(!clean){
-      agentAppend('assistant','Agent 未返回可执行内容。','error');
-    }
-  }catch(e){agentAppend('assistant',e.message||'暂时无法连接 Agent 服务。','error')}
-  finally{agentState.busy=false;$('#agentSendBtn').disabled=false;$('#agentSendBtn').textContent='发送';input.focus()}
+    await agentLoop(agentContext());
+  }catch(e){
+    agentAppend('assistant',e?.message||'暂时无法连接 Agent 服务。','error');
+  }
+  agentState.busy=false;agentState.autoRun=false;agentState.steps=0;
+  agentState.pendingResolve=null;
+  agentUpdateBusy();
+  input.focus();
 }
 function initAgentUI(){
   $('#agentBtn')?.addEventListener('click',async()=>{$('#agentPanel').classList.remove('hidden');renderAgentCapability();await agentLoadOwnHistory();await agentLoadServerConfig();$('#agentInput').focus()});
   $('#agentHistoryBtn')?.addEventListener('click',()=>agentShowHistory());
   $('#agentCloseBtn')?.addEventListener('click',()=>$('#agentPanel').classList.add('hidden'));
+  $('#agentStopBtn')?.addEventListener('click',()=>agentHalt('已停止连续执行。'));
   $('#agentConfigBtn')?.addEventListener('click',()=>agentSetConfigVisible(true));
   $('#agentConfigClose')?.addEventListener('click',()=>agentSetConfigVisible(false));
   $('#agentProvider')?.addEventListener('change',()=>agentSyncProviderUI());
