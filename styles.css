@@ -1496,3 +1496,148 @@ select:focus {
   border-color: var(--danger-line);
   background: var(--accent-soft-2);
 }
+
+/* --------------------------------------------------------------------------
+   20 · Assistant panel
+   -------------------------------------------------------------------------- */
+
+/* The tools and the box they act on read as one surface: you set the intent,
+   then type into it. */
+.agent-composer {
+  border-top: 1px solid var(--line);
+  background: var(--surface-sunk);
+  padding: 10px 11px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.agent-composer .agent-tools { margin-bottom: 0; }
+.agent-composer .agent-form {
+  border-top: 0;
+  padding: 0;
+  background: none;
+}
+
+/* 规划任务 is a switch, not a submit: it marks the next message. */
+.agent-plan-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--t) var(--ease), border-color var(--t) var(--ease), color var(--t) var(--ease);
+}
+.agent-plan-toggle:hover { color: var(--ink); border-color: var(--line-strong); }
+.agent-plan-toggle.is-on {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--accent-dark);
+  font-weight: 600;
+}
+.agent-plan-toggle .icon-slot { width: 14px; height: 14px; font-size: 14px; }
+
+.agent-intent-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--accent-dark);
+}
+
+/* The chip that says what a message is asking for, instead of an inline glyph. */
+.agent-intent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--accent-dark);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+.agent-intent .icon-slot { width: 12px; height: 12px; font-size: 12px; }
+.agent-message.user .agent-intent { background: var(--surface); }
+
+/* Bubbles carry a tail on the side they belong to. */
+.agent-message { border-radius: 12px 12px 12px 5px; }
+.agent-message.user { border-radius: 12px 12px 5px 12px; }
+
+/* Role and model state, at a glance. */
+.agent-role-chip {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.agent-role-chip.is-operator {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--accent-dark);
+}
+.agent-model {
+  max-width: 118px;
+  margin-right: 6px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  border: 1px solid var(--line);
+  background: var(--surface-sunk);
+  color: var(--faint);
+  font-size: 10px;
+  line-height: 1.7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-model.ready {
+  color: var(--success);
+  border-color: var(--c-green-line);
+  background: var(--success-soft);
+}
+
+/* Sample prompts on an empty transcript. */
+.agent-samples { display: flex; flex-direction: column; gap: 6px; }
+.agent-sample {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background var(--t) var(--ease), border-color var(--t) var(--ease), color var(--t) var(--ease);
+}
+.agent-sample:hover {
+  border-style: solid;
+  border-color: var(--accent-line);
+  background: var(--surface-sunk);
+  color: var(--ink);
+}
+.agent-sample.is-plan { color: var(--accent-dark); border-color: var(--accent-line); }
+.agent-sample .icon-slot {
+  width: 12px;
+  height: 12px;
+  font-size: 12px;
+  margin-right: 4px;
+  vertical-align: -1px;
+}

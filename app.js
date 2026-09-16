@@ -1043,13 +1043,67 @@ function renderAgentCapability(){
   const c=S.agentCapabilities||{};
   const configBtn=$('#agentConfigBtn');
   if(configBtn)configBtn.classList.toggle('hidden',c.role!=='superadmin');
-  const role=c.role==='superadmin'?'superadmin':'普通成员';
-  e.innerHTML=c.mode==='operator'?'<strong>superadmin Agent · 全局操作员</strong><br>可查询全局信息并执行管理操作；写入与审批动作需要确认。':'<strong>普通成员 Agent · 只读查询</strong><br>仅可查询你有权看到的工作信息，不能创建、指派、修改或审批。';
+  const operator=c.mode==='operator';
+  e.innerHTML=`<span class="agent-role-chip ${operator?'is-operator':''}">${escapeHTML(operator?'操作员':'只读')}</span>`
+    +`<span>${operator?'可查询全局并执行管理操作，写入与审批都要你确认。':'只能查询你有权看到的信息，不能改动数据。'}</span>`;
+  renderAgentModelChip();
 }
-function agentAppend(role,content,kind=''){
+/* Which model is answering, at a glance — "not configured" is the state that
+   actually needs to be visible, since everything else is self-evident. */
+function renderAgentModelChip(){
+  const el=$('#agentModelChip');if(!el)return;
+  const cfg=agentServerConfig||{};
+  const ready=Boolean(cfg.configured);
+  el.className='agent-model '+(ready?'ready':'missing');
+  el.textContent=ready?(cfg.model||'已接入'):'未接入';
+  el.title=ready
+    ?('当前模型：'+(cfg.model||'（服务端已配置）')+(cfg.provider?' · '+cfg.provider:''))
+    :'还没有配置模型，点右上角的齿轮填写 API';
+}
+
+/* Sample prompts on an empty transcript: the panel explains itself better by
+   being tried than by being described. */
+function agentSamples(context){
+  const c=context||agentContext();
+  const items=[{text:'今天有哪些任务要交？'},{text:'团队这周的负载怎么样？'}];
+  if(c.mode==='operator')items.push({text:'哪些人的任务逾期了？'});
+  else items.push({text:'我这个月完成了多少任务？'});
+  items.push({text:'下周把季度复盘做完：整理数据、出初稿、找王零零评审',plan:true});
+  return items;
+}
+function agentRenderEmptyState(list){
+  const samples=agentSamples();
+  list.innerHTML='<div class="agent-message assistant"><span>你好。我可以查询工作台信息，也可以把一句话拆成一组任务。配置自定义 API 后还能接入你自己的模型。</span></div>'
+    +'<div class="agent-samples">'
+    +samples.map(s=>`<button type="button" class="agent-sample ${s.plan?'is-plan':''}" data-text="${escapeHTML((s.plan?AGENT_PLAN_MARK+' ':'')+s.text)}">`
+      +(s.plan?icon('sparkles'):'')+escapeHTML(s.text)+'</button>').join('')
+    +'</div>';
+  $$('#agentMessages .agent-sample').forEach(b=>b.onclick=()=>{
+    const input=$('#agentInput');if(!input)return;
+    input.value=b.dataset.text;
+    agentSyncPlanButton();
+    input.focus();
+  });
+}
+function agentAppend(role,content,kind='',intent=''){
   agentState.messages.push({role,content});
   const list=$('#agentMessages');if(!list)return;
-  const el=document.createElement('div');el.className=`agent-message ${role==='user'?'user':'assistant'} ${kind}`;el.textContent=content;list.appendChild(el);list.scrollTop=list.scrollHeight;
+  const el=document.createElement('div');
+  el.className=`agent-message ${role==='user'?'user':'assistant'} ${kind}`.trim();
+  const chip=agentIntentChip(intent);
+  if(chip)el.appendChild(chip);
+  /* The chip carries the intent, so the mark itself would just be noise in the
+     bubble — the stored line keeps it, the transcript does not. */
+  const shown=intent==='plan'?agentPlanIntent(content).body:content;
+  el.appendChild(document.createTextNode(shown));
+  list.appendChild(el);list.scrollTop=list.scrollHeight;
+}
+function agentIntentChip(intent){
+  if(!intent)return null;
+  const chip=document.createElement('span');
+  chip.className='agent-intent';
+  chip.innerHTML=icon('sparkles')+escapeHTML(intent==='plan'?'规划任务':'');
+  return chip;
 }
 function agentFormatTime(iso){try{return new Date(iso).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}catch(_){return iso||''}}
 function agentMessageNode(m){
@@ -1061,7 +1115,10 @@ function agentMessageNode(m){
     return node;
   }
   node.className=`agent-message ${m.role==='user'?'user':'assistant'}`;
-  const text=document.createElement('span');text.textContent=m.content||'';node.appendChild(text);
+  const intent=m.role==='user'?agentPlanIntent(m.content):{plan:false,body:m.content||''};
+  const chip=agentIntentChip(intent.plan?'plan':'');
+  if(chip)node.appendChild(chip);
+  const text=document.createElement('span');text.textContent=intent.plan?intent.body:(m.content||'');node.appendChild(text);
   const stamp=document.createElement('small');stamp.className='agent-time';stamp.textContent=agentFormatTime(m.createdAt);node.appendChild(stamp);
   return node;
 }
@@ -1070,7 +1127,7 @@ async function agentLoadOwnHistory(){
     const data=await api('/api/action',{action:'agent.history',data:{}});
     const messages=data.messages||[],list=$('#agentMessages');if(!list)return;
     list.innerHTML='';
-    if(!messages.length){list.innerHTML='<div class="agent-message assistant"><span>你好，我可以帮你查询工作台信息。配置自定义 API 后，也可以接入你的模型。</span></div>';return}
+    if(!messages.length){agentRenderEmptyState(list);return}
     agentState.messages=messages.filter(m=>m.role==='user'||m.role==='assistant').map(m=>({role:m.role,content:m.content}));
     messages.forEach(m=>list.appendChild(agentMessageNode(m)));
     list.scrollTop=list.scrollHeight;
@@ -1097,7 +1154,7 @@ function agentRenderModelOptions(selected=''){
   if(selected&&models.includes(selected))select.value=selected;
 }
 function agentSyncProviderUI(){const provider=$('#agentProvider')?.value||'custom',custom=provider==='custom';$('#agentEndpoint').placeholder=custom?'https://api.example.com/v1/chat/completions':OPENCODE_GO_ENDPOINT;if(!custom){$('#agentEndpoint').value=OPENCODE_GO_ENDPOINT;$('#agentModelSelect').classList.remove('hidden');$('#agentCustomModel').classList.add('hidden')}else{$('#agentModelSelect').classList.add('hidden');$('#agentCustomModel').classList.remove('hidden')}}
-async function agentLoadServerConfig(){try{agentServerConfig=await api('/api/action',{action:'agent.config.get',data:{}})}catch(_){agentServerConfig=null}}
+async function agentLoadServerConfig(){try{agentServerConfig=await api('/api/action',{action:'agent.config.get',data:{}})}catch(_){agentServerConfig=null}renderAgentModelChip()}
 function agentExtractText(data){
   const text=data?.choices?.[0]?.message?.content||data?.choices?.[0]?.text||data?.message?.content||data?.message||data?.content||data?.text;
   if(text)return text;
@@ -1150,14 +1207,39 @@ function agentRenderModeOptions(){
     b.setAttribute('aria-pressed',on?'true':'false');
   });
 }
-/* Planning asks the model for the same fields a task needs, but stops short of
-   executing: the array comes back as a <plan> block that the user approves. */
-const AGENT_PLAN_PROMPT=text=>'把下面这段安排拆成一组标准任务。这一步只做规划，不要输出任何 <action> 动作，也不要声称已经创建。\n'
-  +'先用一两句话说明你的拆解思路，然后另起一行输出一个 <plan> 块，块里是一个单行 JSON 数组：\n'
-  +'<plan>[{"name":"任务名","projectId":"项目ID","assignee":"负责人账户","date":"YYYY-MM-DD","deadline":"可选","priority":"P0/P1/P2","duration":分钟数}]</plan>\n'
-  +'规则：projectId 与 assignee 必须用数据里真实存在的 id（负责人写账户 id，不是中文名）；date 不早于今天、不晚于可排期上限；'
-  +'宁可少拆几个也不要编造不存在的项目或账户；确实无法确定负责人时，用当前账户。\n'
-  +'---\n'+text;
+/* Planning is asked for with a mark at the start of the message rather than a
+   separate button besides the composer: the mark rides in the text the user can
+   see and edit, the send path reads it back out, and the transcript still shows
+   what was actually asked. Typing it by hand works the same way. */
+const AGENT_PLAN_MARK='\u2726';
+const AGENT_PLAN_ALIASES=[AGENT_PLAN_MARK,'/plan','[规划]'];
+function agentPlanIntent(text){
+  const raw=String(text||'').replace(/^\s+/,'');
+  for(const alias of AGENT_PLAN_ALIASES){
+    if(!raw.startsWith(alias))continue;
+    return {plan:true,body:raw.slice(alias.length).replace(/^\s+/,'')};
+  }
+  return {plan:false,body:String(text||'')};
+}
+function agentTogglePlan(){
+  const input=$('#agentInput');if(!input||agentState.busy)return;
+  const intent=agentPlanIntent(input.value);
+  /* Clicking again takes the mark back off, so the switch is never a trap. */
+  if(intent.plan)input.value=intent.body;
+  else input.value=AGENT_PLAN_MARK+' '+input.value;
+  agentSyncPlanButton();
+  input.focus();
+}
+function agentSyncPlanButton(){
+  const input=$('#agentInput');
+  const on=Boolean(input)&&agentPlanIntent(input.value).plan;
+  const btn=$('#agentPlanBtn');
+  if(btn){
+    btn.classList.toggle('is-on',on);
+    btn.setAttribute('aria-pressed',on?'true':'false');
+  }
+  $('#agentPlanHint')?.classList.toggle('hidden',!on);
+}
 function agentSplitPlan(text){
   let plan=[];
   const clean=String(text||'').replace(/<plan>([\s\S]*?)<\/plan>/gi,(_,body)=>{
@@ -1181,7 +1263,18 @@ const AGENT_CONTEXT_LIMIT=24;  /* how many turns we replay back to the model */
 function agentContext(){
   return {role:S.agentCapabilities?.role||'member',mode:S.agentCapabilities?.mode||'readonly'};
 }
-function agentSystemPrompt(context){
+const AGENT_PLAN_RULE='这次是一条任务规划请求：把用户那句话拆成一组标准任务，'
+  +'但不要执行任何操作，不要输出 <action> 动作块，也不要声称已经创建。'
+  +'先用一两句话说明拆解思路，然后另起一行输出一个 <plan> 块，块里是单行 JSON 数组：'
+  +'<plan>[{"name":"任务名","projectId":"项目ID","assignee":"负责人账户","date":"YYYY-MM-DD",'
+  +'"deadline":"可选","priority":"P0/P1/P2","duration":分钟数}]</plan>。'
+  +'规则：projectId 与 assignee 必须用数据里真实存在的 id（负责人写账户 id，不是中文名）；'
+  +'date 不早于今天、不晚于可排期上限；宁可少拆几个也不要编造不存在的项目或账户；'
+  +'确实无法确定负责人时，用当前账户。';
+function agentSystemPrompt(context,planning){
+  /* The rule lives in the system prompt rather than wrapped around the user's
+     words, so the stored transcript stays exactly what was typed. */
+  if(planning)return `你是「战略小组台账」工作助手。当前账户角色：${context.role}，权限模式：${context.mode}。${AGENT_PLAN_RULE}`;
   const rule=context.mode==='operator'
     ?'用户要求改动数据时，输出一个 <action>{"action":"…","data":{…}}</action> 动作块，一次只输出一个动作，然后停下来等待系统回执。系统会把结果以【系统回执】或【系统回执·失败】的形式发给你。收到成功回执后，先看回执里的「数据核对」，确认这一步确实产生了预期的变化，再输出下一个动作；核对结果与预期不符就先修正它。如果用户的目标还没完成就继续输出下一个动作，完成了就用一句话总结并明确结束。收到失败回执时先读懂原因：如果是缺了前置步骤（例如负责人还没加入项目、项目还没审批），就输出补救动作把它补上再继续；如果确实做不到，用一句话说明原因并结束。绝对不要在收到回执之前声称操作已经完成，也不要重复提交同一个已经失败的动作。'
     :'你是只读助手，不能创建、指派、修改或审批任何数据。';
@@ -1371,6 +1464,9 @@ async function agentLoop(context){
 }
 async function agentSubmit(){
   const input=$('#agentInput'),text=input?.value.trim();if(!text||agentState.busy)return;
+  const intent=agentPlanIntent(text);
+  /* The mark is the request itself — no separate mode to remember. */
+  if(intent.plan){input.value='';agentSyncPlanButton();return agentPlanSubmit(intent.body)}
   input.value='';agentAppend('user',text);
   agentState.autoRun=false;agentState.stop=false;agentState.steps=0;agentState.failures=0;
   agentState.mode=agentPref();agentState.lastActionKey='';agentState.repeats=0;
@@ -1388,19 +1484,19 @@ async function agentSubmit(){
 }
 /* Plan a set of tasks from free text. The model returns a <plan> array, the
    user approves a rendered table, and only then does anything get written. */
-async function agentPlanSubmit(){
-  const input=$('#agentInput'),text=input?.value.trim();
+async function agentPlanSubmit(body){
+  const input=$('#agentInput');
+  const source=body===undefined?(input?.value||''):body;
+  const text=agentPlanIntent(source).body.trim();
   if(!text||agentState.busy){if(!text)toast('先在输入框里写下你的安排');return}
-  input.value='';
-  agentAppend('user',text);
-  /* The transcript shows what the user typed; the model gets the instruction
-     wrapped around it. */
-  agentState.messages[agentState.messages.length-1].content=AGENT_PLAN_PROMPT(text);
+  const shown=AGENT_PLAN_MARK+' '+text;
+  input.value='';agentSyncPlanButton();
+  agentAppend('user',shown,'','plan');
   agentState.busy=true;agentUpdateBusy();
   agentState.stop=false;agentState.steps=0;agentState.failures=0;agentState.mode=agentPref();
   agentState.lastActionKey='';agentState.repeats=0;agentState.pendingResolve=null;
   try{
-    const answer=await agentRequest([{role:'system',content:agentSystemPrompt(agentContext())},...agentRecentMessages()]);
+    const answer=await agentRequest([{role:'system',content:agentSystemPrompt(agentContext(),true)},...agentRecentMessages()]);
     const {clean,plan}=agentSplitPlan(answer);
     if(clean)agentAppend('assistant',clean);
     if(!plan.length)agentAppend('assistant','没能从这段内容里拆出任务。可以写得更具体一点，比如「下周三给 wang00 安排一次 2 小时的季度复盘」。','error');
@@ -1828,11 +1924,11 @@ function initChatUI(){
   updateChatDot();
 }
 function initAgentUI(){
-  $('#agentBtn')?.addEventListener('click',async()=>{$('#agentPanel').classList.remove('hidden');renderAgentCapability();await agentLoadOwnHistory();await agentLoadServerConfig();$('#agentInput').focus()});
+  $('#agentBtn')?.addEventListener('click',async()=>{$('#agentPanel').classList.remove('hidden');renderAgentCapability();await agentLoadOwnHistory();await agentLoadServerConfig();agentSyncPlanButton();$('#agentInput').focus()});
   $('#agentHistoryBtn')?.addEventListener('click',()=>agentShowHistory());
   $('#agentCloseBtn')?.addEventListener('click',()=>$('#agentPanel').classList.add('hidden'));
   $('#agentStopBtn')?.addEventListener('click',()=>agentHalt('已停止连续执行。'));
-  $('#agentPlanBtn')?.addEventListener('click',()=>agentPlanSubmit());
+  $('#agentPlanBtn')?.addEventListener('click',()=>agentTogglePlan());
   $$('#agentPanel .agent-mode-opt').forEach(b=>b.addEventListener('click',()=>agentSetPref(b.dataset.mode)));
   agentRenderModeOptions();
   $('#agentConfigBtn')?.addEventListener('click',()=>agentSetConfigVisible(true));
@@ -1842,7 +1938,9 @@ function initAgentUI(){
   $('#agentConfigReset')?.addEventListener('click',()=>{saveAgentConfig({});agentServerConfig=null;agentSetConfigVisible(false);toast('已清除本机 Agent 配置；如需清除服务端密钥请重新保存')});
   $('#agentForm')?.addEventListener('submit',e=>{e.preventDefault();agentSubmit()});
   $('#agentInput')?.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();agentSubmit()}});
+  $('#agentInput')?.addEventListener('input',()=>agentSyncPlanButton());
   renderAgentCapability();
+  agentSyncPlanButton();
 }
 initAgentUI();
 initChatUI();

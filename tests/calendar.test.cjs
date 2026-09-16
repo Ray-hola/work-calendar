@@ -480,9 +480,12 @@ test('the success receipt carries a data check the model must reconcile', () => 
 function liftFunction(name) {
   const fn = source.match(new RegExp('function ' + name + '\\([^)]*\\)\\{[\\s\\S]*?\\n\\}'));
   if (fn) return fn[0];
-  const arrow = source.match(new RegExp('const ' + name + '=[^\\n]*;'));
-  assert.ok(arrow, '找不到 ' + name + '，测试切点需要更新');
-  return arrow[0];
+  const single = source.match(new RegExp('const ' + name + '=[^\\n]*;'));
+  if (single) return single[0];
+  /* A const can also be built across several lines, e.g. a long prompt. */
+  const multi = source.match(new RegExp('const ' + name + '=[\\s\\S]*?;\\n'));
+  assert.ok(multi, '找不到 ' + name + '，测试切点需要更新');
+  return multi[0];
 }
 const CHAT_EVERYONE = source.match(/const CHAT_EVERYONE='([^']*)'/)[1];
 /* CHAT_URL_RE is a module-level const rather than a function parameter, so it
@@ -710,4 +713,77 @@ test('the invite dialog also manages who is already on the project', () => {
   assert.ok(/id="currentMembers"/.test(source), '要列出当前协作者');
   assert.ok(/class="ghost-btn remove-member"/.test(source), '每位协作者旁要有移出按钮');
   assert.ok(/再点一次确认/.test(source), '移除是不可逆的，需要二次确认');
+});
+
+/* Planning is asked for with a mark at the head of the message. The parser and
+   the system prompt sit past the sandbox cut-off, so they are lifted. */
+const AGENT_PLAN_SOURCE = ['AGENT_PLAN_MARK', 'AGENT_PLAN_ALIASES', 'agentPlanIntent']
+  .map(liftFunction).join('\n');
+
+test('a mark at the head of a message is what makes it a planning request', () => {
+  const a = app();
+  a.run(AGENT_PLAN_SOURCE);
+  const mark = a.run('AGENT_PLAN_MARK');
+
+  assert.deepEqual(a.json(`agentPlanIntent(${JSON.stringify(mark + ' 下周把复盘做完')})`),
+    {plan: true, body: '下周把复盘做完'});
+  assert.deepEqual(a.json("agentPlanIntent('下周把复盘做完')"),
+    {plan: false, body: '下周把复盘做完'}, '普通消息不受影响');
+
+  /* 手打的别名一样认得出 */
+  assert.equal(a.json("agentPlanIntent('/plan 排个计划')").plan, true);
+  assert.deepEqual(a.json("agentPlanIntent('/plan 排个计划')").body, '排个计划');
+  assert.equal(a.json("agentPlanIntent('[规划] 排个计划')").plan, true);
+
+  /* 只点了按钮还没写内容 */
+  const bare = a.json(`agentPlanIntent(${JSON.stringify(mark)})`);
+  assert.equal(bare.plan, true, '光有标记也算进入了规划');
+  assert.equal(bare.body, '', '正文为空');
+
+  /* 标记出现在句子中间不算 */
+  assert.equal(a.json(`agentPlanIntent('把 ${mark} 加进去')`).plan, false,
+    '只有开头才算，句子中间的不算');
+});
+
+test('the planning rule rides in the system prompt, not around the message', () => {
+  const a = app();
+  a.run(['AGENT_PLAN_RULE', 'agentSystemPrompt'].map(liftFunction).join('\n'));
+
+  const planning = a.run("agentSystemPrompt({role:'superadmin',mode:'operator'},true)");
+  assert.ok(planning.includes('<plan>'), '规划时要求输出 <plan> 块');
+  assert.ok(planning.includes('不要执行任何操作'), '明确说了这一步不动手');
+  assert.ok(planning.includes('<action>'), '并点名禁止 <action>');
+
+  const normal = a.run("agentSystemPrompt({role:'superadmin',mode:'operator'},false)");
+  assert.ok(!normal.includes('<plan>'), '普通对话不该带上规划规则');
+  assert.ok(normal.includes('<action>'), '普通对话仍然允许动作块');
+
+  assert.ok(!/AGENT_PLAN_PROMPT/.test(source),
+    '旧的「把提示词包在用户消息外面」的写法应已移除，否则记录里存的就是提示词而不是原话');
+});
+
+test('the composer toggle marks the message instead of sending it', () => {
+  const toggle = source.match(/function agentTogglePlan\(\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/input\.value=AGENT_PLAN_MARK\+' '\+input\.value/.test(toggle),
+    '点一下给输入框加上前缀');
+  assert.ok(/input\.value=intent\.body/.test(toggle), '再点一下把前缀取下来');
+
+  const submit = source.match(/async function agentSubmit\(\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/if\(intent\.plan\)\{input\.value='';agentSyncPlanButton\(\);return agentPlanSubmit\(intent\.body\)\}/.test(submit),
+    '发送时读回前缀并转到规划');
+  assert.ok(/async function agentPlanSubmit\(body\)/.test(source),
+    '规划以正文为参数，不再自己去读输入框');
+});
+
+test('a planning message is labelled in the transcript and in reopened history', () => {
+  const append = source.match(/function agentAppend\(role,content,kind='',intent=''\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/agentIntentChip\(intent\)/.test(append), '发出去的那条要带意图标签');
+  assert.ok(!/el\.textContent=content/.test(append), '不能再用 textContent 覆盖整个气泡');
+
+  const node = source.match(/function agentMessageNode\(m\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/agentPlanIntent\(m\.content\)/.test(node),
+    '重新打开历史时同样认得出来，而不是把前缀当正文显示');
+
+  assert.ok(/agentRenderEmptyState/.test(source), '空会话给出可以点的示例');
+  assert.ok(/function agentSyncPlanButton\(\)/.test(source), '按钮状态要跟着输入框走');
 });
