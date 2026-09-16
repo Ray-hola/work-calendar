@@ -64,7 +64,7 @@ TZ = ZoneInfo('Asia/Shanghai')
 # MVP 的日期范围先开放到 2027-04-30（含当天）。统一由后端校验，避免
 # 浏览器绕过日期输入限制后创建超出当前产品范围的安排。
 CALENDAR_END = date(2027, 4, 30)
-TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages')
+TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages', 'messages')
 
 # Agent capability boundary.  The future chat/browser adapter must use these
 # capabilities instead of exposing Store internals or the generic action API.
@@ -865,7 +865,7 @@ class Store:
             diaries=[d for d in self.all('diaries') if user['admin'] or d.get('author')==user['id']]
             edit_requests=[r for r in self.all('edit_requests') if user['admin'] or r.get('requester')==user['id'] or r.get('approver')==user['id']]
             automation=next((x.get('value',{}) for x in self.all('settings') if x.get('id')=='automation'),{})
-            return {'user':user,'users':self.users(),'today':now().date().isoformat(),'projects':projects,'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees']],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':[n for n in self.all('notifications') if n['to']==user['id'] and '12:00 初稿' not in str(n.get('title',''))], 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or self.get('projects',s['projectId'])['owner']==user['id'])], 'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.all('audit')[-60:] if user['admin'] else []}
+            return {'user':user,'users':self.users(),'today':now().date().isoformat(),'projects':projects,'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees']],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':[n for n in self.all('notifications') if n['to']==user['id'] and '12:00 初稿' not in str(n.get('title',''))], 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or self.get('projects',s['projectId'])['owner']==user['id'])], 'chat':self.chat_summary(),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.all('audit')[-60:] if user['admin'] else []}
 
     def diary_statistics(self, viewer, start=None, end=None):
         """Return daily completion/load summaries for the diary dashboard.
@@ -1001,6 +1001,40 @@ class Store:
                                             if k not in ('password', 'apiKey', 'messages')})
             return result or {'ok':True}
 
+    def chat_list(self, user, data):
+        """The team room. Every signed-in account reads and writes the same one.
+
+        Chat is deliberately outside the task permission model: a member who
+        cannot reassign work can still say something about it.
+        """
+        since = str(data.get('since') or '')
+        try:
+            limit = max(1, min(300, int(data.get('limit') or 120)))
+        except (TypeError, ValueError):
+            limit = 120
+        rows = [m for m in self.all('messages') if not since or str(m.get('createdAt', '')) > since]
+        rows.sort(key=lambda m: m.get('createdAt', ''))
+        return {'messages': rows[-limit:], 'now': timestamp()}
+
+    def chat_send(self, user, data):
+        body = str(data.get('body') or '').strip()
+        if not body:
+            raise Problem(400, '消息不能为空')
+        if len(body) > 1000:
+            raise Problem(400, '单条消息不能超过 1000 字')
+        message = {'author': user['id'], 'body': body, 'createdAt': timestamp()}
+        self.put('messages', message)
+        return message
+
+    def chat_summary(self):
+        """Cheap counters for the unread dot — never the bodies themselves."""
+        row = self.db.execute('SELECT COUNT(*) AS n FROM messages').fetchone()
+        last = self.db.execute('SELECT data FROM messages ORDER BY rowid DESC LIMIT 1').fetchone()
+        latest = json.loads(last['data']) if last else {}
+        return {'count': (row['n'] if row else 0),
+                'lastAt': latest.get('createdAt', ''),
+                'lastBy': latest.get('author', '')}
+
     def reconcile_task_approvals(self):
         """Keep persisted pending approvals and inbox delivery in sync with the Owner.
 
@@ -1055,6 +1089,10 @@ class Store:
                     self.put('notifications', duplicate)
 
     def _action(self, user, action, d):
+        if action=='chat.list':
+            return self.chat_list(user, d)
+        if action=='chat.send':
+            return self.chat_send(user, d)
         if action=='achievement.read':
             return self.achievements(user)
         if action=='agent.capabilities':

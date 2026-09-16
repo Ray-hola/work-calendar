@@ -36,7 +36,8 @@ const ICON_PATHS={
   'trend':'<path d="M3 17.5 9.5 11l4 4L21 7.5"/><path d="M21 12.5v-5h-5"/>',
   'play':'<path d="m7.5 4.8 11.5 7.2-11.5 7.2Z"/>',
   'square':'<rect x="6" y="6" width="12" height="12" rx="2"/>',
-  'dot':'<circle cx="12" cy="12" r="3"/>'
+  'dot':'<circle cx="12" cy="12" r="3"/>',
+  'chat':'<path d="M20 13.5a2 2 0 0 1-2 2H8.5L4 19V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2Z"/>'
 };
 function icon(name,extra=''){
   const body=ICON_PATHS[name]||ICON_PATHS['diamond'];
@@ -78,7 +79,9 @@ async function refresh(){
   let next;
   try{next=await getState()}catch(e){showAuth();return}
   if(S.user?.id!==next.user.id){Object.assign(UI,{view:'calendar',member:'all',filter:'all',selectedWeek:0,detailDate:null,timelineScroll:null,dayOffset:0})}
-  S=next;renderAll();
+  /* updateChatDot is defined further down the file than the unit-test sandbox
+     loads, so guard the call rather than assume it is in scope. */
+  S=next;renderAll();if(typeof updateChatDot==='function')updateChatDot();
 }
 let inboxRefreshPromise=null;
 async function refreshInboxState(){
@@ -102,7 +105,7 @@ function switchView(view){
   if(view!=='calendar'){weekObserver?.disconnect();weekObserver=null}
   $$('.view').forEach(v=>v.classList.toggle('active-view',v.id===`${view}View`));
   $$('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.view===view));
-  const labels={today:'今日任务',calendar:'周视图',summary:'日记',projects:'项目空间',timeline:'项目时间轴',achievements:'成果库',inbox:'收件箱',accounts:'账户管理',dayDetail:'日期详情'};
+  const labels={today:'今日任务',calendar:'周视图',summary:'日记',projects:'项目空间',timeline:'项目时间轴',achievements:'成果库',inbox:'收件箱',accounts:'账户管理',dayDetail:'日期详情',chat:'沟通区'};
   $('#crumbCurrent').textContent=`/ ${labels[view]||view}`;
   renderScheduleScope();
   if(view==='calendar')renderCalendar();
@@ -114,6 +117,7 @@ function switchView(view){
   if(view==='achievements')renderAchievements();
   if(view==='inbox'){renderInbox();refreshInboxState();}
   if(view==='accounts')renderAccounts();
+  if(view==='chat'){loadChat(true);startChatPolling()}else{stopChatPolling()}
   if(changed)window.scrollTo({top:0,left:0,behavior:'instant'});
 }
 const isArchivedTask=t=>['deferred','skipped','rejected'].includes(t.status);
@@ -1416,6 +1420,106 @@ async function agentRunPlan(items){
     : `计划里的 ${created} 个任务都已创建。`,'');
   return {created,failed:failures.length};
 }
+/* ---------------------------------------------------------------- 沟通区 --
+   A single team room. Chat deliberately sits outside the task permission
+   model: a member who cannot reassign work can still say something about it. */
+const CHAT_SEEN_KEY='wc-chat-seen';
+let chatPollTimer=0,chatLastAt='',chatLastDay='';
+const CHAT_POLL_MS=4000;
+function chatSeenAt(){try{return localStorage.getItem(CHAT_SEEN_KEY)||''}catch(_){return ''}}
+function chatMarkSeen(at){try{localStorage.setItem(CHAT_SEEN_KEY,at||'')}catch(_){}updateChatDot()}
+function updateChatDot(){
+  const dot=$('#chatDot');if(!dot)return;
+  const chat=S.chat||{};
+  /* Unread only counts when someone else wrote it and you are not looking. */
+  const unseen=Boolean(chat.lastAt)&&chat.lastAt!==chatSeenAt()
+    &&chat.lastBy!==S.user?.id&&UI.view!=='chat';
+  dot.classList.toggle('hidden',!unseen);
+}
+function chatDayLabel(iso){
+  const d=new Date(iso),today=new Date();
+  const key=x=>`${x.getFullYear()}-${x.getMonth()}-${x.getDate()}`;
+  if(key(d)===key(today))return '今天';
+  const yesterday=new Date(today);yesterday.setDate(yesterday.getDate()-1);
+  if(key(d)===key(yesterday))return '昨天';
+  return `${d.getMonth()+1} 月 ${d.getDate()} 日`;
+}
+function chatClock(iso){
+  const d=new Date(iso);
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+function chatBubble(m,withDay){
+  const mine=m.author===S.user?.id;
+  const day=withDay?`<div class="chat-day">${escapeHTML(chatDayLabel(m.createdAt))}</div>`:'';
+  return day+`<div class="chat-message ${mine?'mine':''}">${avatarHTML(m.author)}`
+    +`<div class="chat-body"><div class="chat-meta"><strong>${escapeHTML(nameOf(m.author))}</strong>`
+    +`<time>${escapeHTML(chatClock(m.createdAt))}</time></div>`
+    +`<div class="chat-text">${escapeHTML(m.body)}</div></div></div>`;
+}
+async function loadChat(reset){
+  const log=$('#chatLog');if(!log)return;
+  let rows=[];
+  try{
+    const data=await api('/api/action',{action:'chat.list',data:reset?{}:{since:chatLastAt}});
+    rows=data.messages||[];
+  }catch(e){
+    if(reset)log.innerHTML=`<p class="chat-empty">读不到消息：${escapeHTML(e?.message||'加载失败')}</p>`;
+    return;
+  }
+  if(reset){log.innerHTML='';chatLastAt='';chatLastDay=''}
+  if(!rows.length){
+    if(reset)log.innerHTML='<p class="chat-empty">还没有人说话，发第一条吧。</p>';
+    return;
+  }
+  /* Follow the newest line, but do not yank the reader back down if they have
+     scrolled up into the history. */
+  const nearBottom=log.scrollHeight-log.scrollTop-log.clientHeight<90;
+  if(log.querySelector('.chat-empty'))log.innerHTML='';
+  rows.forEach(m=>{
+    const day=(m.createdAt||'').slice(0,10);
+    log.insertAdjacentHTML('beforeend',chatBubble(m,Boolean(day)&&day!==chatLastDay));
+    if(day)chatLastDay=day;
+    if(m.createdAt)chatLastAt=m.createdAt;
+  });
+  if(reset||nearBottom)log.scrollTop=log.scrollHeight;
+  chatMarkSeen(chatLastAt);
+}
+function startChatPolling(){
+  stopChatPolling();
+  chatPollTimer=setInterval(()=>{loadChat(false)},CHAT_POLL_MS);
+}
+function stopChatPolling(){
+  if(chatPollTimer)clearInterval(chatPollTimer);
+  chatPollTimer=0;
+}
+async function chatSend(){
+  const input=$('#chatInput'),text=input?.value.trim();
+  if(!text)return;
+  input.value='';input.style.height='';
+  try{
+    await api('/api/action',{action:'chat.send',data:{body:text}});
+    await loadChat(false);
+    input.focus();
+  }catch(e){
+    toast(e?.message||'发送失败');
+    input.value=text;                     /* keep the draft rather than losing it */
+  }
+}
+function initChatUI(){
+  $('#chatEntryBtn')?.addEventListener('click',()=>switchView('chat'));
+  $('#chatForm')?.addEventListener('submit',e=>{e.preventDefault();chatSend()});
+  const input=$('#chatInput');
+  input?.addEventListener('keydown',e=>{
+    /* isComposing keeps the Enter that confirms a Chinese IME candidate from
+       sending a half-finished message. */
+    if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();chatSend()}
+  });
+  input?.addEventListener('input',()=>{
+    input.style.height='auto';
+    input.style.height=Math.min(120,input.scrollHeight)+'px';
+  });
+  updateChatDot();
+}
 function initAgentUI(){
   $('#agentBtn')?.addEventListener('click',async()=>{$('#agentPanel').classList.remove('hidden');renderAgentCapability();await agentLoadOwnHistory();await agentLoadServerConfig();$('#agentInput').focus()});
   $('#agentHistoryBtn')?.addEventListener('click',()=>agentShowHistory());
@@ -1434,6 +1538,7 @@ function initAgentUI(){
   renderAgentCapability();
 }
 initAgentUI();
+initChatUI();
 function ensureAccountCreateButton(){
   const owner=Boolean(S.user?.role==='superadmin'),host=$('#accountsView .page-intro');if(!host)return;
   let b=$('#createAccountBtn');

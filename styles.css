@@ -1012,7 +1012,152 @@ select:focus {
 .week-carousel.scrolling::-webkit-scrollbar-thumb { background: var(--accent); }
 
 /* --------------------------------------------------------------------------
-   20 · Accessibility: honour reduced motion
+   20 · 沟通区 (team chat)
+   -------------------------------------------------------------------------- */
+
+/* The entry point sits at the right end of the brand row. */
+.brand { display: flex; width: 100%; }
+
+.brand-chat {
+  position: relative;
+  margin-left: auto;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--rail-muted);
+  cursor: pointer;
+  transition: background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease);
+}
+.brand-chat:hover {
+  background: var(--rail-hover);
+  border-color: var(--rail-line);
+  color: var(--rail-strong);
+}
+.brand-chat .chat-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 1.5px var(--rail);
+}
+.chat-hint { font-size: 12px; color: var(--faint); }
+
+.chat-room {
+  display: flex;
+  flex-direction: column;
+  height: min(620px, calc(100vh - 235px));
+  min-height: 420px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.chat-log {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: 18px 20px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.chat-log::-webkit-scrollbar-thumb { border-color: var(--surface); }
+
+.chat-day {
+  align-self: center;
+  font-size: 11px;
+  color: var(--faint);
+  background: var(--surface-sunk);
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  padding: 3px 10px;
+}
+
+.chat-message {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  max-width: 78%;
+}
+.chat-message.mine { align-self: flex-end; flex-direction: row-reverse; }
+.chat-message .avatar { flex: none; width: 30px; height: 30px; font-size: 13px; }
+.chat-body { min-width: 0; }
+.chat-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--faint);
+}
+.chat-message.mine .chat-meta { flex-direction: row-reverse; }
+.chat-meta strong { font-weight: 600; color: var(--ink-2); }
+.chat-meta time { font-variant-numeric: tabular-nums; }
+.chat-text {
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--ink);
+  background: var(--surface-sunk);
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  padding: 8px 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.chat-message.mine .chat-text {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+.chat-empty {
+  margin: auto;
+  font-size: 13px;
+  color: var(--faint);
+  text-align: center;
+}
+
+.chat-compose {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-sunk);
+}
+.chat-compose textarea {
+  flex: 1;
+  min-height: 38px;
+  max-height: 120px;
+  resize: none;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--ink);
+  transition: border-color var(--t) var(--ease);
+}
+.chat-compose textarea:focus {
+  border-color: var(--accent-line);
+  outline: none;
+}
+
+@media (max-width: 640px) {
+  .chat-message { max-width: 92%; }
+}
+
+/* --------------------------------------------------------------------------
+   21 · Accessibility: honour reduced motion
    -------------------------------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {
