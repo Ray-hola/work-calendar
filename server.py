@@ -1,6 +1,7 @@
 """Work Calendar: local authenticated application, SQLite storage and scheduler."""
 from __future__ import annotations
 import argparse
+import calendar
 import hashlib
 import hmac
 import json
@@ -1417,9 +1418,17 @@ class Store:
             start=valid_date(d.get('start'));end=valid_date(d['end']) if d.get('end') else None
             if end and end<start:raise Problem(400,'结束日期不能早于开始日期')
             frequency=d.get('frequency','weekly')
-            if frequency not in ('daily','weekly','workdays','custom','dates','specific'):raise Problem(400,'重复周期无效')
+            if frequency not in ('daily','weekly','workdays','custom','dates','specific','monthly'):raise Problem(400,'重复周期无效')
             every=int(d.get('every',1))
-            if not 1<=every<=366:raise Problem(400,'自定义间隔应在1–366天内')
+            # `every` counts weeks for weekly rules (2 = 隔周执行) and days for
+            # custom rules.
+            if frequency=='weekly':
+                if not 1<=every<=52:raise Problem(400,'周间隔应在 1–52 周内')
+            elif not 1<=every<=366:raise Problem(400,'自定义间隔应在1–366天内')
+            month_day=int(d.get('monthDay',1) or 1)
+            if not 1<=month_day<=31:raise Problem(400,'每月执行日应在 1–31 号之间')
+            span=int(d.get('span',1) or 1)
+            if not 1<=span<=30:raise Problem(400,'持续天数应在 1–30 天内')
             weekdays=d.get('weekdays', d.get('days', []))
             if weekdays in (None, ''): weekdays=[]
             if not isinstance(weekdays,list): weekdays=[weekdays]
@@ -1433,7 +1442,7 @@ class Store:
             if not isinstance(skip_dates,list): skip_dates=[skip_dates]
             skip_dates=sorted(set(valid_date(x) for x in skip_dates))
             if frequency in ('dates','specific') and not specific: raise Problem(400,'指定日期周期至少需要一个日期')
-            r=self.put('repeats',{'name':required(d,'name'),'desc':d.get('desc',''),'assignees':assignees,'priority':d.get('priority','P1'),'duration':duration(d.get('duration',30)),'start':start,'end':end,'time':valid_clock(d.get('time','09:00')),'frequency':frequency,'every':every,'weekdays':weekdays,'specificDates':specific,'skipDates':skip_dates,'active':True,'createdAt':timestamp()})
+            r=self.put('repeats',{'name':required(d,'name'),'desc':d.get('desc',''),'assignees':assignees,'priority':d.get('priority','P1'),'duration':duration(d.get('duration',30)),'start':start,'end':end,'time':valid_clock(d.get('time','09:00')),'frequency':frequency,'every':every,'weekdays':weekdays,'monthDay':month_day,'span':span,'specificDates':specific,'skipDates':skip_dates,'active':True,'createdAt':timestamp()})
             self.materialize(now().date(), CALENDAR_END)
             for a in assignees:self.notify(a,'固定安排已发布',f'superadmin 发布「{r["name"]}」，周期 {frequency}，自 {start} 起。','repeat',r['id'])
             return r
@@ -1444,14 +1453,21 @@ class Store:
         if action in ('repeat.update','repeat.skip','repeat.exception'):
             self.admin(user);r=self.get('repeats',d.get('id') or d.get('repeatId'))
             if action=='repeat.update':
-                for key in ('name','desc','priority','active','time','frequency','every'):
+                for key in ('name','desc','priority','active','time','frequency','every','monthDay','span'):
                     if key in d:r[key]=valid_clock(d[key]) if key=='time' else d[key]
                 if 'name' in r:r['name']=required(r,'name')
                 if r.get('priority','P1') not in ('P0','P1','P2'):raise Problem(400,'优先级无效')
-                if r.get('frequency') not in ('daily','weekly','workdays','custom','dates','specific'):raise Problem(400,'重复周期无效')
-                try:r['every']=int(r.get('every',1))
-                except (TypeError,ValueError):raise Problem(400,'自定义间隔无效')
-                if not 1<=r['every']<=366:raise Problem(400,'自定义间隔应在1–366天内')
+                if r.get('frequency') not in ('daily','weekly','workdays','custom','dates','specific','monthly'):raise Problem(400,'重复周期无效')
+                try:
+                    r['every']=int(r.get('every',1))
+                    r['monthDay']=int(r.get('monthDay',1) or 1)
+                    r['span']=int(r.get('span',1) or 1)
+                except (TypeError,ValueError):raise Problem(400,'周期参数无效')
+                if r['frequency']=='weekly':
+                    if not 1<=r['every']<=52:raise Problem(400,'周间隔应在 1–52 周内')
+                elif not 1<=r['every']<=366:raise Problem(400,'自定义间隔应在1–366天内')
+                if not 1<=r['monthDay']<=31:raise Problem(400,'每月执行日应在 1–31 号之间')
+                if not 1<=r['span']<=30:raise Problem(400,'持续天数应在 1–30 天内')
                 if 'weekdays' in d or 'days' in d:
                     vals=d.get('weekdays',d.get('days')) or []
                     if not isinstance(vals,list):vals=[vals]
@@ -1641,17 +1657,23 @@ class Store:
             while day<=min(last,end):
                 delta=(day-base).days;freq=r['frequency'];weekdays=r.get('weekdays') or []
                 specific=set(r.get('specificDates',r.get('dates',[])) or [])
+                every=max(1,int(r.get('every',1) or 1))
+                month_day=int(r.get('monthDay',1) or 1)
+                weekly_hit=(day.weekday() in weekdays) if weekdays else (day.weekday()==base.weekday())
                 match=(freq=='daily' or
-                       (freq=='weekly' and ((weekdays and day.weekday() in weekdays) or (not weekdays and delta%7==0))) or
+                       (freq=='weekly' and weekly_hit and (delta//7)%every==0) or
                        (freq=='workdays' and day.weekday()<5) or
-                       (freq=='custom' and delta%r['every']==0) or
+                       (freq=='custom' and delta%every==0) or
+                       (freq=='monthly' and day.day==min(month_day,calendar.monthrange(day.year,day.month)[1])) or
                        (freq in ('dates','specific') and day.isoformat() in specific))
                 if day.isoformat() in set(r.get('skipDates',r.get('excludedDates',[])) or []): match=False
                 if match:
+                    span=max(1,int(r.get('span',1) or 1))
+                    deadline=(day+timedelta(days=span-1)).isoformat() if span>1 else None
                     for user in r['assignees']:
                         id=f'repeat:{r["id"]}:{user}:{day.isoformat()}'
                         if id not in existing:
-                            self.put('tasks',{'id':id,'repeatId':r['id'],'name':r['name'],'desc':r['desc'],'priority':r['priority'],'duration':r['duration'],'date':day.isoformat(),'time':r['time'],'deadline':None,'projectId':None,'assignee':user,'status':'todo','fixed':True,'type':'固定安排','createdAt':timestamp()});existing.add(id)
+                            self.put('tasks',{'id':id,'repeatId':r['id'],'name':r['name'],'desc':r['desc'],'priority':r['priority'],'duration':r['duration'],'date':day.isoformat(),'time':r['time'],'deadline':deadline,'span':span,'projectId':None,'assignee':user,'status':'todo','fixed':True,'type':'固定安排','createdAt':timestamp()});existing.add(id)
                 day+=timedelta(days=1)
 
     def aggregate(self, p, day, cutoff):

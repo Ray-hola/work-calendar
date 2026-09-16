@@ -390,7 +390,23 @@ async function reviewProject(id,accept,notificationId){
 function renderRepeats(){
   const list=$('#repeatList');if(!list)return;const repeats=S.repeats||[];
   const dayNames=['周一','周二','周三','周四','周五','周六','周日'];
-  list.innerHTML=repeats.map(r=>{const days=(r.weekdays||[]).map(i=>dayNames[i]).join('、');const pattern=r.frequency==='daily'?'每天':r.frequency==='workdays'?'工作日':r.frequency==='dates'?'指定日期':days||'每周';const state=r.active===false?'已暂停':'启用中';return `<article class="repeat-admin-item"><div><strong>${escapeHTML(r.name)}</strong><span>${escapeHTML(pattern)} · ${escapeHTML(r.time||'09:00')} · ${escapeHTML((r.assignees||[]).join('、'))}</span><small>${state}${r.skipDates?.length?` · 已挖空 ${r.skipDates.length} 天`:''}</small></div><button class="ghost-btn skip-repeat" data-id="${escapeHTML(r.id)}">挖空本次</button></article>`}).join('')||'<p class="muted">还没有固定任务规则。</p>';
+  const weekdayName=iso=>dayNames[(new Date(`${iso}T12:00:00`).getDay()+6)%7];
+  const patternOf=r=>{
+    const days=(r.weekdays||[]).map(i=>dayNames[i]).join('、');
+    const every=Math.max(1,Number(r.every||1));
+    if(r.frequency==='daily')return '每天';
+    if(r.frequency==='workdays')return '工作日';
+    if(r.frequency==='monthly')return `每月 ${Math.min(31,Math.max(1,Number(r.monthDay||1)))} 号`;
+    if(r.frequency==='dates'||r.frequency==='specific')return '指定日期';
+    const base=days||(r.start?`同起始日（${weekdayName(r.start)}）`:'每周');
+    return every>1?`每 ${every} 周 · ${base}`:`每周 · ${base}`;
+  };
+  list.innerHTML=repeats.map(r=>{
+    const span=Math.max(1,Number(r.span||1));
+    const state=r.active===false?'已暂停':'启用中';
+    const spanText=span>1?` · 持续 ${span} 天`:'';
+    const untilText=r.end?` · 至 ${escapeHTML(r.end)}`:'';
+    return `<article class="repeat-admin-item"><div><strong>${escapeHTML(r.name)}</strong><span>${escapeHTML(patternOf(r))} · ${escapeHTML(r.time||'09:00')} · ${escapeHTML((r.assignees||[]).join('、'))}</span><small>${state}${spanText}${untilText}${r.skipDates?.length?` · 已挖空 ${r.skipDates.length} 天`:''}</small></div><button class="ghost-btn skip-repeat" data-id="${escapeHTML(r.id)}">挖空本次</button></article>`}).join('')||'<p class="muted">还没有固定任务规则。</p>';
   $$('.skip-repeat').forEach(b=>b.onclick=()=>{const date=prompt('请输入本次不执行的日期（YYYY-MM-DD）',S.today);if(!date)return;act('repeat.skip',{id:b.dataset.id,date,skip:true}).catch(()=>{})});
 }
 function accountProjectRoles(id){const owned=S.projects.filter(p=>p.owner===id).map(p=>p.name),joined=S.projects.filter(p=>p.owner!==id&&(p.members||{})[id]==='accepted').map(p=>p.name);return {owned,joined}}
@@ -482,10 +498,50 @@ function newProject(){
 }
 function fixedTask(){
   const users=S.users.filter(u=>u.active&&!u.admin),days=['周一','周二','周三','周四','周五','周六','周日'];
-  openModal(`<div class="eyebrow">Super Admin · 固定任务</div><h2>发布固定安排</h2><label class="form-field">任务名称<input id="repeatName" maxlength="120" required></label><fieldset class="member-checkboxes" id="repeatUsers"><legend>安排给（可多选）</legend>${users.map(u=>`<label><input type="checkbox" name="repeatUser" value="${escapeHTML(u.id)}"> ${escapeHTML(u.id)}</label>`).join('')}</fieldset><label class="form-field">周期<select id="repeatFreq"><option value="daily">每天</option><option value="weekly" selected>每周指定星期</option><option value="workdays">工作日</option><option value="dates">指定日期</option></select></label><fieldset class="member-checkboxes" id="repeatWeekdayFields"><legend>每周几执行</legend>${days.map((d,i)=>`<label><input type="checkbox" name="repeatWeekday" value="${i}" ${i<5?'checked':''}> ${d}</label>`).join('')}</fieldset><label class="form-field hidden" id="repeatDatesField">指定日期（逗号分隔）<input id="repeatDates" placeholder="2026-09-20, 2026-10-01"></label><label class="form-field">开始日期<input id="repeatStart" type="date" max="${DATE_HORIZON}" value="${S.today}"></label><label class="form-field">结束日期（可留空）<input id="repeatEnd" type="date" max="${DATE_HORIZON}"></label><label class="form-field">开始时间<input id="repeatTime" type="time" value="09:00"></label><label class="form-field">时长<input id="repeatDuration" type="number" min="1" max="1440" value="30"></label><label class="form-field">本次挖空日期（可留空）<input id="repeatSkipDates" placeholder="例如：2026-10-01, 2026-10-02"></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmRepeat">保存固定任务</button></div>`);
-  const sync=()=>{const freq=$('#repeatFreq').value;$('#repeatWeekdayFields').classList.toggle('hidden',!['weekly'].includes(freq));$('#repeatDatesField').classList.toggle('hidden',freq!=='dates')};
-  $('#repeatFreq').onchange=sync;sync();$('#cancelAction').onclick=closeModal;
-  $('#confirmRepeat').onclick=async()=>{const dates=$('#repeatDates').value.split(/[,，\s]+/).map(x=>x.trim()).filter(Boolean),skipDates=$('#repeatSkipDates').value.split(/[,，\s]+/).map(x=>x.trim()).filter(Boolean),assignees=$$('input[name="repeatUser"]:checked').map(x=>x.value),weekdays=$$('input[name="repeatWeekday"]:checked').map(x=>Number(x.value));if(!$('#repeatName').value.trim()||!assignees.length){toast('请填写任务名称并选择成员');return}if($('#repeatFreq').value==='weekly'&&!weekdays.length){toast('请选择每周执行日');return}if($('#repeatFreq').value==='dates'&&!dates.length){toast('请填写至少一个指定日期');return}try{await act('repeat.create',{name:$('#repeatName').value,assignees,frequency:$('#repeatFreq').value,weekdays,dates,start:$('#repeatStart').value,end:$('#repeatEnd').value,time:$('#repeatTime').value,duration:Number($('#repeatDuration').value),priority:'P1',skipDates});closeModal()}catch(e){}};
+  const monthOptions=Array.from({length:31},(_,i)=>i+1).map(n=>`<option value="${n}" ${n===1?'selected':''}>${n} 号</option>`).join('');
+  openModal(`<div class="eyebrow">Super Admin · 固定任务</div><h2>发布固定安排</h2>
+    <label class="form-field">任务名称<input id="repeatName" maxlength="120" required></label>
+    <fieldset class="member-checkboxes" id="repeatUsers"><legend>安排给（可多选）</legend>${users.map(u=>`<label><input type="checkbox" name="repeatUser" value="${escapeHTML(u.id)}"> ${escapeHTML(u.id)}</label>`).join('')}</fieldset>
+    <label class="form-field">周期<select id="repeatFreq"><option value="daily">每天</option><option value="weekly" selected>每周</option><option value="monthly">每月</option><option value="workdays">工作日</option><option value="dates">指定日期</option></select></label>
+    <label class="form-field" id="repeatEveryField">间隔<select id="repeatEvery"><option value="1">每 1 周</option><option value="2">每 2 周（双周）</option><option value="3">每 3 周</option><option value="4">每 4 周</option></select></label>
+    <fieldset class="member-checkboxes" id="repeatWeekdayFields"><legend>每周几执行</legend>${days.map((d,i)=>`<label><input type="checkbox" name="repeatWeekday" value="${i}" ${i<5?'checked':''}> ${d}</label>`).join('')}</fieldset>
+    <label class="form-field hidden" id="repeatMonthField">每月执行日<select id="repeatMonthDay">${monthOptions}</select><small class="muted">选 31 号时，天数不足的月份自动落在当月最后一天</small></label>
+    <label class="form-field hidden" id="repeatDatesField">指定日期（逗号分隔）<input id="repeatDates" placeholder="2026-09-20, 2026-10-01"></label>
+    <label class="form-field">持续天数<input id="repeatSpan" type="number" min="1" max="30" value="1"><small class="muted">大于 1 天时，每次生成的任务会跨天并带 DDL 倒计时</small></label>
+    <label class="form-field">开始日期<input id="repeatStart" type="date" max="${DATE_HORIZON}" value="${S.today}"></label>
+    <label class="form-field">结束日期（可留空）<input id="repeatEnd" type="date" max="${DATE_HORIZON}"></label>
+    <label class="form-field">开始时间<input id="repeatTime" type="time" value="09:00"></label>
+    <label class="form-field">每次时长<input id="repeatDuration" type="number" min="1" max="1440" value="30"></label>
+    <label class="form-field">本次挖空日期（可留空）<input id="repeatSkipDates" placeholder="例如：2026-10-01, 2026-10-02"></label>
+    <div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmRepeat">保存固定任务</button></div>`);
+  const sync=()=>{
+    const freq=$('#repeatFreq').value;
+    $('#repeatEveryField').classList.toggle('hidden',freq!=='weekly');
+    $('#repeatWeekdayFields').classList.toggle('hidden',freq!=='weekly');
+    $('#repeatMonthField').classList.toggle('hidden',freq!=='monthly');
+    $('#repeatDatesField').classList.toggle('hidden',freq!=='dates');
+  };
+  $('#repeatFreq').onchange=sync;sync();
+  $('#repeatStart').onchange=()=>$('#repeatEnd').min=$('#repeatStart').value;
+  $('#cancelAction').onclick=closeModal;
+  $('#confirmRepeat').onclick=async()=>{
+    const freq=$('#repeatFreq').value;
+    const assignees=$$('input[name="repeatUser"]:checked').map(x=>x.value);
+    const weekdays=$$('input[name="repeatWeekday"]:checked').map(x=>Number(x.value));
+    const dates=$('#repeatDates').value.split(/[,，\s]+/).map(x=>x.trim()).filter(Boolean);
+    const skipDates=$('#repeatSkipDates').value.split(/[,，\s]+/).map(x=>x.trim()).filter(Boolean);
+    if(!$('#repeatName').value.trim()||!assignees.length){toast('请填写任务名称并选择成员');return}
+    if(freq==='weekly'&&!weekdays.length){toast('请选择每周执行日');return}
+    if(freq==='dates'&&!dates.length){toast('请填写至少一个指定日期');return}
+    const start=$('#repeatStart').value,end=$('#repeatEnd').value;
+    if(!start){toast('请填写开始日期');return}
+    if(end&&end<start){toast('结束日期不能早于开始日期');return}
+    try{await act('repeat.create',{name:$('#repeatName').value,assignees,frequency:freq,
+      every:freq==='weekly'?Number($('#repeatEvery').value||1):1,
+      weekdays,monthDay:Number($('#repeatMonthDay').value||1),
+      span:Math.max(1,Number($('#repeatSpan').value||1)),
+      dates,start,end,time:$('#repeatTime').value,
+      duration:Number($('#repeatDuration').value),priority:'P1',skipDates});closeModal()}catch(e){}};
 }
 function collectionSettings(){
   const cfg=S.automation||{},mode=cfg.mode||'daily',days=['周一','周二','周三','周四','周五','周六','周日'],selected=cfg.weekdays||[0,1,2,3,4];
