@@ -689,7 +689,91 @@ select:focus {
 }
 
 /* --------------------------------------------------------------------------
-   16 · Workspace account menu
+   16 · Vector icons
+   -------------------------------------------------------------------------- */
+
+/* Inline-block so an icon sits correctly inside a run of text; it still behaves
+   as a flex item wherever a button or row turns out to be a flex container. */
+.icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  vertical-align: -.14em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+
+/* Static markup points at an icon by name; JS fills the slot on boot. */
+.icon-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  font-size: 18px;
+  flex: none;
+}
+
+/* Buttons lay their icon and label out with a gap, so labels carry no padding. */
+.primary-btn,
+.secondary-btn,
+.ghost-btn,
+.danger-btn,
+.agent-top-btn,
+.axis-day-add,
+.floating-add-task {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.icon-btn,
+.close-btn,
+.agent-icon-btn,
+.date-chip button,
+.timeline-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.task-arrow,
+.defer-target,
+.fixed-badge,
+.span-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Per-context optical sizes. */
+.agent-icon-btn .icon-slot { width: 16px; height: 16px; font-size: 16px; }
+.close-btn .icon-slot { width: 17px; height: 17px; font-size: 17px; }
+.empty-icon .icon-slot { width: 30px; height: 30px; font-size: 30px; }
+.empty-icon { color: var(--line-strong); }
+.primary-btn .icon-slot,
+.secondary-btn .icon-slot,
+.ghost-btn .icon-slot,
+.agent-top-btn .icon-slot,
+.danger-btn .icon-slot { width: 15px; height: 15px; font-size: 15px; }
+.inbox-icon .icon-slot { width: 16px; height: 16px; font-size: 16px; }
+.inbox-icon { display: inline-flex; align-items: center; justify-content: center; }
+.chevron .icon { stroke-width: 2; }
+
+/* Small glyphs need a slightly heavier stroke to hold their shape. */
+.task-arrow .icon,
+.defer-target .icon,
+.fixed-badge .icon,
+.span-badge .icon,
+.inbox-icon .icon { stroke-width: 2.1; }
+
+/* --------------------------------------------------------------------------
+   17 · Workspace account menu
    -------------------------------------------------------------------------- */
 
 .workspace-slot { position: relative; margin: 28px 0 25px; }
@@ -777,7 +861,7 @@ select:focus {
 }
 
 /* --------------------------------------------------------------------------
-   17 · Scrollbars
+   18 · Scrollbars
    -------------------------------------------------------------------------- */
 
 * { scrollbar-color: var(--line-strong) transparent; }
@@ -792,7 +876,7 @@ select:focus {
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 
 /* --------------------------------------------------------------------------
-   18 · Accessibility: honour reduced motion
+   19 · Accessibility: honour reduced motion
    -------------------------------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {
