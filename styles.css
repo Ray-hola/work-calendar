@@ -473,6 +473,74 @@ select:focus {
 .member-checkboxes label:hover { background: var(--accent-soft); }
 
 /* --------------------------------------------------------------------------
+   12 · Multi-day tasks & the DDL badge
+   -------------------------------------------------------------------------- */
+
+/* A quiet countdown, not an alarm — until the date is actually missed. */
+.task-ddl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 7px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  font-variant-numeric: tabular-nums;
+  transition: background var(--t) var(--ease), border-color var(--t) var(--ease);
+}
+
+.task-ddl em {
+  font-style: normal;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  opacity: .7;
+}
+.task-ddl b { font-weight: 600; }
+
+/* Single-day tasks keep the old, undecorated date. */
+.task-ddl.plain {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.task-ddl.left    { color: var(--accent-dark); background: var(--accent-soft); border-color: var(--accent-line); }
+.task-ddl.due     { color: var(--surface); background: var(--accent); border-color: var(--accent); }
+.task-ddl.due em  { opacity: .85; }
+.task-ddl.overdue { color: var(--danger); background: var(--accent-soft-2); border-color: var(--danger-line); }
+.task-ddl.settled { color: var(--success); background: var(--success-soft); border-color: var(--c-green-line); }
+
+/* "3 天" chip beside the task name. */
+.span-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.overdue-text { color: var(--danger); }
+
+/* Week rail: a compact "3天" mark on multi-day rows. */
+.axis-span {
+  font-style: normal;
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  border-radius: 3px;
+  padding: 1px 4px;
+  margin-left: 5px;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+/* --------------------------------------------------------------------------
    12 · Staggered entry for refreshed lists
    -------------------------------------------------------------------------- */
 
