@@ -145,5 +145,87 @@ class ChatTests(unittest.TestCase):
         self.assertEqual([m['body'] for m in listed], ['项目进行中的讨论'], '归档后仍应可读')
 
 
+    # ---------------------------------------------------------------- @所有人
+    def test_everyone_reaches_the_team_but_never_the_sender(self):
+        self.store.create_user('member2', 'password-long', False)
+        sent = self.store.action(self.member, 'chat.send',
+                                 {'body': '@所有人 下午三点评审', 'mentions': ['*']})
+        self.assertEqual(sent['mentions'], ['*'], '广播以哨兵形式随消息保存，不需要真的账户')
+        for account in ('superadmin', 'member2'):
+            notices = [n for n in self.store.all('notifications') if n['to'] == account]
+            self.assertEqual(len(notices), 1, account + ' 应收到一条广播通知')
+            self.assertIn('所有人', notices[0]['title'])
+        self.assertEqual([n for n in self.store.all('notifications') if n['to'] == 'member1'], [],
+                         '自己发的广播不该回到自己')
+
+    def test_a_broadcast_does_not_double_notify_a_named_person(self):
+        self.store.action(self.member, 'chat.send',
+                          {'body': '@所有人 也顺便 @superadmin', 'mentions': ['*', 'superadmin']})
+        notices = [n for n in self.store.all('notifications') if n['to'] == 'superadmin']
+        self.assertEqual(len(notices), 1, '被点到名的人不该同时收到两条通知')
+
+    def test_a_mention_notice_remembers_its_room(self):
+        project = self.store.action(self.admin, 'project.create', {
+            'name': '看板', 'owner': 'superadmin', 'cycle': 'infinite'})
+        self.store.action(self.member, 'chat.send',
+                          {'body': '看这里 @superadmin', 'mentions': ['superadmin'],
+                           'channel': project['id']})
+        notice = [n for n in self.store.all('notifications') if n['to'] == 'superadmin'][0]
+        self.assertEqual(notice['channel'], project['id'], '通知要能指回它来自哪个房间')
+        self.store.action(self.member, 'chat.send',
+                          {'body': '大厅的话 @superadmin', 'mentions': ['superadmin']})
+        latest = [n for n in self.store.all('notifications') if n['to'] == 'superadmin'][-1]
+        self.assertEqual(latest['channel'], 'general', '大厅的通知也带着自己的房间')
+
+    # -------------------------------------------------------------- 分频道未读
+    def test_unread_is_counted_per_room(self):
+        self.store.action(self.member, 'chat.send', {'body': '大厅一条', 'channel': 'general'})
+        self.store.action(self.member, 'chat.send', {'body': '闲聊一条', 'channel': 'lounge'})
+        chat = self.store.snapshot(self.admin)['chat']
+        self.assertEqual(chat['byChannel'], {'general': 1, 'lounge': 1})
+        self.assertEqual(chat['unread'], 2, '总未读仍是各房间之和')
+
+        at = [m for m in self.store.all('messages') if m['channel'] == 'general'][0]['createdAt']
+        self.store.action(self.admin, 'chat.read', {'channel': 'general', 'at': at})
+        chat = self.store.snapshot(self.admin)['chat']
+        self.assertEqual(chat['byChannel'], {'lounge': 1}, '只看过的那个房间才清零')
+        self.assertEqual(chat['unread'], 1, '没看的房间仍要计入总数')
+
+    def test_a_finished_project_drops_out_of_the_badge(self):
+        project = self.store.action(self.admin, 'project.create', {
+            'name': '结项后不该还亮着', 'owner': 'superadmin', 'cycle': 'infinite'})
+        self.store.action(self.member, 'chat.send', {'body': '结项前说的', 'channel': project['id']})
+        self.assertEqual(self.store.snapshot(self.admin)['chat']['byChannel'].get(project['id']), 1)
+
+        archived = self.store.get('projects', project['id'])
+        archived['status'] = 'done'
+        self.store.put('projects', archived)
+
+        chat = self.store.snapshot(self.admin)['chat']
+        self.assertNotIn(project['id'], chat['byChannel'],
+                         '房间已经不在列表里，就不该还有未读挂在上面')
+        self.assertEqual(chat['unread'], 0)
+
+    def test_a_pre_channel_single_watermark_still_reads_as_read(self):
+        self.store.action(self.member, 'chat.send', {'body': '旧的', 'channel': 'general'})
+        at = self.store.all('messages')[0]['createdAt']
+        # The shape this field had before the room gained channels: one stamp
+        # covering the whole room.
+        self.store.put('settings', {'id': 'chat-read', 'value': {'superadmin': at}, 'updatedAt': at})
+        self.assertEqual(self.store.snapshot(self.admin)['chat']['unread'], 0)
+
+    def test_reading_one_room_does_not_resurrect_the_others(self):
+        self.store.action(self.member, 'chat.send', {'body': '旧消息', 'channel': 'lounge'})
+        at = self.store.all('messages')[0]['createdAt']
+        self.store.put('settings', {'id': 'chat-read', 'value': {'superadmin': at}, 'updatedAt': at})
+
+        self.store.action(self.admin, 'chat.read', {'channel': 'general', 'at': at})
+        self.assertEqual(self.store.snapshot(self.admin)['chat']['unread'], 0,
+                         '第一次分房间已读不该把别的房间的历史翻成未读')
+
+        self.store.action(self.member, 'chat.send', {'body': '新的', 'channel': 'lounge'})
+        self.assertEqual(self.store.snapshot(self.admin)['chat']['byChannel'], {'lounge': 1})
+
+
 if __name__ == '__main__':
     unittest.main()

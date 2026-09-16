@@ -582,6 +582,44 @@ select:focus {
    14 · Assistant run
    -------------------------------------------------------------------------- */
 
+/* --------------------------------------------------------------------------
+   17 · Room channels, mentions and links
+   -------------------------------------------------------------------------- */
+
+/* An unread count per room: the room badge says something happened, this says
+   where. */
+.chat-channel { position: relative; }
+.chat-channel-badge {
+  display: inline-block;
+  min-width: 16px;
+  margin-left: 5px;
+  padding: 1px 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--surface);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1.5;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.chat-channel.is-on .chat-channel-badge { background: var(--surface); color: var(--accent-dark); }
+
+/* 所有人 reads as a broadcast, not a person. */
+.chat-mention-all { background: var(--accent-soft-2); border-color: var(--danger-line); }
+.chat-mention-option.is-everyone .icon { color: var(--accent-dark); }
+
+/* A pasted link, kept inside the bubble however long it is. */
+.chat-link {
+  color: var(--accent-dark);
+  text-decoration: underline;
+  text-decoration-color: var(--accent-line);
+  text-underline-offset: 2px;
+  word-break: break-all;
+}
+.chat-link:hover { text-decoration-color: var(--accent-dark); }
+
 /* The planning button and the standing 逐步确认 / 替我确认 switch sit above the
    composer, so the pace is visible without having to answer a card first. */
 .agent-tools {

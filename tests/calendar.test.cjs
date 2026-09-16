@@ -474,3 +474,83 @@ test('the success receipt carries a data check the model must reconcile', () => 
   assert.ok(receipt, '成功回执必须附上数据核对');
   assert.ok(/先核对这一步有没有达到预期/.test(source), '回执应要求模型先核对再继续');
 });
+
+/* The room's body renderer sits past the sandbox cut-off, so it is lifted out
+   of the source and given the handful of collaborators it needs. */
+function liftFunction(name) {
+  const fn = source.match(new RegExp('function ' + name + '\\([^)]*\\)\\{[\\s\\S]*?\\n\\}'));
+  if (fn) return fn[0];
+  const arrow = source.match(new RegExp('const ' + name + '=[^\\n]*;'));
+  assert.ok(arrow, '找不到 ' + name + '，测试切点需要更新');
+  return arrow[0];
+}
+const CHAT_EVERYONE = source.match(/const CHAT_EVERYONE='([^']*)'/)[1];
+/* CHAT_URL_RE is a module-level const rather than a function parameter, so it
+   has to travel with the functions that close over it. */
+const CHAT_BODY_SOURCE = ['CHAT_URL_RE', 'chatMentionName', 'chatParseMentions', 'chatMentionsHTML',
+                          'chatTrimUrl', 'chatSplitLinks', 'chatBodyHTML']
+  .map(liftFunction).join('\n');
+
+function chatRoom(users) {
+  const a = app();
+  a.run(`S.user={id:'superadmin',admin:1};S.users=${JSON.stringify(users)}`);
+  const built = new Function('escapeHTML', 'nameOf', 'S', 'CHAT_EVERYONE',
+    CHAT_BODY_SOURCE + '\nreturn {chatBodyHTML, chatParseMentions};')(
+      a.run('escapeHTML'), a.run('nameOf'), a.run('S'), CHAT_EVERYONE);
+  return {render: built.chatBodyHTML, mentions: built.chatParseMentions};
+}
+
+const PEOPLE = [{id: 'wang00', displayName: '王零零', active: 1},
+                {id: 'superadmin', displayName: '管理员', active: 1}];
+
+test('a pasted link becomes a link, and trailing punctuation stays outside it', () => {
+  const room = chatRoom(PEOPLE);
+  const html = room.render('详见 https://example.com/a/b?x=1&y=2，明天前给我');
+  assert.ok(html.includes('<a class="chat-link" href="https://example.com/a/b?x=1&amp;y=2"'),
+    '链接要成为 a 标签，& 要转义成实体：' + html);
+  assert.ok(html.includes('rel="noopener noreferrer nofollow"'), '外链要有 rel 保护');
+  assert.ok(html.includes('>https://example.com/a/b?x=1&amp;y=2</a>，明天前给我'),
+    '中文句号应落在链接之外：' + html);
+});
+
+test('a bare www address is linkified over https, and a balanced bracket is kept', () => {
+  const room = chatRoom(PEOPLE);
+  const bare = room.render('看 www.example.com/x。');
+  assert.ok(bare.includes('href="https://www.example.com/x"'), 'www 开头要补上协议：' + bare);
+
+  const paren = room.render('参考 https://example.com/wiki/Foo_(bar)');
+  assert.ok(paren.includes('href="https://example.com/wiki/Foo_(bar)"'),
+    '成对的括号属于地址本身：' + paren);
+
+  const wrap = room.render('（见 https://example.com/a）');
+  assert.ok(wrap.includes('>https://example.com/a</a>）'), '不成对的括号应留在外面：' + wrap);
+});
+
+test('only http and www are linkified, so no other scheme slips through', () => {
+  const room = chatRoom(PEOPLE);
+  const html = room.render('javascript:alert(1) 和 ftp://example.com/x 都不是链接');
+  assert.ok(!html.includes('<a'), '只有 http(s) 与 www 才该成为链接：' + html);
+});
+
+test('link text is escaped, so a URL cannot carry markup', () => {
+  const room = chatRoom(PEOPLE);
+  const html = room.render('https://example.com/<img src=x>');
+  assert.ok(!html.includes('<img'), '链接里不得注入标签：' + html);
+  assert.ok(html.includes('&lt;img'), '应当被转义：' + html);
+});
+
+test('mentions still highlight when they sit next to a link', () => {
+  const room = chatRoom(PEOPLE);
+  const html = room.render('@王零零 看 https://example.com/a');
+  assert.ok(html.includes('chat-mention">@王零零</em>'), '提及要高亮：' + html);
+  assert.ok(html.includes('class="chat-link"'), '链接要保留：' + html);
+});
+
+test('@所有人 is a broadcast sentinel rather than an account id', () => {
+  const room = chatRoom(PEOPLE);
+  assert.deepEqual(room.mentions('@所有人 下午三点评审'), [CHAT_EVERYONE]);
+  const html = room.render('@所有人 注意');
+  assert.ok(html.includes('chat-mention chat-mention-all">@所有人</em>'),
+    '广播要有自己的样式：' + html);
+  assert.ok(room.mentions('@王零零 看一下').includes('wang00'), '普通提及不受影响');
+});

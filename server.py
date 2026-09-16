@@ -69,6 +69,7 @@ CALENDAR_END = date(2027, 4, 30)
 CHAT_CHANNELS = (('general', '沟通'), ('lounge', '闲聊'))
 CHAT_DEFAULT = 'general'
 CHAT_LEGACY = 'all'          # the pre-channel hall; folded into 沟通
+CHAT_EVERYONE = '*'          # a broadcast, not an account id
 TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages', 'messages')
 
 # Agent capability boundary.  The future chat/browser adapter must use these
@@ -580,9 +581,13 @@ class Store:
                 raise Problem(401, '请登录工作台')
             return self.user(r['user_id'])
 
-    def notify(self, to, title, body, kind='task', reference=None):
+    def notify(self, to, title, body, kind='task', reference=None, channel=None):
         if not any(u['id']==to for u in self.users()):raise Problem(404,'通知接收账户不存在')
-        return self.put('notifications', {'to':to, 'title':title, 'body':body, 'kind':kind, 'reference':reference, 'read':False, 'createdAt':timestamp()})
+        record={'to':to, 'title':title, 'body':body, 'kind':kind, 'reference':reference, 'read':False, 'createdAt':timestamp()}
+        # Only chat notices name a room; a task notice keeps its old shape so
+        # nothing that reads these rows has to learn a new field.
+        if channel:record['channel']=channel
+        return self.put('notifications', record)
 
     def audit(self, actor, action, details):
         self.put('audit', {'actor':actor, 'action':action, 'details':details, 'createdAt':timestamp()})
@@ -1041,6 +1046,27 @@ class Store:
             raise Problem(409, '项目已归档，「%s」的沟通记录改在成果库里查看' % project['name'])
         return channel
 
+    def chat_visible_channels(self):
+        """The rooms a visitor can actually open: the standing two, plus live
+        projects. A finished project is deliberately absent, so its history
+        cannot sit in someone's badge forever."""
+        ids = [cid for cid, _ in CHAT_CHANNELS]
+        ids += [p['id'] for p in self.all('projects') if p['status'] == 'active']
+        return ids
+
+    def chat_read_at(self, account, channel):
+        """How far this account has read in one room.
+
+        Before the room had channels there was a single watermark covering all
+        of it. Those old rows still read as a plain string, and a string is
+        still honoured as the baseline for every room — so upgrading does not
+        resurrect history as unread.
+        """
+        raw = self.chat_settings('chat-read').get(account, '')
+        if isinstance(raw, dict):
+            return str(raw.get(channel) or '')
+        return str(raw or '')
+
     def chat_settings(self, key):
         record = next((s.get('value', {}) for s in self.all('settings') if s.get('id') == key), {})
         return dict(record) if isinstance(record, dict) else {}
@@ -1071,28 +1097,55 @@ class Store:
         # The mentions travel with the message so the notice does not depend on
         # parsing the text back into accounts later.
         mentions = []
-        for raw in (data.get('mentions') or [])[:20]:
+        everyone = False
+        for raw in (data.get('mentions') or [])[:40]:
             target = str(raw)
+            if target == CHAT_EVERYONE:
+                everyone = True
+                continue
             if target == user['id'] or target in mentions:
                 continue
             if not any(u['id'] == target and u['active'] for u in self.users()):
                 continue
             mentions.append(target)
+        if everyone:
+            mentions.insert(0, CHAT_EVERYONE)
         message = {'author': user['id'], 'body': body, 'channel': channel,
                    'mentions': mentions, 'createdAt': timestamp()}
         self.put('messages', message)
         where = '「%s」' % self.chat_channel_name(channel)
-        for target in mentions:
-            self.notify(target, '有人在沟通区提到了你',
-                        '%s 在%s里 @ 了你：%s' % (self.display_name(user['id']), where, body[:60]),
-                        'chat_mention', message['id'])
+        if everyone:
+            # A broadcast goes to the whole team, so naming someone as well
+            # would only send them the same notice twice.
+            targets = [u['id'] for u in self.users() if u['active'] and u['id'] != user['id']]
+            line = '%s 在%s里 @ 了所有人：%s' % (self.display_name(user['id']), where, body[:60])
+            for target in targets:
+                self.notify(target, '有人在沟通区 @ 了所有人', line,
+                            'chat_mention', message['id'], channel=channel)
+        else:
+            line = '%s 在%s里 @ 了你：%s' % (self.display_name(user['id']), where, body[:60])
+            for target in mentions:
+                self.notify(target, '有人在沟通区提到了你', line,
+                            'chat_mention', message['id'], channel=channel)
         return message
 
     def chat_mark_read(self, user, data):
+        channel = self.chat_scope(data)
+        at = str(data.get('at') or timestamp())
         state = self.chat_settings('chat-read')
-        state[user['id']] = str(data.get('at') or timestamp())
+        raw = state.get(user['id'])
+        if isinstance(raw, dict):
+            book = dict(raw)
+        else:
+            # First write since the room gained channels: seed every room that
+            # exists now with the old all-covering watermark.
+            seeded = set(self.chat_visible_channels())
+            seeded.update(self.chat_normalize(m) for m in self.all('messages'))
+            book = {cid: str(raw or '') for cid in seeded}
+        book[channel] = at
+        state[user['id']] = book
         self.put('settings', {'id': 'chat-read', 'value': state, 'updatedAt': timestamp()})
-        return {'at': state[user['id']]}
+        return {'at': at, 'channel': channel}
 
     def chat_presence(self, user, data):
         """Heartbeat plus who else is around. Kept vague on purpose: this shows
@@ -1114,14 +1167,25 @@ class Store:
         return result
 
     def chat_summary(self, user):
-        """Cheap counters for the unread badge — never the bodies themselves."""
+        """Cheap counters for the unread badge — never the bodies themselves.
+
+        Counted per room as well as in total: a badge on the room tells you
+        something happened, not where, and the room has several doors.
+        """
         rows = self.all('messages')
-        last_read = self.chat_settings('chat-read').get(user['id'], '')
-        unread = sum(1 for m in rows
-                     if m.get('author') != user['id']
-                     and str(m.get('createdAt', '')) > last_read)
+        visible = set(self.chat_visible_channels())
+        by_channel = {}
+        for m in rows:
+            if m.get('author') == user['id']:
+                continue
+            channel = self.chat_normalize(m)
+            if channel not in visible:
+                continue
+            if str(m.get('createdAt', '')) > self.chat_read_at(user['id'], channel):
+                by_channel[channel] = by_channel.get(channel, 0) + 1
         last = rows[-1] if rows else {}
-        return {'count': len(rows), 'unread': unread,
+        return {'count': len(rows), 'unread': sum(by_channel.values()),
+                'byChannel': by_channel,
                 'lastAt': last.get('createdAt', ''),
                 'lastBy': last.get('author', '')}
 

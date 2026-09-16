@@ -489,7 +489,7 @@ function renderInbox(){
   const unreadRequests=requests.filter(r=>!r.read).length;
   const unreadNotifications=notifications.filter(x=>!x.read).length;
   const unreadCount=unreadRequests+unreadNotifications;$('#inboxCount').textContent=unreadCount;$('.notification-dot').classList.toggle('hidden',unreadCount===0);$('#inboxView .eyebrow').textContent=`通知中心 · ${unreadCount} 条未读`;
-  const cards=[...requests.map(r=>{const p=S.projects.find(x=>x.id===r.projectId);const unread=!r.read;return {priority:2,time:r.createdAt,html:`<article class="inbox-item request-inbox-item ${unread?'unread':''}" data-request="${escapeHTML(r.id)}"><div class="inbox-icon">${icon('folder')}</div><div class="inbox-copy"><strong>项目协作邀请</strong>${unread?'<i class="unread-dot"></i>':''}<p>邀请你加入「${escapeHTML(p?.name||'项目')}」。接受后项目任务才会进入你的日程。</p><small>${escapeHTML(r.createdAt)}</small><div class="inbox-actions"><button class="primary-btn accept-request" data-id="${escapeHTML(r.id)}">接受</button><button class="secondary-btn reject-request" data-id="${escapeHTML(r.id)}">拒绝</button></div></div></article>`}}),...notifications.map(x=>{const {project,task,projectPending,projectCompletionPending,taskPending,editPending,chatMention,pending}=approvalInfo(x);const unread=!x.read||pending;const actions=chatMention?`<div class="inbox-actions"><button class="primary-btn open-chat-from-mention">去沟通区</button></div>`:projectPending?`<div class="inbox-actions"><button class="primary-btn approve-project-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意创建</button><button class="secondary-btn reject-project-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:projectCompletionPending?`<div class="inbox-actions"><button class="primary-btn approve-project-completion-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意完成</button><button class="secondary-btn reject-project-completion-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:taskPending?`<div class="inbox-actions"><button class="primary-btn approve-task-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">审批通过</button><button class="secondary-btn reject-task-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回并建议</button></div>`:editPending?`<div class="inbox-actions"><button class="primary-btn approve-edit-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意修改</button><button class="secondary-btn reject-edit-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:'';return {priority:pending?2:unread?1:0,time:x.createdAt,html:`<article class="inbox-item ${unread?'unread':''} ${pending?'approval-pending':''}" data-id="${escapeHTML(x.id)}"><div class="inbox-icon">${editPending?icon('edit'):projectCompletionPending?icon('diamond'):taskPending?icon('check'):x.kind==='report'?icon('clock'):x.kind==='approval'?icon('folder'):x.kind==='request'?icon('mail'):icon('trend')}</div><div class="inbox-copy"><strong>${escapeHTML(x.title)}</strong>${unread?'<i class="unread-dot"></i>':''}<p>${escapeHTML(x.body)}</p><small>${escapeHTML(x.createdAt)}</small>${actions}</div><span class="task-arrow">${icon('chevron-right')}</span></article>`}})].sort((a,b)=>(b.priority-a.priority)||String(b.time).localeCompare(String(a.time)));
+  const cards=[...requests.map(r=>{const p=S.projects.find(x=>x.id===r.projectId);const unread=!r.read;return {priority:2,time:r.createdAt,html:`<article class="inbox-item request-inbox-item ${unread?'unread':''}" data-request="${escapeHTML(r.id)}"><div class="inbox-icon">${icon('folder')}</div><div class="inbox-copy"><strong>项目协作邀请</strong>${unread?'<i class="unread-dot"></i>':''}<p>邀请你加入「${escapeHTML(p?.name||'项目')}」。接受后项目任务才会进入你的日程。</p><small>${escapeHTML(r.createdAt)}</small><div class="inbox-actions"><button class="primary-btn accept-request" data-id="${escapeHTML(r.id)}">接受</button><button class="secondary-btn reject-request" data-id="${escapeHTML(r.id)}">拒绝</button></div></div></article>`}}),...notifications.map(x=>{const {project,task,projectPending,projectCompletionPending,taskPending,editPending,chatMention,pending}=approvalInfo(x);const unread=!x.read||pending;const actions=chatMention?`<div class="inbox-actions"><button class="primary-btn open-chat-from-mention" data-channel="${escapeHTML(x.channel||'')}">去沟通区</button></div>`:projectPending?`<div class="inbox-actions"><button class="primary-btn approve-project-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意创建</button><button class="secondary-btn reject-project-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:projectCompletionPending?`<div class="inbox-actions"><button class="primary-btn approve-project-completion-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意完成</button><button class="secondary-btn reject-project-completion-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:taskPending?`<div class="inbox-actions"><button class="primary-btn approve-task-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">审批通过</button><button class="secondary-btn reject-task-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回并建议</button></div>`:editPending?`<div class="inbox-actions"><button class="primary-btn approve-edit-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意修改</button><button class="secondary-btn reject-edit-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:'';return {priority:pending?2:unread?1:0,time:x.createdAt,html:`<article class="inbox-item ${unread?'unread':''} ${pending?'approval-pending':''}" data-id="${escapeHTML(x.id)}"><div class="inbox-icon">${editPending?icon('edit'):projectCompletionPending?icon('diamond'):taskPending?icon('check'):x.kind==='report'?icon('clock'):x.kind==='approval'?icon('folder'):x.kind==='request'?icon('mail'):icon('trend')}</div><div class="inbox-copy"><strong>${escapeHTML(x.title)}</strong>${unread?'<i class="unread-dot"></i>':''}<p>${escapeHTML(x.body)}</p><small>${escapeHTML(x.createdAt)}</small>${actions}</div><span class="task-arrow">${icon('chevron-right')}</span></article>`}})].sort((a,b)=>(b.priority-a.priority)||String(b.time).localeCompare(String(a.time)));
   $('#inboxList').innerHTML=cards.map(x=>x.html).join('')||'<div class="empty-state">收件箱很安静</div>';
   $$('#inboxList .inbox-item').forEach(e=>{e.tabIndex=0;e.onkeydown=ev=>{if(ev.key==='Enter'&&!ev.target.closest('.inbox-actions')){if(e.dataset.id)openNotification(e.dataset.id);else openRequest(e.dataset.request)}}});
   $$('#inboxList .inbox-item[data-id]').forEach(e=>e.onclick=ev=>{if(ev.target.closest('.inbox-actions'))return;openNotification(e.dataset.id)});
@@ -1426,6 +1426,9 @@ async function agentRunPlan(items){
    something about it. */
 const CHAT_POLL_MS=4000;
 const CHAT_PRESENCE_MS=15000;
+/* A broadcast is a sentinel rather than an account id, so it can never
+   collide with a real member and needs no row of its own. */
+const CHAT_EVERYONE='*';
 let chatPollTimer=0,chatPresenceTimer=0,chatLastAt='',chatLastDay='';
 let chatChannel='general',chatPresence={},chatMentionQuery=null,chatMentionIndex=0;
 
@@ -1437,6 +1440,7 @@ function updateChatDot(){
   dot.classList.toggle('hidden',!show);
   dot.textContent=show?(unread>99?'99+':String(unread)):'';
 }
+const chatMentionName=id=>id===CHAT_EVERYONE?'所有人':nameOf(id);
 function chatDayLabel(iso){
   const d=new Date(iso),today=new Date();
   const key=x=>`${x.getFullYear()}-${x.getMonth()}-${x.getDate()}`;
@@ -1456,12 +1460,19 @@ function chatChannelList(){
   (S.projects||[]).filter(pr=>pr.status==='active').forEach(pr=>items.push({id:pr.id,name:pr.name}));
   return items;
 }
+function chatChannelUnread(id){
+  return Number(((S.chat||{}).byChannel||{})[id]||0);
+}
 function renderChatChannels(){
   const bar=$('#chatChannels');if(!bar)return;
   const items=chatChannelList();
   /* A project can finish while you are sitting in its channel. */
   if(!items.some(c=>c.id===chatChannel))chatChannel='general';
-  bar.innerHTML=items.map(c=>`<button type="button" class="chat-channel ${c.id===chatChannel?'is-on':''}" data-channel="${escapeHTML(c.id)}">${escapeHTML(c.name)}</button>`).join('');
+  bar.innerHTML=items.map(c=>{
+    const n=chatChannelUnread(c.id);
+    const badge=n?`<i class="chat-channel-badge">${n>99?'99+':n}</i>`:'';
+    return `<button type="button" class="chat-channel ${c.id===chatChannel?'is-on':''} ${n?'has-unread':''}" data-channel="${escapeHTML(c.id)}">${escapeHTML(c.name)}${badge}</button>`;
+  }).join('');
   $$('#chatChannels .chat-channel').forEach(b=>b.onclick=()=>{
     if(chatChannel===b.dataset.channel)return;
     chatChannel=b.dataset.channel;
@@ -1472,20 +1483,55 @@ function renderChatChannels(){
    like one picked from the menu. */
 function chatParseMentions(text){
   const found=[];
+  if(text.includes('@所有人'))found.push(CHAT_EVERYONE);
   (S.users||[]).forEach(u=>{
     const name=u.displayName||u.id;
     if(text.includes('@'+name)||text.includes('@'+u.id))if(!found.includes(u.id))found.push(u.id);
   });
   return found;
 }
-function chatBodyHTML(text){
+function chatMentionsHTML(text){
   let html=escapeHTML(text);
   chatParseMentions(text).forEach(id=>{
-    const name=escapeHTML(nameOf(id));
+    const name=escapeHTML(chatMentionName(id));
     const safe=name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-    html=html.replace(new RegExp('@'+safe,'g'),`<em class="chat-mention">@${name}</em>`);
+    const cls=id===CHAT_EVERYONE?'chat-mention chat-mention-all':'chat-mention';
+    html=html.replace(new RegExp('@'+safe,'g'),`<em class="${cls}">@${name}</em>`);
   });
   return html;
+}
+/* Only http(s) and bare www. are linked. Trailing punctuation belongs to the
+   sentence, not the address, so it is trimmed back outside the anchor — except
+   for a closing bracket that the address itself opened. */
+const CHAT_URL_RE=/\b(?:https?:\/\/|www\.)[^\s<>"'，。；：！？、（）「」『』【】《》…]+/gi;
+function chatTrimUrl(url){
+  let text=url,tail='';
+  for(;;){
+    const last=text.slice(-1);
+    if(!/[.,;:!?，。；：！？、"'）)】》…]/.test(last))break;
+    if((last===')'||last==='）')&&(text.split('(').length>=text.split(')').length))break;
+    tail=last+tail;text=text.slice(0,-1);
+  }
+  return {url:text,tail};
+}
+function chatSplitLinks(text){
+  const parts=[];let last=0,m;
+  CHAT_URL_RE.lastIndex=0;
+  while((m=CHAT_URL_RE.exec(text))){
+    const cut=chatTrimUrl(m[0]);
+    if(!cut.url)continue;
+    if(m.index>last)parts.push({text:text.slice(last,m.index)});
+    parts.push(cut);
+    last=m.index+cut.url.length;      /* the tail falls back into the text */
+  }
+  if(last<text.length)parts.push({text:text.slice(last)});
+  return parts;
+}
+function chatBodyHTML(text){
+  return chatSplitLinks(text).map(p=>p.url!==undefined
+    ?`<a class="chat-link" href="${escapeHTML(/^www\./i.test(p.url)?'https://'+p.url:p.url)}"`
+      +` target="_blank" rel="noopener noreferrer nofollow">${escapeHTML(p.url+p.tail)}</a>`
+    :chatMentionsHTML(p.text)).join('');
 }
 function chatBubble(m,withDay){
   const mine=m.author===S.user?.id;
@@ -1527,11 +1573,17 @@ async function loadChat(reset){
   reportChatRead(chatLastAt);
 }
 async function reportChatRead(at){
+  const channel=chatChannel;
+  const was=chatChannelUnread(channel);
   try{
-    await api('/api/action',{action:'chat.read',data:{at:at||''}});
-    S.chat={...(S.chat||{}),unread:0};
-    updateChatDot();
-  }catch(_){}
+    await api('/api/action',{action:'chat.read',data:{at:at||'',channel}});
+  }catch(_){return}
+  /* Only this room is cleared; the badge stays until every room is read. */
+  const byChannel={...((S.chat||{}).byChannel||{})};
+  delete byChannel[channel];
+  S.chat={...(S.chat||{}),unread:Object.values(byChannel).reduce((a,n)=>a+Number(n||0),0),byChannel};
+  updateChatDot();
+  if(was)renderChatChannels();
 }
 async function refreshChatPresence(){
   try{
@@ -1573,24 +1625,31 @@ function chatMentionContext(input){
 }
 function chatMentionCandidates(query){
   const q=(query||'').toLowerCase();
-  return (S.users||[]).filter(u=>u.active&&u.id!==S.user?.id)
+  const list=(S.users||[]).filter(u=>u.active&&u.id!==S.user?.id)
     .filter(u=>!q||(u.displayName||'').toLowerCase().includes(q)||u.id.toLowerCase().includes(q))
     .slice(0,6);
+  /* 所有人 is a broadcast rather than an account, so it never comes from the
+     account list — it is offered at the top of it. */
+  if(!q||'所有人'.includes(q)||'all'.startsWith(q)||'everyone'.startsWith(q))
+    list.unshift({id:CHAT_EVERYONE,name:'所有人',every:true});
+  return list;
 }
 function renderChatMentionMenu(){
   const menu=$('#chatMentionMenu');if(!menu)return;
   const list=chatMentionQuery===null?[]:chatMentionCandidates(chatMentionQuery);
   if(!list.length){menu.classList.add('hidden');menu.innerHTML='';return}
   if(chatMentionIndex>=list.length)chatMentionIndex=0;
-  menu.innerHTML=list.map((u,i)=>`<button type="button" role="option" aria-selected="${i===chatMentionIndex}" class="chat-mention-option ${i===chatMentionIndex?'is-on':''}" data-id="${escapeHTML(u.id)}">`
-    +`${avatarHTML(u.id)}<span class="chat-mention-name">${escapeHTML(u.displayName||u.id)}</span><small>${escapeHTML(u.id)}</small></button>`).join('');
+  menu.innerHTML=list.map((u,i)=>`<button type="button" role="option" aria-selected="${i===chatMentionIndex}" class="chat-mention-option ${u.every?'is-everyone':''} ${i===chatMentionIndex?'is-on':''}" data-id="${escapeHTML(u.id)}">`
+    +(u.every?icon('users'):avatarHTML(u.id))
+    +`<span class="chat-mention-name">${escapeHTML(u.name||u.displayName||u.id)}</span>`
+    +`<small>${escapeHTML(u.every?'通知全体成员':u.id)}</small></button>`).join('');
   menu.classList.remove('hidden');
   $$('#chatMentionMenu .chat-mention-option').forEach(b=>b.onclick=()=>chatApplyMention(b.dataset.id));
 }
 function chatApplyMention(id){
   const input=$('#chatInput');if(!input)return;
   const info=chatMentionContext(input);if(!info)return;
-  const name=nameOf(id);
+  const name=chatMentionName(id);
   input.value=input.value.slice(0,info.start)+'@'+name+' '+input.value.slice(info.end);
   const caret=info.start+name.length+2;
   input.setSelectionRange(caret,caret);
@@ -1614,6 +1673,12 @@ async function chatSend(){
     toast(e?.message||'发送失败');
     input.value=text;                     /* keep the draft rather than losing it */
   }
+}
+/* Landing on the room a notice came from, rather than on whichever channel was
+   open last. */
+function openChatChannel(channel){
+  if(channel&&chatChannelList().some(c=>c.id===channel))chatChannel=channel;
+  switchView('chat');
 }
 /* Reading a finished project's channel: the messages stay where they are, they
    just stop being reachable from the room and become part of 成果库. */
@@ -1664,7 +1729,8 @@ function initChatUI(){
   input?.addEventListener('blur',()=>setTimeout(()=>{chatMentionQuery=null;renderChatMentionMenu()},150));
   /* Delegated, so it keeps working across inbox re-renders. */
   document.addEventListener('click',e=>{
-    if(e.target.closest?.('.open-chat-from-mention'))switchView('chat');
+    const mention=e.target.closest?.('.open-chat-from-mention');
+    if(mention){openChatChannel(mention.dataset.channel);return}
     const archive=e.target.closest?.('.open-channel-archive');
     if(archive)openChannelArchive(archive.dataset.project,archive.dataset.name);
   });
