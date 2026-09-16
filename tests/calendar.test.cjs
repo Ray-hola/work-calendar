@@ -347,3 +347,86 @@ test('workspace account menu lists the right entries per role and escapes names'
   assert.ok(!member.includes('账户管理'), '普通成员不应看到账户管理');
   assert.ok(member.includes('我的资料'), '成员仍可编辑自己的资料');
 });
+
+/* The assistant used to end its whole run the moment one action was refused,
+   so a model that proposed 给 wang00 建任务 before adding him to the project
+   could never take the one step that would have fixed it.
+
+   agentLoop sits past the sandbox cut-off, so it is lifted straight out of the
+   source and given its collaborators as arguments. */
+const AGENT_LOOP_SOURCE = source.match(/async function agentLoop\(context\)\{[\s\S]*?\n\}/)[0];
+const AGENT_MAX_STEPS = Number(source.match(/const AGENT_MAX_STEPS=(\d+)/)[1]);
+const AGENT_MAX_FAILURES = Number(source.match(/const AGENT_MAX_FAILURES=(\d+)/)[1]);
+/* A refusal only leaves the run open if the click — not the success — is what
+   authorises it. */
+const CLICK_AUTHORISES_RUN = /confirm\.onclick=async\(\)=>\{[\s\S]{0,400}?agentState\.autoRun=true;/.test(source);
+
+function agentHarness(queue, verdicts) {
+  const trace = [];
+  const state = {messages: [], steps: 0, failures: 0, autoRun: false, stop: false, pendingResolve: null};
+  const append = (who, text) => trace.push(['say', String(text)]);
+  const busy = () => {};
+  const record = (display, forModel) => trace.push(['step', display, String(forModel)]);
+  const next = async () => (queue.length ? queue.shift() : []);
+  const runOne = async (proposal) => {
+    const verdict = verdicts.shift() || 'ok';
+    if (verdict === 'fail') { state.failures += 1; state.autoRun = true; return {failed: true}; }
+    if (verdict === 'cancel') { state.autoRun = false; return {cancelled: true}; }
+    state.autoRun = true;
+    trace.push(['ran', proposal.action]);
+    return {label: proposal.action};
+  };
+  const loop = new Function(
+    'agentState', 'agentAppend', 'agentUpdateBusy', 'agentNext', 'agentRunOne',
+    'AGENT_MAX_STEPS', 'AGENT_MAX_FAILURES',
+    AGENT_LOOP_SOURCE + '\nreturn agentLoop;'
+  )(state, append, busy, next, runOne, AGENT_MAX_STEPS, AGENT_MAX_FAILURES);
+  return {
+    loop,
+    ran: () => trace.filter(x => x[0] === 'ran').map(x => x[1]),
+    said: () => trace.filter(x => x[0] === 'say').map(x => x[1]),
+    stepText: () => trace.filter(x => x[0] === 'step').map(x => x[2]).join('\n'),
+  };
+}
+
+test('a refused action is fed back to the model, which can repair it and finish', async () => {
+  const h = agentHarness(
+    [[{action: 'task.create'}], [{action: 'project.invite'}], [{action: 'task.create'}], []],
+    ['fail', 'ok', 'ok']);
+  const steps = await h.loop({mode: 'operator'});
+  assert.equal(steps, 3, '被拒也算一步，之后补救并重做，共三步');
+  assert.deepEqual(h.ran(), ['project.invite', 'task.create'], '补救动作之后原动作应被重做');
+});
+
+test('a refusal is written into the transcript as a failed receipt for the model', () => {
+  /* The receipt is composed in agentRunOne, not in the loop — pin the contract
+     so a future edit cannot quietly turn a refusal back into a dead end. */
+  const refusal = source.match(/catch\(err\)\{[\s\S]*?finish\(\{failed:true\}\);/);
+  assert.ok(refusal, 'agentRunOne 的失败分支必须把结果交回循环而不是终结整轮');
+  assert.ok(refusal[0].includes('【系统回执·失败】'), '失败必须作为回执发给模型');
+  assert.ok(refusal[0].includes('不要重复提交同一个动作'), '回执要阻止模型原地重试');
+});
+
+test('a run survives a refusal but gives up once the failure budget is spent', async () => {
+  const one = agentHarness([[{action: 'task.create'}], []], ['fail']);
+  assert.equal(await one.loop({mode: 'operator'}), 1);
+  assert.equal(one.said().some(t => t.includes('连续')), false, '单次被拒不该宣告放弃');
+
+  const many = agentHarness(
+    Array.from({length: 40}, () => [{action: 'task.create'}]),
+    Array(AGENT_MAX_FAILURES).fill('fail'));
+  assert.equal(await many.loop({mode: 'operator'}), AGENT_MAX_FAILURES, '用尽失败额度后停手');
+  assert.equal(many.said().some(t => t.includes(`连续 ${AGENT_MAX_FAILURES} 步`)), true,
+    '应明确告知用户已停下');
+});
+
+test('cancelling the first card still stops the run outright', async () => {
+  const h = agentHarness([[{action: 'task.create'}], [{action: 'project.create'}]], ['cancel']);
+  assert.equal(await h.loop({mode: 'operator'}), 0);
+  assert.deepEqual(h.ran(), []);
+});
+
+test('confirming a card authorises the run before the store has answered', () => {
+  assert.ok(CLICK_AUTHORISES_RUN,
+    '首步就被拒时仍要能补救，因此 autoRun 必须在点击时置位，而不是执行成功之后');
+});

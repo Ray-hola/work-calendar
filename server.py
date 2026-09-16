@@ -369,6 +369,20 @@ class Store:
                        '<action>{"action":"task.create","data":{"name":"整理周报","projectId":"项目ID","assignee":"成员账户","date":"2026-09-14","duration":60,"priority":"P1"}}</action>。'
                        '日期使用 YYYY-MM-DD，优先级为 P0/P1/P2。前端会解析动作块并请用户确认后再执行，'
                        '所以只输出动作块即可，不要声称已经执行完成。')
+            # Prerequisites the model cannot guess from the data alone. Without
+            # these it proposes a valid-looking task.create that the store then
+            # refuses, and the run stops on a failure the assistant could have
+            # fixed by itself in one more step.
+            policy += ('\n动手之前先核对前置条件，可以省掉大多数失败：\n'
+                       '- 项目任务的负责人必须是该项目 members 里状态为 accepted 的成员。'
+                       '如果目标成员不在其中，先输出 project.invite（data:{"id":"项目ID","members":["账户"]}），'
+                       '拿到成功回执后再输出原来的 task.create。\n'
+                       '- 只有 status 为 active 的项目可以安排任务。待审批的项目先输出 '
+                       'project.review（data:{"id":"项目ID","accept":true}）。\n'
+                       '- 任务日期必须落在项目的 start 与 end 之间，且不能超出可排期范围。\n'
+                       '执行失败时系统会回一条【系统回执·失败】。先读懂原因再决定怎么做：'
+                       '如果是缺了前置步骤（例如负责人还没加入项目、项目还没审批），就补上那一步再继续；'
+                       '确实做不到的，用一句话向用户说明原因并结束，不要重复提交同一个动作。')
         # A caller-supplied system message is untrusted input.  The policy is
         # placed first for provider compatibility and repeated last so it
         # remains authoritative if a custom prompt tries to override it.
@@ -646,8 +660,9 @@ class Store:
             if project.get('end') and result.get('deadline') and result['deadline'] > project['end']:
                 raise Problem(400, '任务期限不能晚于项目截止日期')
             proposed_assignee = result.get('assignee', task.get('assignee'))
-            if project['members'].get(proposed_assignee) != 'accepted':
-                raise Problem(400, '负责人必须先接受项目邀请')
+            blocked = self.member_gate(project, proposed_assignee)
+            if blocked:
+                raise Problem(400, blocked)
         elif 'assignee' in result and result['assignee'] != task.get('assignee'):
             raise Problem(400, '无项目任务不能申请调整负责人')
         proposed_date = result.get('date', task.get('date'))
@@ -691,6 +706,25 @@ class Store:
                 if not existing:
                     self.notify(member, '项目协作邀请', f'请确认加入「{project["name"]}」。接受后项目任务才进入你的日程。', 'request', project['id'])
 
+    def member_gate(self, project, member):
+        """Explain why `member` cannot take work here, phrased as a next step.
+
+        The three states read very differently to whoever has to fix them, and
+        the old single message ("负责人必须先接受项目邀请") was wrong for the
+        most common one: a member who was never invited at all. The action name
+        is included so the assistant can repair this by itself instead of
+        handing the failure back to the user.
+        """
+        state = (project.get('members') or {}).get(member)
+        name = project.get('name') or project['id']
+        if state == 'accepted':
+            return None
+        fix = ('先用 project.invite 把 %s 加入「%s」（data:{"id":"%s","members":["%s"]}），'
+               '再安排任务' % (member, name, project['id'], member))
+        if state == 'pending':
+            return '%s 还没确认「%s」的协作邀请，请%s。' % (member, name, fix)
+        return '%s 还不是「%s」的成员，请%s。' % (member, name, fix)
+
     def assign_members(self, user, project, members):
         """Administrator assignments supersede any outstanding invitation."""
         self.admin(user)
@@ -717,9 +751,10 @@ class Store:
         if not pid:raise Problem(400,'任务必须归属项目，请先选择项目')
         if pid:
             p=self.get('projects',pid);self.project_owner(user,p)
-            if p['status']!='active':raise Problem(409,'项目审批通过并处于进行中时才可安排任务')
+            if p['status']!='active':raise Problem(409,'项目「%s」还不是进行中状态，先用 project.review（data:{"id":"%s","accept":true}）审批通过，再安排任务'%(p['name'],p['id']))
             if p.get('end') and day>p['end']:raise Problem(400,'任务日期不能晚于项目截止日期')
-            if p['members'].get(assignee)!='accepted':raise Problem(400,'负责人必须先接受项目邀请')
+            blocked=self.member_gate(p,assignee)
+            if blocked:raise Problem(400,blocked)
         priority=data.get('priority','P1')
         if priority not in ('P0','P1','P2'):raise Problem(400,'优先级无效')
         task={'name':name,'desc':str(data.get('desc','')),'priority':priority,'projectId':pid,'duration':duration(data.get('duration',30)), 'date':day,'time':str(data.get('time','09:00')),'deadline':data.get('deadline') or None,'assignee':assignee,'status':'todo','fixed':False,'type':data.get('type','通用'),'createdAt':timestamp()}
@@ -1219,7 +1254,7 @@ class Store:
             self.put('projects',p);self.notify(p['owner'],'项目完成审批结果',f'「{p["name"]}」'+('已完成' if d.get('accept') else '完成申请被驳回：'+p['completionRejection']),'project_completion',p['id']);return p
         if action=='project.invite':
             p=self.get('projects',d['id']);self.project_owner(user,p)
-            if p['status']!='active':raise Problem(409,'项目审批通过后才能新增协作者')
+            if p['status']!='active':raise Problem(409,'项目「%s」还不是进行中状态，先用 project.review（data:{"id":"%s","accept":true}）审批通过，再新增协作者'%(p['name'],p['id']))
             members=list(dict.fromkeys(d.get('members',[])))
             members=[m for m in members if m!=p['owner']]
             if not members:raise Problem(400,'请选择要邀请的协作者')
@@ -1373,7 +1408,8 @@ class Store:
                 if project.get('start') and t['date'] < project['start']: raise Problem(400,'任务日期不能早于项目开始日期')
                 if project.get('end') and t['date']>project['end']:raise Problem(400,'任务日期不能晚于项目截止日期')
                 if project.get('end') and t.get('deadline') and t['deadline']>project['end']: raise Problem(400,'任务期限不能晚于项目截止日期')
-                if project['members'].get(t['assignee'])!='accepted':raise Problem(400,'负责人必须先接受项目邀请')
+                blocked=self.member_gate(project,t['assignee'])
+                if blocked:raise Problem(400,blocked)
             if t['priority'] not in ('P0','P1','P2') or t['status'] not in ('todo','doing'):raise Problem(400,'状态或优先级不合法')
             self.put('tasks',t);self.put('logs',{'taskId':t['id'],'actor':user['id'],'kind':'adjust','before':old,'after':t,'createdAt':timestamp(),'date':now().date().isoformat()})
             for recipient in {old['assignee'],t['assignee']}:
@@ -1647,7 +1683,8 @@ class Store:
                 if who not in p['members']:raise Problem(400,'负责人不在项目范围')
                 t=self.get('tasks',s['taskId'])
                 if t['status'] in ('done','deferred','skipped'):raise Problem(409,'已归档任务不可重新分配')
-                if p['members'].get(who)!='accepted':raise Problem(400,'负责人必须先接受项目邀请')
+                blocked=self.member_gate(p,who)
+                if blocked:raise Problem(400,blocked)
                 self._action(user,'task.update',{'id':t['id'],'assignee':who,'deadline':valid_date(d.get('deadline',s['deadline']))})
                 s['status']='accepted';s['assignee']=who
             else:s['status']='rejected';s['reasonRejected']=required(d,'reason')
