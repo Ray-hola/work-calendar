@@ -674,7 +674,95 @@ select:focus {
 }
 
 /* --------------------------------------------------------------------------
-   16 · Scrollbars
+   16 · Workspace account menu
+   -------------------------------------------------------------------------- */
+
+.workspace-slot { position: relative; margin: 28px 0 25px; }
+.workspace-slot .workspace-switcher { margin: 0; cursor: pointer; }
+
+.workspace-switcher .chevron { transition: transform var(--t) var(--ease); }
+.workspace-switcher[aria-expanded="true"] .chevron { transform: rotate(180deg); }
+.workspace-switcher[aria-expanded="true"] {
+  border-color: var(--accent);
+  background: var(--rail-hover);
+}
+
+@keyframes wcMenuIn {
+  from { opacity: 0; transform: translateY(-6px) scale(.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+.account-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  z-index: 60;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
+  max-height: min(72vh, 520px);
+  overflow-y: auto;
+  transform-origin: top center;
+  animation: wcMenuIn var(--t) var(--ease-out) both;
+}
+.account-menu.hidden { display: none; }
+
+.account-menu-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 11px;
+  border-bottom: 1px solid var(--line);
+}
+.account-menu-head .avatar.large { width: 36px; height: 36px; font-size: 15px; }
+.account-menu-identity { min-width: 0; }
+.account-menu-identity strong { display: block; font-size: 13px; color: var(--ink); }
+.account-menu-identity .name-tag { margin-top: 4px; }
+.account-menu-identity small { display: block; font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+.account-menu-group { display: grid; gap: 1px; padding: 5px 0; }
+.account-menu-group + .account-menu-group { border-top: 1px solid var(--line-soft); }
+
+.account-menu-label {
+  font-size: 10px;
+  letter-spacing: .12em;
+  color: var(--faint);
+  padding: 5px 10px 4px;
+  text-transform: uppercase;
+}
+
+.account-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--ink-2);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.account-menu-item:hover { background: var(--surface-sunk); color: var(--ink); }
+.account-menu-item > small { margin-left: auto; font-size: 11px; color: var(--faint); }
+
+.account-menu-item.danger { color: var(--danger); }
+.account-menu-item.danger:hover { background: var(--accent-soft-2); }
+
+.account-menu-item.switch .avatar { width: 22px; height: 22px; font-size: 11px; }
+.account-menu-item.switch > span { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.account-menu-item.switch small { color: var(--faint); font-size: 11px; }
+
+/* On the mobile rail the switcher is hidden, so its slot must not leave a gap. */
+@media (max-width: 640px) {
+  .workspace-slot { display: none; }
+}
+
+/* --------------------------------------------------------------------------
+   17 · Scrollbars
    -------------------------------------------------------------------------- */
 
 * { scrollbar-color: var(--line-strong) transparent; }
@@ -689,7 +777,7 @@ select:focus {
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 
 /* --------------------------------------------------------------------------
-   17 · Accessibility: honour reduced motion
+   18 · Accessibility: honour reduced motion
    -------------------------------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {

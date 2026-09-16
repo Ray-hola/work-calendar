@@ -554,6 +554,50 @@ function renderAccounts(){
   $$('.edit-profile').forEach(b=>b.onclick=()=>editProfile(b.dataset.user,b.dataset.mode));
   $$('.delete-account').forEach(b=>b.onclick=()=>deleteAccount(b.dataset.user));
 }
+/* The workspace chip opens a menu: who you are, your own settings, a fast
+   account switch and sign-out. Switching accounts only signs out and carries
+   the target id into the sign-in form — passwords are never bypassed. */
+function renderAccountMenu(){
+  const menu=$('#accountMenu');if(!menu)return;
+  const me=userById(S.user.id)||{};
+  const others=(S.users||[]).filter(u=>u.id!==S.user.id&&u.active);
+  const head=`<div class="account-menu-head">${avatarHTML(S.user.id,'large')}<div class="account-menu-identity"><strong>${escapeHTML(me.displayName||S.user.id)}</strong>${me.nickname?`<span class="name-tag nick">${escapeHTML(me.nickname)}</span>`:''}<small>${escapeHTML(accountRoleLabel(S.user))}</small></div></div>`;
+  const row=(action,label,hint)=>`<button class="account-menu-item" data-action="${action}" role="menuitem">${escapeHTML(label)}${hint?`<small>${escapeHTML(hint)}</small>`:''}</button>`;
+  const mine=`<div class="account-menu-group">${row('profile','我的资料','昵称 / 头像')}${row('password','修改密码')}${S.user?.admin?row('accounts','账户管理'):''}</div>`;
+  const switchGroup=others.length?`<div class="account-menu-group"><span class="account-menu-label">切换账户</span>${others.slice(0,8).map(u=>`<button class="account-menu-item switch" data-user="${escapeHTML(u.id)}" role="menuitem">${avatarHTML(u.id)}<span>${escapeHTML(u.displayName||u.id)}${u.nickname?`<small>${escapeHTML(u.nickname)}</small>`:''}</span></button>`).join('')}</div>`:'';
+  const foot=`<div class="account-menu-group"><button class="account-menu-item danger" data-action="logout" role="menuitem">退出登录</button></div>`;
+  menu.innerHTML=head+mine+switchGroup+foot;
+  menu.querySelectorAll('.account-menu-item[data-action]').forEach(b=>b.onclick=()=>accountMenuAction(b.dataset.action));
+  menu.querySelectorAll('.account-menu-item.switch').forEach(b=>b.onclick=()=>signOutTo(b.dataset.user));
+}
+function accountMenuAction(action){
+  toggleAccountMenu(false);
+  if(action==='profile')editProfile(S.user.id,'self');
+  else if(action==='password')changeOwnPassword();
+  else if(action==='accounts')switchView('accounts');
+  else if(action==='logout')signOutTo('');
+}
+function changeOwnPassword(){
+  const current=prompt('请输入当前密码');if(current===null)return;
+  const next=prompt('请输入新密码（至少 6 位）');if(!next)return;
+  if(next.length<6){toast('密码至少 6 位');return}
+  api('/api/password',{id:S.user.id,current,password:next}).then(()=>toast('密码已更新')).catch(e=>toast(e?.message||'修改失败'));
+}
+async function signOutTo(userId){
+  toggleAccountMenu(false);
+  try{await api('/api/logout',{})}catch(_){}
+  showAuth();
+  $('#loginUser').value=userId||'';
+  if(userId)$('#loginPass').focus();else $('#loginUser').focus();
+}
+function toggleAccountMenu(open){
+  const menu=$('#accountMenu'),btn=$('#workspaceSwitcher');
+  if(!menu)return;
+  const next=(open===undefined)?menu.classList.contains('hidden'):Boolean(open);
+  if(next)renderAccountMenu();
+  menu.classList.toggle('hidden',!next);
+  btn?.setAttribute('aria-expanded',next?'true':'false');
+}
 function deleteAccount(id){
   const x=S.users.find(u=>u.id===id);
   if(!x){toast('账户不存在');return}
@@ -669,6 +713,7 @@ function renderAll(){
   $('.workspace-switcher small').textContent=S.user.admin?'团队工作区':'成员工作区';
   const meUser=userById(S.user.id)||{};
   $('.workspace-switcher strong').innerHTML=escapeHTML(meUser.displayName||S.user.id)+(meUser.nickname?` <span class="name-tag nick">${escapeHTML(meUser.nickname)}</span>`:'');
+  if(!$('#accountMenu')?.classList.contains('hidden'))renderAccountMenu();
   $('#crumbRoot').textContent=S.user.admin?'团队工作台':'我的工作台';
   $('.focus-card > span').textContent=S.user.admin?'成员今日安排':'今日安排';
   renderStats();renderInbox();renderAccounts();switchView(UI.view);
@@ -792,7 +837,15 @@ function renderTimeline(){
 }
 
 function openSearch(){openModal(`<div class="eyebrow">工作台搜索</div><h2>搜索任务与项目</h2><label class="form-field">关键词<input id="searchQuery" placeholder="输入名称、负责人或项目"></label><div id="searchResults" class="search-results"><span class="muted">输入关键词开始搜索</span></div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">关闭</button></div>`);$('#cancelAction').onclick=closeModal;const input=$('#searchQuery'),results=$('#searchResults');input.oninput=()=>{const q=input.value.trim().toLowerCase();if(!q){results.innerHTML='<span class="muted">输入关键词开始搜索</span>';return}const ts=(S.user?.admin?S.tasks:scheduleTasks()).filter(t=>[t.name,t.assignee,projectName(t)].some(v=>String(v||'').toLowerCase().includes(q)));const ps=S.projects.filter(p=>[p.name,p.owner,p.desc].some(v=>String(v||'').toLowerCase().includes(q)));results.innerHTML=ts.map(t=>`<button class="search-result" data-task="${escapeHTML(t.id)}"><strong>${escapeHTML(t.name)}</strong><small>${escapeHTML(t.assignee)} · ${escapeHTML(projectName(t))}</small></button>`).join('')+ps.map(p=>`<button class="search-result" data-project="${escapeHTML(p.id)}"><strong>${escapeHTML(p.name)}</strong><small>Owner · ${escapeHTML(p.owner)} · ${projectStatus(p)}</small></button>`).join('')||'<span class="muted">没有找到匹配项</span>';$$('.search-result').forEach(b=>b.onclick=()=>{if(b.dataset.task)openDrawer(b.dataset.task);else{closeModal();switchView('projects')}})};input.focus()}
-$$('.nav-item').forEach(b=>b.onclick=()=>switchView(b.dataset.view));$$('.filter-link').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;switchView('today')});$$('.quick-tab').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;renderToday()});$('#prevDay').onclick=()=>{UI.dayOffset=(UI.dayOffset||0)-1;renderToday()};$('#nextDay').onclick=()=>{if(displayDay()>=DATE_HORIZON){toast(`日期范围目前只支持到 ${DATE_HORIZON}`);return}UI.dayOffset=(UI.dayOffset||0)+1;renderToday()};$('#inboxBtn').onclick=()=>switchView('inbox');document.querySelector('.icon-btn[title="搜索"]').onclick=openSearch;$('#closeDrawer').onclick=closeDrawer;$('#closeModal').onclick=closeModal;$('#modalBackdrop').onclick=e=>{if(e.target.id==='modalBackdrop')closeModal()};$('#taskDrawer').onclick=e=>{if(e.target.id==='taskDrawer')closeDrawer()};$('#backWeekBtn').onclick=()=>switchView('calendar');$('#backTodayBtn').onclick=()=>{UI.selectedWeek=0;UI.dayOffset=0;switchView('calendar')};$('#addProjectBtn').onclick=newProject;$('#addProjectTopBtn').onclick=newProject;$('#addTaskBtn').onclick=newTask;$('#emptyAddBtn').onclick=newTask;$('#timelineAddProjectBtn').onclick=newProject;$('#createFixedBtn').onclick=fixedTask;$('#collectionSettingsBtn').onclick=collectionSettings;$('#forceAssignBtn').onclick=()=>switchView('projects');$('#runAutomationBtn').onclick=()=>act('scheduler.run',{});$('#markAllReadBtn').onclick=()=>act('inbox.read',{all:true});$('#generateSummaryBtn').onclick=openTodayDiary;
+$$('.nav-item').forEach(b=>b.onclick=()=>switchView(b.dataset.view));
+$('#workspaceSwitcher')?.addEventListener('click',()=>toggleAccountMenu());
+$('#workspaceSwitcher')?.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggleAccountMenu()}});
+document.addEventListener('click',e=>{
+  const menu=$('#accountMenu');if(!menu||menu.classList.contains('hidden'))return;
+  if(e.target.closest('#accountMenu')||e.target.closest('#workspaceSwitcher'))return;
+  toggleAccountMenu(false);
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleAccountMenu(false)});$$('.filter-link').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;switchView('today')});$$('.quick-tab').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;renderToday()});$('#prevDay').onclick=()=>{UI.dayOffset=(UI.dayOffset||0)-1;renderToday()};$('#nextDay').onclick=()=>{if(displayDay()>=DATE_HORIZON){toast(`日期范围目前只支持到 ${DATE_HORIZON}`);return}UI.dayOffset=(UI.dayOffset||0)+1;renderToday()};$('#inboxBtn').onclick=()=>switchView('inbox');document.querySelector('.icon-btn[title="搜索"]').onclick=openSearch;$('#closeDrawer').onclick=closeDrawer;$('#closeModal').onclick=closeModal;$('#modalBackdrop').onclick=e=>{if(e.target.id==='modalBackdrop')closeModal()};$('#taskDrawer').onclick=e=>{if(e.target.id==='taskDrawer')closeDrawer()};$('#backWeekBtn').onclick=()=>switchView('calendar');$('#backTodayBtn').onclick=()=>{UI.selectedWeek=0;UI.dayOffset=0;switchView('calendar')};$('#addProjectBtn').onclick=newProject;$('#addProjectTopBtn').onclick=newProject;$('#addTaskBtn').onclick=newTask;$('#emptyAddBtn').onclick=newTask;$('#timelineAddProjectBtn').onclick=newProject;$('#createFixedBtn').onclick=fixedTask;$('#collectionSettingsBtn').onclick=collectionSettings;$('#forceAssignBtn').onclick=()=>switchView('projects');$('#runAutomationBtn').onclick=()=>act('scheduler.run',{});$('#markAllReadBtn').onclick=()=>act('inbox.read',{all:true});$('#generateSummaryBtn').onclick=openTodayDiary;
 window.addEventListener('focus',()=>{if(UI.view==='inbox')refreshInboxState()});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&UI.view==='inbox')refreshInboxState()});
 if(location.protocol==='file:'){showAuth()}else{refresh()}

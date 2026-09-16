@@ -323,3 +323,27 @@ test('agent action envelopes are parsed and removed from the reply text', () => 
   assert.equal(malformed.clean, '无效动作');
   assert.equal(a.run("AGENT_ACTION_LABELS['task.create']"), '创建任务');
 });
+
+test('workspace account menu lists the right entries per role and escapes names', () => {
+  const a = app();
+  const elements = {};
+  const stub = () => ({innerHTML:'', classList:{contains:()=>false, toggle(){}}, setAttribute(){}, querySelectorAll:()=>[], addEventListener(){}});
+  a.context.document = {querySelector:s=>elements[s]||(elements[s]=stub()), querySelectorAll:()=>[]};
+
+  a.run("S.user={id:'boss',admin:1,role:'superadmin',active:1};S.users=[{id:'boss',admin:1,role:'superadmin',active:1,displayName:'老板'},{id:'m1',admin:0,role:'member',active:1,displayName:'<img src=x>'},{id:'m2',admin:0,role:'member',active:0,displayName:'已停用'}]");
+  a.run('renderAccountMenu()');
+  const admin = elements['#accountMenu'].innerHTML;
+  assert.ok(admin.includes('账户管理'), 'superadmin 应看到账户管理入口');
+  assert.ok(admin.includes('我的资料'), '应包含我的资料');
+  assert.ok(admin.includes('修改密码'), '应包含修改密码');
+  assert.ok(admin.includes('退出登录'), '应包含退出登录');
+  assert.ok(admin.includes('切换账户'), '应列出其他账户');
+  assert.ok(admin.includes('&lt;img src=x&gt;'), '中文名称必须被转义');
+  assert.ok(!admin.includes('<img'), '不得注入标签');
+  assert.ok(!admin.includes('已停用'), '停用账户不出现在切换列表');
+
+  a.run("S.user={id:'m1',admin:0,role:'member',active:1};renderAccountMenu()");
+  const member = elements['#accountMenu'].innerHTML;
+  assert.ok(!member.includes('账户管理'), '普通成员不应看到账户管理');
+  assert.ok(member.includes('我的资料'), '成员仍可编辑自己的资料');
+});
