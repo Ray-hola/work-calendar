@@ -4,7 +4,7 @@ import unittest
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
-from server import Store, Problem, AGENT_WRITE_TOOLS
+from server import Store, Problem, AGENT_WRITE_TOOLS, CALENDAR_END
 
 
 class RepeatFeatureTests(unittest.TestCase):
@@ -57,21 +57,26 @@ class RepeatFeatureTests(unittest.TestCase):
         self.assertFalse(self.store.collection_enabled('2026-12-30'))
 
     def test_calendar_horizon_is_inclusive_and_rejects_later_dates(self):
+        # Anchored to CALENDAR_END rather than literal dates, so widening the
+        # scheduling range does not require editing this test.
         self.store.db.commit()
+        last = CALENDAR_END.isoformat()
+        beyond = (CALENDAR_END + timedelta(days=1)).isoformat()
+        day_before_last = (CALENDAR_END - timedelta(days=1)).isoformat()
         with self.assertRaises(Problem):
             self.store.action(self.admin, 'project.create', {
-                'name': 'too late', 'start': '2027-04-02', 'cycle': 'infinite',
+                'name': 'too late', 'start': beyond, 'cycle': 'infinite',
             })
         repeat = self.store.action(self.admin, 'repeat.create', {
             'name': 'horizon routine', 'assignees': ['test001'],
-            'start': '2027-03-31', 'frequency': 'daily',
+            'start': day_before_last, 'frequency': 'daily',
         })
         tasks = [t for t in self.store.all('tasks') if t.get('repeatId') == repeat['id']]
-        self.assertEqual({t['date'] for t in tasks}, {'2027-03-31', '2027-04-01'})
+        self.assertEqual({t['date'] for t in tasks}, {day_before_last, last})
         with self.assertRaises(Problem):
             self.store.action(self.admin, 'repeat.create', {
                 'name': 'outside routine', 'assignees': ['test001'],
-                'start': '2027-04-01', 'frequency': 'dates', 'dates': ['2027-04-02'],
+                'start': last, 'frequency': 'dates', 'dates': [beyond],
             })
 
     def test_agent_capabilities_are_read_only_for_members(self):

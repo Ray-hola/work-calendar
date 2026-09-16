@@ -61,9 +61,9 @@ from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent
 TZ = ZoneInfo('Asia/Shanghai')
-# MVP 的日期范围先开放到 2027-04-01（含当天）。统一由后端校验，避免
+# MVP 的日期范围先开放到 2027-04-30（含当天）。统一由后端校验，避免
 # 浏览器绕过日期输入限制后创建超出当前产品范围的安排。
-CALENDAR_END = date(2027, 4, 1)
+CALENDAR_END = date(2027, 4, 30)
 TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages')
 
 # Agent capability boundary.  The future chat/browser adapter must use these
