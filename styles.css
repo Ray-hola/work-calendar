@@ -608,7 +608,73 @@ select:focus {
 }
 
 /* --------------------------------------------------------------------------
-   15 · Scrollbars
+   15 · Account names & avatars
+   -------------------------------------------------------------------------- */
+
+.account-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.account-name strong { font-size: 14px; }
+
+/* 中文名称 is the formal name, 昵称 the personal one, and the account id stays
+   visible as a quiet mono chip so operators can still match the login. */
+.name-tag {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.name-tag.nick {
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+}
+.name-tag.code {
+  color: var(--muted);
+  background: var(--surface-sunk);
+  border: 1px solid var(--line);
+  font-family: monospace;
+}
+
+/* Fallback avatar: a stable hue per account showing the name's first glyph. */
+.avatar {
+  background: hsl(var(--avatar-hue, 18) 38% 56%);
+  color: var(--surface);
+  overflow: hidden;
+  transition: background var(--t) var(--ease);
+}
+.account-banner .avatar,
+.workspace-switcher .avatar { background: hsl(var(--avatar-hue, 18) 38% 56%); }
+
+.avatar.has-image { background: var(--surface-sunk); }
+.avatar.has-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.avatar-editor {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.avatar-editor .avatar {
+  width: 46px;
+  height: 46px;
+  font-size: 17px;
+  border-radius: 50%;
+}
+
+/* --------------------------------------------------------------------------
+   16 · Scrollbars
    -------------------------------------------------------------------------- */
 
 * { scrollbar-color: var(--line-strong) transparent; }
@@ -623,7 +689,7 @@ select:focus {
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 
 /* --------------------------------------------------------------------------
-   16 · Accessibility: honour reduced motion
+   17 · Accessibility: honour reduced motion
    -------------------------------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {

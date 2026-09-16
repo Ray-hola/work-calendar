@@ -168,6 +168,14 @@ class Store:
         if 'role' not in columns:
             self.db.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'member'")
             self.db.execute("UPDATE users SET role=CASE WHEN admin=1 THEN 'superadmin' ELSE 'member' END")
+        # Profile columns: 中文名称 is assigned by the superadmin group, while
+        # 昵称 and the avatar belong to the account holder.
+        if 'display_name' not in columns:
+            self.db.execute('ALTER TABLE users ADD COLUMN display_name TEXT')
+        if 'nickname' not in columns:
+            self.db.execute('ALTER TABLE users ADD COLUMN nickname TEXT')
+        if 'avatar' not in columns:
+            self.db.execute('ALTER TABLE users ADD COLUMN avatar TEXT')
         self.db.execute('CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires TEXT NOT NULL)')
         self.db.execute('CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, ran_at TEXT NOT NULL)')
         for table in TABLES:
@@ -209,7 +217,15 @@ class Store:
         return obj
 
     def users(self):
-        return [dict(r) for r in self.db.execute('SELECT id,admin,active,role FROM users ORDER BY admin DESC,id')]
+        rows = self.db.execute('SELECT id,admin,active,role,display_name,nickname,avatar FROM users ORDER BY admin DESC,id')
+        result = []
+        for row in rows:
+            item = dict(row)
+            item['displayName'] = item.pop('display_name') or ''
+            item['nickname'] = item.pop('nickname') or ''
+            item['avatar'] = item.pop('avatar') or ''
+            result.append(item)
+        return result
 
     def user(self, id):
         u = next((u for u in self.users() if u['id'] == id and u['active']), None)
@@ -335,10 +351,10 @@ class Store:
             messages.append({'role': item['role'], 'content': content})
         # Keep the permission contract in the model context as a second line of
         # defence; actual mutations still go through Store.action authorization.
-        policy = ('你是 Work Calendar 助手。当前账户是 superadmin，可协助查询并提出管理操作；'
+        policy = ('你是「战略小组台账」助手。当前账户是 superadmin，可协助查询并提出管理操作；'
                   '任何创建、指派、调整或审批都必须先向用户展示拟执行内容并等待明确确认。'
                   if user.get('admin') else
-                  '你是 Work Calendar 查询助手。当前账户是普通成员，只能回答该成员有权看到的信息，'
+                  '你是「战略小组台账」查询助手。当前账户是普通成员，只能回答该成员有权看到的信息，'
                   '不能创建、删除、指派、调整或审批任何数据。')
         if user.get('admin'):
             # Teach the operator model the one structured envelope the browser
@@ -367,7 +383,7 @@ class Store:
             'notifications', 'workCompletions', 'achievements', 'repeats', 'agentCapabilities')}
         context_text = json.dumps(context, ensure_ascii=False, separators=(',', ':'))
         messages.insert(0, {'role': 'system', 'content':
-                            '以下是当前账户可见的 Work Calendar 数据，仅用于回答查询；'
+                            '以下是当前账户可见的战略小组台账数据，仅用于回答查询；'
                             '不要把其中的内部字段或权限信息原样泄露给其他用户：\n' + context_text[:80000]})
         messages.insert(0, {'role': 'system', 'content': policy})
         messages.append({'role': 'system', 'content': policy})
@@ -995,13 +1011,42 @@ class Store:
                         self.db.execute('DELETE FROM agent_messages WHERE id=?',(message['id'],))
             self.audit(user['id'],'agent.history.clear',{'target':target})
             return {'cleared':True,'userId':target}
+        if action=='account.profile':
+            # 中文名称 is the formal name the superadmin group assigns; 昵称 is
+            # the holder's own choice and is edited through profile.self.
+            self.superadmin(user)
+            target=required(d,'id')
+            if not any(x['id']==target for x in self.users()):
+                raise Problem(404,'账户不存在')
+            display_name=str(d.get('displayName') or '').strip()[:24]
+            with self.lock,self.db:
+                self.db.execute('UPDATE users SET display_name=? WHERE id=?',(display_name,target))
+            self.audit(user['id'],'account.profile',{'target':target,'displayName':display_name})
+            return {'id':target,'displayName':display_name}
+        if action=='profile.self':
+            # Members may always rename themselves and pick an avatar; both are
+            # display-only and never touch task ownership or permissions.
+            nickname=str(d.get('nickname') or '').strip()[:24]
+            avatar=str(d.get('avatar') or '')
+            if avatar and not avatar.startswith('data:image/'):
+                raise Problem(400,'头像格式无效')
+            if len(avatar)>160000:
+                raise Problem(400,'头像文件过大，请换一张更小的图片')
+            with self.lock,self.db:
+                self.db.execute('UPDATE users SET nickname=?,avatar=? WHERE id=?',(nickname,avatar,user['id']))
+            self.audit(user['id'],'profile.self',{'nickname':nickname})
+            return {'id':user['id'],'nickname':nickname,'avatar':avatar}
         if action=='account.create':
             # Only the superadmin group manages accounts and roles.
             self.superadmin(user)
             username=required(d,'username');password=required(d,'password')
             role=str(d.get('role') or ('superadmin' if d.get('admin') else 'member'))
             self.create_user(username,password,role=role)
-            self.audit(user['id'],'account.create',{'target':username,'role':role})
+            display_name=str(d.get('displayName') or '').strip()[:24]
+            if display_name:
+                with self.lock,self.db:
+                    self.db.execute('UPDATE users SET display_name=? WHERE id=?',(display_name,username))
+            self.audit(user['id'],'account.create',{'target':username,'role':role,'displayName':display_name})
             return
         if action=='account.toggle':
             self.superadmin(user)
@@ -1840,7 +1885,7 @@ def main():
         path=Path(args.db).parent/'initial-accounts.txt'
         fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
         with os.fdopen(fd,'w',encoding='utf-8') as f:
-            f.write('Work Calendar 本地核验账户（请勿上传或公开分享）\n')
+            f.write('战略小组台账 本地核验账户（请勿上传或公开分享）\n')
             for id,pw in store.initial_passwords.items():f.write(f'{id}\t{pw}\n')
         print(f'账户密码已保存：{path}',flush=True)
     class Handler(BaseHTTPRequestHandler):
@@ -1917,7 +1962,7 @@ def main():
             stop.wait(30)
     thread=threading.Thread(target=scheduler,daemon=True);thread.start()
     server=ThreadingHTTPServer((args.host,args.port),Handler)
-    print(f'Work Calendar 正在运行：http://{args.host}:{args.port}',flush=True)
+    print(f'战略小组台账 正在运行：http://{args.host}:{args.port}',flush=True)
     try:server.serve_forever()
     except KeyboardInterrupt:pass
     finally:stop.set();thread.join(timeout=5);server.server_close();store.close()

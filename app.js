@@ -25,7 +25,7 @@ const status=t=>{
 };
 const projectName=t=>(S.projects.find(p=>p.id===t.projectId)||{}).name||'个人';
 function toast(msg){const e=$('#toast');e.textContent=msg;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200)}
-function showAuth(){document.body.classList.add('auth-locked');let e=$('#authScreen');if(!e){e=document.createElement('section');e.id='authScreen';document.body.prepend(e)}const local=location.protocol==='file:';e.innerHTML=`<div class="auth-card"><div class="brand"><span class="brand-mark">W</span><span>work<br><strong>calendar</strong></span></div><h1>登录工作台</h1><p>使用核验账户进入你的任务、项目和收件箱。</p><form id="loginForm"><label>账户<input id="loginUser" autocomplete="username" value="superadmin" required></label><label>密码<input id="loginPass" type="password" autocomplete="current-password" required></label><button class="primary-btn" type="submit" ${local?'disabled':''}>${local?'请先启动本地服务':'进入工作台'}</button><div id="loginError" class="login-error">${local?'请在工作区运行 ./run.sh，然后访问 http://127.0.0.1:4173/':''}</div></form><small>首次启动后，密码写入 data/initial-accounts.txt（仅本机保存）。</small></div>`;$('#loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/login',{username:$('#loginUser').value,password:$('#loginPass').value});document.body.classList.remove('auth-locked');e.target.closest('#authScreen').remove();await refresh();switchView('calendar')}catch(err){$('#loginError').textContent=err.message}}}
+function showAuth(){document.body.classList.add('auth-locked');let e=$('#authScreen');if(!e){e=document.createElement('section');e.id='authScreen';document.body.prepend(e)}const local=location.protocol==='file:';e.innerHTML=`<div class="auth-card"><div class="brand"><span class="brand-mark">战</span><span>战略小组<br><strong>台账</strong></span></div><h1>登录工作台</h1><p>使用核验账户进入你的任务、项目和收件箱。</p><form id="loginForm"><label>账户<input id="loginUser" autocomplete="username" value="superadmin" required></label><label>密码<input id="loginPass" type="password" autocomplete="current-password" required></label><button class="primary-btn" type="submit" ${local?'disabled':''}>${local?'请先启动本地服务':'进入工作台'}</button><div id="loginError" class="login-error">${local?'请在工作区运行 ./run.sh，然后访问 http://127.0.0.1:4173/':''}</div></form><small>首次启动后，密码写入 data/initial-accounts.txt（仅本机保存）。</small></div>`;$('#loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/login',{username:$('#loginUser').value,password:$('#loginPass').value});document.body.classList.remove('auth-locked');e.target.closest('#authScreen').remove();await refresh();switchView('calendar')}catch(err){$('#loginError').textContent=err.message}}}
 async function refresh(){
   let next;
   try{next=await getState()}catch(e){showAuth();return}
@@ -97,7 +97,7 @@ function ddlText(t){
 function renderStats(day=displayDay()){const d=scheduleTasks().filter(t=>taskActiveOn(t,day)),current=d.filter(t=>!isArchivedTask(t)),done=current.filter(t=>t.status==='done').length;$('#todayCount').textContent=current.filter(t=>t.status!=='done').length;$('#p0Count').textContent=current.filter(t=>t.priority==='P0'&&t.status!=='done').length;$('#doingCount').textContent=scheduleTasks().filter(t=>t.status==='doing').length;$('#deferredCount').textContent=scheduleTasks().filter(t=>t.status==='deferred').length;$('#allTabCount').textContent=d.length;$('#openTabCount').textContent=current.length-done;$('#doneTabCount').textContent=done;$('#progressText').textContent=`${done} / ${current.length} 已完成`;const pct=current.length?done/current.length*100:0;$('#dayProgress').style.width=`${pct}%`;$('#progressPercent').textContent=`${Math.round(pct)}%`;$('#focusTime').textContent=`${String(Math.floor(current.reduce((n,t)=>n+t.duration,0)/60)).padStart(2,'0')}:${String(current.reduce((n,t)=>n+t.duration,0)%60).padStart(2,'0')}`;$('#focusProgress').style.width=`${pct}%`}
 function taskCard(t){
   const [c,l]=status(t),deferLog=t.status==='deferred'?S.logs.find(x=>x.taskId===t.id&&x.kind==='defer'):null;
-  return `<article class="task-card" data-id="${escapeHTML(t.id)}" tabindex="0"><div class="task-stripe ${escapeHTML(t.priority)}"></div><div class="task-main"><div class="task-topline"><span class="priority ${escapeHTML(t.priority)}">${escapeHTML(t.priority)}</span><span class="task-name">${escapeHTML(t.name)}</span>${t.fixed?'<span class="fixed-badge">↻ 固定</span>':''}${isMultiDay(t)?`<span class="span-badge">${spanDays(t)} 天</span>`:''}</div><div class="task-desc">${escapeHTML(t.desc||'暂无描述')}</div><div class="task-meta"><span class="assignee-tag">${escapeHTML(t.assignee)}</span><span class="project-tag">${escapeHTML(projectName(t))}</span><span>◷ ${escapeHTML(t.time||'09:00')} · ${t.duration} 分钟</span>${ddlBadge(t)}${deferLog?.target?`<span class="defer-target">→ ${escapeHTML(deferLog.target)}</span>`:''}</div></div><div class="task-status"><i class="status-dot ${c}"></i>${l}<span class="task-arrow">›</span></div></article>`;
+  return `<article class="task-card" data-id="${escapeHTML(t.id)}" tabindex="0"><div class="task-stripe ${escapeHTML(t.priority)}"></div><div class="task-main"><div class="task-topline"><span class="priority ${escapeHTML(t.priority)}">${escapeHTML(t.priority)}</span><span class="task-name">${escapeHTML(t.name)}</span>${t.fixed?'<span class="fixed-badge">↻ 固定</span>':''}${isMultiDay(t)?`<span class="span-badge">${spanDays(t)} 天</span>`:''}</div><div class="task-desc">${escapeHTML(t.desc||'暂无描述')}</div><div class="task-meta"><span class="assignee-tag" title="${escapeHTML(t.assignee)}">${escapeHTML(nameOf(t.assignee))}</span><span class="project-tag">${escapeHTML(projectName(t))}</span><span>◷ ${escapeHTML(t.time||'09:00')} · ${t.duration} 分钟</span>${ddlBadge(t)}${deferLog?.target?`<span class="defer-target">→ ${escapeHTML(deferLog.target)}</span>`:''}</div></div><div class="task-status"><i class="status-dot ${c}"></i>${l}<span class="task-arrow">›</span></div></article>`;
 }
 function dailyTaskGroups(tasks){
   const groups=new Map();
@@ -421,21 +421,122 @@ function accountRoleLabel(x){
   return parts.join('　')||'暂无项目归属';
 }
 function roleOf(x){return x&&(x.role||(x.admin?'superadmin':'member'))}
+function userById(id){return (S.users||[]).find(u=>u.id===id)}
+/* 中文名称 is the formal ledger name; 昵称 is what the holder calls themselves.
+   Anything displayed to the team falls back through displayName → id. */
+function nameOf(id){const u=userById(id);return (u&&u.displayName)||id}
+function nickOf(id){const u=userById(id);return (u&&u.nickname)||''}
+function avatarSeed(id){
+  const u=userById(id)||{};
+  const text=u.displayName||u.nickname||id||'?';
+  return [...String(text)][0]||'?';
+}
+/* A stable hue per account keeps the fallback initial recognisable. */
+function avatarHue(id){
+  let h=0;for(const ch of String(id||''))h=(h*31+ch.charCodeAt(0))%360;
+  return h;
+}
+function avatarHTML(id,extra=''){
+  const u=userById(id)||{};
+  const cls='avatar'+(extra?' '+extra:'')+(u.avatar?' has-image':'');
+  if(u.avatar)return `<span class="${cls}" style="--avatar-hue:${avatarHue(id)}"><img src="${escapeHTML(u.avatar)}" alt=""></span>`;
+  return `<span class="${cls}" style="--avatar-hue:${avatarHue(id)}">${escapeHTML(avatarSeed(id))}</span>`;
+}
+/* Updates an avatar element in place so existing bindings stay valid. */
+function applyAvatar(el,id){
+  if(!el)return el;
+  const u=userById(id)||{};
+  el.classList.toggle('has-image',Boolean(u.avatar));
+  el.style.setProperty('--avatar-hue',String(avatarHue(id)));
+  el.innerHTML=u.avatar?`<img src="${escapeHTML(u.avatar)}" alt="">`:escapeHTML(avatarSeed(id));
+  return el;
+}
+/* Downscales a picked image to a 128px square before it ever reaches the API,
+   so the stored data URL stays small enough for the state payload. */
+function readAvatarFile(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onerror=()=>reject(new Error('读取文件失败'));
+    reader.onload=()=>{
+      const img=new Image();
+      img.onerror=()=>reject(new Error('无法识别这张图片'));
+      img.onload=()=>{
+        const size=128;
+        const canvas=document.createElement('canvas');
+        canvas.width=size;canvas.height=size;
+        const ctx=canvas.getContext('2d');
+        const scale=Math.max(size/img.width,size/img.height);
+        const w=img.width*scale,h=img.height*scale;
+        ctx.drawImage(img,(size-w)/2,(size-h)/2,w,h);
+        resolve(canvas.toDataURL('image/jpeg',.82));
+      };
+      img.src=reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+function editProfile(id,initialMode){
+  const target=userById(id);if(!target){toast('找不到该账户');return}
+  const self=id===S.user.id;
+  const canName=S.user?.role==='superadmin';
+  if(!canName&&!self){toast('只有 superadmin 可以修改他人资料');return}
+  let pendingAvatar=target.avatar||'';
+  const nameField=canName?`<label class="form-field">中文名称<input id="profileDisplayName" maxlength="12" value="${escapeHTML(target.displayName||'')}" placeholder="台账里显示的正式名字"><small class="muted">由 superadmin 设置，会出现在任务、项目和成员列表里</small></label>`:'';
+  const selfFields=self?`<label class="form-field">昵称<input id="profileNickname" maxlength="12" value="${escapeHTML(target.nickname||'')}" placeholder="自己想被叫的名字"><small class="muted">只有你能改，显示在账户和侧栏上</small></label>
+    <div class="form-field">头像<div class="avatar-editor"><span class="avatar large" id="profileAvatarPreview">${escapeHTML(avatarSeed(id))}</span><input type="file" id="profileAvatarFile" accept="image/*" class="hidden"><button type="button" class="secondary-btn" id="profileAvatarPick">选择图片</button><button type="button" class="ghost-btn" id="profileAvatarClear">移除</button></div><small class="muted">会压缩成 128×128 保存，留空则用名字首字</small></div>`:'';
+  openModal(`<div class="eyebrow">账户资料 · ${escapeHTML(target.id)}</div><h2>${escapeHTML(target.displayName||target.id)}</h2><p>${self?'昵称和头像属于你自己，随时可以改。':'你可以为本账户设置中文名称。'}</p>${nameField}${selfFields}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmProfile">保存</button></div>`);
+  const preview=$('#profileAvatarPreview');
+  const paint=()=>{
+    preview.classList.toggle('has-image',Boolean(pendingAvatar));
+    preview.style.setProperty('--avatar-hue',String(avatarHue(id)));
+    preview.innerHTML=pendingAvatar?`<img src="${escapeHTML(pendingAvatar)}" alt="">`:escapeHTML(avatarSeed(id));
+  };
+  paint();
+  $('#profileAvatarPick')?.addEventListener('click',()=>$('#profileAvatarFile').click());
+  $('#profileAvatarFile')?.addEventListener('change',async e=>{
+    const file=e.target.files?.[0];if(!file)return;
+    try{pendingAvatar=await readAvatarFile(file);paint()}
+    catch(err){toast(err.message||'图片处理失败')}
+    e.target.value='';
+  });
+  $('#profileAvatarClear')?.addEventListener('click',()=>{pendingAvatar='';paint()});
+  $('#cancelAction').onclick=closeModal;
+  $('#confirmProfile').onclick=async()=>{
+    const btn=$('#confirmProfile');btn.disabled=true;btn.textContent='保存中…';
+    try{
+      if(canName&&$('#profileDisplayName')){
+        await api('/api/action',{action:'account.profile',data:{id,displayName:$('#profileDisplayName').value.trim()}});
+      }
+      if(self){
+        await api('/api/action',{action:'profile.self',data:{nickname:($('#profileNickname')?.value||'').trim(),avatar:pendingAvatar}});
+      }
+      closeModal();await refresh();toast('资料已更新');
+    }catch(err){
+      btn.disabled=false;btn.textContent='保存';
+      toast(err?.message||'保存失败');
+    }
+  };
+}
 function roleText(x){const role=roleOf(x);return role==='superadmin'?'Super Admin':role==='admin'?'Admin':(accountProjectRoles(x.id).owned.length?'项目 Owner':'普通用户')}
 function renderAccountItem(x,owner,admin){
   const self=x.id===S.user.id,role=roleOf(x);
-  const actions=self?`<span class="permission-pill">当前身份</span> <button class="ghost-btn change-password" data-user="${x.id}">修改密码</button>`
-    :owner?`<select class="role-select" data-user="${x.id}" title="权限组"><option value="superadmin"${role==='superadmin'?' selected':''}>superadmin</option><option value="admin"${role==='admin'?' selected':''}>admin</option><option value="member"${role==='member'?' selected':''}>普通用户</option></select> <button class="ghost-btn reset-password" data-user="${x.id}">重置密码</button> <button class="ghost-btn toggle-account" data-user="${x.id}" data-active="${x.active?1:0}">${x.active?'停用':'启用'}</button> ${x.id!=='superadmin'?`<button class="ghost-btn delete-account" data-user="${x.id}">删除</button>`:''} `
-    :'';
+  const nameBtn=owner?`<button class="ghost-btn edit-profile" data-user="${x.id}" data-mode="name">中文名</button>`:'';
+  const selfBtn=self?`<button class="ghost-btn edit-profile" data-user="${x.id}" data-mode="self">昵称 / 头像</button>`:'';
+  const actions=self?`<span class="permission-pill">当前身份</span> ${selfBtn} <button class="ghost-btn change-password" data-user="${x.id}">修改密码</button>`
+    :owner?`<select class="role-select" data-user="${x.id}" title="权限组"><option value="superadmin"${role==='superadmin'?' selected':''}>superadmin</option><option value="admin"${role==='admin'?' selected':''}>admin</option><option value="member"${role==='member'?' selected':''}>普通用户</option></select> <button class="ghost-btn reset-password" data-user="${x.id}">重置密码</button> ${nameBtn} <button class="ghost-btn toggle-account" data-user="${x.id}" data-active="${x.active?1:0}">${x.active?'停用':'启用'}</button> ${x.id!=='superadmin'?`<button class="ghost-btn delete-account" data-user="${x.id}">删除</button>`:''} `
+    :(self?nameBtn:'');
   const tail=self?'':(x.active?`<button class="ghost-btn switch-login" data-user="${x.id}">切换</button>`:'<span class="muted">不可用</span>');
-  return `<article class="account-item ${self?'current-account':''}"><div class="avatar">${x.id.slice(0,1).toUpperCase()}</div><div class="account-copy"><strong>${escapeHTML(x.id)}</strong><span>${escapeHTML(roleText(x))}</span><small>${escapeHTML(accountRoleLabel(x))}</small></div>${actions}${tail}</article>`;
+  const nickTag=x.nickname?`<span class="name-tag nick">${escapeHTML(x.nickname)}</span>`:'';
+  const codeTag=x.displayName?`<span class="name-tag code">${escapeHTML(x.id)}</span>`:'';
+  return `<article class="account-item ${self?'current-account':''}">${avatarHTML(x.id)}<div class="account-copy"><div class="account-name"><strong>${escapeHTML(x.displayName||x.id)}</strong>${nickTag}${codeTag}</div><span>${escapeHTML(roleText(x))}</span><small>${escapeHTML(accountRoleLabel(x))}</small></div>${actions}${tail}</article>`;
 }
 function renderAccounts(){
   const u=S.users,admin=Boolean(S.user?.admin),owner=S.user?.role==='superadmin';
   const ownerProjects=S.projects.filter(p=>p.owner===S.user.id);
   $('#currentRoleLabel').textContent=owner?'Super Admin':admin?'Admin':ownerProjects.length?'项目 Owner':'协作者';
-  $('.account-banner .avatar').textContent=S.user.id[0].toUpperCase();
-  $('.account-banner strong').textContent=S.user.id;
+  const me=userById(S.user.id)||{};
+  applyAvatar($('.account-banner .avatar'),S.user.id);
+  $('.account-banner strong').innerHTML=escapeHTML(me.displayName||S.user.id)+(me.nickname?` <span class="name-tag nick">${escapeHTML(me.nickname)}</span>`:'');
   $('.account-banner span').textContent=owner?'Super Admin · 全部项目、成员与账户管理':admin?'Admin · 全部项目与成员':'';
   $('.account-banner .permission-pill').textContent=owner?'可管理账户 / 角色 / 密码':admin?'可强行指派 / 调整':'可查看已加入项目';
   $('#forceAssignBtn').classList.toggle('hidden',!admin);
@@ -450,6 +551,7 @@ function renderAccounts(){
   $$('.role-select').forEach(sel=>sel.onchange=async()=>{const next=sel.value,prev=sel.dataset.changed||sel.querySelector(`option[selected]`)?.value;try{await api('/api/action',{action:'account.role',data:{id:sel.dataset.user,role:next}});await refresh();toast(`${sel.dataset.user} 已设为 ${next==='member'?'普通用户':next}`)}catch(e){toast(e.message||'操作失败');await refresh()}});
   $$('.change-password').forEach(b=>b.onclick=async()=>{const current=prompt('请输入当前密码');if(current===null)return;const pw=prompt('请输入新密码（至少6位）');if(!pw)return;try{await api('/api/password',{id:b.dataset.user,current,password:pw});toast('密码已更新')}catch(e){toast(e.message)}});
   $$('.reset-password').forEach(b=>b.onclick=async()=>{const pw=prompt(`为 ${b.dataset.user} 设置新密码（至少6位）`);if(!pw)return;try{await api('/api/password',{id:b.dataset.user,password:pw});toast('密码已重置，该账户需重新登录')}catch(e){toast(e.message)}});
+  $$('.edit-profile').forEach(b=>b.onclick=()=>editProfile(b.dataset.user,b.dataset.mode));
   $$('.delete-account').forEach(b=>b.onclick=()=>deleteAccount(b.dataset.user));
 }
 function deleteAccount(id){
@@ -563,9 +665,10 @@ function renderAll(){
   renderRepeats();
   $('#forceAssignBtn').textContent='管理项目与任务';
   $('[data-view="today"]').removeAttribute('disabled');
-  $('.workspace-switcher .avatar').textContent=S.user.id[0].toUpperCase();
+  applyAvatar($('.workspace-switcher .avatar'),S.user.id);
   $('.workspace-switcher small').textContent=S.user.admin?'团队工作区':'成员工作区';
-  $('.workspace-switcher strong').textContent=S.user.id;
+  const meUser=userById(S.user.id)||{};
+  $('.workspace-switcher strong').innerHTML=escapeHTML(meUser.displayName||S.user.id)+(meUser.nickname?` <span class="name-tag nick">${escapeHTML(meUser.nickname)}</span>`:'');
   $('#crumbRoot').textContent=S.user.admin?'团队工作台':'我的工作台';
   $('.focus-card > span').textContent=S.user.admin?'成员今日安排':'今日安排';
   renderStats();renderInbox();renderAccounts();switchView(UI.view);
@@ -805,7 +908,7 @@ function agentSystemPrompt(context){
   const rule=context.mode==='operator'
     ?'用户要求改动数据时，输出一个 <action>{"action":"…","data":{…}}</action> 动作块，一次只输出一个动作，然后停下来等待系统回执。系统会把执行结果以【系统回执】的形式发给你，收到后判断：如果用户的目标还没完成，继续输出下一个动作；如果已经完成，用一句话总结并明确结束。绝对不要在收到回执之前声称操作已经完成。'
     :'你是只读助手，不能创建、指派、修改或审批任何数据。';
-  return `你是 Work Calendar 工作助手。当前账户角色：${context.role}，权限模式：${context.mode}。遵守服务端权限边界：${rule}`;
+  return `你是「战略小组台账」工作助手。当前账户角色：${context.role}，权限模式：${context.mode}。遵守服务端权限边界：${rule}`;
 }
 function agentRecentMessages(){
   return agentState.messages.slice(-AGENT_CONTEXT_LIMIT).map(x=>({role:x.role,content:x.content}));
@@ -950,13 +1053,13 @@ function ensureAccountCreateButton(){
 }
 function createAccountDialog(){
   const groups={superadmin:S.users.filter(u=>roleOf(u)==='superadmin').length,admin:S.users.filter(u=>roleOf(u)==='admin').length};
-  openModal(`<div class="eyebrow">账户管理 · 新建账户</div><h2>添加账户</h2><p class="muted">账户名 3–30 位字母数字，密码至少 6 位。所有角色都保留在账户列表，密码重置不会删除任何数据。</p><label class="form-field">账户名<input id="newAccountName" autocomplete="off" placeholder="例如 zhangsan"></label><label class="form-field">初始密码<input id="newAccountPassword" type="password" autocomplete="new-password" placeholder="至少 6 位"></label><label class="form-field">权限组<select id="newAccountRole"><option value="member">普通用户</option><option value="admin">admin · 全部业务与 AI 权限（账户管理除外，当前 ${groups.admin} 个）</option><option value="superadmin">superadmin · 全部权限（当前 ${groups.superadmin} 个）</option></select></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmCreateAccount">创建账户</button></div>`);
+  openModal(`<div class="eyebrow">账户管理 · 新建账户</div><h2>添加账户</h2><p class="muted">账户名 3–30 位字母数字，密码至少 6 位。所有角色都保留在账户列表，密码重置不会删除任何数据。</p><label class="form-field">账户名<input id="newAccountName" autocomplete="off" placeholder="例如 zhangsan"></label><label class="form-field">中文名称（可留空）<input id="newAccountDisplayName" maxlength="12" placeholder="台账里显示的正式名字"></label><label class="form-field">初始密码<input id="newAccountPassword" type="password" autocomplete="new-password" placeholder="至少 6 位"></label><label class="form-field">权限组<select id="newAccountRole"><option value="member">普通用户</option><option value="admin">admin · 全部业务与 AI 权限（账户管理除外，当前 ${groups.admin} 个）</option><option value="superadmin">superadmin · 全部权限（当前 ${groups.superadmin} 个）</option></select></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmCreateAccount">创建账户</button></div>`);
   $('#cancelAction').onclick=closeModal;
   $('#confirmCreateAccount').onclick=async()=>{
-    const username=$('#newAccountName').value.trim(),password=$('#newAccountPassword').value,role=$('#newAccountRole').value;
+    const username=$('#newAccountName').value.trim(),password=$('#newAccountPassword').value,role=$('#newAccountRole').value,displayName=$('#newAccountDisplayName').value.trim();
     if(!username){toast('请填写账户名');return}
     if(password.length<6){toast('密码至少 6 位');return}
-    try{await api('/api/action',{action:'account.create',data:{username,password,role}});closeModal();await refresh();toast(role==='member'?'已创建普通账户 '+username:'已创建管理账户 '+username)}
+    try{await api('/api/action',{action:'account.create',data:{username,password,role,displayName}});closeModal();await refresh();toast(role==='member'?'已创建普通账户 '+username:'已创建管理账户 '+username)}
     catch(e){toast(e.message||'创建失败')}
   };
 }

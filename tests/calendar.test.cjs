@@ -118,8 +118,13 @@ test('assignee and project markup escapes user-provided text', () => {
   a.run("S.user={admin:1};S.projects=[]");
   const html = a.run(`taskCard({id:'a',name:'<img src=x>',assignee:'test001',priority:'P1',status:'todo',duration:30,date:'2026-09-12'})`);
   assert.ok(html.includes('&lt;img src=x&gt;'));
-  assert.ok(html.includes('assignee-tag">test001'));
+  assert.ok(html.includes('assignee-tag" title="test001">test001'));
   assert.ok(!html.includes('<img'));
+  // The account id also lands inside a title attribute, so a quote must not be
+  // able to break out of the attribute and add its own handler.
+  const evil = a.run(`taskCard({id:'b',name:'x',assignee:'te" onmouseover="alert(1)',priority:'P1',status:'todo',duration:30,date:'2026-09-12'})`);
+  assert.ok(evil.includes('title="te&quot; onmouseover=&quot;alert(1)"'), '引号必须被转义，属性不得被闭合');
+  assert.ok(!evil.includes('<img'));
 });
 
 test('project operations are available to admin and project owner; assignees must be active confirmed members', () => {
