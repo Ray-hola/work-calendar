@@ -27,8 +27,8 @@
 @media(max-width:900px){.sidebar{width:206px}.project-grid{grid-template-columns:1fr 1fr}.mini-calendar{grid-template-columns:repeat(4,1fr)}.day-cell:nth-child(n+5){display:none}}
 @media(max-width:640px){.app-shell{display:block}.sidebar{width:100%;height:auto;padding:13px 15px;display:block}.brand{display:inline-flex}.workspace-switcher,.sidebar-section,.sidebar-footer{display:none}.nav-list{display:flex;gap:5px;margin-top:14px;overflow:auto}.nav-item{width:auto;white-space:nowrap;height:36px;padding:0 12px;font-size:12px}.nav-item b{display:none}.topbar{height:58px;padding:0 16px}.breadcrumbs{font-size:12px}.top-actions .icon-btn{display:none}.top-actions .primary-btn{height:34px;padding:0 11px}.view{padding:25px 16px 50px}.page-intro{align-items:start;gap:15px;margin-bottom:22px}.page-intro h1{font-size:27px}.page-intro p{font-size:13px}.date-chip{flex-shrink:0}.daily-progress{grid-template-columns:1fr auto;gap:8px}.daily-progress .progress{grid-column:1/-1;grid-row:2}.progress-percent{grid-column:2;grid-row:1}.task-card{grid-template-columns:4px 1fr auto;padding:13px}.task-meta{gap:7px;flex-wrap:wrap}.task-status{display:none}.mini-calendar{grid-template-columns:repeat(2,1fr)}.day-cell:nth-child(n){display:block;min-height:115px}.week-row{grid-template-columns:1fr auto;gap:9px}.week-summary{grid-column:1/-1}.summary-layout{grid-template-columns:1fr}.summary-side{grid-template-columns:repeat(3,1fr)}.stat-card{padding:12px}.stat-card strong{font-size:23px}.project-grid{grid-template-columns:1fr}.assignment-panel{padding:15px}.suggestion{flex-wrap:wrap}.suggestion-copy{min-width:calc(100% - 44px)}.suggestion .ghost-btn{margin-left:40px}.task-drawer{padding:30px 20px}.modal{padding:27px 20px}}
 /* Vertical week axis with horizontal day rails */
-.week-gesture-hint{display:flex;gap:10px;margin:-12px 0 13px;color:var(--faint);font-size:12px}.week-gesture-hint span{background:var(--surface);border:1px solid var(--line);padding:6px 9px;border-radius:6px}.week-carousel{padding:18px 10px 35px 2px}.week-panel{background:var(--surface);border:1px solid var(--line);border-radius:16px;margin:0 auto 15px;width:min(860px,100%);padding:18px 18px 16px;transition:transform .28s,box-shadow .28s,opacity .28s}.compact-week{opacity:.58;transform:scale(.94)}.focus-week{border-color:var(--accent-line);box-shadow:0 18px 42px rgba(217,119,87,.13);transform:scale(1)}.week-panel-header{display:flex;justify-content:space-between;align-items:center;padding:1px 3px 14px}.week-kicker{color:var(--accent);font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.week-panel-header h2{font-size:19px;margin:4px 0 0;letter-spacing:-.03em}.week-totals{text-align:right;color:var(--muted);font-size:11px}.week-totals strong{display:block;font-size:24px;color:var(--ink);line-height:1}.week-days{overflow-x:auto;overscroll-behavior-x:contain;padding:5px 2px 11px;scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent}.week-days-track{display:flex;gap:10px;min-width:max-content}.axis-day{position:relative;flex:0 0 126px;min-height:91px;border:1px solid var(--line-soft);border-radius:11px;background:var(--surface-sunk);padding:12px;cursor:pointer;transition:flex-basis .28s,min-height .28s,transform .28s,box-shadow .28s,border-color .28s,background .28s;}.axis-day:hover{transform:translateY(-7px) scale(1.035);background:var(--surface);box-shadow:0 14px 24px rgba(48,40,30,.14);border-color:var(--accent-line);z-index:2}.axis-day.selected-day{flex-basis:315px;min-height:220px;background:var(--surface);border:2px solid var(--accent);padding:11px;box-shadow:0 12px 26px rgba(217,119,87,.16);z-index:1}.axis-day.selected-day:before{content:'选中';position:absolute;top:-10px;right:11px;background:var(--accent);color:var(--surface);font-size:10px;font-weight:700;border-radius:10px;padding:4px 8px}.axis-day.today-day .axis-day-head strong{color:var(--accent)}.axis-day-head{display:flex;align-items:baseline;gap:7px}.axis-day-head span{font-size:11px;color:var(--muted)}.axis-day-head strong{font-size:23px;letter-spacing:-.04em}.axis-day-head em{font-style:normal;color:var(--accent);font-size:10px;font-weight:700;margin-left:auto}.axis-day-count{font-size:11px;color:var(--muted);margin-top:7px}.selected-day .axis-day-count{color:var(--ink)}.axis-task-list{display:grid;gap:6px;margin-top:13px}.axis-task{width:100%;display:grid;grid-template-columns:auto 1fr auto;gap:6px;align-items:center;text-align:left;background:var(--surface-sunk);border:1px solid var(--line-soft);border-radius:7px;padding:7px 8px;font-size:11px}.axis-task:hover{border-color:var(--accent-line);background:var(--accent-soft)}.axis-task small{grid-column:2/-1;color:var(--muted);font-size:10px}.axis-task.P0{border-left:3px solid var(--p0)}.axis-task.P1{border-left:3px solid var(--p1)}.axis-task.P2{border-left:3px solid var(--p2)}.axis-empty{font-size:12px;color:var(--muted);background:var(--surface-sunk);border-radius:7px;padding:14px;margin-top:12px;text-align:center}
-@media(max-width:640px){.week-carousel{padding-left:0;padding-right:0}.week-panel{padding:14px 12px}.axis-day{flex-basis:112px}.axis-day.selected-day{flex-basis:275px}.week-gesture-hint{font-size:11px;gap:6px}.week-gesture-hint span{padding:5px 6px}}
+.week-gesture-hint{display:flex;gap:10px;margin:-12px 0 13px;color:var(--faint);font-size:12px}.week-gesture-hint span{background:var(--surface);border:1px solid var(--line);padding:6px 9px;border-radius:6px}.week-carousel{height:min(690px,calc(100vh - 225px));min-height:470px;overflow-y:auto;padding:18px 10px 35px 2px;scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent}.week-panel{background:var(--surface);border:1px solid var(--line);border-radius:16px;margin:0 auto 15px;width:min(860px,100%);padding:18px 18px 16px;transition:transform .28s,box-shadow .28s,opacity .28s}.compact-week{opacity:.58;transform:scale(.94)}.focus-week{border-color:var(--accent-line);box-shadow:0 18px 42px rgba(217,119,87,.13);transform:scale(1)}.week-panel-header{display:flex;justify-content:space-between;align-items:center;padding:1px 3px 14px}.week-kicker{color:var(--accent);font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}.week-panel-header h2{font-size:19px;margin:4px 0 0;letter-spacing:-.03em}.week-totals{text-align:right;color:var(--muted);font-size:11px}.week-totals strong{display:block;font-size:24px;color:var(--ink);line-height:1}.week-days{overflow-x:auto;overscroll-behavior-x:contain;padding:5px 2px 11px;scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent}.week-days-track{display:flex;gap:10px;min-width:max-content}.axis-day{position:relative;flex:0 0 126px;min-height:91px;border:1px solid var(--line-soft);border-radius:11px;background:var(--surface-sunk);padding:12px;cursor:pointer;transition:flex-basis .28s,min-height .28s,transform .28s,box-shadow .28s,border-color .28s,background .28s;}.axis-day:hover{transform:translateY(-7px) scale(1.035);background:var(--surface);box-shadow:0 14px 24px rgba(48,40,30,.14);border-color:var(--accent-line);z-index:2}.axis-day.selected-day{flex-basis:315px;min-height:220px;background:var(--surface);border:2px solid var(--accent);padding:11px;box-shadow:0 12px 26px rgba(217,119,87,.16);z-index:1}.axis-day.selected-day:before{content:'选中';position:absolute;top:-10px;right:11px;background:var(--accent);color:var(--surface);font-size:10px;font-weight:700;border-radius:10px;padding:4px 8px}.axis-day.today-day .axis-day-head strong{color:var(--accent)}.axis-day-head{display:flex;align-items:baseline;gap:7px}.axis-day-head span{font-size:11px;color:var(--muted)}.axis-day-head strong{font-size:23px;letter-spacing:-.04em}.axis-day-head em{font-style:normal;color:var(--accent);font-size:10px;font-weight:700;margin-left:auto}.axis-day-count{font-size:11px;color:var(--muted);margin-top:7px}.selected-day .axis-day-count{color:var(--ink)}.axis-task-list{display:grid;gap:6px;margin-top:13px}.axis-task{width:100%;display:grid;grid-template-columns:auto 1fr auto;gap:6px;align-items:center;text-align:left;background:var(--surface-sunk);border:1px solid var(--line-soft);border-radius:7px;padding:7px 8px;font-size:11px}.axis-task:hover{border-color:var(--accent-line);background:var(--accent-soft)}.axis-task small{grid-column:2/-1;color:var(--muted);font-size:10px}.axis-task.P0{border-left:3px solid var(--p0)}.axis-task.P1{border-left:3px solid var(--p1)}.axis-task.P2{border-left:3px solid var(--p2)}.axis-empty{font-size:12px;color:var(--muted);background:var(--surface-sunk);border-radius:7px;padding:14px;margin-top:12px;text-align:center}
+@media(max-width:640px){.week-carousel{height:calc(100vh - 240px);min-height:480px;padding-left:0;padding-right:0}.week-panel{padding:14px 12px}.axis-day{flex-basis:112px}.axis-day.selected-day{flex-basis:275px}.week-gesture-hint{font-size:11px;gap:6px}.week-gesture-hint span{padding:5px 6px}}
 .hover-peek{position:absolute;left:9px;right:9px;bottom:8px;background:var(--ink-deep);color:var(--surface);border-radius:8px;padding:7px 8px;display:grid;grid-template-columns:auto 1fr;gap:4px 6px;opacity:0;transform:translateY(8px);pointer-events:none;transition:opacity .2s,transform .2s}.axis-day:hover .hover-peek{opacity:1;transform:translateY(0)}.hover-peek strong{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.hover-peek small{grid-column:1/-1;color:var(--rail-muted);font-size:9px}
 .axis-day:not(.selected-day) .axis-task-list{display:none}.axis-day:hover:not(.selected-day){flex-basis:300px;min-height:208px;transform:translateY(-12px) scale(1.04);box-shadow:0 22px 42px rgba(48,40,30,.22);border-color:var(--accent-line);background:var(--surface);z-index:20}.axis-day:hover:not(.selected-day) .axis-task-list{display:grid;animation:floatIn .2s ease both}.axis-day:hover .hover-peek{display:none}.week-days,.week-days-track{overflow:visible}.week-carousel{overflow-y:auto;overflow-x:visible}@keyframes floatIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 /* hover lift must sit above the rail and adjacent cards */
@@ -906,81 +906,7 @@ select:focus {
 }
 
 /* --------------------------------------------------------------------------
-   19 · A single scroll surface
-   -------------------------------------------------------------------------- */
-
-/* The shell owns the viewport height and only the content area scrolls. Before
-   this, the page itself scrolled *and* the week rail scrolled inside it, so the
-   same wheel gesture did two different things depending on where the pointer
-   happened to be. */
-.app-shell {
-  height: 100vh;
-  min-height: 0;
-  overflow: hidden;
-}
-.main-content {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
-.view.active-view {
-  display: block;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  overscroll-behavior-y: contain;
-}
-
-/* A long nav should scroll inside the rail, not stretch the whole app. */
-.sidebar {
-  height: 100vh;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
-}
-
-/* The week rail no longer scrolls on its own — its 31 weeks simply live in the
-   view's scroll area, which is what makes one wheel gesture mean one thing. */
-.week-carousel {
-  height: auto;
-  min-height: 0;
-  overflow: visible;
-  padding: 18px 10px 34px 2px;
-}
-
-/* The timeline genuinely needs two axes (dates across, projects down), so there
-   the view itself stops scrolling and the remaining height goes to the grid —
-   which is also what keeps its sticky header working. */
-.view.active-view.timeline-view {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.timeline-view > .page-intro,
-.timeline-view > .timeline-toolbar,
-.timeline-view > .timeline-legend,
-.timeline-view > .empty-state {
-  flex: none;
-}
-.timeline-view > .timeline-scroll {
-  flex: 1;
-  min-height: 220px;
-  max-height: none;
-}
-
-/* On the mobile rail the top bar is horizontal and there is no fixed height to
-   divide up, so hand scrolling back to the document. */
-@media (max-width: 640px) {
-  .app-shell { height: auto; min-height: 100vh; overflow: visible; }
-  .main-content { display: block; height: auto; overflow: visible; }
-  .view.active-view { overflow: visible; }
-  .sidebar { height: auto; overflow: visible; }
-  .view.active-view.timeline-view { display: block; overflow: visible; }
-}
-
-/* --------------------------------------------------------------------------
-   20 · Scrollbars
+   19 · Scrollbars
    -------------------------------------------------------------------------- */
 
 * { scrollbar-color: var(--line-strong) transparent; }
@@ -995,7 +921,7 @@ select:focus {
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 
 /* --------------------------------------------------------------------------
-   21 · Accessibility: honour reduced motion
+   20 · Accessibility: honour reduced motion
    -------------------------------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {
