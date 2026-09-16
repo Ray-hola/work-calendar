@@ -615,8 +615,13 @@ function editProfile(id,initialMode){
   const selfFields=self?`<label class="form-field">昵称<input id="profileNickname" maxlength="12" value="${escapeHTML(target.nickname||'')}" placeholder="自己想被叫的名字"><small class="muted">只有你能改，显示在账户和侧栏上</small></label>
     <div class="form-field">头像<div class="avatar-editor"><span class="avatar large" id="profileAvatarPreview">${escapeHTML(avatarSeed(id))}</span><input type="file" id="profileAvatarFile" accept="image/*" class="hidden"><button type="button" class="secondary-btn" id="profileAvatarPick">选择图片</button><button type="button" class="ghost-btn" id="profileAvatarClear">移除</button></div><small class="muted">会压缩成 128×128 保存，留空则用名字首字</small></div>`:'';
   openModal(`<div class="eyebrow">账户资料 · ${escapeHTML(target.id)}</div><h2>${escapeHTML(target.displayName||target.id)}</h2><p>${self?'昵称和头像属于你自己，随时可以改。':'你可以为本账户设置中文名称。'}</p>${nameField}${selfFields}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmProfile">保存</button></div>`);
+  /* The avatar element only exists on your own card. A superadmin opening
+     someone else's card just to set their 中文名称 used to hit a null here and
+     throw, which skipped the whole footer wiring below — so 保存 did nothing.
+     Guarding it keeps the dialog working for both kinds of edit. */
   const preview=$('#profileAvatarPreview');
   const paint=()=>{
+    if(!preview)return;
     preview.classList.toggle('has-image',Boolean(pendingAvatar));
     preview.style.setProperty('--avatar-hue',String(avatarHue(id)));
     preview.innerHTML=pendingAvatar?`<img src="${escapeHTML(pendingAvatar)}" alt="">`:escapeHTML(avatarSeed(id));
@@ -1052,7 +1057,11 @@ function agentRenderModelOptions(selected=''){
 function agentSyncProviderUI(){const provider=$('#agentProvider')?.value||'custom',custom=provider==='custom';$('#agentEndpoint').placeholder=custom?'https://api.example.com/v1/chat/completions':OPENCODE_GO_ENDPOINT;if(!custom){$('#agentEndpoint').value=OPENCODE_GO_ENDPOINT;$('#agentModelSelect').classList.remove('hidden');$('#agentCustomModel').classList.add('hidden')}else{$('#agentModelSelect').classList.add('hidden');$('#agentCustomModel').classList.remove('hidden')}}
 async function agentLoadServerConfig(){try{agentServerConfig=await api('/api/action',{action:'agent.config.get',data:{}})}catch(_){agentServerConfig=null}}
 function agentExtractText(data){
-  return data?.choices?.[0]?.message?.content||data?.choices?.[0]?.text||data?.message?.content||data?.message||data?.content||data?.text||'';
+  const text=data?.choices?.[0]?.message?.content||data?.choices?.[0]?.text||data?.message?.content||data?.message||data?.content||data?.text;
+  if(text)return text;
+  /* Some gateways deliver the answer under reasoning_content instead. Checked
+     last so a normal reply always wins. */
+  return data?.choices?.[0]?.message?.reasoning_content||data?.reasoning_content||'';
 }
 async function agentRequest(messages){
   /* Every role uses the authenticated server proxy. The browser never sends

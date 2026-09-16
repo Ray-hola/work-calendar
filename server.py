@@ -9,6 +9,7 @@ import os
 import secrets
 import sqlite3
 import threading
+import time as _time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -395,6 +396,12 @@ class Store:
         context = {k: state.get(k) for k in (
             'today', 'projects', 'tasks', 'reports', 'diaries', 'diaryStats',
             'notifications', 'workCompletions', 'achievements', 'repeats', 'agentCapabilities')}
+        # The diary dashboard needs a month of per-account rows broken down by
+        # project; the assistant does not, and those rows were 78% of the
+        # payload — a one-line question cost 13k prompt tokens. A week is still
+        # more than enough to answer anything the assistant is asked about it.
+        context['diaryStats'] = self.diary_statistics(
+            user, start=(now().date() - timedelta(days=6)).isoformat())
         context_text = json.dumps(context, ensure_ascii=False, separators=(',', ':'))
         messages.insert(0, {'role': 'system', 'content':
                             '以下是当前账户可见的战略小组台账数据，仅用于回答查询；'
@@ -413,29 +420,55 @@ class Store:
         payload = {'model': model, 'messages': messages,
                    'temperature': float(cfg.get('temperature', 0.2)),
                    'stream': False}
-        body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
         headers = {'Content-Type': 'application/json', 'User-Agent': 'WorkCalendar/1.0',
                    'x-opencode-session': session_id}
         if key:
             headers['Authorization'] = f'Bearer {key}'
-        request = urllib.request.Request(endpoint, data=body, method='POST', headers=headers)
-        try:
-            with urllib.request.urlopen(request, timeout=45) as response:
-                raw = response.read(1_000_000)
-            result = json.loads(raw.decode('utf-8'))
-        except urllib.error.HTTPError as exc:
-            detail = exc.read(4000).decode('utf-8', errors='replace')
-            raise Problem(502, f'LLM 服务返回 HTTP {exc.code}：{detail[:300]}')
-        except (urllib.error.URLError, TimeoutError) as exc:
-            raise Problem(502, f'LLM 服务连接失败：{str(exc)[:200]}')
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            raise Problem(502, 'LLM 服务返回了无法解析的响应')
-        try:
-            choice = result['choices'][0]
+
+        def send_once():
+            body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+            request = urllib.request.Request(endpoint, data=body, method='POST', headers=headers)
+            try:
+                with urllib.request.urlopen(request, timeout=45) as response:
+                    raw = response.read(1_000_000)
+                return json.loads(raw.decode('utf-8'))
+            except urllib.error.HTTPError as exc:
+                detail = exc.read(4000).decode('utf-8', errors='replace')
+                raise Problem(502, f'LLM 服务返回 HTTP {exc.code}：{detail[:300]}')
+            except (urllib.error.URLError, TimeoutError) as exc:
+                raise Problem(502, f'LLM 服务连接失败：{str(exc)[:200]}')
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                raise Problem(502, 'LLM 服务返回了无法解析的响应')
+
+        # The endpoint occasionally answers with an empty message. The browser
+        # only saw "服务端 Agent 未返回文本", which says nothing about why. Ask
+        # once more (an empty reply is usually transient) and, if it is still
+        # empty, report what actually came back instead of a blank response.
+        result = {}
+        choice = {}
+        content = ''
+        for attempt in (1, 2):
+            result = send_once()
+            choices = result.get('choices') or []
+            if not choices:
+                raise Problem(502, 'LLM 响应缺少 choices')
+            choice = choices[0]
             message = choice.get('message') or {}
-            content = message.get('content', '')
-        except (KeyError, IndexError, TypeError):
-            raise Problem(502, 'LLM 响应缺少 choices.message.content')
+            # Some gateways put the answer under reasoning_content, and a few
+            # return the content as a list of parts.
+            raw_content = message.get('content') or message.get('reasoning_content') or ''
+            if isinstance(raw_content, list):
+                raw_content = ''.join(str(part.get('text', '')) for part in raw_content if isinstance(part, dict))
+            content = raw_content
+            if str(content).strip():
+                break
+            if attempt == 1:
+                _time.sleep(0.6)
+        if not str(content).strip():
+            usage = result.get('usage') or {}
+            raise Problem(502, '模型（%s）连续两次都没有返回内容（finish_reason=%s，tokens=%s）。'
+                               '可以稍后重试，或在 AI 接入配置里换一个模型。'
+                          % (model, choice.get('finish_reason'), usage.get('total_tokens', '?')))
         # Keep a per-user transcript so the assistant panel can be reopened like
         # a chat app and superadmin can review what the agent was asked to do.
         last_user = next((item['content'] for item in reversed(messages) if item['role'] == 'user'), '')
