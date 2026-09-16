@@ -348,13 +348,22 @@ class Store:
         self.authorize_agent_tool(user, 'agent.chat')
         if not isinstance(data.get('messages'), list) or not data['messages']:
             raise Problem(400, '请提供至少一条消息')
+        window = data['messages'][-40:]
         messages = []
-        for item in data['messages'][-40:]:
+        for index, item in enumerate(window):
             if not isinstance(item, dict) or item.get('role') not in ('system', 'user', 'assistant'):
                 raise Problem(400, '消息格式无效')
             content = str(item.get('content', ''))
-            if not content or len(content) > 12000:
-                raise Problem(400, '消息内容不能为空且不能超过 12000 字符')
+            if len(content) > 12000:
+                raise Problem(400, '单条消息不能超过 12000 字符（这条有 %d 字符）' % len(content))
+            if not content.strip():
+                # A blank line among earlier turns can only have come from a
+                # stored transcript, so it is dropped rather than allowed to
+                # brick the account. A blank *last* message is the caller's own
+                # mistake and is still refused.
+                if index == len(window) - 1:
+                    raise Problem(400, '消息内容不能为空')
+                continue
             messages.append({'role': item['role'], 'content': content})
         # Keep the permission contract in the model context as a second line of
         # defence; actual mutations still go through Store.action authorization.
@@ -513,6 +522,12 @@ class Store:
         The record is scoped to a user so the chat history can be reopened and
         so superadmin can review what the agent did on someone's behalf.
         """
+        # An empty line is a bug, not information: storing one used to poison
+        # every later request, because the transcript replays what is stored and
+        # the proxy refuses to forward an empty message. Action records are kept
+        # regardless — they name an action even when the body is short.
+        if role in ('user', 'assistant') and not str(content or '').strip():
+            return None
         record = {'id': uid(), 'user': user_id, 'role': role,
                   'content': str(content or '')[:12000], 'createdAt': timestamp()}
         if isinstance(extra, dict):

@@ -787,3 +787,19 @@ test('a planning message is labelled in the transcript and in reopened history',
   assert.ok(/agentRenderEmptyState/.test(source), '空会话给出可以点的示例');
   assert.ok(/function agentSyncPlanButton\(\)/.test(source), '按钮状态要跟着输入框走');
 });
+
+/* One blank line in the transcript is enough to break the whole assistant: the
+   proxy refuses an empty message, and the transcript is what gets replayed. */
+test('a blank turn is never replayed to the proxy', () => {
+  const recent = source.match(/function agentRecentMessages\(\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/\.filter\(x=>String\(x\.content\|\|''\)\.trim\(\)\)/.test(recent),
+    '回放前要滤掉空内容');
+
+  const history = source.match(/async function agentLoadOwnHistory\(\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/String\(m\.content\|\|''\)\.trim\(\)/.test(history),
+    '载入历史时就不该把空行放进回放窗口');
+
+  const step = source.match(/function agentRecordStep\([\s\S]*?\n\}/)[0];
+  assert.ok(/if\(String\(forModel\|\|''\)\.trim\(\)\)/.test(step),
+    '记录步骤回执时也不能推入空内容');
+});

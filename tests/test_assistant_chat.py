@@ -98,5 +98,55 @@ class AssistantChatTests(unittest.TestCase):
                         '上下文不应无节制增长')
 
 
+    # ------------------------------------------------ 空行与长度上限
+    def test_a_stored_blank_turn_is_skipped_rather_than_refusing_the_request(self):
+        """One blank line used to brick the account.
+
+        The model answered empty once, the blank was recorded, and every later
+        request replayed it — which the proxy refused, so the assistant stayed
+        broken until someone edited the database by hand.
+        """
+        self.store.record_agent_message('superadmin', 'user', '先把这周的排期拉出来')
+        self.store.record_agent_message('superadmin', 'assistant', '')
+        self.store.record_agent_message('superadmin', 'user', '再看一遍')
+
+        payload = [{'role': 'user', 'content': '先把这周的排期拉出来'},
+                   {'role': 'assistant', 'content': ''},
+                   {'role': 'user', 'content': '再看一遍'}]
+        result = self.store.llm_chat(self.admin, {'messages': payload})
+        self.assertEqual(result['content'], '收到', '历史里的空行应被跳过，而不是让整次请求失败')
+
+        forwarded = _Stub.seen[-1]['messages']
+        self.assertTrue(all(m['content'] for m in forwarded), '转发给模型的消息里不能有空内容')
+
+    def test_a_blank_line_is_never_written_to_the_transcript(self):
+        self.assertIsNone(self.store.record_agent_message('superadmin', 'assistant', ''))
+        self.assertIsNone(self.store.record_agent_message('superadmin', 'user', '   '))
+        self.assertEqual([m for m in self.store.all('agent_messages')
+                          if m['role'] in ('user', 'assistant')], [],
+                         '空行是缺陷而不是信息，不该入库')
+
+    def test_the_callers_own_empty_message_is_still_refused(self):
+        with self.assertRaises(Exception) as caught:
+            self.store.llm_chat(self.admin, {'messages': [{'role': 'user', 'content': ''}]})
+        self.assertEqual(caught.exception.status, 400)
+        self.assertIn('不能为空', caught.exception.message)
+
+    def test_an_oversized_message_says_how_long_it_was(self):
+        with self.assertRaises(Exception) as caught:
+            self.store.llm_chat(self.admin, {'messages': [{'role': 'user', 'content': 'x' * 12001}]})
+        self.assertEqual(caught.exception.status, 400)
+        self.assertIn('12000', caught.exception.message)
+        self.assertIn('12001', caught.exception.message, '报错要说清这条到底多长')
+
+    def test_a_message_at_the_ceiling_is_accepted(self):
+        """The store truncates to the same 12000 the proxy enforces, so a
+        replayed record can never be rejected for length."""
+        exact = 'x' * 12000
+        self.store.llm_chat(self.admin, {'messages': [{'role': 'user', 'content': exact}]})
+        # 服务端会在末尾再补一条策略消息，所以不能只看最后一条。
+        forwarded = [m['content'] for m in _Stub.seen[-1]['messages']]
+        self.assertIn(exact, forwarded, '正好到上限的消息应原样转发')
+
 if __name__ == '__main__':
     unittest.main()

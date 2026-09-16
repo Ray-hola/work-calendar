@@ -1107,6 +1107,10 @@ function agentIntentChip(intent){
 }
 function agentFormatTime(iso){try{return new Date(iso).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}catch(_){return iso||''}}
 function agentMessageNode(m){
+  /* A blank line carries nothing, and older transcripts still hold a couple
+     from when an empty model reply was recorded. Rendering them is what made
+     the room look broken, so every caller gets null instead. */
+  if((m.role==='user'||m.role==='assistant')&&!String(m.content||'').trim())return null;
   const node=document.createElement('div');
   if(m.role==='action'){
     const label=AGENT_ACTION_LABELS[m.action]||m.action||'操作';
@@ -1128,8 +1132,12 @@ async function agentLoadOwnHistory(){
     const messages=data.messages||[],list=$('#agentMessages');if(!list)return;
     list.innerHTML='';
     if(!messages.length){agentRenderEmptyState(list);return}
-    agentState.messages=messages.filter(m=>m.role==='user'||m.role==='assistant').map(m=>({role:m.role,content:m.content}));
-    messages.forEach(m=>list.appendChild(agentMessageNode(m)));
+    /* A blank line is not a turn. One used to be stored whenever the model
+       came back empty, and replaying it made the server refuse every later
+       request — the transcript must never carry it forward. */
+    const turns=messages.filter(m=>(m.role==='user'||m.role==='assistant')&&String(m.content||'').trim());
+    agentState.messages=turns.map(m=>({role:m.role,content:m.content}));
+    messages.forEach(m=>{const node=agentMessageNode(m);if(node)list.appendChild(node)});
     list.scrollTop=list.scrollHeight;
   }catch(_){}
 }
@@ -1137,7 +1145,7 @@ async function agentShowHistory(){
   const admin=Boolean(S.user?.admin);
   openModal(`<div class="eyebrow">WORK AGENT · 工作记录</div><h2>AI 工作记录</h2><p class="muted">记录保留每个账户与助手的对话及已执行操作，仅本人与 superadmin 可见。</p>${admin?`<label class="form-field">查看账户<select id="agentHistoryUser">${S.users.map(u=>`<option value="${escapeHTML(u.id)}">${escapeHTML(u.id)}</option>`).join('')}</select></label>`:''}<div id="agentHistoryList" class="agent-history-list"></div><div class="modal-footer"><button class="secondary-btn" id="agentHistoryClear">清空记录</button><button class="primary-btn" id="agentHistoryClose">关闭</button></div>`);
   const target=()=>$('#agentHistoryUser')?.value||S.user.id;
-  const load=async()=>{const box=$('#agentHistoryList');box.innerHTML='<p class="muted">正在加载…</p>';try{const data=await api('/api/action',{action:'agent.history',data:{userId:target()}});const msgs=data.messages||[];box.innerHTML='';if(!msgs.length){box.innerHTML='<p class="muted">该账户暂无 AI 工作记录。</p>';return}msgs.forEach(m=>box.appendChild(agentMessageNode(m)))}catch(e){box.innerHTML=`<p class="muted">加载失败：${escapeHTML(e.message||'')}</p>`}};
+  const load=async()=>{const box=$('#agentHistoryList');box.innerHTML='<p class="muted">正在加载…</p>';try{const data=await api('/api/action',{action:'agent.history',data:{userId:target()}});const msgs=data.messages||[];box.innerHTML='';if(!msgs.length){box.innerHTML='<p class="muted">该账户暂无 AI 工作记录。</p>';return}msgs.forEach(m=>{const node=agentMessageNode(m);if(node)box.appendChild(node)})}catch(e){box.innerHTML=`<p class="muted">加载失败：${escapeHTML(e.message||'')}</p>`}};
   $('#agentHistoryUser')?.addEventListener('change',load);
   $('#agentHistoryClose').onclick=closeModal;
   $('#agentHistoryClear').onclick=async()=>{if(!confirm(`确认清空 ${target()} 的 AI 工作记录？`))return;try{await api('/api/action',{action:'agent.history.clear',data:{userId:target()}});toast('记录已清空');await load()}catch(e){toast(e.message||'清空失败')}};
@@ -1281,7 +1289,12 @@ function agentSystemPrompt(context,planning){
   return `你是「战略小组台账」工作助手。当前账户角色：${context.role}，权限模式：${context.mode}。遵守服务端权限边界：${rule}`;
 }
 function agentRecentMessages(){
-  return agentState.messages.slice(-AGENT_CONTEXT_LIMIT).map(x=>({role:x.role,content:x.content}));
+  /* Last line of defence: the proxy refuses an empty message, and a blank turn
+     carries nothing the model needs anyway. */
+  return agentState.messages
+    .filter(x=>String(x.content||'').trim())
+    .slice(-AGENT_CONTEXT_LIMIT)
+    .map(x=>({role:x.role,content:x.content}));
 }
 async function agentNext(context){
   const answer=await agentRequest([{role:'system',content:agentSystemPrompt(context)},...agentRecentMessages()]);
@@ -1336,7 +1349,7 @@ function agentShowStep(display){
   list.appendChild(el);list.scrollTop=list.scrollHeight;
 }
 function agentRecordStep(display,forModel){
-  agentState.messages.push({role:'user',content:forModel});
+  if(String(forModel||'').trim())agentState.messages.push({role:'user',content:forModel});
   agentShowStep(display);
 }
 function agentUpdateBusy(){
