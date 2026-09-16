@@ -588,12 +588,10 @@ select:focus {
 
 /* An unread count per room: the room badge says something happened, this says
    where. */
-.chat-channel { position: relative; }
 .chat-channel-badge {
   display: inline-block;
-  min-width: 16px;
-  margin-left: 5px;
-  padding: 1px 5px;
+  min-width: 18px;
+  padding: 2px 5px;
   border-radius: 9px;
   background: var(--accent);
   color: var(--surface);
@@ -604,7 +602,7 @@ select:focus {
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
-.chat-channel.is-on .chat-channel-badge { background: var(--surface); color: var(--accent-dark); }
+.chat-channel.is-on .chat-channel-badge { background: var(--accent); color: var(--surface); }
 
 /* 所有人 reads as a broadcast, not a person. */
 .chat-mention-all { background: var(--accent-soft-2); border-color: var(--danger-line); }
@@ -1101,7 +1099,7 @@ select:focus {
 
 .chat-room {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   height: min(620px, calc(100vh - 235px));
   min-height: 420px;
   background: var(--surface);
@@ -1228,30 +1226,32 @@ select:focus {
 }
 .chat-channels {
   display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  scrollbar-width: none;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 8px 10px;
 }
 .chat-channels::-webkit-scrollbar { display: none; }
 .chat-channel {
   flex: none;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink);
   font: inherit;
-  font-size: 12px;
-  line-height: 1;
-  padding: 6px 10px;
-  border-radius: 99px;
+  padding: 8px 9px;
+  border-radius: 9px;
   cursor: pointer;
-  transition: background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease);
+  transition: background var(--t) var(--ease), border-color var(--t) var(--ease);
 }
-.chat-channel:hover { color: var(--ink); }
+.chat-channel:hover { background: var(--surface); }
 .chat-channel.is-on {
-  background: var(--accent-soft);
+  background: var(--surface);
   border-color: var(--accent-line);
-  color: var(--accent-dark);
-  font-weight: 600;
+  box-shadow: var(--shadow-sm);
 }
 
 .chat-members {
@@ -1343,4 +1343,117 @@ select:focus {
     transition-duration: .01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* The room reads like a messenger: every channel is a conversation down the
+   left, and the unread count sits on the conversation that owns it. */
+.chat-side {
+  flex: none;
+  width: 208px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  border-right: 1px solid var(--line);
+  background: var(--surface-sunk);
+}
+.chat-side-title {
+  padding: 12px 14px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  color: var(--faint);
+  flex: none;
+}
+.chat-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-current {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* The mark left of each conversation: an icon for the standing rooms, the
+   project's first glyph otherwise. */
+.chat-mark {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.chat-mark .icon { width: 16px; height: 16px; }
+.chat-channel.is-on .chat-mark { border-color: var(--accent-line); color: var(--accent-dark); }
+.chat-mark.is-project {
+  background: hsl(var(--avatar-hue, 18) 38% 56%);
+  border-color: transparent;
+  color: var(--surface);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.chat-channel-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.chat-channel-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-channel-preview {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-channel-idle { font-style: italic; opacity: .8; }
+
+.chat-channel-side {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+}
+.chat-channel-time {
+  font-size: 10px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Narrow screens stack the list above the messages, and each row sheds the
+   preview so it fits a horizontal strip. */
+@media (max-width: 720px) {
+  .chat-room { flex-direction: column; }
+  .chat-side {
+    width: auto;
+    flex-direction: row;
+    align-items: center;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .chat-side-title { display: none; }
+  .chat-channels { flex-direction: row; padding: 8px; }
+  .chat-channel { width: auto; flex: none; }
+  .chat-channel-body { flex: none; }
+  .chat-channel-preview { display: none; }
+  .chat-channel-side { flex-direction: row; align-items: center; gap: 6px; }
+  .chat-mark { width: 22px; height: 22px; border-radius: 7px; }
 }

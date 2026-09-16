@@ -554,3 +554,97 @@ test('@所有人 is a broadcast sentinel rather than an account id', () => {
     '广播要有自己的样式：' + html);
   assert.ok(room.mentions('@王零零 看一下').includes('wang00'), '普通提及不受影响');
 });
+
+/* The conversation list sits past the sandbox cut-off, so its renderer is
+   lifted out of the source and run inside the sandbox — that way it uses the
+   real icon(), escapeHTML() and chatChannelList() rather than stubs. */
+const CHAT_SIDE_SOURCE = ['chatChannelList', 'chatChannelUnread', 'chatClock', 'chatListTime',
+                          'chatChannelMark', 'chatPreviewText', 'renderChatCurrent',
+                          'renderChatChannels']
+  .map(liftFunction).join('\n');
+
+function chatSidebar(projects, unread, previews, channel) {
+  const a = app();
+  const elements = {};
+  a.context.document = {
+    querySelector: s => elements[s] || (elements[s] = {}),
+    querySelectorAll: () => [],
+  };
+  a.run(`S.user={id:'superadmin',admin:1};S.projects=${JSON.stringify(projects)};
+         S.users=[{id:'superadmin',displayName:'管理员',active:1},{id:'wang00',displayName:'王零零',active:1}];
+         S.chat={byChannel:${JSON.stringify(unread)}};`);
+  a.run(`var chatChannel=${JSON.stringify(channel)};var chatPreviews=${JSON.stringify(previews)};`);
+  a.run(CHAT_SIDE_SOURCE);
+  a.run('renderChatChannels()');
+  return elements;
+}
+
+const SIDE_PROJECTS = [{id: 'live1', name: '市场周报', status: 'active'}];
+
+test('the conversation list shows one row per room, with the unread on its own', () => {
+  const el = chatSidebar(SIDE_PROJECTS, {lounge: 4, live1: 2}, {}, 'general');
+  const html = el['#chatChannels'].innerHTML;
+  assert.equal((html.match(/class="chat-channel /g) || []).length, 3, '两个固定频道 + 一个进行中项目');
+  assert.ok(html.includes('>沟通<'), '沟通在列表里');
+  assert.ok(html.includes('>闲聊<'), '闲聊在列表里');
+  assert.ok(html.includes('>市场周报<'), '项目频道在列表里');
+  /* The count belongs to the row that owns it, not to the whole room. */
+  const rows = html.split('<button').slice(1);
+  const general = rows.find(r => r.includes('>沟通<'));
+  const lounge = rows.find(r => r.includes('>闲聊<'));
+  const project = rows.find(r => r.includes('>市场周报<'));
+  assert.ok(!general.includes('chat-channel-badge'), '没有未读的房间不显示数字');
+  assert.ok(lounge.includes('chat-channel-badge">4<'), '闲聊显示自己的未读 4');
+  assert.ok(project.includes('chat-channel-badge">2<'), '项目频道显示自己的未读 2');
+});
+
+test('the selected conversation is the only one marked active', () => {
+  const el = chatSidebar(SIDE_PROJECTS, {}, {}, 'lounge');
+  const html = el['#chatChannels'].innerHTML;
+  const rows = html.split('<button').slice(1);
+  const on = rows.filter(r => r.includes('is-on'));
+  assert.equal(on.length, 1, '同时只能有一个选中的会话');
+  assert.ok(on[0].includes('>闲聊<'), '选中的是闲聊');
+  assert.equal(el['#chatCurrent'].textContent, '闲聊', '右侧标题跟着走');
+});
+
+test('each row previews its newest line, and flags your own words', () => {
+  const previews = {
+    general: {body: '看这个链接 https://example.com/a', author: 'wang00', createdAt: '2026-09-16T09:30:00+08:00'},
+    lounge: {body: '我说的话', author: 'superadmin', createdAt: '2026-09-15T18:00:00+08:00'},
+  };
+  const el = chatSidebar(SIDE_PROJECTS, {}, previews, 'general');
+  const html = el['#chatChannels'].innerHTML;
+  assert.ok(html.includes('看这个链接'), '显示摘要');
+  assert.ok(html.includes('我：我说的话'), '自己发的加「我：」前缀');
+  assert.ok(html.includes('09:30'), '今天的消息显示时间');
+  assert.ok(html.includes('昨天'), '昨天的消息显示「昨天」');
+  assert.ok(html.includes('还没有消息'), '没有消息的房间给出提示而不是空白');
+});
+
+test('a preview cannot carry markup into the list', () => {
+  const el = chatSidebar(SIDE_PROJECTS, {},
+    {general: {body: '<img src=x onerror=alert(1)>', author: 'wang00', createdAt: '2026-09-16T09:30:00+08:00'}},
+    'general');
+  const html = el['#chatChannels'].innerHTML;
+  assert.ok(!html.includes('<img'), '摘要里的标签要被转义：' + html);
+  assert.ok(html.includes('&lt;img'), '应当以文本形式出现');
+});
+
+/* The badge is hidden while you are inside the room, so leaving it has to
+   re-evaluate the count — otherwise it stays blank until the next poll. */
+test('leaving the room refreshes the unread badge', () => {
+  const body = source.match(/function switchView\(view\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/typeof updateChatDot==='function'/.test(body),
+    'switchView 必须在切换视图时刷新未读徽标');
+});
+
+test('only one room is marked read at a time', () => {
+  /* The read report names the room it is about; without a channel the server
+     would fall back to the hall and clear the wrong conversation. */
+  const read = source.match(/async function reportChatRead\(at\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/action:'chat\.read',data:\{at:at\|\|'',channel\}/.test(read),
+    '已读上报必须带上当前房间');
+  assert.ok(/delete byChannel\[channel\]/.test(read),
+    '本地只清掉刚读过的那个房间');
+});

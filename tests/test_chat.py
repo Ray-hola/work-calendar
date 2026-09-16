@@ -227,5 +227,35 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(self.store.snapshot(self.admin)['chat']['byChannel'], {'lounge': 1})
 
 
+    def test_the_list_carries_a_preview_of_each_room(self):
+        project = self.store.action(self.admin, 'project.create', {
+            'name': '看板', 'owner': 'superadmin', 'cycle': 'infinite'})
+        self.store.action(self.member, 'chat.send', {'body': '大厅第一条'})
+        self.store.action(self.admin, 'chat.send', {'body': '大厅最新的'})
+        self.store.action(self.member, 'chat.send', {'body': '项目里的', 'channel': project['id']})
+
+        listed = self.store.action(self.member, 'chat.list', {})
+        previews = listed['previews']
+        self.assertEqual(sorted(previews), sorted(['general', project['id']]),
+                         '有消息的房间才有摘要；空房间在前端显示为「还没有消息」')
+        self.assertEqual(previews['general']['body'], '大厅最新的', '取每个频道最新的一条')
+        self.assertEqual(previews['general']['author'], 'superadmin')
+        self.assertEqual(previews[project['id']]['body'], '项目里的')
+
+    def test_a_preview_is_trimmed_and_never_leaks_an_archived_room(self):
+        long_body = '很长的消息' * 40
+        self.store.action(self.member, 'chat.send', {'body': long_body})
+        preview = self.store.action(self.member, 'chat.list', {})['previews']['general']
+        self.assertLessEqual(len(preview['body']), 60, '预览要截断，它每次轮询都会传一遍')
+
+        project = self.store.action(self.admin, 'project.create', {
+            'name': '要归档的', 'owner': 'superadmin', 'cycle': 'infinite'})
+        self.store.action(self.member, 'chat.send', {'body': '归档前的话', 'channel': project['id']})
+        archived = self.store.get('projects', project['id'])
+        archived['status'] = 'done'
+        self.store.put('projects', archived)
+        self.assertNotIn(project['id'], self.store.action(self.member, 'chat.list', {})['previews'],
+                         '已归档的频道不该出现在会话列表里')
+
 if __name__ == '__main__':
     unittest.main()

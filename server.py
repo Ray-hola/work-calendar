@@ -1085,7 +1085,28 @@ class Store:
                 if self.chat_normalize(m) == channel
                 and (not since or str(m.get('createdAt', '')) > since)]
         rows.sort(key=lambda m: m.get('createdAt', ''))
-        return {'messages': rows[-limit:], 'now': timestamp(), 'channel': channel}
+        return {'messages': rows[-limit:], 'now': timestamp(), 'channel': channel,
+                'previews': self.chat_previews()}
+
+    def chat_previews(self):
+        """One line of the newest message per room, for the conversation list.
+
+        Restricted to rooms a visitor can open, so an archived project's history
+        never surfaces outside 成果库 — and trimmed hard, because this travels
+        with every poll.
+        """
+        visible = set(self.chat_visible_channels())
+        previews = {}
+        for m in self.all('messages'):
+            channel = self.chat_normalize(m)
+            if channel not in visible:
+                continue
+            at = str(m.get('createdAt', ''))
+            if channel in previews and previews[channel]['createdAt'] >= at:
+                continue
+            previews[channel] = {'body': str(m.get('body', ''))[:60],
+                                 'author': m.get('author', ''), 'createdAt': at}
+        return previews
 
     def chat_send(self, user, data):
         body = str(data.get('body') or '').strip()

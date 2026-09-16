@@ -118,6 +118,10 @@ function switchView(view){
   if(view==='inbox'){renderInbox();refreshInboxState();}
   if(view==='accounts')renderAccounts();
   if(view==='chat'){renderChatChannels();loadChat(true);refreshChatPresence();startChatPolling()}else{stopChatPolling()}
+  /* The badge hides while you are in the room; leaving it should reveal what is
+     still unread there, without waiting for the next poll. updateChatDot is
+     defined past the unit-test cut-off, hence the guard. */
+  if(typeof updateChatDot==='function')updateChatDot();
   if(changed)window.scrollTo({top:0,left:0,behavior:'instant'});
 }
 const isArchivedTask=t=>['deferred','skipped','rejected'].includes(t.status);
@@ -1431,6 +1435,9 @@ const CHAT_PRESENCE_MS=15000;
 const CHAT_EVERYONE='*';
 let chatPollTimer=0,chatPresenceTimer=0,chatLastAt='',chatLastDay='';
 let chatChannel='general',chatPresence={},chatMentionQuery=null,chatMentionIndex=0;
+/* One line of the newest message per room, sent along with chat.list so the
+   sidebar can read like a list of conversations. */
+let chatPreviews={};
 
 function updateChatDot(){
   const dot=$('#chatDot');if(!dot)return;
@@ -1463,6 +1470,33 @@ function chatChannelList(){
 function chatChannelUnread(id){
   return Number(((S.chat||{}).byChannel||{})[id]||0);
 }
+/* A compact stamp for the list: a time today, 昨天, or a date. */
+function chatListTime(iso){
+  const d=new Date(iso),today=new Date();
+  const key=x=>`${x.getFullYear()}-${x.getMonth()}-${x.getDate()}`;
+  if(key(d)===key(today))return chatClock(iso);
+  const yesterday=new Date(today);yesterday.setDate(yesterday.getDate()-1);
+  if(key(d)===key(yesterday))return '昨天';
+  return `${d.getMonth()+1}/${d.getDate()}`;
+}
+/* The mark beside a conversation: an icon for the two standing rooms, the
+   project's first glyph otherwise. */
+function chatChannelMark(c){
+  if(c.id==='general')return `<span class="chat-mark">${icon('chat')}</span>`;
+  if(c.id==='lounge')return `<span class="chat-mark">${icon('users')}</span>`;
+  return `<span class="chat-mark is-project" style="--avatar-hue:${avatarHue(c.id)}">${escapeHTML(String(c.name||'#').slice(0,1))}</span>`;
+}
+function chatPreviewText(id){
+  const meta=chatPreviews[id]||{};
+  if(!meta.body)return '<span class="chat-channel-idle">还没有消息</span>';
+  const mine=meta.author===S.user?.id;
+  return escapeHTML((mine?'我：':'')+String(meta.body).replace(/\s+/g,' '));
+}
+function renderChatCurrent(){
+  const el=$('#chatCurrent');if(!el)return;
+  const item=chatChannelList().find(c=>c.id===chatChannel);
+  el.textContent=item?item.name:'沟通';
+}
 function renderChatChannels(){
   const bar=$('#chatChannels');if(!bar)return;
   const items=chatChannelList();
@@ -1470,14 +1504,25 @@ function renderChatChannels(){
   if(!items.some(c=>c.id===chatChannel))chatChannel='general';
   bar.innerHTML=items.map(c=>{
     const n=chatChannelUnread(c.id);
+    const meta=chatPreviews[c.id]||{};
+    const time=meta.createdAt?`<time class="chat-channel-time">${escapeHTML(chatListTime(meta.createdAt))}</time>`:'';
     const badge=n?`<i class="chat-channel-badge">${n>99?'99+':n}</i>`:'';
-    return `<button type="button" class="chat-channel ${c.id===chatChannel?'is-on':''} ${n?'has-unread':''}" data-channel="${escapeHTML(c.id)}">${escapeHTML(c.name)}${badge}</button>`;
+    return `<button type="button" role="tab" aria-selected="${c.id===chatChannel}" class="chat-channel ${c.id===chatChannel?'is-on':''}" data-channel="${escapeHTML(c.id)}">`
+      +chatChannelMark(c)
+      +`<span class="chat-channel-body"><span class="chat-channel-name">${escapeHTML(c.name)}</span>`
+      +`<span class="chat-channel-preview">${chatPreviewText(c.id)}</span></span>`
+      +`<span class="chat-channel-side">${time}${badge}</span></button>`;
   }).join('');
   $$('#chatChannels .chat-channel').forEach(b=>b.onclick=()=>{
-    if(chatChannel===b.dataset.channel)return;
-    chatChannel=b.dataset.channel;
-    renderChatChannels();loadChat(true);
+    /* Switching rooms reads only the room you switched to. */
+    if(chatChannel!==b.dataset.channel){
+      chatChannel=b.dataset.channel;
+      renderChatCurrent();
+    }
+    renderChatChannels();
+    loadChat(true);
   });
+  renderChatCurrent();
 }
 /* Mentions are read back out of the text, so a hand-typed @名字 works exactly
    like one picked from the menu. */
@@ -1548,6 +1593,7 @@ async function loadChat(reset){
     const scope={channel:chatChannel};
     const data=await api('/api/action',{action:'chat.list',data:reset?scope:{...scope,since:chatLastAt}});
     rows=data.messages||[];
+    if(data.previews)chatPreviews=data.previews;
   }catch(e){
     if(reset)log.innerHTML=`<p class="chat-empty">读不到消息：${escapeHTML(e?.message||'加载失败')}</p>`;
     return;
@@ -1570,6 +1616,8 @@ async function loadChat(reset){
     if(m.createdAt)chatLastAt=m.createdAt;
   });
   if(reset||nearBottom)log.scrollTop=log.scrollHeight;
+  /* The list carries the newest line of every room, so a poll keeps it fresh. */
+  renderChatChannels();
   reportChatRead(chatLastAt);
 }
 async function reportChatRead(at){
