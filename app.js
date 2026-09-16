@@ -990,7 +990,7 @@ if(location.protocol==='file:'){showAuth()}else{refresh()}
 const AGENT_CONFIG_KEY='work-calendar-agent-config-v1';
 const OPENCODE_GO_ENDPOINT='https://opencode.ai/zen/go/v1/chat/completions';
 const OPENCODE_GO_MODELS=['glm-5.3-flash','glm-5.3','glm-5.2','glm-5.1','kimi-k3','kimi-k2.7-code','kimi-k2.6','longcat-2.0','deepseek-v4.1-flash','deepseek-v4-pro','deepseek-v4-flash','deepseek-v4-flash-vision-exp','mimo-v2.5','mimo-v2.5-pro','hy4-preview','hy3','grok-4.5'];
-const agentState={messages:[],busy:false,steps:0,failures:0,autoRun:false,stop:false,pendingResolve:null,sessionId:(globalThis.crypto?.randomUUID?.()||`wc-${Date.now()}-${Math.random().toString(36).slice(2)}`)};
+const agentState={messages:[],busy:false,steps:0,failures:0,mode:null,lastActionKey:'',repeats:0,autoRun:false,stop:false,pendingResolve:null,sessionId:(globalThis.crypto?.randomUUID?.()||`wc-${Date.now()}-${Math.random().toString(36).slice(2)}`)};
 let agentServerConfig=null;
 function agentConfig(){
   try{return JSON.parse(localStorage.getItem(AGENT_CONFIG_KEY)||'{}')}catch(_){return {}}
@@ -1091,8 +1091,12 @@ function agentSplitActions(text){
   }).trim();
   return {clean,actions};
 }
-const AGENT_MAX_STEPS=12;      /* hard stop so a run can never loop forever */
-const AGENT_MAX_FAILURES=3;    /* a run may repair a few refusals, then stops */
+/* Runs are meant to go the distance for a real job, so the ceiling sits far
+   above anything a sane task needs. What actually prevents a runaway is the
+   refusal budget and the repeat detector below, not the step count. */
+const AGENT_MAX_STEPS=200;
+const AGENT_MAX_FAILURES=5;    /* repairs a few refusals, then stops */
+const AGENT_MAX_REPEATS=2;     /* same action proposed this many extra times */
 const AGENT_CONTEXT_LIMIT=24;  /* how many turns we replay back to the model */
 
 function agentContext(){
@@ -1100,7 +1104,7 @@ function agentContext(){
 }
 function agentSystemPrompt(context){
   const rule=context.mode==='operator'
-    ?'用户要求改动数据时，输出一个 <action>{"action":"…","data":{…}}</action> 动作块，一次只输出一个动作，然后停下来等待系统回执。系统会把结果以【系统回执】或【系统回执·失败】的形式发给你。收到成功回执后，如果用户的目标还没完成就继续输出下一个动作，完成了就用一句话总结并明确结束。收到失败回执时先读懂原因：如果是缺了前置步骤（例如负责人还没加入项目、项目还没审批），就输出补救动作把它补上再继续；如果确实做不到，用一句话说明原因并结束。绝对不要在收到回执之前声称操作已经完成，也不要重复提交同一个已经失败的动作。'
+    ?'用户要求改动数据时，输出一个 <action>{"action":"…","data":{…}}</action> 动作块，一次只输出一个动作，然后停下来等待系统回执。系统会把结果以【系统回执】或【系统回执·失败】的形式发给你。收到成功回执后，先看回执里的「数据核对」，确认这一步确实产生了预期的变化，再输出下一个动作；核对结果与预期不符就先修正它。如果用户的目标还没完成就继续输出下一个动作，完成了就用一句话总结并明确结束。收到失败回执时先读懂原因：如果是缺了前置步骤（例如负责人还没加入项目、项目还没审批），就输出补救动作把它补上再继续；如果确实做不到，用一句话说明原因并结束。绝对不要在收到回执之前声称操作已经完成，也不要重复提交同一个已经失败的动作。'
     :'你是只读助手，不能创建、指派、修改或审批任何数据。';
   return `你是「战略小组台账」工作助手。当前账户角色：${context.role}，权限模式：${context.mode}。遵守服务端权限边界：${rule}`;
 }
@@ -1112,6 +1116,38 @@ async function agentNext(context){
   const {clean,actions}=agentSplitActions(answer);
   if(clean)agentAppend('assistant',clean);
   return actions;
+}
+/* A second look at the ledger after every write. The model is told what the
+   data actually looks like now, so it cannot treat a return value as proof and
+   has to reconcile the two before moving on. */
+function agentFingerprint(){
+  const of=(list,fields)=>Object.fromEntries((list||[]).map(x=>[x.id,fields.map(f=>String(x[f]==null?'':x[f])).join('|')]));
+  return {
+    tasks:of(S.tasks,['name','status','assignee','date','deadline','priority']),
+    projects:of(S.projects,['name','status','owner']),
+    users:of(S.users,['active','role','displayName','nickname']),
+    repeats:of(S.repeats,['name','active','every','span']),
+  };
+}
+function agentVerify(before,after){
+  const kinds={tasks:['任务',()=>S.tasks],projects:['项目',()=>S.projects],
+               users:['账户',()=>S.users],repeats:['固定安排',()=>S.repeats]};
+  const out=[];
+  for(const key of Object.keys(kinds)){
+    const label=kinds[key][0],list=kinds[key][1];
+    const b=before[key]||{},a=after[key]||{};
+    const nameOf=id=>{const hit=(list()||[]).find(x=>x.id===id);return (hit&&(hit.name||hit.displayName||hit.id))||id};
+    const added=Object.keys(a).filter(id=>!(id in b));
+    const removed=Object.keys(b).filter(id=>!(id in a));
+    const changed=Object.keys(a).filter(id=>id in b&&a[id]!==b[id]);
+    if(!added.length&&!removed.length&&!changed.length)continue;
+    const bits=[];
+    if(added.length)bits.push('新增 '+added.map(nameOf).join('、'));
+    if(removed.length)bits.push('移除 '+removed.join('、'));
+    if(changed.length)bits.push('更新 '+changed.map(nameOf).join('、'));
+    out.push(label+bits.join('，'));
+  }
+  return out;
 }
 function agentSummarize(result){
   if(result==null)return '已完成';
@@ -1141,35 +1177,42 @@ function agentHalt(note){
   if(note)agentAppend('assistant',note,'');
 }
 function agentRunOne(proposal){
-  /* Renders one confirmation card. The first card always waits for the user;
-     once they confirm, the run switches to automatic and later cards execute
-     on their own until the model stops proposing actions. */
+  /* Renders one action card. The first card of a run also asks how the run
+     should proceed; after that the step simply executes. */
   return new Promise(resolve=>{
     const list=$('#agentMessages');
     if(!list){resolve({cancelled:true});return}
     const label=AGENT_ACTION_LABELS[proposal.action]||proposal.action;
     const payload=(proposal.data&&typeof proposal.data==='object')?proposal.data:{};
+    const chooses=agentState.mode===null;
     const card=document.createElement('div');
     card.className='agent-message assistant agent-action';
-    card.innerHTML=`<div class="agent-action-title">待确认操作 · ${escapeHTML(label)}</div><pre class="agent-action-payload">${escapeHTML(JSON.stringify(payload,null,2))}</pre><div class="agent-action-buttons"><button class="ghost-btn agent-action-cancel">取消</button><button class="primary-btn agent-action-confirm">确认执行</button></div>`;
+    card.innerHTML=`<div class="agent-action-title">${chooses?'待执行的第一个操作':'待确认操作'} · ${escapeHTML(label)}</div>`
+      +`<pre class="agent-action-payload">${escapeHTML(JSON.stringify(payload,null,2))}</pre>`
+      +(chooses?`<p class="agent-action-note">先选一种执行方式，助手再动手。<strong>逐步确认</strong>：每一步都贴出来等你点。<strong>替我全部做完</strong>：确认第一屏之后就交给它，后面的步骤自己跑完，随时可以按停止。</p>`:'')
+      +'<div class="agent-action-buttons"></div>';
     list.appendChild(card);list.scrollTop=list.scrollHeight;
     const finish=value=>{agentState.pendingResolve=null;resolve(value)};
     agentState.pendingResolve=finish;
     const buttons=card.querySelector('.agent-action-buttons');
-    const confirm=card.querySelector('.agent-action-confirm');
-    card.querySelector('.agent-action-cancel').onclick=()=>{card.remove();agentHalt();finish({cancelled:true})};
-    confirm.onclick=async()=>{
-      confirm.disabled=true;confirm.textContent='执行中…';
-      /* The click is what authorises the run. Setting this here rather than on
-         success is what lets the model repair a first action that the store
-         refused — otherwise the very first refusal would close the run. */
-      agentState.autoRun=true;
+    const cancel=()=>{card.remove();agentHalt();finish({cancelled:true})};
+    const execute=async()=>{
+      buttons.innerHTML='<span class="agent-action-done">执行中…</span>';
+      const before=agentFingerprint();
       try{
         const result=await api('/api/action',{action:'agent.execute',data:{action:proposal.action,data:payload,confirmed:true}});
-        buttons.innerHTML='<span class="agent-action-done">已执行</span>';
-        await refresh();toast(`已${label}`);
+        await refresh();
+        /* The ledger is read again here rather than trusting the return value:
+           a step that reports success but changed nothing has to be visible to
+           the model before it plans the next one. */
+        const diff=agentVerify(before,agentFingerprint());
         const summary=agentSummarize(result);
-        agentRecordStep(`已${label} · ${summary}`,`【系统回执】${label} 执行成功，返回：${summary}`);
+        buttons.innerHTML='<span class="agent-action-done">已执行</span>';
+        toast(`已${label}`);
+        agentRecordStep(`已${label} · ${summary}`,
+          `【系统回执】${label} 执行成功，返回：${summary}。`
+          +`数据核对：${diff.length?diff.join('；'):'没有发现任何变化'}。`
+          +`先核对这一步有没有达到预期：达到了再输出下一个动作；对不上或没生效，先修正它再继续。`);
         finish({label,result});
       }catch(err){
         const message=err?.message||'执行失败';
@@ -1178,20 +1221,42 @@ function agentRunOne(proposal){
         /* Hand the refusal back to the model instead of ending the run here.
            The failure usually names the step that is missing, so the model can
            supply it and finish what the user actually asked for. */
+        buttons.innerHTML='<span class="agent-action-done">未执行</span>';
         agentRecordStep(`执行未通过 · ${label}`,
-          `【系统回执·失败】${label} 没有执行。原因：${message}。`+
-          `请判断能否再补一步达成用户的目标：能就输出那个补救动作，不能就用一句话说明原因并结束。`+
-          `不要重复提交同一个动作。`);
+          `【系统回执·失败】${label} 没有执行。原因：${message}。`
+          +`请判断能否再补一步达成用户的目标：能就输出那个补救动作，不能就用一句话说明原因并结束。`
+          +`不要重复提交同一个动作。`);
         finish({failed:true});
       }
     };
-    if(agentState.autoRun&&!agentState.stop)confirm.click();
+    if(chooses){
+      buttons.innerHTML='<button class="ghost-btn agent-action-cancel">取消</button>'
+        +'<button class="secondary-btn agent-action-step">逐步确认</button>'
+        +'<button class="primary-btn agent-action-auto">替我全部做完</button>';
+      buttons.querySelector('.agent-action-cancel').onclick=cancel;
+      buttons.querySelector('.agent-action-step').onclick=()=>{agentState.mode='step';execute()};
+      buttons.querySelector('.agent-action-auto').onclick=()=>{agentState.mode='auto';execute()};
+    }else{
+      buttons.innerHTML='<button class="ghost-btn agent-action-cancel">取消</button>'
+        +'<button class="ghost-btn agent-action-handover hidden">后续自动做完</button>'
+        +'<button class="primary-btn agent-action-confirm">确认执行</button>';
+      buttons.querySelector('.agent-action-cancel').onclick=cancel;
+      buttons.querySelector('.agent-action-confirm').onclick=execute;
+      const hand=buttons.querySelector('.agent-action-handover');
+      /* Mid-run change of mind: the remaining steps stop asking. */
+      if(agentState.mode==='step'){
+        hand.classList.remove('hidden');
+        hand.onclick=()=>{agentState.mode='auto';execute()};
+      }
+      if(agentState.mode==='auto'&&!agentState.stop)buttons.querySelector('.agent-action-confirm').click();
+    }
   });
 }
 async function agentLoop(context){
-  /* One pass = ask the model for its next move, then run the actions it
-     proposed. Keeps going while the model still proposes work and the user's
-     confirmation has put the run into automatic mode. */
+  /* One pass = ask the model for its next move, then run what it proposed.
+     The loop no longer cares whether the user confirms every step or handed
+     the rest over: either way it keeps going until the model has nothing left
+     to propose, the user stops it, or one of the guards trips. */
   let steps=0,stalled=false;
   while(steps<AGENT_MAX_STEPS&&!agentState.stop){
     const actions=await agentNext(context);
@@ -1203,28 +1268,39 @@ async function agentLoop(context){
     stalled=false;
     for(const proposal of actions){
       if(agentState.stop)break;
+      /* A model that keeps re-proposing the same action is stuck, not working. */
+      const key=proposal.action+'|'+JSON.stringify(proposal.data||{});
+      if(key===agentState.lastActionKey){
+        agentState.repeats+=1;
+        if(agentState.repeats>AGENT_MAX_REPEATS){
+          agentAppend('assistant',`模型连续几次提出同一个「${AGENT_ACTION_LABELS[proposal.action]||proposal.action}」，看起来是卡住了，先停在这里。可以说一句换个做法。`,'error');
+          stalled=true;break;
+        }
+      }else{
+        agentState.lastActionKey=key;agentState.repeats=0;
+      }
       const outcome=await agentRunOne(proposal);
       if(outcome.cancelled){stalled=true;break}
       steps+=1;
       agentState.steps=steps;agentUpdateBusy();
-      /* A refusal counts as a step as well, so a model that keeps proposing
-         impossible actions still runs into the same ceiling. */
+      /* A refusal counts as a step too, so a model that keeps proposing
+         impossible actions still runs into a ceiling. */
       if(outcome.failed&&agentState.failures>=AGENT_MAX_FAILURES){stalled=true;break}
-      if(steps>=AGENT_MAX_STEPS)break;
-      if(!agentState.autoRun){stalled=true;break}
+      if(steps>=AGENT_MAX_STEPS){stalled=true;break}
     }
     if(stalled)break;
-    if(!agentState.autoRun)break;
   }
-  if(stalled&&agentState.failures>=AGENT_MAX_FAILURES)
+  if(steps>=AGENT_MAX_STEPS)
+    agentAppend('assistant',`已连续执行 ${steps} 步，为安全起见先停在这里。你可以继续追问，我会接着往下做。`,'');
+  else if(stalled&&agentState.failures>=AGENT_MAX_FAILURES)
     agentAppend('assistant',`连续 ${agentState.failures} 步没有通过校验，先停在这里。可以补充必要信息，或手动处理后让我接着做。`,'error');
-  if(steps>=AGENT_MAX_STEPS)agentAppend('assistant',`已连续执行 ${steps} 步，为安全起见先停在这里。你可以继续追问，我会接着往下做。`,'');
   return steps;
 }
 async function agentSubmit(){
   const input=$('#agentInput'),text=input?.value.trim();if(!text||agentState.busy)return;
   input.value='';agentAppend('user',text);
   agentState.autoRun=false;agentState.stop=false;agentState.steps=0;agentState.failures=0;
+  agentState.mode=null;agentState.lastActionKey='';agentState.repeats=0;
   agentState.pendingResolve=null;
   agentState.busy=true;agentUpdateBusy();
   try{

@@ -582,6 +582,18 @@ select:focus {
    14 · Assistant run
    -------------------------------------------------------------------------- */
 
+/* The first card of a run explains the two ways to proceed. */
+.agent-action-note {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--muted);
+}
+.agent-action-note strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
 /* One quiet receipt per executed step, so a multi-step run stays scannable. */
 .agent-step {
   align-self: stretch;

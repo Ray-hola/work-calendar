@@ -357,9 +357,12 @@ test('workspace account menu lists the right entries per role and escapes names'
 const AGENT_LOOP_SOURCE = source.match(/async function agentLoop\(context\)\{[\s\S]*?\n\}/)[0];
 const AGENT_MAX_STEPS = Number(source.match(/const AGENT_MAX_STEPS=(\d+)/)[1]);
 const AGENT_MAX_FAILURES = Number(source.match(/const AGENT_MAX_FAILURES=(\d+)/)[1]);
-/* A refusal only leaves the run open if the click — not the success — is what
-   authorises it. */
-const CLICK_AUTHORISES_RUN = /confirm\.onclick=async\(\)=>\{[\s\S]{0,400}?agentState\.autoRun=true;/.test(source);
+const AGENT_MAX_REPEATS = Number(source.match(/const AGENT_MAX_REPEATS=(\d+)/)[1]);
+/* Nothing runs until the first card is answered, and the answer is a choice:
+   confirm each step, or hand the rest of the run over. */
+const FIRST_CARD_CHOOSES = /const chooses=agentState\.mode===null;/.test(source)
+  && /agent-action-step">逐步确认/.test(source)
+  && /agent-action-auto">替我全部做完/.test(source);
 
 function agentHarness(queue, verdicts) {
   const trace = [];
@@ -370,17 +373,18 @@ function agentHarness(queue, verdicts) {
   const next = async () => (queue.length ? queue.shift() : []);
   const runOne = async (proposal) => {
     const verdict = verdicts.shift() || 'ok';
-    if (verdict === 'fail') { state.failures += 1; state.autoRun = true; return {failed: true}; }
-    if (verdict === 'cancel') { state.autoRun = false; return {cancelled: true}; }
-    state.autoRun = true;
+    /* autoRun is deliberately left false throughout: the loop must keep going
+       in step-by-step mode, where the user confirms every single card. */
+    if (verdict === 'fail') { state.failures += 1; return {failed: true}; }
+    if (verdict === 'cancel') { return {cancelled: true}; }
     trace.push(['ran', proposal.action]);
     return {label: proposal.action};
   };
   const loop = new Function(
     'agentState', 'agentAppend', 'agentUpdateBusy', 'agentNext', 'agentRunOne',
-    'AGENT_MAX_STEPS', 'AGENT_MAX_FAILURES',
+    'AGENT_MAX_STEPS', 'AGENT_MAX_FAILURES', 'AGENT_MAX_REPEATS', 'AGENT_ACTION_LABELS',
     AGENT_LOOP_SOURCE + '\nreturn agentLoop;'
-  )(state, append, busy, next, runOne, AGENT_MAX_STEPS, AGENT_MAX_FAILURES);
+  )(state, append, busy, next, runOne, AGENT_MAX_STEPS, AGENT_MAX_FAILURES, AGENT_MAX_REPEATS, {});
   return {
     loop,
     ran: () => trace.filter(x => x[0] === 'ran').map(x => x[1]),
@@ -412,8 +416,10 @@ test('a run survives a refusal but gives up once the failure budget is spent', a
   assert.equal(await one.loop({mode: 'operator'}), 1);
   assert.equal(one.said().some(t => t.includes('连续')), false, '单次被拒不该宣告放弃');
 
+  /* Each proposal differs, otherwise the repeat detector would stop the run
+     before the failure budget is spent. */
   const many = agentHarness(
-    Array.from({length: 40}, () => [{action: 'task.create'}]),
+    Array.from({length: 40}, (_, i) => [{action: 'task.create', data: {name: 't' + i}}]),
     Array(AGENT_MAX_FAILURES).fill('fail'));
   assert.equal(await many.loop({mode: 'operator'}), AGENT_MAX_FAILURES, '用尽失败额度后停手');
   assert.equal(many.said().some(t => t.includes(`连续 ${AGENT_MAX_FAILURES} 步`)), true,
@@ -426,7 +432,27 @@ test('cancelling the first card still stops the run outright', async () => {
   assert.deepEqual(h.ran(), []);
 });
 
-test('confirming a card authorises the run before the store has answered', () => {
-  assert.ok(CLICK_AUTHORISES_RUN,
-    '首步就被拒时仍要能补救，因此 autoRun 必须在点击时置位，而不是执行成功之后');
+test('the first card asks how the run should proceed', () => {
+  assert.ok(FIRST_CARD_CHOOSES,
+    '第一张卡片必须让用户选「逐步确认」还是「替我全部做完」');
+  assert.ok(AGENT_MAX_STEPS >= 100, '步数上限应远高于原来的 12');
+});
+
+test('a long run is no longer cut short by the old step ceiling', async () => {
+  const queue = Array.from({length: 40}, (_, i) => [{action: 'task.create', data: {name: 't' + i}}]);
+  const h = agentHarness(queue, []);
+  assert.equal(await h.loop({mode: 'operator'}), 40, '每一步都不同，应一直跑到模型不再提议');
+});
+
+test('a model stuck on the same action is stopped by the repeat detector', async () => {
+  const h = agentHarness(Array.from({length: 40}, () => [{action: 'task.create'}]), []);
+  const steps = await h.loop({mode: 'operator'});
+  assert.equal(steps, AGENT_MAX_REPEATS + 1, '同一个动作只执行到重复上限');
+  assert.ok(h.said().some(t => t.includes('卡住')), '应告诉用户模型卡住了');
+});
+
+test('the success receipt carries a data check the model must reconcile', () => {
+  const receipt = source.match(/【系统回执】[\s\S]{0,400}?数据核对/);
+  assert.ok(receipt, '成功回执必须附上数据核对');
+  assert.ok(/先核对这一步有没有达到预期/.test(source), '回执应要求模型先核对再继续');
 });
