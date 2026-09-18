@@ -655,6 +655,65 @@ class Store:
         if not user['admin'] and p['owner']!=user['id']:
             raise Problem(403, '只有项目 Owner 或 superadmin 可以操作')
 
+    def _lineage_root(self, task, by_id):
+        """Walk originId/reworkOf links to the oldest record of a task lineage."""
+        root=task.get('id'); parent=task.get('originId') or task.get('reworkOf'); seen=set()
+        while parent and parent in by_id and parent not in seen:
+            seen.add(parent); root=parent
+            parent=by_id[parent].get('originId') or by_id[parent].get('reworkOf')
+        return root
+
+    def _lineage_leaves(self, tasks):
+        """Return the newest record of every lineage: the one that owns the work."""
+        by_id={t.get('id'):t for t in tasks if t.get('id')}
+        groups={}
+        for task in tasks:
+            groups.setdefault(self._lineage_root(task,by_id),[]).append(task)
+        return [max(chain,key=lambda t:(str(t.get('date','')),str(t.get('createdAt','')))) for chain in groups.values()]
+
+    def _superseded_map(self, tasks):
+        """Map each superseded occurrence to the lineage leaf that replaced it.
+
+        Deferral no longer leaves two live records: the successor takes over the
+        task and the earlier occurrence becomes history. Derived from the chain
+        rather than a stored flag so pre-existing data is handled too.
+        """
+        by_id={t.get('id'):t for t in tasks if t.get('id')}
+        groups={}
+        for task in tasks:
+            groups.setdefault(self._lineage_root(task,by_id),[]).append(task)
+        superseded={}
+        for chain in groups.values():
+            leaf=max(chain,key=lambda t:(str(t.get('date','')),str(t.get('createdAt',''))))
+            for task in chain:
+                if task.get('id')!=leaf.get('id'):
+                    superseded[task['id']]=leaf.get('id')
+        return superseded
+
+    def _lineage_ancestors(self, task, tasks):
+        """Return every earlier occurrence superseded by this task, oldest last."""
+        by_id={t.get('id'):t for t in tasks if t.get('id')}
+        result=[]; parent=task.get('originId') or task.get('reworkOf'); seen=set()
+        while parent and parent in by_id and parent not in seen:
+            seen.add(parent); node=by_id[parent]; result.append(node)
+            parent=node.get('originId') or node.get('reworkOf')
+        return result
+
+    def _settle_lineage(self, task, actor):
+        """Mark every superseded ancestor complete once the leaf finally finishes.
+
+        The successor carries the whole task, so a late completion settles the
+        history behind it instead of leaving a trail of permanently open rows.
+        """
+        when=timestamp(); changed=[]
+        for node in self._lineage_ancestors(task, self.all('tasks')):
+            if node.get('status')=='done':
+                continue
+            node.update(status='done', completedAt=when, completedBy=actor, carriedCompletion=True)
+            node.setdefault('supersededBy', task.get('id'))
+            self.put('tasks', node); changed.append(node['id'])
+        return changed
+
     def project_tasks_complete(self, project_id):
         """Return whether every task lineage in a project has a completed leaf.
 
@@ -665,16 +724,8 @@ class Store:
         tasks=[t for t in self.all('tasks') if t.get('projectId')==project_id]
         if not tasks:
             return False
-        by_id={t.get('id'):t for t in tasks if t.get('id')}
-        groups={}
-        for task in tasks:
-            root=task.get('id'); parent=task.get('originId') or task.get('reworkOf'); seen=set()
-            while parent and parent in by_id and parent not in seen:
-                seen.add(parent); root=parent
-                parent=by_id[parent].get('originId') or by_id[parent].get('reworkOf')
-            groups.setdefault(root,[]).append(task)
-        latest=[max(chain,key=lambda t:(str(t.get('date','')),str(t.get('createdAt','')))) for chain in groups.values()]
-        return bool(latest) and all(t.get('status')=='done' for t in latest)
+        leaves=self._lineage_leaves(tasks)
+        return bool(leaves) and all(t.get('status')=='done' for t in leaves)
 
     def can_view_task(self, user, t):
         if not t.get('projectId'):
@@ -788,8 +839,12 @@ class Store:
         # defer creates a fresh todo occurrence in the action handler below.
         copy = {**task, 'id': uid(), 'date': target_day,
                 'originId': task.get('originId') or task['id'], 'fixed': False,
-                'deadline': carried_deadline, 'createdAt': timestamp()}
+                'deadline': carried_deadline, 'createdAt': timestamp(),
+                'supersededBy': None, 'supersededAt': None}
         self.put('tasks', copy)
+        # The successor owns the task from here; the source becomes history.
+        task['supersededBy'] = copy['id']; task['supersededAt'] = timestamp()
+        self.put('tasks', task)
         self.put('logs', {'taskId': task['id'], 'actor': 'system', 'kind': 'defer', 'reason': reason,
                           'remaining': task.get('desc') or task.get('name'), 'target': target_day,
                           'nextTaskId': copy['id'], 'date': now().date().isoformat(), 'createdAt': timestamp()})
@@ -919,7 +974,16 @@ class Store:
             self.advance_due_tasks()
             self.reconcile_task_approvals()
             projects=[p for p in self.all('projects') if self.can_view_project(user,p)]
-            tasks=[t for t in self.all('tasks') if self.can_view_task(user,t)]
+            all_tasks=self.all('tasks')
+            superseded=self._superseded_map(all_tasks)
+            tasks=[]
+            for task in all_tasks:
+                if not self.can_view_task(user,task):
+                    continue
+                # Superseded occurrences stay in the payload so history, logs and
+                # approval lookups keep working; the client hides them from the
+                # active views and shows them in the deferral history instead.
+                tasks.append({**task,'superseded':True,'supersededBy':superseded[task['id']]} if task['id'] in superseded else task)
             ids={t['id'] for t in tasks}; pids={p['id'] for p in projects}
             reports=[r for r in self.all('reports') if r['author']==user['id'] or user['admin'] or (r.get('projectId') and self.get('projects',r['projectId'])['owner']==user['id'])]
             # Personal diaries are private to their author; superadmin can browse
@@ -942,7 +1006,9 @@ class Store:
         end=date.fromisoformat(end) if end else today
         accounts=[u['id'] for u in self.users() if u['active'] and (viewer['admin'] or u['id']==viewer['id'])]
         projects={p['id']:p for p in self.all('projects') if self.can_view_project(viewer,p)}
-        tasks=self.all('tasks')
+        # One deferred task is one unit of work: count only the lineage leaf so a
+        # chain carried across several days is not charged to every day at once.
+        tasks=self._lineage_leaves(self.all('tasks'))
         rows=[]
         day=start
         while day<=end:
@@ -963,10 +1029,12 @@ class Store:
         """Return deduplicated real task/project completion events for the log."""
         events=[]; seen=set(); projects={p['id']:p for p in self.all('projects')}
         logs=self.all('logs')
+        all_tasks=self.all('tasks')
+        by_id={t['id']:t for t in all_tasks if t.get('id')}
         groups={}
-        for task in self.all('tasks'):
+        for task in all_tasks:
             if not viewer['admin'] and task.get('assignee')!=viewer['id']: continue
-            groups.setdefault(task.get('originId') or task.get('id'),[]).append(task)
+            groups.setdefault(self._lineage_root(task,by_id),[]).append(task)
         for root,chain in groups.items():
             ids={t.get('id') for t in chain}
             approvals=[l for l in logs if l.get('taskId') in ids and l.get('kind')=='approval' and l.get('decision')=='approved']
@@ -1004,15 +1072,7 @@ class Store:
             tasks = [t for t in all_tasks if t.get('projectId') == project.get('id')]
             # Collapse deferred/rejected/rework occurrences into one logical
             # task chain, matching project_tasks_complete's closeout rules.
-            by_id = {t.get('id'): t for t in tasks if t.get('id')}
-            groups = {}
-            for task in tasks:
-                root = task.get('id'); parent = task.get('originId') or task.get('reworkOf'); seen = set()
-                while parent and parent in by_id and parent not in seen:
-                    seen.add(parent); root = parent
-                    parent = by_id[parent].get('originId') or by_id[parent].get('reworkOf')
-                groups.setdefault(root, []).append(task)
-            leaves = [max(chain, key=lambda t: (str(t.get('date', '')), str(t.get('createdAt', '')))) for chain in groups.values()]
+            leaves = self._lineage_leaves(tasks)
             counts = {
                 'total': len(leaves),
                 'completed': sum(t.get('status') == 'done' for t in leaves),
@@ -1788,6 +1848,7 @@ class Store:
                     self.notify(approver,'任务完成待审批',f'{user["id"]} 提交「{t["name"]}」完成总结，请审批。\n完成总结：{summary}','task_approval',t['id'])
                 else:
                     t['status']='done'
+                    self._settle_lineage(t,user['id'])
             elif action=='task.defer':
                 target=valid_date(d.get('date'))
                 if target<=t['date']:raise Problem(400,'递延日期必须晚于原日期')
@@ -1799,7 +1860,7 @@ class Store:
                 carried_deadline=t.get('deadline')
                 if carried_deadline and carried_deadline<target:
                     carried_deadline=target
-                log.update(kind='defer',reason=required(d,'reason'),remaining=required(d,'remaining'),target=target);copy={**t,'id':uid(),'date':target,'status':'todo','fixed':False,'repeatId':None,'desc':log['remaining'],'duration':duration(d.get('duration',t.get('duration'))),'deadline':carried_deadline,'originId':t['id']};self.put('tasks',copy);log['nextTaskId']=copy['id'];t['status']='deferred'
+                log.update(kind='defer',reason=required(d,'reason'),remaining=required(d,'remaining'),target=target);root=t.get('originId') or t['id'];copy={**t,'id':uid(),'date':target,'status':'todo','fixed':False,'repeatId':None,'desc':log['remaining'],'duration':duration(d.get('duration',t.get('duration'))),'deadline':carried_deadline,'originId':root,'createdAt':timestamp(),'supersededBy':None,'supersededAt':None};self.put('tasks',copy);log['nextTaskId']=copy['id'];t['status']='deferred';t['supersededBy']=copy['id'];t['supersededAt']=timestamp()
             else:
                 if not t['fixed']:raise Problem(400,'只有固定安排可以跳过本次')
                 log.update(kind='skip',reason=str(d.get('reason','临时跳过')));t['status']='skipped'
@@ -1828,6 +1889,8 @@ class Store:
                 for item in chain:
                     if item.get('status')=='pending_approval':
                         item['status']='done';item['approval']={**item.get('approval',{}),'status':'approved','reviewedBy':user['id'],'reviewedAt':timestamp()};self.put('tasks',item);self.put('logs',{'taskId':item['id'],'actor':user['id'],'kind':'approval','decision':'approved','createdAt':timestamp(),'date':now().date().isoformat()})
+                latest=max(chain,key=lambda x:(str(x.get('date','')),str(x.get('createdAt',''))))
+                self._settle_lineage(latest,user['id'])
                 for recipient in sorted({item['assignee'] for item in chain}):
                     self.notify(recipient,'任务完成已通过',f'「{t["name"]}」已由 {user["id"]} 审批通过，任务已结束。','task_approval',t['id'])
                 return self.get('tasks',t['id'])

@@ -40,6 +40,17 @@ test('ordinary member schedule only contains their own arrangements; admin retai
   assert.deepEqual(a.json('scheduleTasks().map(t=>t.id)'), ['other-project','other-personal']);
 });
 
+test('a superseded deferral occurrence leaves the active board but stays in history', () => {
+  const a = app();
+  a.run(`S.user={id:'superadmin',admin:1};S.projects=[];UI.member='all';S.tasks=[
+    {id:'old',assignee:'test002',status:'deferred',superseded:true,supersededBy:'new'},
+    {id:'new',assignee:'test002',status:'todo',originId:'old'}];`);
+  assert.deepEqual(a.json('scheduleTasks().map(t=>t.id)'), ['new']);
+  assert.deepEqual(a.json('scheduleTasks(true).map(t=>t.id)'), ['old','new']);
+  assert.equal(a.run('isSuperseded(S.tasks[0])'), true);
+  assert.equal(a.run('isSuperseded(S.tasks[1])'), false);
+});
+
 test('invitation workload count is aggregate and limited to the project period', () => {
   const a = app();
   a.run(`S.tasks=[

@@ -524,6 +524,29 @@ select:focus {
 
 .overdue-text { color: var(--danger); }
 
+/* Lineage marks: an occurrence replaced by its successor, or a carried task. */
+.superseded-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--surface-sunk);
+  border: 1px solid var(--line);
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.carried-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-dark);
+  white-space: nowrap;
+}
+.carried-badge .icon { width: 12px; height: 12px; stroke-width: 2.1; }
+
 /* Week rail: a compact "3天" mark on multi-day rows. */
 .axis-span {
   font-style: normal;

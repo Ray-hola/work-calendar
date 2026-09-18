@@ -274,6 +274,57 @@ class ScheduleAccessTests(unittest.TestCase):
         carried = next(t for t in self.store.all('tasks') if t.get('originId') == task['id'])
         self.assertEqual(carried['deadline'], target)
 
+    def test_defer_replaces_occurrence_and_marks_original_superseded(self):
+        task = self.personal['test002']
+        target = (date.fromisoformat(self.day) + timedelta(days=1)).isoformat()
+        original = self.store.action(self.store.user('test002'), 'task.defer', {
+            'id': task['id'], 'reason': '时间不足', 'remaining': '继续处理', 'date': target,
+        })
+        successor = next(t for t in self.store.all('tasks') if t.get('originId') == task['id'])
+        self.assertEqual(original['supersededBy'], successor['id'])
+        snapshot = {t['id']: t for t in self.store.snapshot(self.store.user('test002'))['tasks']}
+        self.assertTrue(snapshot[task['id']].get('superseded'))
+        self.assertEqual(snapshot[task['id']].get('supersededBy'), successor['id'])
+        self.assertFalse(snapshot[successor['id']].get('superseded'))
+
+    def test_completing_a_successor_settles_the_superseded_original(self):
+        task = self.personal['test002']
+        target = (date.fromisoformat(self.day) + timedelta(days=1)).isoformat()
+        self.store.action(self.store.user('test002'), 'task.defer', {
+            'id': task['id'], 'reason': '等待他人', 'remaining': '继续处理', 'date': target,
+        })
+        successor = next(t for t in self.store.all('tasks') if t.get('originId') == task['id'])
+        self.store.action(self.store.user('test002'), 'task.complete',
+                          {'id': successor['id'], 'summary': '依赖已完成', 'actual': 20})
+        self.store.action(self.admin, 'task.review', {'id': successor['id'], 'accept': True})
+        settled = self.store.get('tasks', task['id'])
+        self.assertEqual(settled['status'], 'done')
+        self.assertTrue(settled.get('carriedCompletion'))
+
+    def test_deferred_chain_counts_once_in_diary_statistics(self):
+        task = self.personal['test002']
+        target = (date.fromisoformat(self.day) + timedelta(days=1)).isoformat()
+        self.store.action(self.store.user('test002'), 'task.defer', {
+            'id': task['id'], 'reason': '时间不足', 'remaining': '继续处理', 'date': target,
+        })
+        rows = {(r['date'], r['userId']): r for r in self.store.diary_statistics(self.admin, self.day, target)}
+        self.assertEqual(rows[(self.day, 'test002')]['total'], 0)
+        self.assertEqual(rows[(target, 'test002')]['total'], 1)
+
+    def test_auto_carry_leaves_only_the_newest_occurrence_live(self):
+        start = date.fromisoformat(self.day) - timedelta(days=2)
+        task = self.store.put('tasks', {
+            'name': '自动递延', 'date': start.isoformat(), 'duration': 30,
+            'assignee': 'test002', 'projectId': None, 'priority': 'P1', 'status': 'doing',
+            'fixed': False, 'type': '通用',
+        })
+        self.store.db.commit()
+        self.store.schedule(datetime.combine(date.fromisoformat(self.day), time(8), TZ))
+        chain = [t for t in self.store.all('tasks') if t.get('originId') == task['id'] or t['id'] == task['id']]
+        live = [t for t in chain if not t.get('supersededBy')]
+        self.assertEqual(len(live), 1)
+        self.assertEqual(live[0]['date'], self.day)
+
     def test_task_auto_starts_when_scheduled_time_arrives(self):
         task = self.store.put('tasks', {
             'name': '到点自动开始', 'date': self.day, 'time': '00:01', 'duration': 30,
