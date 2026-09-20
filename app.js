@@ -37,7 +37,8 @@ const ICON_PATHS={
   'play':'<path d="m7.5 4.8 11.5 7.2-11.5 7.2Z"/>',
   'square':'<rect x="6" y="6" width="12" height="12" rx="2"/>',
   'dot':'<circle cx="12" cy="12" r="3"/>',
-  'chat':'<path d="M20 13.5a2 2 0 0 1-2 2H8.5L4 19V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2Z"/>'
+  'chat':'<path d="M20 13.5a2 2 0 0 1-2 2H8.5L4 19V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2Z"/>',
+  'mic':'<rect x="9" y="3" width="6" height="10" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v3"/>'
 };
 function icon(name,extra=''){
   const body=ICON_PATHS[name]||ICON_PATHS['diamond'];
@@ -53,6 +54,8 @@ function hydrateIcons(root=document){
 }
 let S={user:null,users:[],tasks:[],projects:[],achievements:[],logs:[],reports:[],diaries:[],diaryStats:[],notifications:[],requests:[],editRequests:[],suggestions:[],profiles:[],today:''};
 const api=(path,body)=>fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Work-Calendar':'1'},credentials:'same-origin',body:JSON.stringify(body)}).then(async r=>{const x=await r.json();if(!r.ok)throw new Error(x.error||'操作未完成');return x});
+/* Raw-body sibling of api() for uploads: audio is sent as-is, not as JSON. */
+const apiBlob=(path,blob)=>fetch(path,{method:'POST',headers:{'Content-Type':blob.type||'application/octet-stream','X-Work-Calendar':'1'},credentials:'same-origin',body:blob}).then(async r=>{const x=await r.json().catch(()=>({}));if(!r.ok)throw new Error(x.error||'请求未完成');return x});
 const getState=()=>fetch('/api/state',{credentials:'same-origin'}).then(async r=>{const x=await r.json();if(!r.ok)throw new Error(x.error||'请登录');return x});
 const fmt=iso=>{const d=new Date(`${iso}T12:00:00`);return `${d.getMonth()+1}月${d.getDate()}日`};
 const wd=iso=>['周日','周一','周二','周三','周四','周五','周六'][new Date(`${iso}T12:00:00`).getDay()];
@@ -1150,10 +1153,12 @@ if(location.protocol==='file:'){showAuth()}else{refresh()}
 
 /* Embedded Agent UI: superadmin-managed OpenAI-compatible endpoint via server proxy. */
 const AGENT_CONFIG_KEY='work-calendar-agent-config-v1';
+const TRANSCRIBE_ENDPOINT='/api/transcribe';
 const OPENCODE_GO_ENDPOINT='https://opencode.ai/zen/go/v1/chat/completions';
 const OPENCODE_GO_MODELS=['glm-5.3-flash','glm-5.3','glm-5.2','glm-5.1','kimi-k3','kimi-k2.7-code','kimi-k2.6','longcat-2.0','deepseek-v4.1-flash','deepseek-v4-pro','deepseek-v4-flash','deepseek-v4-flash-vision-exp','mimo-v2.5','mimo-v2.5-pro','hy4-preview','hy3','grok-4.5'];
 const agentState={messages:[],busy:false,steps:0,failures:0,mode:null,lastActionKey:'',repeats:0,autoRun:false,stop:false,pendingResolve:null,sessionId:(globalThis.crypto?.randomUUID?.()||`wc-${Date.now()}-${Math.random().toString(36).slice(2)}`)};
 let agentServerConfig=null;
+let agentServerAsr=null;
 function agentConfig(){
   try{return JSON.parse(localStorage.getItem(AGENT_CONFIG_KEY)||'{}')}catch(_){return {}}
 }
@@ -1291,7 +1296,26 @@ function agentRenderModelOptions(selected=''){
   if(selected&&models.includes(selected))select.value=selected;
 }
 function agentSyncProviderUI(){const provider=$('#agentProvider')?.value||'custom',custom=provider==='custom';$('#agentEndpoint').placeholder=custom?'https://api.example.com/v1/chat/completions':OPENCODE_GO_ENDPOINT;if(!custom){$('#agentEndpoint').value=OPENCODE_GO_ENDPOINT;$('#agentModelSelect').classList.remove('hidden');$('#agentCustomModel').classList.add('hidden')}else{$('#agentModelSelect').classList.add('hidden');$('#agentCustomModel').classList.remove('hidden')}}
-async function agentLoadServerConfig(){try{agentServerConfig=await api('/api/action',{action:'agent.config.get',data:{}})}catch(_){agentServerConfig=null}renderAgentModelChip()}
+/* The speech-to-text fields mirror the chat fields: superadmin-only, with the
+   key never echoed back. Empty endpoint means "not configured". */
+function renderAgentAsrConfig(){
+  const separator=$('#agentAsrEndpoint')?.closest('.agent-asr-config');
+  if(!separator)return;
+  separator.classList.toggle('hidden',!S.user?.admin);
+  if(!S.user?.admin)return;
+  const cfg=agentServerAsr||{};
+  if($('#agentAsrEndpoint'))$('#agentAsrEndpoint').value=cfg.baseUrl||'';
+  if($('#agentAsrModel'))$('#agentAsrModel').value=cfg.model||'';
+  if($('#agentAsrLanguage'))$('#agentAsrLanguage').value=cfg.language||'zh';
+  if($('#agentAsrApiKey'))$('#agentAsrApiKey').value='';
+  const state=$('#agentAsrModel');
+  if(state)state.title=cfg.configured?`当前已启用：${cfg.model||''}`:'当前未启用，语音输入回退到浏览器识别';
+}
+async function agentLoadServerConfig(){
+  try{agentServerConfig=await api('/api/action',{action:'agent.config.get',data:{}})}catch(_){agentServerConfig=null}
+  try{agentServerAsr=await api('/api/action',{action:'agent.asr.get',data:{}})}catch(_){agentServerAsr=null}
+  renderAgentModelChip();renderAgentAsrConfig();agentInitVoice();
+}
 function agentExtractText(data){
   const text=data?.choices?.[0]?.message?.content||data?.choices?.[0]?.text||data?.message?.content||data?.message||data?.content||data?.text;
   if(text)return text;
@@ -1485,11 +1509,14 @@ function agentUpdateBusy(){
   const send=$('#agentSendBtn'),stop=$('#agentStopBtn'),input=$('#agentInput');
   if(send){send.disabled=agentState.busy;send.textContent=agentState.busy?'…':'发送'}
   if(stop){stop.classList.toggle('hidden',!agentState.busy);stop.textContent=agentState.steps?`停止（已执行 ${agentState.steps} 步）`:'停止'}
+  const mic=$('#agentMicBtn');
+  if(mic){mic.disabled=agentState.busy;mic.setAttribute('aria-disabled',agentState.busy?'true':'false')}
   /* Say on the composer itself what the run is waiting for, so a paused card
      is never mistaken for a composer that ate the message. */
   if(input){
     input.placeholder=agentState.pendingResolve?'上一步在等你确认：点卡片上的按钮，或点「停止」'
       :agentState.busy?'助手正在处理上一条…（点「停止」可以打断）'
+      :voice.active?'正在聆听…说出来吧，说完再点一次麦克风'
       :'问我任务、项目、负载或收件箱…';
   }
 }
@@ -2100,9 +2127,9 @@ function initChatUI(){
   updateChatDot();
 }
 function initAgentUI(){
-  $('#agentBtn')?.addEventListener('click',async()=>{$('#agentPanel').classList.remove('hidden');renderAgentCapability();await agentLoadOwnHistory();await agentLoadServerConfig();agentSyncPlanButton();$('#agentInput').focus()});
+  $('#agentBtn')?.addEventListener('click',async()=>{$('#agentPanel').classList.remove('hidden');renderAgentCapability();await agentLoadOwnHistory();await agentLoadServerConfig();agentSyncPlanButton();agentInitVoice();$('#agentInput').focus()});
   $('#agentHistoryBtn')?.addEventListener('click',()=>agentShowHistory());
-  $('#agentCloseBtn')?.addEventListener('click',()=>$('#agentPanel').classList.add('hidden'));
+  $('#agentCloseBtn')?.addEventListener('click',()=>{agentStopVoice();$('#agentPanel').classList.add('hidden')});
   $('#agentStopBtn')?.addEventListener('click',()=>agentHalt('已停止连续执行。'));
   $('#agentPlanBtn')?.addEventListener('click',()=>agentTogglePlan());
   $$('#agentPanel .agent-mode-opt').forEach(b=>b.addEventListener('click',()=>agentSetPref(b.dataset.mode)));
@@ -2112,12 +2139,193 @@ function initAgentUI(){
   $('#agentProvider')?.addEventListener('change',()=>agentSyncProviderUI());
   $('#agentConfigSave')?.addEventListener('click',async()=>{const provider=$('#agentProvider').value,endpoint=$('#agentEndpoint').value.trim(),model=provider==='custom'?$('#agentCustomModel').value.trim():$('#agentModelSelect').value,apiKey=$('#agentApiKey').value.trim();if(!endpoint||!model){toast('请填写 API 地址和模型');return}try{const data=await api('/api/action',{action:'agent.config.set',data:{provider,baseUrl:endpoint,model,apiKey}});agentServerConfig=data;saveAgentConfig({provider,endpoint,model});agentSetConfigVisible(false);toast('Agent API 配置已保存（密钥仅保存在服务端）')}catch(e){toast(e.message||'保存失败')}});
   $('#agentConfigReset')?.addEventListener('click',()=>{saveAgentConfig({});agentServerConfig=null;agentSetConfigVisible(false);toast('已清除本机 Agent 配置；如需清除服务端密钥请重新保存')});
-  $('#agentForm')?.addEventListener('submit',e=>{e.preventDefault();agentSubmit()});
+  $('#agentAsrSave')?.addEventListener('click',async()=>{
+    const baseUrl=$('#agentAsrEndpoint').value.trim();
+    if(!baseUrl){toast('请填写语音转写服务地址；如需关闭请用「停用语音转写」');return}
+    const payload={baseUrl,model:$('#agentAsrModel').value.trim(),language:$('#agentAsrLanguage').value.trim()||'zh'};
+    const apiKey=$('#agentAsrApiKey').value.trim();
+    if(apiKey)payload.apiKey=apiKey;
+    try{agentServerAsr=await api('/api/action',{action:'agent.asr.set',data:payload});renderAgentAsrConfig();agentInitVoice();toast('语音转写配置已保存')}catch(e){toast(e.message||'保存失败')}
+  });
+  $('#agentAsrClear')?.addEventListener('click',async()=>{
+    try{agentServerAsr=await api('/api/action',{action:'agent.asr.set',data:{baseUrl:''}}).catch(()=>null);}catch(_){}
+    try{await api('/api/action',{action:'agent.asr.set',data:{baseUrl:'',apiKey:''}})}catch(_){}
+    agentServerAsr=await api('/api/action',{action:'agent.asr.get',data:{}}).catch(()=>null);
+    renderAgentAsrConfig();agentInitVoice();toast('已停用语音转写，语音输入回退到浏览器识别');
+  });
+    $('#agentForm')?.addEventListener('submit',e=>{e.preventDefault();agentSubmit()});
   $('#agentInput')?.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();agentSubmit()}});
   $('#agentInput')?.addEventListener('input',()=>agentSyncPlanButton());
+  $('#agentMicBtn')?.addEventListener('click',()=>agentToggleVoice());
   renderAgentCapability();
   agentSyncPlanButton();
 }
+
+/* ---------------------------------------------------------------------------
+   Voice input · the composer can also be dictated. Two engines are supported:
+   a superadmin-configured speech-to-text service (Qwen3-ASR, Whisper, …) that
+   keeps audio on infrastructure the operator chose, and the browser's built-in
+   Web Speech API as a zero-config fallback. The transcript only lands in the
+   input box where you can edit it before sending; nothing is auto-sent.
+   ------------------------------------------------------------------------- */
+const voice={recorder:null,stream:null,chunks:[],recognition:null,engine:null,active:false,base:'',final:'',interim:'',lang:'',startedAt:0};
+function agentSpeechRecognition(){
+  return window.SpeechRecognition||window.webkitSpeechRecognition||null;
+}
+function agentCanRecord(){
+  return Boolean(navigator.mediaDevices?.getUserMedia&&typeof MediaRecorder==='function');
+}
+/* Prefer the server engine when it is configured and the browser can record;
+   otherwise fall back to whatever recognition the browser itself provides. */
+function agentVoiceEngine(){
+  if(agentServerAsr?.configured&&agentCanRecord())return 'server';
+  if(agentSpeechRecognition())return 'browser';
+  return null;
+}
+function agentVoiceLang(){
+  if(voice.lang)return voice.lang;
+  try{
+    for(const tag of (navigator.languages||[navigator.language||'zh-CN'])){
+      if(String(tag).toLowerCase().startsWith('zh'))return voice.lang=tag;
+    }
+    return voice.lang=navigator.language||'zh-CN';
+  }catch(_){return voice.lang='zh-CN'}
+}
+/* Recognition emits a fresh interim guess for the tail while the settled text
+   accumulates; only `final` is kept, so the box never stutters. */
+function agentVoiceRender(){
+  const input=$('#agentInput');if(!input)return;
+  const settled=voice.base+voice.final;
+  input.value=settled+(voice.interim?voice.interim:'');
+  try{input.setSelectionRange(input.value.length,input.value.length)}catch(_){}
+  agentSyncPlanButton();
+}
+function agentVoiceAppend(text){
+  if(!text)return;
+  voice.final+=(voice.final?' ':'')+text;
+  voice.interim='';agentVoiceRender();
+}
+function agentVoiceStart(){
+  const engine=agentVoiceEngine();
+  if(!engine)return;
+  agentStopVoice();
+  if(engine==='server')agentVoiceStartRecording();
+  else agentVoiceStartRecognition();
+}
+/* ---------- server engine: record with MediaRecorder, transcribe on upload ---------- */
+async function agentVoiceStartRecording(){
+  let stream;
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({audio:true});
+  }catch(_){
+    toast('没有拿到麦克风权限，请在地址栏允许后重试');
+    return;
+  }
+  const mime=typeof MediaRecorder.isTypeSupported==='function'
+    ? ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4'].find(t=>MediaRecorder.isTypeSupported(t))||''
+    : '';
+  let recorder;
+  try{recorder=mime?new MediaRecorder(stream,{mimeType:mime}):new MediaRecorder(stream)}catch(_){recorder=new MediaRecorder(stream)}
+  voice.stream=stream;voice.recorder=recorder;voice.chunks=[];voice.interim='';
+  voice.engine='server';voice.active=true;voice.startedAt=Date.now();
+  voice.base=$('#agentInput')?.value||'';voice.final='';
+  recorder.ondataavailable=event=>{if(event.data&&event.data.size)voice.chunks.push(event.data)};
+  recorder.onstop=()=>agentVoiceFinishRecording();
+  try{recorder.start()}catch(_){agentStopVoice();return}
+  agentVoiceState();
+}
+async function agentVoiceFinishRecording(){
+  const chunks=voice.chunks.slice();voice.chunks=[];
+  voice.stream?.getTracks().forEach(track=>{try{track.stop()}catch(_){}});
+  voice.stream=null;
+  if(!chunks.length){agentVoiceState();return}
+  const blob=new Blob(chunks,{type:voice.recorder?.mimeType||'audio/webm'});
+  const bar=$('#agentVoiceBar');
+  if(bar)bar.textContent='正在转写…';
+  try{
+    const result=await apiBlob(TRANSCRIBE_ENDPOINT,blob);
+    agentVoiceAppend(result?.text||'');
+    if(!result?.text)toast('没有识别到内容，再说一次试试');
+  }catch(err){
+    toast(err?.message||'语音转写失败');
+  }finally{
+    voice.recorder=null;agentVoiceState();
+    const bar=$('#agentVoiceBar');
+    if(bar)bar.textContent='正在聆听…说出来吧，说完再点一次麦克风';
+  }
+}
+/* ---------- browser engine: Web Speech API, zero config ---------- */
+function agentVoiceStartRecognition(){
+  const Engine=agentSpeechRecognition();
+  if(!Engine)return;
+  const recognition=new Engine();
+  recognition.lang=agentVoiceLang();recognition.continuous=true;recognition.interimResults=true;
+  voice.recognition=recognition;voice.engine='browser';
+  voice.base=$('#agentInput')?.value||'';voice.final='';voice.interim='';
+  recognition.onstart=()=>{voice.active=true;agentVoiceState();agentVoiceRender()};
+  recognition.onresult=event=>{
+    let interim='',final='';
+    for(let i=event.resultIndex;i<event.results.length;i+=1){
+      const result=event.results[i],text=result[0]?.transcript||'';
+      if(result.isFinal)final+=text;else interim+=text;
+    }
+    if(final)voice.final+=final;
+    voice.interim=interim;agentVoiceRender();
+  };
+  recognition.onerror=event=>{
+    const reason=event?.error||'';
+    voice.active=false;voice.recognition=null;agentVoiceState();
+    if(reason==='not-allowed'||reason==='service-not-allowed')toast('浏览器没有麦克风权限，请在地址栏允许后重试');
+    else if(reason==='audio-capture')toast('没有检测到可用的麦克风');
+    else if(reason!=='aborted'&&reason!=='no-speech')toast('语音识别中断，请重试');
+  };
+  recognition.onend=()=>{
+    voice.active=false;voice.recognition=null;voice.interim='';agentVoiceRender();agentVoiceState();
+  };
+  try{recognition.start()}catch(_){voice.recognition=null}
+}
+function agentStopVoice(){
+  const recognition=voice.recognition,recorder=voice.recorder;
+  voice.recognition=null;voice.recorder=null;voice.active=false;voice.interim='';
+  if(recognition){try{recognition.stop()}catch(_){}}
+  if(recorder&&recorder.state!=='inactive'){try{recorder.stop()}catch(_){}}else{
+    voice.stream?.getTracks().forEach(track=>{try{track.stop()}catch(_){}});
+    voice.stream=null;agentVoiceState();agentVoiceRender();
+  }
+  agentVoiceState();
+}
+function agentToggleVoice(){
+  if(!agentVoiceEngine())return;
+  if(voice.active)agentStopVoice();else agentVoiceStart();
+}
+function agentVoiceState(){
+  const mic=$('#agentMicBtn');
+  if(mic){
+    mic.classList.toggle('is-on',voice.active);
+    mic.setAttribute('aria-pressed',voice.active?'true':'false');
+    mic.title=voice.active?'正在聆听：再点一下结束并转成文字':'语音输入：点一下开始说话，再点一下结束并转成文字';
+    const slot=mic.querySelector('.icon-slot');if(slot)slot.dataset.icon=voice.active?'square':'mic';
+  }
+  const voiceBar=$('#agentVoiceBar');
+  if(voiceBar)voiceBar.classList.toggle('hidden',!voice.active);
+  agentUpdateBusy();
+}
+/* Called once when the panel opens (and after the server config arrives): reveal
+   the mic only when some engine exists, and say which one is in use. */
+function agentInitVoice(){
+  const engine=agentVoiceEngine();
+  $('#agentMicBtn')?.classList.toggle('hidden',!engine);
+  const hint=$('#agentVoiceHint');
+  if(hint){
+    hint.classList.toggle('hidden',!engine);
+    if(engine)hint.textContent=engine==='server'
+      ?`语音输入：点一下麦克风开始说话，再点一下结束，音频会送到 ${agentServerAsr?.model||'本地转写服务'} 转成文字，可先改再发。`
+      :'语音输入：点一下麦克风开始说话，再点一下结束，识别结果会填进输入框，可先改再发。';
+  }
+  agentVoiceState();
+}
+
+
 initAgentUI();
 initChatUI();
 function ensureAccountCreateButton(){

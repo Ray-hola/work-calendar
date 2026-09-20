@@ -12,7 +12,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from server import Store, MAX_MESSAGE_CHARS, MAX_TRANSCRIPT_CHARS
+from server import Store, Problem, MAX_MESSAGE_CHARS, MAX_TRANSCRIPT_CHARS
 
 
 class _Stub(BaseHTTPRequestHandler):
@@ -185,6 +185,87 @@ class AssistantChatTests(unittest.TestCase):
         self.assertEqual(result['trimmed'], 0, '没超预算就不要动它')
         forwarded = [m['content'] for m in _Stub.seen[-1]['messages']]
         self.assertEqual(len([c for c in forwarded if c.startswith('x' * 10)]), 6)
+
+
+class _AsrStub(BaseHTTPRequestHandler):
+    """A speech-to-text endpoint that echoes back what the proxy uploaded."""
+
+    calls = 0
+    raw = b''
+    content_type = ''
+
+    def do_POST(self):
+        type(self).calls += 1
+        type(self).raw = self.rfile.read(int(self.headers.get('Content-Length', 0)))
+        type(self).content_type = self.headers.get('Content-Type', '')
+        payload = json.dumps({'text': '帮我安排明天的评审'}).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def log_message(self, *a):
+        pass
+
+
+class SpeechToTextTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = Store(Path(self.tmp.name) / 'asr.sqlite3', seed=False)
+        self.store.create_user('superadmin', 'password-long', True)
+        self.store.create_user('test002', 'password-long', False)
+        self.admin = self.store.user('superadmin')
+        self.member = self.store.user('test002')
+        self.server = ThreadingHTTPServer(('127.0.0.1', 0), _AsrStub)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        _AsrStub.calls, _AsrStub.raw, _AsrStub.content_type = 0, b'', ''
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.store.close()
+        self.tmp.cleanup()
+
+    def configure(self):
+        return self.store.set_asr_config(self.admin, {
+            'baseUrl': 'http://127.0.0.1:%d/v1' % self.server.server_address[1],
+            'model': 'Qwen/Qwen3-ASR-0.6B', 'language': 'zh', 'apiKey': 'secret-key',
+        })
+
+    def test_transcribe_forwards_multipart_audio_to_the_configured_service(self):
+        self.configure()
+        result = self.store.transcribe(self.member, b'\x1aE\xdf\xa3fake-webm', 'audio/webm')
+        self.assertEqual(result['text'], '帮我安排明天的评审')
+        self.assertEqual(_AsrStub.calls, 1)
+        self.assertIn('multipart/form-data', _AsrStub.content_type)
+        self.assertIn(b'Qwen/Qwen3-ASR-0.6B', _AsrStub.raw)
+        self.assertIn(b'fake-webm', _AsrStub.raw)
+
+    def test_unconfigured_transcription_says_so_instead_of_guessing(self):
+        with self.assertRaises(Problem) as caught:
+            self.store.transcribe(self.member, b'audio', 'audio/webm')
+        self.assertIn('语音转写服务', caught.exception.message)
+
+    def test_members_may_dictate_but_cannot_change_the_endpoint(self):
+        with self.assertRaises(Problem):
+            self.store.set_asr_config(self.member, {'baseUrl': 'http://evil.example/v1'})
+
+    def test_the_api_key_is_never_returned_to_the_browser(self):
+        self.configure()
+        admin_view = self.store.asr_config(self.admin)
+        member_view = self.store.asr_config(self.member)
+        self.assertTrue(admin_view['configured'])
+        self.assertTrue(admin_view['apiKeySet'])
+        self.assertNotIn('secret-key', json.dumps(admin_view, ensure_ascii=False))
+        self.assertEqual(member_view['baseUrl'], '', '普通成员不需要看到转写地址')
+
+    def test_empty_audio_is_refused_before_any_upload(self):
+        self.configure()
+        with self.assertRaises(Problem):
+            self.store.transcribe(self.member, b'', 'audio/webm')
+        self.assertEqual(_AsrStub.calls, 0)
+
 
 if __name__ == '__main__':
     unittest.main()

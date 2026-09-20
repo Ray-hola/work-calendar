@@ -13,6 +13,7 @@ import time as _time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
 # OpenCode Go exposes these models through the OpenAI-compatible
 # ``/chat/completions`` endpoint. Keep this list in one place so the UI and
@@ -88,6 +89,16 @@ CHAT_EVERYONE = '*'          # a broadcast, not an account id
 # was at fault.
 MAX_MESSAGE_CHARS = 40_000
 MAX_TRANSCRIPT_CHARS = 40_000
+
+# Voice input.  Recognition is a separate service from the chat model: it is a
+# speech-to-text endpoint (Qwen3-ASR, Whisper, or anything else the operator
+# runs) reached over the same OpenAI-compatible surface.  Audio is recorded in
+# the browser, posted to this server and forwarded on, so the clip never goes
+# anywhere the operator did not choose.  The upload bound is deliberately much
+# larger than the generic 200KB JSON door because a minute of speech is audio,
+# not text; it is enforced per-route below.
+TRANSCRIBE_PATH = '/api/transcribe'
+MAX_AUDIO_BYTES = 8_000_000
 TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages', 'messages')
 
 # Agent capability boundary.  The future chat/browser adapter must use these
@@ -291,6 +302,115 @@ class Store:
         """Read the private LLM connection record without exposing its key."""
         return next((x for x in self.all('settings') if x.get('id') == 'llm'),
                     {'id': 'llm', 'value': {}})
+
+    def _asr_record(self):
+        """Read the private speech-to-text connection record."""
+        return next((x for x in self.all('settings') if x.get('id') == 'asr'),
+                    {'id': 'asr', 'value': {}})
+
+    def asr_config(self, user):
+        """Return the speech-to-text status the browser may display."""
+        self.authorize_agent_tool(user, 'agent.config.read')
+        value = dict(self._asr_record().get('value') or {})
+        key = str(value.get('apiKey') or '')
+        is_admin = bool(user.get('admin'))
+        return {
+            'configured': bool(value.get('baseUrl')),
+            'baseUrl': str(value.get('baseUrl') or '') if is_admin else '',
+            'model': str(value.get('model') or '') if is_admin else '',
+            'language': str(value.get('language') or 'zh') if is_admin else '',
+            'apiKeySet': bool(key),
+            'apiKeyMasked': (('•' * len(key)) if len(key) <= 4 else ('•' * (len(key) - 4) + key[-4:])) if key else '',
+            'updatedAt': self._asr_record().get('updatedAt'),
+        }
+
+    def set_asr_config(self, user, data):
+        """Persist the speech-to-text endpoint; only superadmin may change it."""
+        self.admin(user)
+        base = str(data.get('baseUrl', '')).strip().rstrip('/')
+        model = str(data.get('model') or '').strip() or 'Qwen/Qwen3-ASR-0.6B'
+        language = str(data.get('language') or 'zh').strip() or 'zh'
+        if not base:
+            raise Problem(400, '请填写语音转写服务的 API 地址')
+        parsed = urllib.parse.urlparse(base)
+        if parsed.scheme not in ('http', 'https') or not parsed.netloc:
+            raise Problem(400, '语音转写地址必须是 http(s) 地址')
+        if len(base) > 500 or len(model) > 200 or len(language) > 32:
+            raise Problem(400, '语音转写配置长度超出限制')
+        previous = self._asr_record()
+        value = dict(previous.get('value') or {})
+        value.update({'baseUrl': base, 'model': model, 'language': language})
+        if 'apiKey' in data:
+            key = str(data.get('apiKey') or '').strip()
+            if len(key) > 500:
+                raise Problem(400, 'API Key 过长')
+            value['apiKey'] = key
+        self.put('settings', {'id': 'asr', 'value': value, 'updatedAt': timestamp()})
+        self.audit(user['id'], 'agent.asr_config', {'baseUrl': base, 'model': model})
+        return self.asr_config(user)
+
+    def transcribe(self, user, body, content_type=''):
+        """Forward a recorded clip to the configured speech-to-text service.
+
+        Members may dictate into their own composer, so this is a read-only
+        capability: it never touches workspace data and the key stays server
+        side, exactly like the chat proxy.
+        """
+        self.authorize_agent_tool(user, 'agent.chat')
+        if not isinstance(body, (bytes, bytearray)) or not body:
+            raise Problem(400, '没有收到音频内容')
+        if len(body) > MAX_AUDIO_BYTES:
+            raise Problem(413, '录音过长，请缩短后再试')
+        record = self._asr_record(); cfg = dict(record.get('value') or {})
+        base = str(cfg.get('baseUrl') or '').rstrip('/')
+        model = str(cfg.get('model') or '').strip() or 'Qwen/Qwen3-ASR-0.6B'
+        key = str(cfg.get('apiKey') or '')
+        language = str(cfg.get('language') or 'zh').strip()
+        if not base:
+            raise Problem(409, '请先由 superadmin 配置语音转写服务')
+        endpoint = base if base.endswith('/audio/transcriptions') else base + '/audio/transcriptions'
+        # Build the multipart body by hand: this file is dependency-free on
+        # purpose, so there is no `requests` to lean on for one upload.
+        boundary = '----workcalendar' + uuid.uuid4().hex
+        audio_type = (content_type or 'audio/webm').split(';')[0].strip() or 'audio/webm'
+        parts = []
+        def field(name, value):
+            parts.append(
+                f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode('utf-8'))
+        field('model', model)
+        if language:
+            field('language', language)
+        field('response_format', 'json')
+        parts.append(
+            (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="clip.webm"\r\n'
+             f'Content-Type: {audio_type}\r\n\r\n').encode('utf-8'))
+        parts.append(bytes(body))
+        parts.append(f'\r\n--{boundary}--\r\n'.encode('utf-8'))
+        payload = b''.join(parts)
+        headers = {'Content-Type': f'multipart/form-data; boundary={boundary}',
+                   'User-Agent': 'WorkCalendar/1.0', 'Accept': 'application/json'}
+        if key:
+            headers['Authorization'] = f'Bearer {key}'
+        request = urllib.request.Request(endpoint, data=payload, method='POST', headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                raw = response.read(1_000_000)
+        except urllib.error.HTTPError as exc:
+            detail = exc.read(4000).decode('utf-8', errors='replace')
+            raise Problem(502, f'语音转写服务返回 HTTP {exc.code}：{detail[:300]}')
+        except (urllib.error.URLError, TimeoutError) as exc:
+            raise Problem(502, f'语音转写服务连接失败：{str(exc)[:200]}')
+        try:
+            result = json.loads(raw.decode('utf-8'))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise Problem(502, '语音转写服务返回了无法解析的响应')
+        text = result.get('text') if isinstance(result, dict) else None
+        if text is None and isinstance(result, dict):
+            choices = result.get('choices') or []
+            if choices:
+                message = choices[0].get('message') or {}
+                text = message.get('content') or ''
+        return {'text': str(text or '').strip()}
 
     def llm_config(self, user):
         """Return the connection settings safe for the browser to display."""
@@ -1415,6 +1535,10 @@ class Store:
             return self.llm_config(user)
         if action=='agent.config.set':
             return self.set_llm_config(user, d)
+        if action=='agent.asr.get':
+            return self.asr_config(user)
+        if action=='agent.asr.set':
+            return self.set_asr_config(user, d)
         if action=='agent.chat':
             return self.llm_chat(user, d)
         if action=='agent.execute':
@@ -2368,7 +2492,17 @@ def main():
                 origin=self.headers.get('Origin')
                 if origin and origin.rstrip('/') not in configured_origins:raise Problem(403,'请求来源不匹配')
                 size=int(self.headers.get('Content-Length','0'))
-                if size>200_000:raise Problem(413,'请求内容过大')
+                # The generic JSON endpoints stay bounded here; the audio route
+                # below raises the ceiling just for that one upload, so a long
+                # clip is not silently turned into a 413 with a text-shaped error.
+                limit=MAX_AUDIO_BYTES if self.path==TRANSCRIBE_PATH else 200_000
+                if size>limit:raise Problem(413,'请求内容过大')
+                if self.path==TRANSCRIBE_PATH:
+                    # Audio is not JSON, so this route reads the raw body before
+                    # the generic decode below ever sees it.
+                    user=store.authenticate(self.token())
+                    raw=self.rfile.read(size) if size>0 else b''
+                    self.send(200,store.transcribe(user,raw,self.headers.get('Content-Type','')));return
                 d=json.loads(self.rfile.read(size) or b'{}')
                 if not isinstance(d,dict):raise Problem(400,'请求参数必须是对象')
                 if self.path=='/api/login':

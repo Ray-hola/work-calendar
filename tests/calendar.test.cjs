@@ -801,8 +801,7 @@ test('a planning message is labelled in the transcript and in reopened history',
 
 /* One blank line in the transcript is enough to break the whole assistant: the
    proxy refuses an empty message, and the transcript is what gets replayed. */
-test('a blank turn is never replayed to the proxy', () => {
-  const recent = source.match(/function agentRecentMessages\(\)\{[\s\S]*?\n\}/)[0];
+test('a blank turn is never replayed to the proxy', () => {  const recent = source.match(/function agentRecentMessages\(\)\{[\s\S]*?\n\}/)[0];
   assert.ok(/\.filter\(x=>String\(x\.content\|\|''\)\.trim\(\)\)/.test(recent),
     '回放前要滤掉空内容');
 
@@ -813,4 +812,33 @@ test('a blank turn is never replayed to the proxy', () => {
   const step = source.match(/function agentRecordStep\([\s\S]*?\n\}/)[0];
   assert.ok(/if\(String\(forModel\|\|''\)\.trim\(\)\)/.test(step),
     '记录步骤回执时也不能推入空内容');
+});
+
+/* Voice input must stay invisible where no engine exists, write the recognized
+   text into the composer (never straight to the send path), and leave a stable
+   prefix so interim guesses cannot stutter over settled text. A configured
+   server engine (Qwen3-ASR/Whisper) is preferred so audio stays on
+   infrastructure the operator chose, with the browser engine as fallback. */
+test('voice input writes into the composer and hides itself when unsupported', () => {
+  assert.ok(/window\.SpeechRecognition\|\|window\.webkitSpeechRecognition/.test(source),
+    '保留浏览器自带引擎作为零配置兜底');
+  const engine = source.match(/function agentVoiceEngine\(\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/agentServerAsr\?\.configured&&agentCanRecord\(\)/.test(engine),
+    '配了服务端转写且浏览器能录音时优先走服务端');
+  const init = source.match(/function agentInitVoice\(\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/classList\.toggle\('hidden',!engine\)/.test(init),
+    '没有任何引擎时麦克风按钮应当隐藏，而不是点了报错');
+  const render = source.match(/function agentVoiceRender\(\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/input\.value=settled\+\(voice\.interim\?voice\.interim:''\)/.test(render),
+    '最终文本与临时识别结果分开累积，输入框不会来回抖动');
+  const start = source.match(/async function agentVoiceStartRecording\(\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/voice\.base=\$\('#agentInput'\)\?\.value\|\|''/.test(start),
+    '开始录音时保留输入框里已经写好的内容');
+  assert.ok(!/agentSubmit\(/.test(start), '录音只填进输入框，绝不自动发送');
+  const finish = source.match(/async function agentVoiceFinishRecording\(\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/apiBlob\(TRANSCRIBE_ENDPOINT,blob\)/.test(finish),
+    '音频以原始 body 上传到 /api/transcribe，而不是当 JSON 塞进对话接口');
+  const stop = source.match(/function agentStopVoice\(\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/recognition\.stop\(\)/.test(stop), '再点一下要能结束浏览器识别');
+  assert.ok(/recorder\.stop\(\)/.test(stop), '再点一下要能结束服务端录音');
 });
