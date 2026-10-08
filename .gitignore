@@ -5,6 +5,11 @@ data/*.sqlite3-wal
 data/initial-accounts.txt
 data/*.log
 
+# Stray runtime logs in the repo root. The service manager used to redirect
+# stdout/stderr to ./out.log and ./err.log next to the code; a manual
+# `python server.py > out.log` would land in the same place. Never commit either.
+/*.log
+
 # Python
 __pycache__/
 *.py[cod]
