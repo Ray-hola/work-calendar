@@ -79,7 +79,17 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 ## 安全与数据
 
-- `WORK_CALENDAR_ORIGINS` 必须填写实际 `https://` 域名，多个域名用逗号分隔。
+- `WORK_CALENDAR_ORIGINS` 必须填写实际 `https://` 域名，多个域名用逗号分隔——**每个真正对外服务的 hostname 都要写进去**（例如同时服务根域和 `www` 时两个都填）。
+  **留成占位域名不会报任何错**：首页与 `GET /api/health` 照常 200，但浏览器发出的每个 `POST` 都会 403 `请求来源不匹配`——站点打得开、一写入就失败。这个故障 GET 探针看不出来，用下面这条判定（它打的是一个不存在的路径，不会写入任何数据；**必须带 `X-Work-Calendar: 1`**，否则拿到的是更前面那道门的另一个 403 `请求来源校验失败`）：
+
+  ```bash
+  curl -s -w ' %{http_code}\n' -X POST \
+    -H 'X-Work-Calendar: 1' -H 'Origin: https://your-domain' \
+    -H 'Content-Type: application/json' --data '{}' \
+    https://your-domain/api/__origin_probe
+  ```
+
+  `401 请登录工作台` = 来源已放行（正常）；`403 请求来源不匹配` = 白名单还没配上。
 - `WORK_CALENDAR_SECURE_COOKIE=1` 只在 HTTPS 访问时启用。
 - 不要公开 `data/initial-accounts.txt` 或 SQLite 文件；建议将 `data/` 权限设为 `700`、数据库设为 `600`。
 - 定期备份 `data/work-calendar.sqlite3`。API Key 保存在服务端数据库，不会返回给成员端。
