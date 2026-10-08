@@ -94,3 +94,11 @@ Set-ExecutionPolicy -Scope Process Bypass
 - 不要公开 `data/initial-accounts.txt` 或 SQLite 文件；建议将 `data/` 权限设为 `700`、数据库设为 `600`。
 - 定期备份 `data/work-calendar.sqlite3`。API Key 保存在服务端数据库，不会返回给成员端。
 - 可将 `backup.sh.example` 配置为每日 cron/systemd timer，使用 SQLite 在线备份并保留最近 14 天。
+- Windows 上用 `backup-windows.example.py`（Python 3 已是运行依赖，无需额外安装）。它同样走 SQLite **在线备份 API**：WAL 模式下直接复制主文件会拿到撕裂快照、并静默丢掉还在 `-wal` 里的数据，而在线 API 无需停服即可取得一致性快照。备份后会重新打开产物校验 `integrity_check` 与逐表行数，保留最近 14 份，且**每条失败路径都会先删掉半成品**（否则按文件名判断的 `--skip-if-today` 会把坏文件当成「今天已备份」而静默停摆）。所有路径都是必填参数，文件本身不含任何机器专有信息。
+
+  ```powershell
+  python backup-windows.example.py --live <app.sqlite3> --dest-dir <备份目录> --keep 14
+  python backup-windows.example.py ... --skip-if-today   # 开机补跑关机错过的那天
+  ```
+
+  两条 Windows 坑：登录触发器建计划任务需要提权，而无 BOM 的 `.ps1`/`.vbs` 会被按 ANSI 解析，包装脚本必须保持纯 ASCII。
