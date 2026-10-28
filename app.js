@@ -933,11 +933,6 @@ function memberTaskCount(userId,project){
   const start=project.start||'0000-01-01',end=project.end||'9999-12-31';
   return S.tasks.filter(t=>t.assignee===userId&&t.date>=start&&t.date<=end&&!isSuperseded(t)).length;
 }
-function scheduleMemberLabels(tasks){
-  if(!S.user?.admin||!tasks.length)return '';
-  const members=[...new Set(tasks.map(t=>t.assignee))];
-  return `<div class="axis-members" title="${escapeHTML(members.map(id=>nameOf(id)).join('、'))}">${members.slice(0,4).map(id=>`<i>${escapeHTML(avatarSeed(id))}</i>`).join('')}${members.length>4?`<small>+${members.length-4}</small>`:''}</div>`;
-}
 function renderScheduleScope(){
   const visible=Boolean(S.user?.admin&&['today','calendar','dayDetail'].includes(UI.view));
   $('#scheduleScope').classList.toggle('hidden',!visible);
@@ -1072,8 +1067,7 @@ function renderAgentCapability(){
   const configBtn=$('#agentConfigBtn');
   if(configBtn)configBtn.classList.toggle('hidden',c.role!=='superadmin');
   const operator=c.mode==='operator';
-  e.innerHTML=`<span class="agent-role-chip ${operator?'is-operator':''}">${escapeHTML(operator?'操作员':'只读')}</span>`
-    +`<span>${operator?'可查询全局并执行管理操作，写入与审批都要你确认。':'只能查询你有权看到的信息，不能改动数据。'}</span>`;
+  e.innerHTML=`<span class="agent-role-chip ${operator?'is-operator':''}">${escapeHTML(operator?'操作员':'只读')}</span>`;
   renderAgentModelChip();
 }
 /* Which model is answering, at a glance — "not configured" is the state that
