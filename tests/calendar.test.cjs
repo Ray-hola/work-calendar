@@ -265,7 +265,7 @@ test('owner project card exposes a report based completion request only when rea
   assert.ok(elements['#projectGrid'].innerHTML.includes('request-project-completion'));
   a.run("S.tasks[0].status='doing';renderProjects()");
   assert.ok(!elements['#projectGrid'].innerHTML.includes('request-project-completion'));
-  assert.ok(elements['#projectGrid'].innerHTML.includes('完成全部子任务后可结项'));
+  assert.ok(!elements['#projectGrid'].innerHTML.includes('完成全部子任务后可结项'), '未满足条件时只是不显示按钮，不再放说明文字');
 });
 
 test('project completion request opens a required report form before submitting', () => {
@@ -310,8 +310,8 @@ test('account management groups superadmins and labels members by project role',
   ];S.user={id:'superadmin',admin:1};S.users=[
     {id:'superadmin',admin:1,active:1},{id:'test001',admin:0,active:1},{id:'test002',admin:0,active:1}
   ];`);
-  assert.equal(a.run("accountRoleLabel({id:'superadmin',admin:1,role:'superadmin',active:1})"), '全部项目、成员、审批、AI 配置与账户管理');
-  assert.equal(a.run("accountRoleLabel({id:'boss',admin:1,role:'admin',active:1})"), '全部项目、成员、审批与 AI 配置（账户管理除外）');
+  assert.equal(a.run("accountRoleLabel({id:'superadmin',admin:1,role:'superadmin',active:1})"), '', '权限组本身已写明角色，不再附加权限说明');
+  assert.equal(a.run("accountRoleLabel({id:'boss',admin:1,role:'admin',active:1})"), '');
   assert.equal(a.run("accountRoleLabel({id:'test001',admin:0,active:1})"), 'Owner：项目甲');
   assert.equal(a.run("accountRoleLabel({id:'test002',admin:0,active:1})"), '协作者：项目甲');
   assert.equal(a.run("accountRoleLabel({id:'promoted',admin:0,active:1})"), '暂无项目归属');
