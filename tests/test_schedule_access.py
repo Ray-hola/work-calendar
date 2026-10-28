@@ -487,12 +487,49 @@ class TaskApprovalTests(unittest.TestCase):
         self.store.action(self.owner, 'task.review', {'id': task['id'], 'accept': False, 'reason': '请补充证据'})
         retry = next(t for t in self.store.all('tasks') if t.get('reworkOf') == task['id'])
         self.assertGreater(retry['date'], self.day)
-    def test_owner_completion_is_approved_by_project_owner(self):
+    def test_owner_own_task_completes_without_self_review(self):
         task=self.store.action(self.owner,'task.create',{'name':'owner task','projectId':self.project['id'],'assignee':'test001','date':self.day})
         self.store.action(self.owner,'task.complete',{'id':task['id'],'summary':'owner done','actual':30})
-        self.assertEqual(self.store.get('tasks',task['id'])['status'],'pending_approval')
+        self.assertEqual(self.store.get('tasks',task['id'])['status'],'done')
+        self.assertFalse(any(n['to']=='test001' and n['kind']=='task_approval' for n in self.store.all('notifications')),
+                         'Owner 自己的任务不应再给自己发审批通知')
+
+    def test_owner_submission_from_before_the_rule_can_still_be_reviewed(self):
+        task=self.store.action(self.owner,'task.create',{'name':'旧待审','projectId':self.project['id'],'assignee':'test001','date':self.day})
+        stored=self.store.get('tasks',task['id'])
+        stored.update(status='pending_approval',approval={'status':'pending','approver':'test001','summary':'旧提交'})
+        self.store.put('tasks',stored)
         self.store.action(self.owner,'task.review',{'id':task['id'],'accept':True})
         self.assertEqual(self.store.get('tasks',task['id'])['status'],'done')
+
+    def test_a_bad_assignee_is_a_form_error_not_a_login_error(self):
+        """反馈 #1：负责人取到空值时服务端曾回 401「请重新登录」。"""
+        task=self.store.action(self.admin,'task.create',{'name':'调整','projectId':self.project['id'],'assignee':'test002','date':self.day})
+        with self.assertRaises(Problem) as caught:
+            self.store.action(self.admin,'task.update',{'id':task['id'],'assignee':''})
+        self.assertEqual(caught.exception.status,400)
+        self.assertNotIn('登录',caught.exception.message)
+
+    def test_a_session_for_a_disabled_account_still_asks_to_log_in(self):
+        token=self.store.login('test002','test-only-password')
+        with self.store.db:
+            self.store.db.execute('UPDATE users SET active=0 WHERE id=?',('test002',))
+        with self.assertRaises(Problem) as caught:
+            self.store.authenticate(token)
+        self.assertEqual(caught.exception.status,401)
+
+    def test_owner_reorders_project_tasks_by_lineage(self):
+        """反馈 #4：手动顺序存在项目上，只接受本项目的任务。"""
+        a=self.store.action(self.owner,'task.create',{'name':'A','projectId':self.project['id'],'assignee':'test002','date':self.day})
+        b=self.store.action(self.owner,'task.create',{'name':'B','projectId':self.project['id'],'assignee':'test002','date':self.day})
+        project=self.store.action(self.owner,'project.reorder',{'id':self.project['id'],'order':[b['id'],'not-a-task',a['id'],b['id']]})
+        self.assertEqual(project['taskOrder'],[b['id'],a['id']])
+        self.assertEqual(self.store.get('projects',self.project['id'])['taskOrder'],[b['id'],a['id']])
+        with self.assertRaises(Problem) as caught:
+            self.store.action(self.member,'project.reorder',{'id':self.project['id'],'order':[a['id']]})
+        self.assertEqual(caught.exception.status,403)
+        with self.assertRaises(Problem):
+            self.store.action(self.owner,'project.reorder',{'id':self.project['id'],'order':'a,b'})
 
     def test_task_edit_request_owner_approval_updates_task_and_notifies(self):
         task=self.store.action(self.admin,'task.create',{'name':'可调整','projectId':self.project['id'],'assignee':'test002','date':self.day})

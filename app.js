@@ -426,11 +426,11 @@ function openDrawer(id){
   const editReviewActions=editPending&&editReviewer?`<div class="drawer-actions approval-actions"><button class="primary-btn" id="approveEditRequest">${icon('check')}同意修改</button><button class="secondary-btn" id="rejectEditRequest">驳回修改申请</button></div>`:'';
   const completionLogs=S.logs.filter(x=>x.taskId===t.id&&['complete','complete_pending'].includes(x.kind)),latestCompletion=completionLogs[completionLogs.length-1],completionSummary=t.completionSummary||latestCompletion?.summary||t.approval?.summary;
   const rejection=t.rejection||t.approval?.reason;
-  const actionCopy=pendingApproval?`<p class="muted approval-pending-note">完成总结已提交，等待项目 Owner 审批；审批前任务会顺延到下一日。${completionSummary?`<br>完成总结：${escapeHTML(completionSummary)}`:''}</p>`:editPending?`<p class="muted approval-pending-note">修改申请已提交，等待 ${escapeHTML(t.assignee===p?.owner?'superadmin':p?.owner||'superadmin')} 审批；审批前请暂缓完成或递延任务。</p>`:rejected?`<p class="rejection-note">任务已驳回${rejection?`：${escapeHTML(rejection)}`:'，请根据建议重新完成。'}</p>`:archived?`<p class="muted">${isSuperseded(t)?'本次已由后续任务接替，完成情况以最新一次为准。':`${l} · 本次任务已归档`}</p>`:perform?`<div class="drawer-actions">${t.status==='todo'?`<button class="secondary-btn" id="startTask">${icon('play')}开始任务</button>`:''}<button class="primary-btn complete-btn" id="completeTask">${icon('check')}提交完成审批</button><button class="defer-btn" id="deferTask">${icon('arrow-up-right')}未完成，递延</button></div>`:'<p class="muted">由任务负责人记录完成或递延。</p>';
+  const actionCopy=pendingApproval?`<p class="muted approval-pending-note">完成总结已提交，等待项目 Owner 审批；审批前任务会顺延到下一日。${completionSummary?`<br>完成总结：${escapeHTML(completionSummary)}`:''}</p>`:editPending?`<p class="muted approval-pending-note">修改申请已提交，等待 ${escapeHTML(t.assignee===p?.owner?'superadmin':p?.owner||'superadmin')} 审批；审批前请暂缓完成或递延任务。</p>`:rejected?`<p class="rejection-note">任务已驳回${rejection?`：${escapeHTML(rejection)}`:'，请根据建议重新完成。'}</p>`:archived?`<p class="muted">${isSuperseded(t)?'本次已由后续任务接替，完成情况以最新一次为准。':`${l} · 本次任务已归档`}</p>`:perform?`<div class="drawer-actions">${t.status==='todo'?`<button class="secondary-btn" id="startTask">${icon('play')}开始任务</button>`:''}<button class="primary-btn complete-btn" id="completeTask">${icon('check')}${taskNeedsApproval(t)?'提交完成审批':'记录完成'}</button><button class="defer-btn" id="deferTask">${icon('arrow-up-right')}未完成，递延</button></div>`:'<p class="muted">由任务负责人记录完成或递延。</p>';
   const editSummary=editPending?renderEditRequestSummary(t):'';
   const canDelete=S.user.admin&&!t.fixed&&!t.repeatId&&!pendingApproval&&!rejected;
-  $('#drawerContent').innerHTML=`<div class="drawer-kicker">${escapeHTML(projectName(t))} · ${escapeHTML(t.priority)}</div><h2 class="drawer-title">${escapeHTML(t.name)}</h2><p class="drawer-description">${escapeHTML(t.desc||'暂无描述')}</p>${completionSummary?`<div class="completion-summary"><span>最新完成总结</span><p>${escapeHTML(completionSummary)}${latestCompletion?.actual?` · 实际 ${latestCompletion.actual} 分钟`:''}</p></div>`:''}${editSummary}<div class="detail-grid"><div><span>状态</span><strong><i class="status-dot ${c}"></i>${l}</strong></div><div><span>预计时长</span><strong>${t.duration} 分钟</strong></div><div><span>${isMultiDay(t)?`任务周期 · ${spanDays(t)} 天`:'安排日期'}</span><strong>${escapeHTML(t.date)}${isMultiDay(t)?` → ${escapeHTML(taskEnd(t))}`:''}</strong></div><div><span>DDL</span><strong class="${t.status==='done'?'':daysCount(S.today,taskEnd(t))<0?'overdue-text':''}">${escapeHTML(ddlText(t))}</strong></div><div><span>负责人</span><strong>${escapeHTML(t.assignee)}</strong></div></div>${canRequestEdit?'<button class="secondary-btn edit-task-request-btn" id="requestTaskEdit">申请修改任务</button>':''}${S.user.admin&&!editPending&&!['done','deferred','skipped','pending_approval','awaiting_approval','submitted','rejected'].includes(t.status)&&(!p||p.status==='active')?'<button class="secondary-btn edit-task-request-btn" id="directTaskEdit">直接调整任务</button>':''}${manage?'<button class="secondary-btn" id="editTaskAssignee">调整任务指派</button>':''}${canDelete?'<button class="secondary-btn danger-btn" id="deleteTask">删除此任务</button>':''}<div class="history"><h3>任务记录</h3>${S.logs.filter(x=>lineageIds.has(x.taskId)).map(x=>`<div class="history-item"><i></i><span>${escapeHTML(x.kind==='adjust'?`指派调整：${x.before.assignee} → ${x.after.assignee}`:`${x.kind} · ${x.summary||x.reason||x.remaining||''}`)}</span></div>`).join('')||'<div class="history-item"><i></i><span>暂无记录</span></div>'}</div>${actionCopy}${reviewActions}${editReviewActions}`;
-  $('#taskDrawer').classList.remove('hidden');$('#startTask')?.addEventListener('click',()=>act('task.start',{id:t.id}).then(()=>closeDrawer()).catch(()=>{}));$('#completeTask')?.addEventListener('click',()=>complete(t));$('#deferTask')?.addEventListener('click',()=>defer(t));$('#requestTaskEdit')?.addEventListener('click',()=>editTaskRequest(id));$('#directTaskEdit')?.addEventListener('click',()=>editTaskRequest(id,true));$('#editTaskAssignee')?.addEventListener('click',()=>editTaskAssignment(id));$('#deleteTask')?.addEventListener('click',async()=>{if(!confirm(`确认删除「${t.name}」？删除后将从日历移除。`))return;try{await act('task.delete',{id:t.id});closeDrawer()}catch(e){}});$('#approveTask')?.addEventListener('click',()=>reviewTask(t.id,true));$('#rejectTask')?.addEventListener('click',()=>reviewTask(t.id,false));$('#approveEditRequest')?.addEventListener('click',()=>reviewTaskEdit(t.id,true));$('#rejectEditRequest')?.addEventListener('click',()=>reviewTaskEdit(t.id,false));
+  $('#drawerContent').innerHTML=`<div class="drawer-kicker">${escapeHTML(projectName(t))} · ${escapeHTML(t.priority)}</div><h2 class="drawer-title">${escapeHTML(t.name)}</h2><p class="drawer-description">${escapeHTML(t.desc||'暂无描述')}</p>${completionSummary?`<div class="completion-summary"><span>最新完成总结</span><p>${escapeHTML(completionSummary)}${latestCompletion?.actual?` · 实际 ${latestCompletion.actual} 分钟`:''}</p></div>`:''}${editSummary}<div class="detail-grid"><div><span>状态</span><strong><i class="status-dot ${c}"></i>${l}</strong></div><div><span>预计时长</span><strong>${t.duration} 分钟</strong></div><div><span>${isMultiDay(t)?`任务周期 · ${spanDays(t)} 天`:'安排日期'}</span><strong>${escapeHTML(t.date)}${isMultiDay(t)?` → ${escapeHTML(taskEnd(t))}`:''}</strong></div><div><span>DDL</span><strong class="${t.status==='done'?'':daysCount(S.today,taskEnd(t))<0?'overdue-text':''}">${escapeHTML(ddlText(t))}</strong></div><div><span>负责人</span><strong>${escapeHTML(t.assignee)}</strong></div></div>${canRequestEdit?'<button class="secondary-btn edit-task-request-btn" id="requestTaskEdit">申请修改任务</button>':''}${S.user.admin&&!editPending&&!['done','deferred','skipped','pending_approval','awaiting_approval','submitted','rejected'].includes(t.status)&&(!p||p.status==='active')?'<button class="secondary-btn edit-task-request-btn" id="directTaskEdit">直接调整任务</button>':''}${manage?'<button class="secondary-btn" id="adjustTaskAssignment">调整任务指派</button>':''}${canDelete?'<button class="secondary-btn danger-btn" id="deleteTask">删除此任务</button>':''}<div class="history"><h3>任务记录</h3>${S.logs.filter(x=>lineageIds.has(x.taskId)).map(x=>`<div class="history-item"><i></i><span>${escapeHTML(x.kind==='adjust'?`指派调整：${x.before.assignee} → ${x.after.assignee}`:`${x.kind} · ${x.summary||x.reason||x.remaining||''}`)}</span></div>`).join('')||'<div class="history-item"><i></i><span>暂无记录</span></div>'}</div>${actionCopy}${reviewActions}${editReviewActions}`;
+  $('#taskDrawer').classList.remove('hidden');$('#startTask')?.addEventListener('click',()=>act('task.start',{id:t.id}).then(()=>closeDrawer()).catch(()=>{}));$('#completeTask')?.addEventListener('click',()=>complete(t));$('#deferTask')?.addEventListener('click',()=>defer(t));$('#requestTaskEdit')?.addEventListener('click',()=>editTaskRequest(id));$('#directTaskEdit')?.addEventListener('click',()=>editTaskRequest(id,true));$('#adjustTaskAssignment')?.addEventListener('click',()=>editTaskAssignment(id));$('#deleteTask')?.addEventListener('click',async()=>{if(!confirm(`确认删除「${t.name}」？删除后将从日历移除。`))return;try{await act('task.delete',{id:t.id});closeDrawer()}catch(e){}});$('#approveTask')?.addEventListener('click',()=>reviewTask(t.id,true));$('#rejectTask')?.addEventListener('click',()=>reviewTask(t.id,false));$('#approveEditRequest')?.addEventListener('click',()=>reviewTaskEdit(t.id,true));$('#rejectEditRequest')?.addEventListener('click',()=>reviewTaskEdit(t.id,false));
 }
 function taskEditRequest(t){
   if(!t)return null;
@@ -446,10 +446,18 @@ function canReviewTask(t){
   if(!p)return Boolean(S.user.admin);
   return p.owner===S.user.id;
 }
-function complete(t){openModal(`<div class="eyebrow">完成记录 · ${escapeHTML(t.name)}</div><h2>提交完成审批</h2><p class="notification-detail">提交后任务会顺延到下一日并标记为待审批，由项目 Owner 审批通过后才会结束。</p><label class="form-field">完成总结<textarea id="doneText" placeholder="请说明完成结果、交付物或验证方式"></textarea></label><label class="form-field">实际耗时（分钟）<input id="actualMins" type="number" value="${t.duration}"></label><label class="form-field">工作感受<select id="feeling"><option>顺利</option><option>一般</option><option>困难</option><option>阻塞</option></select></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmComplete">提交审批</button></div>`);$('#cancelAction').onclick=closeModal;$('#confirmComplete').onclick=async()=>{try{await api('/api/action',{action:'task.complete',data:{id:t.id,summary:$('#doneText').value||'完成任务',actual:Number($('#actualMins').value),feeling:$('#feeling').value}});closeModal();closeDrawer();await refresh();toast('完成总结已提交，等待审批')}catch(e){toast(e.message)}}}
+/* Mirrors the server's task_approver: superadmin's tasks and a project Owner's own tasks finish directly. */
+function taskNeedsApproval(t){
+  if(!t||t.assignee==='superadmin')return false;
+  const p=t.projectId&&S.projects.find(x=>x.id===t.projectId);
+  return !p||p.owner!==t.assignee;
+}
+function complete(t){const review=taskNeedsApproval(t);openModal(`<div class="eyebrow">完成记录 · ${escapeHTML(t.name)}</div><h2>${review?'提交完成审批':'记录完成'}</h2><p class="notification-detail">${review?'提交后任务会顺延到下一日并标记为待审批，由项目 Owner 审批通过后才会结束。':'这是你作为项目 Owner 的任务，提交后直接完成，无需审批。'}</p><label class="form-field">完成总结<textarea id="doneText" placeholder="请说明完成结果、交付物或验证方式"></textarea></label><label class="form-field">实际耗时（分钟）<input id="actualMins" type="number" value="${t.duration}"></label><label class="form-field">工作感受<select id="feeling"><option>顺利</option><option>一般</option><option>困难</option><option>阻塞</option></select></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmComplete">${review?'提交审批':'确认完成'}</button></div>`);$('#cancelAction').onclick=closeModal;$('#confirmComplete').onclick=async()=>{try{await api('/api/action',{action:'task.complete',data:{id:t.id,summary:$('#doneText').value||'完成任务',actual:Number($('#actualMins').value),feeling:$('#feeling').value}});closeModal();closeDrawer();await refresh();toast(review?'完成总结已提交，等待审批':'任务已完成')}catch(e){toast(e.message)}}}
 function editTaskRequest(id,direct=false){
   const t=S.tasks.find(x=>x.id===id),p=S.projects.find(x=>x.id===t?.projectId);if(!t)return;
-  const users=p?projectAssignees(p):S.users.filter(u=>u.active&&!u.admin);
+  const pool=p?projectAssignees(p):S.users.filter(u=>u.active&&!u.admin);
+  // Keep the current assignee selectable so saving other fields never silently reassigns the task.
+  const users=pool.some(u=>u.id===t.assignee)?pool:[...S.users.filter(u=>u.id===t.assignee),...pool];
   const minDate=p?.start||S.today,maxDate=p?.end? (p.end<DATE_HORIZON?p.end:DATE_HORIZON):DATE_HORIZON;
   openModal(`<div class="eyebrow">${escapeHTML(projectName(t))} · 任务修改</div><h2>${direct?'直接调整任务':'申请修改任务'}</h2><p>${direct?'Super Admin 直接调整后立即生效。':`提交后由 ${escapeHTML(p?.owner||'superadmin')} 审批。请填写修改理由，审批通过后才会更新任务。`}</p><label class="form-field">任务名称<input id="editTaskName" maxlength="120" value="${escapeHTML(t.name)}"></label><label class="form-field">任务描述<textarea id="editTaskDesc">${escapeHTML(t.desc||'')}</textarea></label><div class="task-form-grid"><label class="form-field">安排日期<input id="editTaskDate" type="date" min="${escapeHTML(minDate)}" ${maxDate?`max="${escapeHTML(maxDate)}"`:''} value="${escapeHTML(t.date||S.today)}"></label><label class="form-field">截止时间<input id="editTaskDeadline" type="date" min="${escapeHTML(minDate)}" ${maxDate?`max="${escapeHTML(maxDate)}"`:''} value="${escapeHTML(t.deadline||t.date||'')}"></label><label class="form-field">预计时长<input id="editTaskDuration" type="number" min="1" max="1440" value="${Number(t.duration)||30}"></label><label class="form-field">优先级<select id="editTaskPriority"><option ${t.priority==='P0'?'selected':''}>P0</option><option ${t.priority==='P1'?'selected':''}>P1</option><option ${t.priority==='P2'?'selected':''}>P2</option></select></label></div><label class="form-field">协作人 / 负责人<select id="editTaskAssignee">${users.map(u=>`<option value="${escapeHTML(u.id)}" ${u.id===t.assignee?'selected':''}>${escapeHTML(u.id)}${p&&u.id===p.owner?' · Owner':''}</option>`).join('')}</select></label><label class="form-field">修改理由<textarea id="editTaskReason" required placeholder="例如：需求范围扩大，需要延长交付期限并调整负责人"></textarea></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmTaskEdit">${direct?'保存调整':'提交修改申请'}</button></div>`);
   if(direct)$('#editTaskReason')?.closest('label')?.remove();
@@ -559,6 +567,42 @@ function requestProjectCompletion(id){
   $('#cancelAction').onclick=closeModal;
   $('#confirmProjectCompletion').onclick=async()=>{const report=$('#projectCompletionReport').value.trim();if(!report){toast('请填写结项报告');return}try{await act('project.complete_request',{id,report});closeModal()}catch(e){}};
 }
+/* 项目任务排序. The mode is a per-browser view preference; the manual order
+   itself is stored on the project so the whole team sees what the Owner
+   arranged. It keys on the lineage root, so a deferral copy keeps its slot. */
+const PROJECT_SORT_KEY='wc-project-sort';
+const PROJECT_SORTS={priority:'按优先级',manual:'手动排序',start:'按开始时间',end:'按结束时间'};
+function taskRootId(t,byId){let id=t.id,parent=t.originId||t.reworkOf;const seen=new Set();while(parent&&byId.has(parent)&&!seen.has(parent)){seen.add(parent);id=parent;const node=byId.get(parent);parent=node.originId||node.reworkOf}return id}
+function projectSortMode(p){let saved;try{saved=JSON.parse(localStorage.getItem(PROJECT_SORT_KEY)||'{}')[p.id]}catch(_){}return PROJECT_SORTS[saved]?saved:(p.taskOrder?.length?'manual':'priority')}
+function setProjectSortMode(id,mode){try{const all=JSON.parse(localStorage.getItem(PROJECT_SORT_KEY)||'{}');all[id]=mode;localStorage.setItem(PROJECT_SORT_KEY,JSON.stringify(all))}catch(_){}}
+function sortProjectTasks(p,tasks,mode){
+  const base=sortTasks(tasks);
+  if(mode==='start')return base.sort((x,y)=>String(x.date).localeCompare(String(y.date))||String(x.time||'').localeCompare(String(y.time||'')));
+  if(mode==='end')return base.sort((x,y)=>String(taskEnd(x)).localeCompare(String(taskEnd(y)))||String(x.date).localeCompare(String(y.date)));
+  if(mode==='manual'){
+    const byId=new Map((S.tasks||[]).map(t=>[t.id,t])),rank=new Map((p.taskOrder||[]).map((id,i)=>[id,i]));
+    const at=t=>{const root=taskRootId(t,byId);return rank.has(root)?rank.get(root):rank.size};
+    return base.sort((x,y)=>at(x)-at(y));
+  }
+  return base;
+}
+function bindProjectTaskDrag(){
+  $$('.project-task-tree[data-project]').forEach(tree=>{
+    const rows=[...tree.querySelectorAll('.project-child-row[draggable="true"]')];
+    const order=()=>[...tree.querySelectorAll('.project-child-row[data-root]')].map(r=>r.dataset.root);
+    let dragged=null,before='';
+    rows.forEach(row=>{
+      row.ondragstart=e=>{dragged=row;before=order().join();row.classList.add('dragging');e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',row.dataset.root)};
+      row.ondragover=e=>{if(!dragged||dragged===row)return;e.preventDefault();const r=row.getBoundingClientRect();row.parentNode.insertBefore(dragged,e.clientY>r.top+r.height/2?row.nextSibling:row)};
+      row.ondrop=e=>e.preventDefault();
+      row.ondragend=async()=>{
+        row.classList.remove('dragging');dragged=null;
+        const next=order();if(next.join()===before)return;
+        try{await api('/api/action',{action:'project.reorder',data:{id:tree.dataset.project,order:next}});await refresh();toast('任务顺序已保存')}catch(err){toast(err.message);renderProjects()}
+      };
+    });
+  });
+}
 function renderProjects(){
   const admin=Boolean(S.user?.admin);
   const projects=visibleProjects();
@@ -566,14 +610,18 @@ function renderProjects(){
   $('#projectsView h1').textContent=admin?'项目与任务管理':'我的项目与任务';
   $('#projectsView .page-intro p').textContent=admin?'直接指定 Owner、添加协作者，并在项目下分配任务。':S.projects.some(p=>p.owner===S.user.id)?'在负责的项目下分配和调整任务，邀请协作者加入。':'查看分配给你的项目任务，记录完成情况和每日进度。';
   $('#projectGrid').innerHTML=projects.map(p=>{
-    const tasks=sortTasks(S.tasks.filter(t=>t.projectId===p.id&&!isSuperseded(t))),done=tasks.filter(t=>t.status==='done').length;
+    const mode=projectSortMode(p),tasks=sortProjectTasks(p,S.tasks.filter(t=>t.projectId===p.id&&!isSuperseded(t)),mode),done=tasks.filter(t=>t.status==='done').length;
     const accepted=Object.entries(p.members||{}).filter(([,v])=>v==='accepted').map(([id])=>id),pending=Object.entries(p.members||{}).filter(([,v])=>v==='pending').map(([id])=>id);
     const manage=canManageProject(p)&&p.status==='active',hasSlot=S.users.some(u=>u.active&&!u.admin&&u.id!==p.owner&&!accepted.includes(u.id)&&(admin||!pending.includes(u.id)));
-    return `<article class="project-card project-node"><div class="project-node-heading"><div><div class="project-title"><h3>${escapeHTML(p.name)}</h3><span class="project-status">${projectStatus(p)}</span></div><p>${escapeHTML(p.desc||'暂无描述')}</p></div><div class="project-node-actions">${manage?`<button class="primary-btn add-project-task" data-project="${escapeHTML(p.id)}">${icon('plus')}新建并指派任务</button>`:''}${manage&&hasSlot?`<button class="secondary-btn invite-members" data-id="${escapeHTML(p.id)}">${admin?'直接添加协作者':'邀请协作者'}</button>`:''}${p.status==='active'&&!manage&&(p.members||{})[S.user.id]==='accepted'?`<button class="ghost-btn leave-project" data-id="${escapeHTML(p.id)}">退出项目</button>`:''}${p.status==='pending'&&admin?`<button class="secondary-btn approve-project" data-id="${escapeHTML(p.id)}">审批项目</button>`:''}${p.status==='active'&&manage&&!admin&&projectTasksComplete(p)?`<button class="secondary-btn request-project-completion" data-id="${escapeHTML(p.id)}">申请项目结项</button>`:''}${p.status==='active'&&manage&&!admin&&!projectTasksComplete(p)?`<span class="muted project-completion-hint">${tasks.length?'完成全部子任务后可结项':'创建子任务后可结项'}</span>`:''}${p.status==='pending_completion'&&admin?`<button class="secondary-btn approve-project-completion" data-id="${escapeHTML(p.id)}">审批项目完成</button>`:''}${canManageProject(p)?`<button class="ghost-btn delete-project" data-id="${escapeHTML(p.id)}">删除项目</button>`:''}</div></div><div class="project-members"><span>Owner · ${escapeHTML(p.owner)}　协作者：${accepted.filter(id=>id!==p.owner).map(escapeHTML).join('、')||'暂无'}${pending.length?`　待确认：${pending.map(escapeHTML).join('、')}`:''}</span><span>${canManageProject(p)?'项目':'我的任务'} ${done}/${tasks.length} 已完成 · 截止 ${escapeHTML(p.end||'未设置')}</span></div><div class="project-task-tree"><div class="project-tree-label">${canManageProject(p)?'项目任务':'分配给我的任务'} <span>${tasks.length}</span></div>${tasks.map(t=>`<div class="project-child-row"><button class="project-task-open" data-id="${escapeHTML(t.id)}"><span class="priority ${escapeHTML(t.priority)}">${escapeHTML(t.priority)}</span><strong>${escapeHTML(t.name)}</strong><span class="child-assignee">${escapeHTML(t.assignee)}</span><span class="child-date">${escapeHTML(t.date)}</span><span>${status(t)[1]}</span><span aria-hidden="true">${icon('chevron-right')}</span></button>${manage&&['todo','doing'].includes(t.status)?`<button class="ghost-btn assign-project-task" data-id="${escapeHTML(t.id)}">调整指派</button>`:''}</div>`).join('')||`<p class="project-task-empty">${manage?'还没有任务，从这里安排第一项工作。':p.status==='pending'?'项目审批通过后，Owner 可创建和指派任务。':'暂无分配给你的任务。'}</p>`}</div></article>`;
+    const drag=manage&&mode==='manual'&&tasks.length>1,byId=new Map(S.tasks.map(t=>[t.id,t]));
+    const sorter=tasks.length>1?`<select class="project-task-sort" data-project="${escapeHTML(p.id)}" aria-label="任务排序">${Object.entries(PROJECT_SORTS).map(([k,v])=>`<option value="${k}" ${k===mode?'selected':''}>${v}</option>`).join('')}</select>${drag?'<small class="project-sort-hint">拖动任务调整顺序</small>':''}`:'';
+    return `<article class="project-card project-node"><div class="project-node-heading"><div><div class="project-title"><h3>${escapeHTML(p.name)}</h3><span class="project-status">${projectStatus(p)}</span></div><p>${escapeHTML(p.desc||'暂无描述')}</p></div><div class="project-node-actions">${manage?`<button class="primary-btn add-project-task" data-project="${escapeHTML(p.id)}">${icon('plus')}新建并指派任务</button>`:''}${manage&&hasSlot?`<button class="secondary-btn invite-members" data-id="${escapeHTML(p.id)}">${admin?'直接添加协作者':'邀请协作者'}</button>`:''}${p.status==='active'&&!manage&&(p.members||{})[S.user.id]==='accepted'?`<button class="ghost-btn leave-project" data-id="${escapeHTML(p.id)}">退出项目</button>`:''}${p.status==='pending'&&admin?`<button class="secondary-btn approve-project" data-id="${escapeHTML(p.id)}">审批项目</button>`:''}${p.status==='active'&&manage&&!admin&&projectTasksComplete(p)?`<button class="secondary-btn request-project-completion" data-id="${escapeHTML(p.id)}">申请项目结项</button>`:''}${p.status==='active'&&manage&&!admin&&!projectTasksComplete(p)?`<span class="muted project-completion-hint">${tasks.length?'完成全部子任务后可结项':'创建子任务后可结项'}</span>`:''}${p.status==='pending_completion'&&admin?`<button class="secondary-btn approve-project-completion" data-id="${escapeHTML(p.id)}">审批项目完成</button>`:''}${canManageProject(p)?`<button class="ghost-btn delete-project" data-id="${escapeHTML(p.id)}">删除项目</button>`:''}</div></div><div class="project-members"><span>Owner · ${escapeHTML(p.owner)}　协作者：${accepted.filter(id=>id!==p.owner).map(escapeHTML).join('、')||'暂无'}${pending.length?`　待确认：${pending.map(escapeHTML).join('、')}`:''}</span><span>${canManageProject(p)?'项目':'我的任务'} ${done}/${tasks.length} 已完成 · 截止 ${escapeHTML(p.end||'未设置')}</span></div><div class="project-task-tree" data-project="${escapeHTML(p.id)}"><div class="project-tree-label">${canManageProject(p)?'项目任务':'分配给我的任务'} <span>${tasks.length}</span>${sorter}</div>${tasks.map(t=>`<div class="project-child-row"${drag?` draggable="true" data-root="${escapeHTML(taskRootId(t,byId))}"`:''}>${drag?'<span class="drag-handle" aria-hidden="true">⋮⋮</span>':''}<button class="project-task-open" data-id="${escapeHTML(t.id)}"><span class="priority ${escapeHTML(t.priority)}">${escapeHTML(t.priority)}</span><strong>${escapeHTML(t.name)}</strong><span class="child-assignee">${escapeHTML(t.assignee)}</span><span class="child-date">${escapeHTML(t.date)}</span><span>${status(t)[1]}</span><span aria-hidden="true">${icon('chevron-right')}</span></button>${manage&&['todo','doing'].includes(t.status)?`<button class="ghost-btn assign-project-task" data-id="${escapeHTML(t.id)}">调整指派</button>`:''}</div>`).join('')||`<p class="project-task-empty">${manage?'还没有任务，从这里安排第一项工作。':p.status==='pending'?'项目审批通过后，Owner 可创建和指派任务。':'暂无分配给你的任务。'}</p>`}</div></article>`;
   }).join('')||'<div class="empty-state">暂无项目，可先申请创建项目。</div>';
   $$('.add-project-task').forEach(b=>b.onclick=()=>newTask(b.dataset.project));
   $$('.project-task-open').forEach(b=>b.onclick=()=>openDrawer(b.dataset.id));
   $$('.assign-project-task').forEach(b=>b.onclick=()=>editTaskAssignment(b.dataset.id));
+  $$('.project-task-sort').forEach(s=>s.onchange=()=>{setProjectSortMode(s.dataset.project,s.value);renderProjects()});
+  bindProjectTaskDrag();
   $$('.approve-project').forEach(b=>b.onclick=()=>{const n=S.notifications.find(n=>n.kind==='approval'&&n.reference===b.dataset.id);if(n)openNotification(n.id)});
   $$('.request-project-completion').forEach(b=>b.onclick=()=>requestProjectCompletion(b.dataset.id));
   $$('.approve-project-completion').forEach(b=>b.onclick=()=>{const n=S.notifications.find(n=>n.kind==='project_completion'&&n.reference===b.dataset.id);if(n)openNotification(n.id)});
@@ -1222,6 +1270,46 @@ function agentAppend(role,content,kind='',intent=''){
   const shown=intent==='plan'?agentPlanIntent(content).body:content;
   el.appendChild(document.createTextNode(shown));
   list.appendChild(el);list.scrollTop=list.scrollHeight;
+  return el;
+}
+/* A run that executes actions leaves a long trail of interim replies, cards
+   and receipts. Once it settles the trail folds under one summary line and
+   only the closing reply stays in view; a plain answer is left alone. */
+function agentFoldRun(nodes){
+  const isCard=n=>n.classList?.contains('agent-action')||n.classList?.contains('agent-action-record');
+  const count=nodes.filter(isCard).length||nodes.filter(n=>n.classList?.contains('agent-step')).length;
+  if(!count)return nodes;
+  const rest=nodes.slice(),last=rest[rest.length-1];
+  const tail=last&&last.classList?.contains('agent-message')&&!isCard(last)?rest.pop():null;
+  const box=document.createElement('details');box.className='agent-run';
+  const summary=document.createElement('summary');summary.textContent=`执行过程 · ${count} 步`;
+  box.appendChild(summary);rest.forEach(n=>box.appendChild(n));
+  return tail?[box,tail]:[box];
+}
+function agentFoldTrail(anchor){
+  const list=$('#agentMessages');if(!list||!anchor||anchor.parentNode!==list)return;
+  const trail=[];for(let n=anchor.nextSibling;n;n=n.nextSibling)trail.push(n);
+  agentFoldRun(trail).forEach(n=>list.appendChild(n));
+  list.scrollTop=list.scrollHeight;
+}
+function agentRenderTranscript(box,messages){
+  let trail=[];
+  const flush=()=>{agentFoldRun(trail).forEach(n=>box.appendChild(n));trail=[]};
+  messages.forEach(m=>{const node=agentMessageNode(m);if(!node)return;if(m.role==='user'){flush();box.appendChild(node)}else trail.push(node)});
+  flush();
+}
+/* Models like to prefix a task with its project's name ("项目名·任务"). The
+   project is already carried by projectId, so the prefix is dropped before the
+   card is shown, and what the user confirms is what gets saved. */
+function agentTidyTaskName(action,data){
+  if(!['task.create','task.update'].includes(action)||typeof data?.name!=='string')return data;
+  const pid=data.projectId||(S.tasks||[]).find(t=>t.id===data.id)?.projectId;
+  const project=(S.projects||[]).find(p=>p.id===pid)?.name;
+  if(!project)return data;
+  const quoted=project.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  const trimmed=data.name.trim();
+  const name=trimmed.replace(new RegExp(`^[\\[【(（「]?\\s*${quoted}\\s*[\\]】)）」]?[\\s·・:：\\-—_|｜/、，,]*`),'');
+  return name&&name!==trimmed?{...data,name}:data;
 }
 function agentIntentChip(intent){
   if(!intent)return null;
@@ -1270,7 +1358,7 @@ async function agentLoadOwnHistory(){
        request — the transcript must never carry it forward. */
     const turns=messages.filter(m=>(m.role==='user'||m.role==='assistant')&&String(m.content||'').trim());
     agentState.messages=turns.map(m=>({role:m.role,content:m.content}));
-    messages.forEach(m=>{const node=agentMessageNode(m);if(node)list.appendChild(node)});
+    agentRenderTranscript(list,messages);
     restoreCard();
     list.scrollTop=list.scrollHeight;
   }catch(_){}
@@ -1279,7 +1367,7 @@ async function agentShowHistory(){
   const admin=Boolean(S.user?.admin);
   openModal(`<div class="eyebrow">WORK AGENT · 工作记录</div><h2>AI 工作记录</h2><p class="muted">记录保留每个账户与助手的对话及已执行操作，仅本人与 superadmin 可见。</p>${admin?`<label class="form-field">查看账户<select id="agentHistoryUser">${S.users.map(u=>`<option value="${escapeHTML(u.id)}">${escapeHTML(u.id)}</option>`).join('')}</select></label>`:''}<div id="agentHistoryList" class="agent-history-list"></div><div class="modal-footer"><button class="secondary-btn" id="agentHistoryClear">清空记录</button><button class="primary-btn" id="agentHistoryClose">关闭</button></div>`);
   const target=()=>$('#agentHistoryUser')?.value||S.user.id;
-  const load=async()=>{const box=$('#agentHistoryList');box.innerHTML='<p class="muted">正在加载…</p>';try{const data=await api('/api/action',{action:'agent.history',data:{userId:target()}});const msgs=data.messages||[];box.innerHTML='';if(!msgs.length){box.innerHTML='<p class="muted">该账户暂无 AI 工作记录。</p>';return}msgs.forEach(m=>{const node=agentMessageNode(m);if(node)box.appendChild(node)})}catch(e){box.innerHTML=`<p class="muted">加载失败：${escapeHTML(e.message||'')}</p>`}};
+  const load=async()=>{const box=$('#agentHistoryList');box.innerHTML='<p class="muted">正在加载…</p>';try{const data=await api('/api/action',{action:'agent.history',data:{userId:target()}});const msgs=data.messages||[];box.innerHTML='';if(!msgs.length){box.innerHTML='<p class="muted">该账户暂无 AI 工作记录。</p>';return}agentRenderTranscript(box,msgs)}catch(e){box.innerHTML=`<p class="muted">加载失败：${escapeHTML(e.message||'')}</p>`}};
   $('#agentHistoryUser')?.addEventListener('change',load);
   $('#agentHistoryClose').onclick=closeModal;
   $('#agentHistoryClear').onclick=async()=>{if(!confirm(`确认清空 ${target()} 的 AI 工作记录？`))return;try{await api('/api/action',{action:'agent.history.clear',data:{userId:target()}});toast('记录已清空');await load()}catch(e){toast(e.message||'清空失败')}};
@@ -1429,7 +1517,7 @@ const AGENT_PLAN_RULE='这次是一条任务规划请求：把用户那句话拆
   +'先用一两句话说明拆解思路，然后另起一行输出一个 <plan> 块，块里是单行 JSON 数组：'
   +'<plan>[{"name":"任务名","projectId":"项目ID","assignee":"负责人账户","date":"YYYY-MM-DD",'
   +'"deadline":"可选","priority":"P0/P1/P2","duration":分钟数}]</plan>。'
-  +'规则：projectId 与 assignee 必须用数据里真实存在的 id（负责人写账户 id，不是中文名）；'
+  +'规则：name 只写任务本身，不要带项目名前缀；projectId 与 assignee 必须用数据里真实存在的 id（负责人写账户 id，不是中文名）；'
   +'date 不早于今天、不晚于可排期上限；宁可少拆几个也不要编造不存在的项目或账户；'
   +'确实无法确定负责人时，用当前账户。';
 function agentSystemPrompt(context,planning){
@@ -1534,7 +1622,7 @@ function agentRunOne(proposal){
     const list=$('#agentMessages');
     if(!list){resolve({cancelled:true});return}
     const label=AGENT_ACTION_LABELS[proposal.action]||proposal.action;
-    const payload=(proposal.data&&typeof proposal.data==='object')?proposal.data:{};
+    const payload=agentTidyTaskName(proposal.action,(proposal.data&&typeof proposal.data==='object')?proposal.data:{});
     /* The pace comes from the standing switch beside the input, so the card
        only has to show what is about to happen. */
     const card=document.createElement('div');
@@ -1665,7 +1753,7 @@ async function agentSubmit(){
   const intent=agentPlanIntent(text);
   /* The mark is the request itself — no separate mode to remember. */
   if(intent.plan){input.value='';agentSyncPlanButton();return agentPlanSubmit(intent.body)}
-  input.value='';agentAppend('user',text);
+  input.value='';const asked=agentAppend('user',text);
   agentState.autoRun=false;agentState.stop=false;agentState.steps=0;agentState.failures=0;
   agentState.mode=agentPref();agentState.lastActionKey='';agentState.repeats=0;
   agentState.pendingResolve=null;
@@ -1675,6 +1763,7 @@ async function agentSubmit(){
   }catch(e){
     agentAppend('assistant',e?.message||'暂时无法连接 Agent 服务。','error');
   }
+  agentFoldTrail(asked);
   agentState.busy=false;agentState.autoRun=false;agentState.steps=0;
   agentState.pendingResolve=null;
   agentUpdateBusy();
@@ -1703,7 +1792,7 @@ async function agentPlanSubmit(body){
     const {clean,plan}=agentSplitPlan(answer);
     if(clean)agentAppend('assistant',clean);
     if(!plan.length)agentAppend('assistant','没能从这段内容里拆出任务。可以写得更具体一点，比如「下周三给 wang00 安排一次 2 小时的季度复盘」。','error');
-    else agentPlanCard(plan);
+    else agentPlanCard(plan.map(item=>agentTidyTaskName('task.create',item)));
   }catch(e){
     agentAppend('assistant',e?.message||'暂时无法连接 Agent 服务。','error');
   }
@@ -1735,6 +1824,7 @@ function agentPlanCard(items){
     bar.innerHTML='<span class="agent-action-done">创建中…</span>';
     const done=await agentRunPlan(items);
     bar.innerHTML=`<span class="agent-action-done">已创建 ${done.created} 个${done.failed?` · 失败 ${done.failed}`:''}</span>`;
+    agentFoldTrail(card);
     agentState.busy=false;agentUpdateBusy();
   };
 }

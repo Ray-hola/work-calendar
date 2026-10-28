@@ -842,3 +842,84 @@ test('voice input writes into the composer and hides itself when unsupported', (
   assert.ok(/recognition\.stop\(\)/.test(stop), '再点一下要能结束浏览器识别');
   assert.ok(/recorder\.stop\(\)/.test(stop), '再点一下要能结束服务端录音');
 });
+
+/* 反馈 #1：抽屉里的「调整任务指派」按钮曾与弹窗里的负责人下拉框同用
+   editTaskAssignee 这个 id，保存时取到的是按钮的空值，服务端回「请重新登录」。 */
+test('the drawer button and the edit form never share an element id', () => {
+  const drawer = source.match(/function openDrawer\(id\)\{[\s\S]*?\n\}/)[0];
+  const form = source.match(/function editTaskRequest\(id,direct=false\)\{[\s\S]*?\n\}/)[0];
+  const ids = s => new Set([...s.matchAll(/id="([A-Za-z]+)"/g)].map(m => m[1]));
+  const shared = [...ids(drawer)].filter(id => ids(form).has(id));
+  assert.deepEqual(shared, [], '抽屉与修改弹窗同时在页面上，id 重复时 $() 会取到抽屉里的元素');
+});
+
+test('editing keeps the current assignee selectable even when the pool omits them', () => {
+  const a = app();
+  const elements = {};
+  a.context.document = {querySelector: s => elements[s] || (elements[s] = {classList:{add(){},remove(){}},closest:()=>null}), querySelectorAll: () => []};
+  a.run(`S.today='2026-10-28';S.users=[{id:'superadmin',admin:1,active:1},{id:'admin002',admin:1,active:1},{id:'test002',admin:0,active:1}];
+    S.projects=[];S.tasks=[{id:'t',name:'个人事项',assignee:'admin002',date:'2026-10-28',duration:30,priority:'P1'}];S.user={id:'superadmin',admin:1};`);
+  a.run("editTaskRequest('t',true)");
+  const html = elements['#modalContent'].innerHTML;
+  assert.match(html, /<option value="admin002" selected>/, '当前负责人必须在下拉框里且被选中，否则保存会悄悄换人');
+});
+
+/* 反馈 #3：模型爱给任务名加项目名前缀。The assistant helpers sit past the
+   sandbox cut-off, so they are lifted out of the source like agentLoop. */
+const lift = name => source.match(new RegExp(`function ${name}\\([\\s\\S]*?\\n\\}`))[0];
+test('a project-name prefix is dropped from assistant task names', () => {
+  const a = app();
+  a.run(lift('agentTidyTaskName'));
+  a.run(`S.projects=[{id:'p',name:'客户需求访谈'}];S.tasks=[{id:'t',projectId:'p'}];`);
+  for (const raw of ['客户需求访谈·嘉宾提问大纲', '客户需求访谈 - 嘉宾提问大纲', '【客户需求访谈】嘉宾提问大纲', '客户需求访谈：嘉宾提问大纲']) {
+    assert.equal(a.json(`agentTidyTaskName('task.create',{name:${JSON.stringify(raw)},projectId:'p'}).name`), '嘉宾提问大纲', raw);
+  }
+  assert.equal(a.json(`agentTidyTaskName('task.update',{id:'t',name:'客户需求访谈·复盘'}).name`), '复盘', '调整时按任务所在项目判断');
+  assert.equal(a.json(`agentTidyTaskName('task.create',{name:'客户需求访谈',projectId:'p'}).name`), '客户需求访谈', '整段就是项目名时保持不动');
+  assert.equal(a.json(`agentTidyTaskName('task.delete',{name:'客户需求访谈·x'}).name`), '客户需求访谈·x');
+});
+
+test('a run with actions folds under one line and keeps the closing reply in view', () => {
+  const a = app();
+  a.run(lift('agentFoldRun'));
+  a.context.document = {createElement: tag => ({tag, className: '', children: [], textContent: '',
+    classList: {contains() { return false; }}, appendChild(n) { this.children.push(n); }})};
+  const node = cls => ({classList: {contains: c => cls.split(' ').includes(c)}});
+  a.context.nodes = [node('agent-message assistant'), node('agent-message assistant agent-action'), node('agent-step'), node('agent-message assistant')];
+  const out = a.run('agentFoldRun(nodes)');
+  assert.equal(out.length, 2);
+  assert.equal(out[0].tag, 'details');
+  assert.equal(out[0].children[0].textContent, '执行过程 · 1 步');
+  assert.equal(out[1], a.context.nodes[3], '最后一句结论留在折叠区外');
+  a.context.plain = [node('agent-message assistant')];
+  assert.equal(a.run('agentFoldRun(plain)').length, 1, '没有执行动作的普通问答不折叠');
+  assert.equal(a.run('agentFoldRun(plain)[0]'), a.context.plain[0]);
+});
+
+/* 反馈 #4：项目任务排序。 */
+test('project tasks sort by priority, start, end, or the saved manual order', () => {
+  const a = app();
+  a.run(`S.tasks=[
+    {id:'a',name:'甲',priority:'P2',date:'2026-10-01',deadline:'2026-10-20'},
+    {id:'b',name:'乙',priority:'P0',date:'2026-10-05',deadline:'2026-10-06'},
+    {id:'c2',name:'丙',priority:'P1',date:'2026-10-03',originId:'c'},
+    {id:'c',name:'丙',priority:'P1',date:'2026-10-02',status:'deferred',supersededBy:'c2'}];
+    var p={id:'p',taskOrder:['c','a']};var live=S.tasks.filter(t=>t.id!=='c');`);
+  assert.deepEqual(a.json("sortProjectTasks(p,live,'priority').map(t=>t.id)"), ['b','c2','a']);
+  assert.deepEqual(a.json("sortProjectTasks(p,live,'start').map(t=>t.id)"), ['a','c2','b']);
+  assert.deepEqual(a.json("sortProjectTasks(p,live,'end').map(t=>t.id)"), ['c2','b','a']);
+  assert.deepEqual(a.json("sortProjectTasks(p,live,'manual').map(t=>t.id)"), ['c2','a','b'],
+    '递延出来的新记录沿用原任务的位置，没排过的放最后');
+  assert.equal(a.run('projectSortMode(p)'), 'manual', '项目有手动顺序时默认按它显示');
+  assert.equal(a.run("projectSortMode({id:'q'})"), 'priority');
+});
+
+/* 反馈 #5：Owner 自己的任务完成后直接结束。 */
+test('only tasks with someone else to sign them off ask for approval', () => {
+  const a = app();
+  a.run(`S.projects=[{id:'p',owner:'test001'}];`);
+  assert.equal(a.run("taskNeedsApproval({assignee:'test001',projectId:'p'})"), false);
+  assert.equal(a.run("taskNeedsApproval({assignee:'test002',projectId:'p'})"), true);
+  assert.equal(a.run("taskNeedsApproval({assignee:'superadmin',projectId:'p'})"), false);
+  assert.equal(a.run("taskNeedsApproval({assignee:'test002',projectId:null})"), true);
+});

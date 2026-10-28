@@ -100,6 +100,33 @@ class AssistantChatTests(unittest.TestCase):
         self.assertLess(len(json.dumps(context, ensure_ascii=False)), 25000,
                         '上下文不应无节制增长')
 
+    def test_open_tasks_survive_a_large_history(self):
+        """反馈 #2：上下文曾被按字符截断，最新的待办任务正好落在被截掉的尾部，
+        模型看不到任务 id，只好让用户提供页面上根本不显示的 ID。"""
+        day = __import__('datetime').date.today().isoformat()
+        for i in range(600):
+            self.store.put('tasks', {'name': '历史任务 %d ' % i + '说明' * 80, 'date': '2026-01-01', 'duration': 30,
+                                     'assignee': 'superadmin', 'projectId': None, 'priority': 'P1',
+                                     'status': 'deferred', 'supersededBy': 'later', 'fixed': False})
+        for i in range(400):
+            self.store.put('notifications', {'to': 'superadmin', 'title': '日报', 'body': 'x' * 2000,
+                                             'kind': 'task', 'read': False, 'createdAt': '2026-10-%02dT08:00:00' % (i % 28 + 1)})
+        target = self.store.put('tasks', {'name': '嘉宾提问大纲', 'date': day, 'duration': 30,
+                                          'assignee': 'superadmin', 'projectId': None, 'priority': 'P1',
+                                          'status': 'doing', 'fixed': False})
+        self.store.db.commit()
+        text = self.store.agent_context(self.admin)
+        self.assertLessEqual(len(text), 80_000)
+        context = json.loads(text)
+        self.assertIn(target['id'], [t['id'] for t in context['tasks']], '进行中的任务和它的 id 必须在上下文里')
+        self.assertFalse(any(t['name'].startswith('历史任务') for t in context['tasks']), '已被接替的递延记录不必再给模型')
+
+    def test_the_policy_forbids_asking_for_task_ids_and_project_prefixes(self):
+        self.ask()
+        policy = _Stub.seen[-1]['messages'][0]['content']
+        self.assertIn('绝不要让用户提供任务 ID', policy)
+        self.assertIn('不要带项目名前缀', policy)
+
 
     # ------------------------------------------------ 空行与长度上限
     def test_a_stored_blank_turn_is_skipped_rather_than_refusing_the_request(self):

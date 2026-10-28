@@ -266,7 +266,9 @@ class Store:
     def user(self, id):
         u = next((u for u in self.users() if u['id'] == id and u['active']), None)
         if not u:
-            raise Problem(401, '请重新登录')
+            # Most callers validate an assignee/member id here; only a session
+            # that resolves to a missing account means the caller must log in.
+            raise Problem(400, '账户不存在或已停用')
         return u
 
     def admin(self, user):
@@ -476,6 +478,50 @@ class Store:
         self.put('settings', record)
         return self.llm_config(user)
 
+    def agent_context(self, user, budget=80_000):
+        """Return the workspace view sent to the assistant, as JSON within budget.
+
+        The full snapshot runs to several hundred thousand characters, most of
+        it deferral history and notification bodies. It used to be sliced at
+        the budget, which cut off the newest rows — the open tasks people ask
+        about — so the model never saw their ids and asked the user for one,
+        even though the page shows no ids. Open work now goes first, history is
+        trimmed by whole rows, and the result is always valid JSON.
+        """
+        state = self.snapshot(user)
+        week_ago = (now().date() - timedelta(days=6)).isoformat()
+        fields = ('id', 'name', 'projectId', 'assignee', 'date', 'time', 'deadline',
+                  'duration', 'priority', 'status', 'fixed')
+        archived = ('done', 'deferred', 'skipped')
+        tasks = [t for t in state.get('tasks') or [] if not t.get('supersededBy')]
+        open_tasks = [t for t in tasks if t.get('status') not in archived]
+        recent = sorted((t for t in tasks if t.get('status') in archived and str(t.get('date') or '') >= week_ago),
+                        key=lambda t: str(t.get('date') or ''), reverse=True)
+        newest = lambda rows, key: sorted(rows or [], key=lambda r: str(r.get(key) or ''), reverse=True)
+        notifications = [dict(n, body=str(n.get('body') or '')[:300])
+                         for n in newest(state.get('notifications'), 'createdAt') if not n.get('read')][:30]
+        context = {
+            'today': state.get('today'), 'projects': state.get('projects'),
+            'tasks': [{k: t[k] for k in fields if t.get(k) not in (None, '')} for t in open_tasks + recent],
+            # The diary dashboard needs a month of per-account rows; the
+            # assistant does not, and those rows once made a one-line question
+            # cost 13k prompt tokens. A week answers anything it is asked.
+            'diaryStats': self.diary_statistics(user, start=week_ago),
+            'workCompletions': state.get('workCompletions'), 'achievements': state.get('achievements'),
+            'repeats': state.get('repeats'), 'agentCapabilities': state.get('agentCapabilities'),
+            'notifications': notifications,
+            'reports': [r for r in newest(state.get('reports'), 'date') if str(r.get('date') or '') >= week_ago],
+            'diaries': [r for r in newest(state.get('diaries'), 'date') if str(r.get('date') or '') >= week_ago],
+        }
+        dump = lambda: json.dumps(context, ensure_ascii=False, separators=(',', ':'))
+        text = dump()
+        # Every list is newest/most relevant first, so trimming drops its tail.
+        for key in ('reports', 'notifications', 'diaries', 'tasks'):
+            while len(text) > budget and context[key]:
+                context[key] = context[key][:len(context[key]) * 3 // 4]
+                text = dump()
+        return text
+
     def llm_chat(self, user, data):
         """Proxy a chat request to an OpenAI-compatible endpoint.
 
@@ -553,6 +599,18 @@ class Store:
                        '执行失败时系统会回一条【系统回执·失败】。先读懂原因再决定怎么做：'
                        '如果是缺了前置步骤（例如负责人还没加入项目、项目还没审批），就补上那一步再继续；'
                        '确实做不到的，用一句话向用户说明原因并结束，不要重复提交同一个动作。')
+            # Task changes and task creation are the most frequent requests.
+            # The page never shows ids, so the model must resolve them itself,
+            # and it tends to prefix new task names with the project name.
+            policy += ('\n调整任务：页面上不显示任务 ID，绝不要让用户提供任务 ID。'
+                       '按用户说的任务名称、日期、负责人或项目，在上下文 tasks 里找到目标任务并直接使用它的 id；'
+                       '有多条可能匹配时，列出名称、日期、负责人让用户选，不要提 ID。'
+                       '改开始日期用 task.update（data:{"id":"任务ID","date":"YYYY-MM-DD"}），只传要改的字段；'
+                       '新日期晚于原 deadline 时把 deadline 一并顺延。\n'
+                       '创建任务：name 只写任务本身，不要带项目名前缀（例如不要写成「项目名·任务」或「项目名-任务」），'
+                       '所属项目由 projectId 表示。用户没说的字段直接按默认补齐，不要逐项追问：'
+                       '负责人默认为用户点名的成员，没点名时为项目 owner；日期默认今天；时长默认 60 分钟；优先级默认 P1；'
+                       'deadline 默认与日期相同。要建多条任务时一次只输出一条，拿到回执后再输出下一条。')
         # A caller-supplied system message is untrusted input.  The policy is
         # placed first for provider compatibility and repeated last so it
         # remains authoritative if a custom prompt tries to override it.
@@ -561,20 +619,10 @@ class Store:
         # answer generic questions and could not actually report today's work.
         # snapshot() applies the normal visibility rules, so member data stays
         # private while superadmin receives the team view.
-        state = self.snapshot(user)
-        context = {k: state.get(k) for k in (
-            'today', 'projects', 'tasks', 'reports', 'diaries', 'diaryStats',
-            'notifications', 'workCompletions', 'achievements', 'repeats', 'agentCapabilities')}
-        # The diary dashboard needs a month of per-account rows broken down by
-        # project; the assistant does not, and those rows were 78% of the
-        # payload — a one-line question cost 13k prompt tokens. A week is still
-        # more than enough to answer anything the assistant is asked about it.
-        context['diaryStats'] = self.diary_statistics(
-            user, start=(now().date() - timedelta(days=6)).isoformat())
-        context_text = json.dumps(context, ensure_ascii=False, separators=(',', ':'))
+        context_text = self.agent_context(user)
         messages.insert(0, {'role': 'system', 'content':
                             '以下是当前账户可见的战略小组台账数据，仅用于回答查询；'
-                            '不要把其中的内部字段或权限信息原样泄露给其他用户：\n' + context_text[:80000]})
+                            '不要把其中的内部字段或权限信息原样泄露给其他用户：\n' + context_text})
         messages.insert(0, {'role': 'system', 'content': policy})
         messages.append({'role': 'system', 'content': policy})
         record = self._llm_record(); cfg = dict(record.get('value') or {})
@@ -751,7 +799,10 @@ class Store:
             r = self.db.execute('SELECT user_id,expires FROM sessions WHERE token=?', (hashlib.sha256(token.encode()).hexdigest(),)).fetchone()
             if not r or datetime.fromisoformat(r['expires']) <= now():
                 raise Problem(401, '请登录工作台')
-            return self.user(r['user_id'])
+            try:
+                return self.user(r['user_id'])
+            except Problem:
+                raise Problem(401, '请重新登录')
 
     def notify(self, to, title, body, kind='task', reference=None, channel=None):
         if not any(u['id']==to for u in self.users()):raise Problem(404,'通知接收账户不存在')
@@ -873,7 +924,11 @@ class Store:
             return 'superadmin'
         project = self.get('projects', pid)
         # Every project task is approved by that project's Owner. Project
-        # closure itself is the separate superadmin approval boundary.
+        # closure itself is the separate superadmin approval boundary. The
+        # Owner's own task has nobody else to sign it off, so it completes
+        # directly instead of waiting for a self-review.
+        if task.get('assignee') == project.get('owner'):
+            return None
         return project.get('owner')
 
     def task_edit_approver(self, task):
@@ -1818,6 +1873,16 @@ class Store:
                 member=task.get('assignee')
                 if member in counts and start<=task.get('date','')<=end:counts[member]+=1
             return {'projectId':p['id'],'counts':counts}
+        if action=='project.reorder':
+            # The manual order is stored per task lineage (its oldest record),
+            # so a deferral that copies a task to the next day keeps its place.
+            p=self.get('projects',d['id']);self.project_owner(user,p)
+            order=d.get('order')
+            if not isinstance(order,list) or len(order)>5000:raise Problem(400,'任务顺序格式无效')
+            known={t['id'] for t in self.all('tasks') if t.get('projectId')==p['id']}
+            p['taskOrder']=list(dict.fromkeys(str(x) for x in order if str(x) in known))
+            self.put('projects',p)
+            return p
         if action=='project.update':
             p=self.get('projects',d['id']);self.project_owner(user,p)
             if d.get('status')=='done' and not user['admin']:
@@ -1997,7 +2062,9 @@ class Store:
             t=self.get('tasks',d['id'])
             if t.get('status')!='pending_approval':
                 raise Problem(409,'该任务当前没有待审批记录')
-            approver=self.task_approver(t)
+            # Submissions made before the Owner rule changed still name their
+            # approver, so they can be signed off instead of getting stuck.
+            approver=self.task_approver(t) or (t.get('approval') or {}).get('approver')
             if t.get('projectId'):
                 project=self.get('projects', t['projectId'])
                 if project.get('status') != 'active' or (project.get('end') and project['end'] < now().date().isoformat()):
