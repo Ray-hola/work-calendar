@@ -4,6 +4,8 @@ data/*.sqlite3-shm
 data/*.sqlite3-wal
 data/initial-accounts.txt
 data/*.log
+# Database snapshots written by the scheduled backup
+data/backups/
 
 # Stray runtime logs in the repo root. The service manager used to redirect
 # stdout/stderr to ./out.log and ./err.log next to the code; a manual
