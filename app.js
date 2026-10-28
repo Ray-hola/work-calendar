@@ -227,6 +227,9 @@ function renderCalendar(){
   $$('#weekCarousel .week-task').forEach(b=>b.onclick=()=>openDrawer(b.dataset.id));
   $$('#weekCarousel .week-day-open, #weekCarousel .week-day-more').forEach(b=>b.onclick=()=>renderDayDetail(b.dataset.date));
   $$('#weekCarousel .week-day-add').forEach(b=>b.onclick=()=>newTask(null,b.dataset.date));
+  /* On a tablet the board scrolls sideways; open it with today in the middle. */
+  const today=board.querySelector('.week-day.today');
+  if(board.scrollWidth>board.clientWidth)board.scrollLeft=today?today.getBoundingClientRect().left-board.getBoundingClientRect().left+board.scrollLeft-(board.clientWidth-today.offsetWidth)/2:0;
 }
 function turnWeek(step){
   if(step>0&&UI.selectedWeek>=weekOffsetFor(DATE_HORIZON)){toast(`日期范围目前只支持到 ${DATE_HORIZON}`);return}
@@ -732,7 +735,7 @@ function renderAccountItem(x,owner,admin){
   const tail=self?'':(x.active?`<button class="ghost-btn switch-login" data-user="${x.id}">切换</button>`:'<span class="muted">不可用</span>');
   const nickTag=x.nickname?`<span class="name-tag nick">${escapeHTML(x.nickname)}</span>`:'';
   const codeTag=x.displayName?`<span class="name-tag code">${escapeHTML(x.id)}</span>`:'';
-  return `<article class="account-item ${self?'current-account':''}">${avatarHTML(x.id)}<div class="account-copy"><div class="account-name"><strong>${escapeHTML(x.displayName||x.id)}</strong>${nickTag}${codeTag}</div><span>${escapeHTML(roleText(x))}</span><small>${escapeHTML(accountRoleLabel(x))}</small></div>${actions}${tail}</article>`;
+  return `<article class="account-item ${self?'current-account':''}">${avatarHTML(x.id)}<div class="account-copy"><div class="account-name"><strong>${escapeHTML(x.displayName||x.id)}</strong>${nickTag}${codeTag}</div><span>${escapeHTML(roleText(x))}</span><small>${escapeHTML(accountRoleLabel(x))}</small></div>${actions||tail?`<div class="account-actions">${actions}${tail}</div>`:''}</article>`;
 }
 function renderAccounts(){
   const u=S.users,admin=Boolean(S.user?.admin),owner=S.user?.role==='superadmin';
