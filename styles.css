@@ -5,7 +5,7 @@
 --paper:#F0EEE6;--paper-2:#E9E6DB;--canvas:#F0EEE6;--surface:#FFFDF9;--surface-sunk:#F7F4ED;
 --ink:#1F1B15;--ink-2:#3E372C;--ink-deep:#26221B;--muted:#7C7466;--faint:#9E9688;
 --line:#E2DDD0;--line-soft:#EDE9DE;--line-strong:#D2CBBB;
---rail:#FAF9F5;--rail-hover:#F1ECE1;--rail-line:#E6E0D2;--rail-text:#3E372C;--rail-muted:#7C7466;--rail-dim:#9E9688;--rail-strong:#1F1B15;
+--rail:#FFFDF9;--rail-hover:#F7F4ED;--rail-line:#E2DDD0;--rail-text:#3E372C;--rail-muted:#7C7466;--rail-dim:#9E9688;--rail-strong:#1F1B15;
 --accent:#D97757;--accent-dark:#C05F41;--accent-line:#E7C4B2;--accent-soft:#FBF1EA;--accent-soft-2:#F7E7DE;
 --p0:#C4563F;--p1:#B8862F;--p1-ink:#8A6A1F;--p2:#4A8B6F;
 --success:#4A8B6F;--success-soft:#EDF3EF;
@@ -2278,6 +2278,57 @@ body::before {
 .agent-sample:hover { transform: translateX(3px); }
 
 /* --------------------------------------------------------------------------
+   Login palette · the whole app speaks the sign-in screen's colours
+   Paper ground, ivory sheets, warm hairlines, ink type. Terracotta is kept
+   for the primary action, the brand mark and the one thin "you are here"
+   tick — nowhere else — so the accent means something when it appears.
+   -------------------------------------------------------------------------- */
+:root { --ink-rule: var(--line); }
+.brand strong { color: var(--ink); }
+.nav-item.active { background: var(--surface-sunk); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+.nav-item.active .icon-slot { color: var(--ink); }
+.nav-item.active b, .nav-item b, .filter-link b { color: var(--faint); }
+.nav-item:hover .icon-slot { color: var(--ink); }
+.focus-card { background: var(--surface-sunk); border: 1px solid var(--line); box-shadow: none; }
+.focus-card::after { display: none; }
+.focus-card span, .focus-card small { color: var(--muted); }
+.focus-card strong { color: var(--ink); }
+.focus-card .progress { background: var(--line); }
+.focus-card .progress i { background: var(--accent); }
+.workspace-switcher:hover { border-color: var(--line-strong); box-shadow: 0 6px 16px -12px rgba(64, 54, 42, .4); }
+
+.page-intro .eyebrow, .drawer-kicker, .modal .eyebrow, .daily-project-kicker, .week-kicker,
+.notebook-shelf-heading .eyebrow, .automation-card .eyebrow { color: var(--muted); }
+.page-intro::after { background: var(--line-strong); }
+.agent-top-btn { background: var(--surface); border-color: var(--line); color: var(--ink); }
+.agent-top-btn .icon-slot { color: var(--accent); }
+.agent-top-btn:hover { background: var(--surface); border-color: var(--line-strong); color: var(--ink); box-shadow: var(--shadow-sm); }
+.secondary-btn:hover, .ghost-btn:hover { border-color: var(--line-strong); }
+
+.priority.P0 { color: var(--danger); background: var(--accent-soft-2); box-shadow: none; }
+.priority.P1 { color: var(--p1-ink); background: var(--warn-soft); box-shadow: none; }
+.priority.P2 { color: var(--success); background: var(--success-soft); box-shadow: none; }
+.task-ddl.left { color: var(--ink-2); background: var(--surface-sunk); border-color: var(--line); }
+.task-ddl.due { color: var(--accent-dark); background: var(--surface); border-color: var(--accent-line); }
+.task-ddl.overdue { color: var(--danger); background: var(--surface); border-color: var(--danger-line); }
+.quick-tab.active b, .project-tree-label span { color: var(--muted); }
+.daily-progress .progress-percent { color: var(--ink); }
+
+.task-card:hover, .daily-project-tasks .task-card:hover, .project-child-row:hover, .inbox-item:hover, .inbox-item:focus-visible, .account-item:hover { background: var(--surface-sunk); }
+.account-item.current-account { background: var(--surface-sunk); }
+.task-card:focus-visible, .task-card:active { background: var(--surface-sunk); }
+.task-card:hover::before, .project-child-row:hover::before { color: var(--ink-2); }
+.task-card::after, .project-child-row::after, .inbox-item::after { width: 2px; }
+.task-card:hover .task-arrow, .inbox-item:hover .task-arrow, .project-child-row:hover .project-task-open > span[aria-hidden] { color: var(--ink-2); }
+.inbox-item.unread .inbox-icon { background: var(--surface); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.unread-dot { box-shadow: none; }
+
+.axis-day.today-day:not(.selected-day) { background: var(--surface-sunk) !important; box-shadow: inset 0 2px 0 var(--accent) !important; }
+.axis-day:hover:not(.selected-day), .axis-day:focus-visible:not(.selected-day), .axis-day.pinned:not(.selected-day) { background: var(--surface-sunk) !important; box-shadow: inset 0 -2px 0 var(--line-strong) !important; }
+.axis-day.today-day .axis-day-head strong { color: var(--ink); }
+.notebook-cover { background: var(--surface-sunk) !important; color: var(--ink); text-shadow: none; box-shadow: inset 4px 0 0 var(--accent), inset 0 0 0 1px var(--line); }
+
+/* --------------------------------------------------------------------------
    Responsive · the sheet reflows, the rail folds into a masthead strip
    -------------------------------------------------------------------------- */
 @media (max-width: 1180px) {
@@ -2296,8 +2347,8 @@ body::before {
   .nav-list { margin: 0; padding: 0 12px 10px; gap: 4px; scrollbar-width: none; -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); mask-image: linear-gradient(90deg, #000 85%, transparent); }
   .nav-list::-webkit-scrollbar { display: none; }
   .nav-item { height: 34px; padding: 0 12px; border-radius: 99px; font-size: 13px; flex: none; }
-  .nav-item.active { background: var(--accent); color: var(--surface); box-shadow: none; }
-  .nav-item.active .icon-slot { color: var(--surface); }
+  .nav-item.active { background: var(--surface-sunk); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-strong); }
+  .nav-item.active .icon-slot { color: var(--accent); }
   .nav-item.active::before { display: none; }
   .topbar { position: static; height: 52px; padding: 0 16px; }
   .breadcrumbs, .topbar .secondary-btn { display: none; }
