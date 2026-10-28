@@ -1,6 +1,5 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const UI={view:'calendar',member:'all',filter:'all',selectedWeek:0,detailDate:null,timelineScroll:null,dayOffset:0};
-let weekObserver=null;
 const escapeHTML=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 /* One stroked 24px icon set. Everything the UI used to draw with text glyphs
    (◷ ▦ ✦ ◇ ＋ › ↻ ▶ …) now comes from here, so stroke weight, optical size and
@@ -104,11 +103,10 @@ async function refreshInboxState(){
 function switchView(view){
   if(view==='achievements'&&!S.user?.admin){view='calendar'}
   const changed=UI.view!==view;
-  hideFloat(true);UI.view=view;
+  UI.view=view;
   /* Returning to the week rail should show the current week, not whichever
      panel the rail happened to be parked on last. */
   if(view==='calendar'&&changed)UI.selectedWeek=0;
-  if(view!=='calendar'){weekObserver?.disconnect();weekObserver=null}
   $$('.view').forEach(v=>v.classList.toggle('active-view',v.id===`${view}View`));
   $$('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.view===view));
   const labels={today:'今日任务',calendar:'周视图',summary:'日记',projects:'项目空间',timeline:'项目时间轴',achievements:'成果库',inbox:'收件箱',accounts:'账户管理',dayDetail:'日期详情',chat:'沟通区'};
@@ -189,225 +187,50 @@ function dailyTaskGroups(tasks){
 function bindTaskCards(root){$$(root+' .task-card').forEach(e=>{e.onclick=()=>openDrawer(e.dataset.id);e.onkeydown=x=>{if(x.key==='Enter')openDrawer(e.dataset.id)}})}
 function renderToday(){const day=displayDay(),deferredView=UI.filter==='deferred';renderStats(day);$('#todayLabel').textContent=deferredView?'递延任务':`${wd(day)} · ${fmt(day)}`;$('#dateChip').textContent=deferredView?'全部日期':fmt(day);$$('.quick-tab').forEach(b=>b.classList.toggle('active',b.dataset.filter===UI.filter));let ts=(deferredView?scheduleTasks(true):scheduleTasks().filter(t=>taskActiveOn(t,day)));if(UI.filter==='open')ts=ts.filter(t=>!isArchivedTask(t)&&t.status!=='done');if(UI.filter==='done')ts=ts.filter(t=>t.status==='done');if(UI.filter==='P0')ts=ts.filter(t=>t.priority==='P0');if(UI.filter==='inprogress')ts=ts.filter(t=>t.status==='doing');if(deferredView)ts=ts.filter(t=>isSuperseded(t)||t.status==='deferred');const emptyCopy=UI.filter==='inprogress'?['暂无进行中的任务','打开待处理任务并点击“开始任务”，任务就会出现在这里。']:deferredView?['暂无递延记录','未完成的任务递延后，会在这里保留历史记录。']:['今天没有待处理任务','把下一件重要的事放进日程吧。'];$('#todayEmptyTitle').textContent=emptyCopy[0];$('#todayEmptyHint').textContent=emptyCopy[1];$('#todayTaskList').innerHTML=dailyTaskGroups(ts);$('#todayEmpty').classList.toggle('hidden',ts.length>0);bindTaskCards('#todayTaskList')}
 /* ---------------------------------------------------------------------------
-   One day card unfolds on demand. The panel is placed in viewport space rather
-   than inside the rail: the rail clips its own overflow, so a card that grew in
-   place would be cut off exactly when it finally had something to say.
-   Hovering previews it; clicking pins it so the tasks inside can be used.
+   周视图 · one week at a time. Seven ruled columns list each day's tasks
+   outright; the arrows (or ← →) turn the page. Nothing hides behind a hover.
    ------------------------------------------------------------------------- */
-let floatHideTimer=null,floatCard=null,floatSource=null,floatPinned=false,floatOutside=null;
-function removeFloat(){
-  if(floatHideTimer){clearTimeout(floatHideTimer);floatHideTimer=null}
-  if(floatOutside){document.removeEventListener('click',floatOutside);floatOutside=null}
-  floatCard?.remove();
-  floatCard=null;floatSource=null;floatPinned=false;
-  $$('#weekCarousel .axis-day.pinned').forEach(d=>d.classList.remove('pinned'));
+const WEEK_DAY_LIMIT=6;
+function weekLabel(off){
+  if(off===0)return '本周';if(off===-1)return '上周';if(off===1)return '下周';
+  return off>0?`${off} 周后`:`${-off} 周前`;
 }
-/* Sit under the card, or above it when the card is too close to the bottom.
-   The panel is capped to whatever room that side actually has, so a short
-   window scrolls the task list instead of letting the panel cover the card
-   it belongs to. */
-function placeFloat(el,f){
-  const r=el.getBoundingClientRect(),w=f.offsetWidth,gap=10;
-  const roomBelow=innerHeight-r.bottom-gap-14,roomAbove=r.top-gap-14;
-  const flip=roomBelow<Math.min(f.scrollHeight,300)&&roomAbove>roomBelow;
-  f.classList.toggle('flip',flip);
-  f.style.maxHeight=`${Math.round(Math.min(520,Math.max(190,flip?roomAbove:roomBelow)))}px`;
-  const h=f.offsetHeight;
-  f.style.top=`${Math.round(flip?Math.max(14,r.top-gap-h):Math.min(innerHeight-h-14,r.bottom+gap))}px`;
-  f.style.left=`${Math.round(Math.min(Math.max(14,r.left+r.width/2-w/2),innerWidth-w-14))}px`;
+function weekTaskChip(t,iso){
+  const cont=iso>t.date,[c,l]=status(t);
+  const meta=cont?`续 · ${nameOf(t.assignee)}`:`${escapeHTML(t.time||'09:00')} · ${nameOf(t.assignee)}`;
+  return `<button class="week-task ${escapeHTML(t.priority)} ${c}${cont?' cont':''}" type="button" data-id="${escapeHTML(t.id)}" title="${escapeHTML(`${t.name} · ${nameOf(t.assignee)} · ${l}`)}">`
+    +`<span class="week-task-name">${escapeHTML(t.name)}</span>`
+    +`<span class="week-task-meta">${escapeHTML(meta)}${!cont&&isMultiDay(t)?` · ${spanDays(t)} 天`:''}</span></button>`;
 }
-function dayPeekHTML(iso){
-  const ts=sortTasks(scheduleTasks().filter(t=>taskActiveOn(t,iso)));
-  const done=ts.filter(t=>t.status==='done').length;
-  const canAdd=Boolean(S.user?.admin);
-  return `<div class="peek-head"><span>${wd(iso)}</span><strong>${fmt(iso)}</strong>${iso===S.today?'<em>今天</em>':''}</div>`
-    +`<div class="peek-meta">${ts.length?`${ts.length} 项任务 · 完成 ${done}`:'这一天还没有安排'}</div>`
-    +`<div class="peek-tasks">${ts.length?ts.map(t=>`<button class="peek-task ${escapeHTML(t.priority)}" data-task="${escapeHTML(t.id)}" type="button"><span class="priority ${escapeHTML(t.priority)}">${escapeHTML(t.priority)}</span><b>${escapeHTML(t.name)}</b><small>${escapeHTML(nameOf(t.assignee))} · ${t.duration} 分钟 · ${status(t)[1]}${isMultiDay(t)?` · ${spanDays(t)} 天`:''}</small></button>`).join(''):'<div class="peek-empty">这一天还是空的</div>'}</div>`
-    +`<div class="peek-actions">${canAdd?`<button class="peek-add" data-date="${iso}" type="button">${icon('plus')}添加任务</button>`:''}<button class="peek-detail" data-date="${iso}" type="button">查看详情${icon('arrow-right')}</button></div>`;
-}
-/* Clicking anywhere else drops a pinned panel. */
-function bindFloatOutside(el,f){
-  floatOutside=e=>{
-    if(f.isConnected&&!f.contains(e.target)&&!el.contains(e.target))removeFloat();
-  };
-  setTimeout(()=>{if(floatCard===f)document.addEventListener('click',floatOutside)},0);
-}
-function showFloat(el,pin=false){
-  if(floatHideTimer){clearTimeout(floatHideTimer);floatHideTimer=null}
-  /* Already open on this card: just pin or unpin, without rebuilding it. */
-  if(floatSource===el&&floatCard?.isConnected){
-    if(pin===floatPinned)return;
-    floatPinned=pin;
-    el.classList.toggle('pinned',pin);
-    if(pin)bindFloatOutside(el,floatCard);
-    return;
-  }
-  removeFloat();
-  const iso=el.dataset.date,f=document.createElement('section');
-  floatSource=el;floatCard=f;floatPinned=pin;
-  f.className='day-peek';
-  f.dataset.date=iso;
-  f.innerHTML=dayPeekHTML(iso);
-  document.body.appendChild(f);
-  el.classList.toggle('pinned',pin);
-  placeFloat(el,f);
-  f.addEventListener('mouseenter',()=>{if(floatHideTimer){clearTimeout(floatHideTimer);floatHideTimer=null}});
-  f.addEventListener('mouseleave',()=>{if(!floatPinned)hideFloat()});
-  $$('.day-peek [data-task]').forEach(b=>b.onclick=e=>{e.stopPropagation();removeFloat();openDrawer(b.dataset.task)});
-  $('.day-peek .peek-add')?.addEventListener('click',e=>{e.stopPropagation();const d=e.currentTarget.dataset.date;removeFloat();newTask(null,d)});
-  $('.day-peek .peek-detail')?.addEventListener('click',e=>{e.stopPropagation();const d=e.currentTarget.dataset.date;removeFloat();renderDayDetail(d)});
-  if(pin)bindFloatOutside(el,f);
-  requestAnimationFrame(()=>{if(floatCard===f)f.classList.add('show')});
-}
-function hideFloat(immediate=false){
-  if(floatHideTimer){clearTimeout(floatHideTimer);floatHideTimer=null}
-  if(floatPinned&&!immediate)return;
-  if(immediate){removeFloat();return}
-  /* Give the pointer time to travel from the card into the panel. */
-  floatHideTimer=setTimeout(removeFloat,240);
-}
-/* Scrolling the rail is never intercepted — a wheel or a trackpad behaves
-   exactly as the OS intends. What gives it the feel of a dial is that the rail
-   settles onto a whole week once the gesture ends, and that the week nearest
-   the centre is the one that reads as current. */
-let weekMetrics=null,weekWheelFrame=0,weekWheelBound=false,weekSettleTimer=0,weekSettleLock=false,weekScrollIdle=0;
-function measureWeekPanels(){
-  const car=$('#weekCarousel');
-  if(!car){weekMetrics=null;return}
-  weekMetrics=[...car.querySelectorAll('.week-panel')].map(p=>({el:p,top:p.offsetTop,h:p.offsetHeight}));
-}
-function focusWeek(n){
-  if(n===UI.selectedWeek)return;
-  const prev=UI.selectedWeek;
-  UI.selectedWeek=n;
-  renderScheduleScope();
-  /* Only the two panels whose state actually changed are touched, rather than
-     walking all 31 on every crossing. */
-  [prev,n].forEach(w=>{
-    const p=document.querySelector(`#weekCarousel .week-panel[data-week="${w}"]`);
-    if(!p)return;
-    const on=Number(p.dataset.week)===n;
-    p.classList.toggle('focus-week',on);
-    p.classList.toggle('compact-week',!on);
-    const k=p.querySelector('.week-kicker');
-    if(k)k.textContent=on?'正在查看':'滚动查看';
-  });
-}
-/* Park the chosen week in the middle of the rail. The rail used to lean on
-   scrollIntoView, which a just-revealed panel (height 0) cannot honour — the
-   view landed three weeks away from today. */
-function alignWeekRail(){
-  const car=$('#weekCarousel');
-  if(!car||!car.clientHeight)return;
-  measureWeekPanels();
-  const m=(weekMetrics||[]).find(x=>Number(x.el.dataset.week)===UI.selectedWeek);
-  if(!m)return;
-  const max=Math.max(0,car.scrollHeight-car.clientHeight);
-  const target=Math.min(Math.max(0,m.top+m.h/2-car.clientHeight/2),max);
-  if(Math.abs(target-car.scrollTop)<2)return;
-  car.scrollTop=target;
-}
-function updateWeekFocus(){
-  weekWheelFrame=0;
-  /* Glue an open panel to its card while the rail turns — the settle glide
-     fires scroll events of its own, and dropping the panel on those would pull
-     it out from under the pointer that just opened it. */
-  if(floatCard&&floatSource){
-    const r=floatSource.getBoundingClientRect();
-    if(r.bottom<8||r.top>innerHeight-8)removeFloat();else placeFloat(floatSource,floatCard);
-  }
-  const car=$('#weekCarousel');
-  if(!car||!weekMetrics||!weekMetrics.length)return;
-  /* One cheap read tells us whether anything has shifted the panels since they
-     were measured — a web font landing, a panel's height settling. If it has,
-     re-measure before using stale positions. */
-  if(Math.abs(weekMetrics[0].el.offsetTop-weekMetrics[0].top)>2)measureWeekPanels();
-  const mid=car.scrollTop+car.clientHeight/2;
-  /* The week nearest the centre is the one the eye reads as current. An
-     intersection ratio cannot tell them apart here: the rail shows close to a
-     whole panel at a time, so more than one of them scores 1.0 and the pick
-     comes out arbitrary. */
-  let nearest=null,nearestDist=Infinity;
-  for(const m of weekMetrics){
-    const d=Math.abs((m.top+m.h/2)-mid);
-    if(d<nearestDist){nearestDist=d;nearest=Number(m.el.dataset.week)}
-  }
-  if(nearest!==null)focusWeek(nearest);
-}
-/* Let the rail come to rest on a whole week rather than between two. This runs
-   after the gesture stops, never during it, so the scroll itself stays free. */
-function settleWeekRail(){
-  const car=$('#weekCarousel');
-  /* A hidden view has no height to measure against. */
-  if(!car||!car.clientHeight||weekSettleLock)return;
-  if(typeof matchMedia==='function'&&matchMedia('(prefers-reduced-motion: reduce)').matches)return;
-  const el=car.querySelector(`.week-panel[data-week="${UI.selectedWeek}"]`);
-  if(!el)return;
-  const offset=(el.offsetTop+el.offsetHeight/2)-(car.scrollTop+car.clientHeight/2);
-  /* A rail that stopped roughly on a week should be left alone. Only a real
-     halfway stop is worth correcting, otherwise the glide steals the gesture. */
-  if(Math.abs(offset)<el.offsetHeight*0.2)return;
-  /* The glide below fires scroll events of its own; the lock keeps the settle
-     from re-scheduling itself until it has finished. */
-  weekSettleLock=true;
-  car.scrollTo({top:Math.max(0,car.scrollTop+offset),behavior:'smooth'});
-  /* Once the glide is done, look again in case the gesture resumed and stopped
-     inside the locked window — that last stop would have missed its settle.
-     A rail already centred returns immediately, so this cannot loop. */
-  setTimeout(()=>{weekSettleLock=false;settleWeekRail()},340);
-}
-function scheduleWeekWheel(){
-  const car=$('#weekCarousel');
-  /* Light the scrollbar while the rail is turning, so the track reads as the
-     thing being moved. It fades back on its own once the rail is still. */
-  if(car){
-    car.classList.add('scrolling');
-    clearTimeout(weekScrollIdle);
-    weekScrollIdle=setTimeout(()=>car.classList.remove('scrolling'),420);
-  }
-  if(!weekWheelFrame)weekWheelFrame=requestAnimationFrame(updateWeekFocus);
-  /* A short quiet period stands in for "the gesture ended" — it restarts on
-     every scroll event, so it only fires once the rail has stopped moving. */
-  clearTimeout(weekSettleTimer);
-  weekSettleTimer=setTimeout(settleWeekRail,150);
+function weekDayColumn(iso,tasks,admin){
+  const today=iso===S.today,past=iso<S.today,out=iso>DATE_HORIZON,day=sortTasks(tasks.filter(t=>taskActiveOn(t,iso)));
+  const shown=day.slice(0,WEEK_DAY_LIMIT),more=day.length-shown.length,done=day.filter(t=>t.status==='done').length;
+  return `<section class="week-day${today?' today':''}${past?' past':''}${out?' out':''}" data-date="${iso}">`
+    +`<header class="week-day-head"><button class="week-day-open" type="button" data-date="${iso}" aria-label="${escapeHTML(`${wd(iso)} ${fmt(iso)}，${day.length} 项任务`)}"><span>${wd(iso)}</span><strong>${new Date(`${iso}T12:00:00`).getDate()}</strong>${today?'<em>今天</em>':''}</button>`
+    +`${day.length?`<small>${done}/${day.length}</small>`:''}</header>`
+    +`<div class="week-day-tasks">${shown.map(t=>weekTaskChip(t,iso)).join('')}`
+    +`${more>0?`<button class="week-day-more" type="button" data-date="${iso}">还有 ${more} 项</button>`:''}</div>`
+    +`${admin&&!out?`<button class="week-day-add" type="button" data-date="${iso}" aria-label="在 ${escapeHTML(fmt(iso))} 新增任务">${icon('plus')}</button>`:''}</section>`;
 }
 function renderCalendar(){
-  weekObserver?.disconnect();
-  const horizonOffset=weekOffsetFor(DATE_HORIZON);
-  const focus=Math.min(Math.max(UI.selectedWeek||0,-2),horizonOffset);
-  UI.selectedWeek=focus;
-  const minOffset=Math.min(-2,focus-2),maxOffset=Math.max(2,horizonOffset);
-  const offsets=Array.from({length:maxOffset-minOffset+1},(_,i)=>minOffset+i);
-  $('#weekCarousel').innerHTML=offsets.map(off=>{
-    const ds=week(off).filter(d=>d<=DATE_HORIZON),ts=scheduleTasks().filter(t=>ds.some(d=>taskActiveOn(t,d))),is=off===focus;
-    if(!ds.length)return '';
-    return `<section class="week-panel ${is?'focus-week':'compact-week'}" data-week="${off}">`
-      +`<div class="week-panel-header"><div><span class="week-kicker">${is?'正在查看':'滚动查看'}</span><h2>${fmt(ds[0])} — ${fmt(ds.at(-1))}</h2></div>`
-      +`<div class="week-totals"><strong>${ts.length}</strong><span>项任务 · 完成 ${ts.filter(t=>t.status==='done').length}</span></div></div>`
-      +`<div class="week-days"><div class="week-days-track">${ds.map(iso=>{
-        const a=sortTasks(scheduleTasks().filter(t=>taskActiveOn(t,iso)));
-        const today=iso===S.today;
-        return `<article class="axis-day${today?' today-day':''}" data-date="${iso}" tabindex="0" role="button" aria-expanded="false">`
-          +`<div class="axis-day-head"><span>${wd(iso)}</span><strong>${new Date(`${iso}T12:00:00`).getDate()}</strong>${today?'<em>今天</em>':''}</div>`
-          +`<div class="axis-day-count">${a.length?`${a.length} 项 · 完成 ${a.filter(t=>t.status==='done').length}`:'暂无安排'}</div>`
-          +`${scheduleMemberLabels(a)}</article>`}).join('')}</div></div></section>`}).join('');
-  measureWeekPanels();
-  /* Park the current week before anything reads a position, then again once the
-     web font has settled the real panel heights. */
-  alignWeekRail();
-  requestAnimationFrame(()=>{measureWeekPanels();alignWeekRail()});
-  setTimeout(alignWeekRail,150);
-  if(!weekWheelBound){weekWheelBound=true;window.addEventListener('resize',()=>{measureWeekPanels();scheduleWeekWheel()},{passive:true})}
-  $('#weekCarousel').onscroll=scheduleWeekWheel;
-  scheduleWeekWheel();
-  $$('#weekCarousel .axis-day').forEach(d=>{
-    d.onmouseenter=()=>showFloat(d);
-    d.onmouseleave=()=>hideFloat();
-    d.onfocus=()=>showFloat(d);
-    d.onblur=()=>hideFloat();
-    d.onclick=()=>showFloat(d,!floatPinned||floatSource!==d);
-    d.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();showFloat(d,true)}else if(e.key==='Escape'){removeFloat()}};
-  });
+  const horizon=weekOffsetFor(DATE_HORIZON);
+  UI.selectedWeek=Math.min(UI.selectedWeek||0,horizon);
+  const days=week(UI.selectedWeek),tasks=scheduleTasks(),admin=Boolean(S.user?.admin);
+  const inWeek=tasks.filter(t=>days.some(d=>taskActiveOn(t,d))),done=inWeek.filter(t=>t.status==='done').length;
+  $('#weekRangeLabel').textContent=`${weekLabel(UI.selectedWeek)} · ${fmt(days[0])} — ${fmt(days[6])} · ${inWeek.length} 项任务${inWeek.length?` · 完成 ${done}`:''}`;
+  $('#backTodayBtn').classList.toggle('is-current',UI.selectedWeek===0);
+  $('#nextWeekBtn').disabled=UI.selectedWeek>=horizon;
+  const board=$('#weekCarousel');
+  board.dataset.turn=UI.weekDir||'';UI.weekDir='';
+  board.innerHTML=`<div class="week-grid">${days.map(iso=>weekDayColumn(iso,tasks,admin)).join('')}</div>`;
+  $$('#weekCarousel .week-task').forEach(b=>b.onclick=()=>openDrawer(b.dataset.id));
+  $$('#weekCarousel .week-day-open, #weekCarousel .week-day-more').forEach(b=>b.onclick=()=>renderDayDetail(b.dataset.date));
+  $$('#weekCarousel .week-day-add').forEach(b=>b.onclick=()=>newTask(null,b.dataset.date));
+}
+function turnWeek(step){
+  if(step>0&&UI.selectedWeek>=weekOffsetFor(DATE_HORIZON)){toast(`日期范围目前只支持到 ${DATE_HORIZON}`);return}
+  UI.weekDir=step>0?'next':'prev';UI.selectedWeek=(UI.selectedWeek||0)+step;
+  renderScheduleScope();renderCalendar();
 }
 function renderDayDetail(iso){UI.detailDate=iso;switchView('dayDetail')}
 function renderDayContent(){
@@ -510,7 +333,7 @@ function renderDiaryAdmin(){
   const logs=Array.isArray(S.workCompletions)?S.workCompletions.filter(l=>String(l.completedAt||'').slice(0,10)===day).map(l=>({label:`${l.kind==='project'?'项目':'任务'}完成 · ${l.name}`,user:l.assignee||l.owner,at:l.completedAt,project:l.projectName,taskId:l.taskId,projectId:l.projectId,kind:l.kind})):S.tasks.filter(t=>t.status==='done'&&String(t.completedAt||t.date||'').slice(0,10)===day).map(t=>({label:`任务完成 · ${t.name}`,user:t.assignee,at:t.completedAt||t.date,project:projectName(t),taskId:t.id,projectId:t.projectId,kind:'task'}));
   const rows=members.map(u=>{const stats=diaryDayStats(u.id,day),pct=stats.total?Math.round(stats.completed/stats.total*100):0;return `<div class="diary-load-row"><strong title="${escapeHTML(u.id)}">${escapeHTML(nameOf(u.id))}</strong><span>${stats.completed}/${stats.total} 项完成</span><div class="progress"><i style="width:${pct}%"></i></div><b>${pct}%</b></div>`}).join('');
   const projectRows=visibleProjects().filter(p=>p.status==='active').map(p=>{const ts=S.tasks.filter(t=>t.projectId===p.id&&t.status!=='skipped'&&!isSuperseded(t)),done=ts.filter(t=>t.status==='done').length,pct=ts.length?Math.round(done/ts.length*100):0;return `<div class="diary-project-progress"><strong>${escapeHTML(p.name)}</strong><span>${done}/${ts.length} 完成 · ${pct}%</span></div>`}).join('');
-  $('#diaryWorkspace').innerHTML=`<div class="diary-admin"><div class="notebook-shelf-heading"><div><span class="eyebrow">SUPERADMIN · 成员笔记本</span><h2>笔记本展示柜</h2></div><span class="muted">左右滑动选择成员，点击进入个人日记周视图</span></div><div class="notebook-shelf">${members.map(u=>{const r=diaryReport(u.id,S.today);return `<button class="member-notebook" data-member="${escapeHTML(u.id)}"><span class="notebook-cover">${escapeHTML(String(nameOf(u.id)).slice(0,1))}</span><strong>${escapeHTML(nameOf(u.id))}</strong><small>${r?(r.auto?'今日系统已统计':'今日已记录'):'等待今日记录'}</small></button>`}).join('')||'<p class="muted">暂无成员笔记本。</p>'}</div><div class="diary-log-toolbar"><label>查看工作日期<input id="diaryLogDate" type="date" max="${DATE_HORIZON}" value="${escapeHTML(day)}"></label><button class="secondary-btn" id="diaryLogToday">返回今天</button></div><div class="diary-admin-grid"><div class="diary-log-panel"><div class="panel-heading"><div><h2>工作日志 · ${fmt(day)}</h2><span class="muted">仅记录审批通过后完成的任务与项目 · 点击查看详情</span></div></div><div class="diary-log-list">${logs.length?logs.sort((a,b)=>String(b.at||'').localeCompare(String(a.at||''))).map(l=>`<button class="diary-log-item diary-log-button" data-task-id="${escapeHTML(l.taskId||'')}" data-project-id="${escapeHTML(l.projectId||'')}" data-log-kind="${escapeHTML(l.kind||'')}"><i></i><span>${escapeHTML(l.label)}${l.project?`<small class="diary-log-project">${escapeHTML(l.project)}</small>`:''}</span><small>${escapeHTML(l.user?nameOf(l.user):'')}　${icon('chevron-right')}</small></button>`).join(''):'<p class="muted">当日暂无已完成任务或项目。</p>'}</div><div class="diary-projects"><h3>项目当前进度</h3>${projectRows||'<p class="muted">暂无进行中的项目。</p>'}</div></div><div class="diary-load-panel"><div class="panel-heading"><div><h2>成员负载</h2><span class="muted">当日完成任务占比</span></div></div>${rows||'<p class="muted">暂无成员数据。</p>'}</div></div></div>`;
+  $('#diaryWorkspace').innerHTML=`<div class="diary-admin"><div class="notebook-shelf-heading"><div><span class="eyebrow">SUPERADMIN · 成员笔记本</span><h2>笔记本展示柜</h2></div></div><div class="notebook-shelf">${members.map(u=>{const r=diaryReport(u.id,S.today);return `<button class="member-notebook" data-member="${escapeHTML(u.id)}"><span class="notebook-cover">${escapeHTML(String(nameOf(u.id)).slice(0,1))}</span><strong>${escapeHTML(nameOf(u.id))}</strong><small>${r?(r.auto?'今日系统已统计':'今日已记录'):'等待今日记录'}</small></button>`}).join('')||'<p class="muted">暂无成员笔记本。</p>'}</div><div class="diary-log-toolbar"><label>查看工作日期<input id="diaryLogDate" type="date" max="${DATE_HORIZON}" value="${escapeHTML(day)}"></label><button class="secondary-btn" id="diaryLogToday">返回今天</button></div><div class="diary-admin-grid"><div class="diary-log-panel"><div class="panel-heading"><div><h2>工作日志 · ${fmt(day)}</h2></div></div><div class="diary-log-list">${logs.length?logs.sort((a,b)=>String(b.at||'').localeCompare(String(a.at||''))).map(l=>`<button class="diary-log-item diary-log-button" data-task-id="${escapeHTML(l.taskId||'')}" data-project-id="${escapeHTML(l.projectId||'')}" data-log-kind="${escapeHTML(l.kind||'')}"><i></i><span>${escapeHTML(l.label)}${l.project?`<small class="diary-log-project">${escapeHTML(l.project)}</small>`:''}</span><small>${escapeHTML(l.user?nameOf(l.user):'')}　${icon('chevron-right')}</small></button>`).join(''):'<p class="muted">当日暂无已完成任务或项目。</p>'}</div><div class="diary-projects"><h3>项目当前进度</h3>${projectRows||'<p class="muted">暂无进行中的项目。</p>'}</div></div><div class="diary-load-panel"><div class="panel-heading"><div><h2>成员负载</h2></div></div>${rows||'<p class="muted">暂无成员数据。</p>'}</div></div></div>`;
   $$('.member-notebook').forEach(b=>b.onclick=()=>{UI.diaryAuthor=b.dataset.member;UI.diaryWeek=0;UI.diaryDate=null;renderSummary()});
   $('#diaryLogDate').onchange=e=>{if(e.target.value){UI.diaryLogDate=e.target.value;renderSummary()}};
   $('#diaryLogToday').onclick=()=>{UI.diaryLogDate=S.today;renderSummary()};
@@ -928,7 +751,7 @@ function renderAccounts(){
   $('#accountsView .automation-card').classList.toggle('hidden',!admin);
   $('#accountsView .page-intro p').textContent=owner?'Super Admin 可强行指派或调整任务，并管理账户、权限组与密码。':admin?'Admin 可强行指派或调整任务；账户与密码管理由 superadmin 负责。':'你可以切换核验账户；项目 Owner 可邀请协作者，成员可在收件箱接受项目邀请。';
   const superadmins=u.filter(x=>roleOf(x)==='superadmin'),admins=u.filter(x=>roleOf(x)==='admin'),members=u.filter(x=>roleOf(x)==='member');
-  const section=(title,hint,list)=>`<div class="account-group"><div class="account-group-heading"><strong>${title}</strong><span>${list.length}</span><small>${hint}</small></div>${list.map(x=>renderAccountItem(x,owner,admin)).join('')||'<p class="muted">暂无账户。</p>'}</div>`;
+  const section=(title,hint,list)=>`<div class="account-group"><div class="account-group-heading"><strong>${title}</strong><span>${list.length}</span></div>${list.map(x=>renderAccountItem(x,owner,admin)).join('')||'<p class="muted">暂无账户。</p>'}</div>`;
   $('#accountList').innerHTML=section('superadmin 权限组','全部权限，含账户、角色与密码管理',superadmins)+section('admin 权限组','全部业务与 AI 权限，账户管理除外',admins)+section('普通用户','按项目归属以 Owner 或协作者身份参与',members);
   $$('.switch-login').forEach(b=>b.onclick=async()=>{try{await api('/api/logout',{});showAuth();$('#loginUser').value=b.dataset.user;$('#loginPass').focus()}catch(e){toast(e.message)}});
   $$('.toggle-account').forEach(b=>b.onclick=async()=>{try{await act('account.toggle',{id:b.dataset.user,active:b.dataset.active==='0'});toast(b.dataset.active==='0'?'账户已启用':'账户已停用')}catch(e){}});
@@ -1132,7 +955,7 @@ function renderScheduleScope(){
   const tasks=scheduleTasks().filter(t=>dates.some(d=>taskActiveOn(t,d)));
   $('#scheduleScopeTitle').textContent=UI.member==='all'?'全部成员的安排':`${UI.member} 的安排`;
   $('#scheduleScopeHint').textContent=`${UI.view==='calendar'?'当前周':'当日'} ${tasks.length} 项任务 · ${new Set(tasks.map(t=>t.assignee)).size} 人有安排`;
-  select.onchange=()=>{UI.member=select.value;hideFloat(true);renderStats();switchView(UI.view)};
+  select.onchange=()=>{UI.member=select.value;renderStats();switchView(UI.view)};
 }
 const projectStatus=p=>({active:'进行中',pending:'待审批',pending_completion:'完成待审批',rejected:'已驳回',paused:'已暂停',done:'已完成',archived:'已归档'}[p.status]||'未设置');
 const isProjectHidden=(p,today=S.today)=>Boolean(p&&(p.status==='done'||p.status==='archived'||(p.end&&today&&p.end<today)));
@@ -1191,16 +1014,16 @@ function renderTimeline(){
   $('#timelineProjectCount').textContent=`${model.rows.length} 个项目`;
   $('#timelineEmpty').classList.toggle('hidden',model.rows.length>0);
   scroll.classList.toggle('hidden',model.rows.length===0);
-  $('.timeline-legend').classList.toggle('hidden',model.rows.length===0);
+  
   grid.style.setProperty('--day-width',`${dayWidth}px`);
   grid.style.setProperty('--track-width',`${model.days*dayWidth}px`);
   const days=Array.from({length:model.days},(_,i)=>{const n=model.start+i,iso=dateFromNumber(n),d=new Date(n*DAY_MS);return {n,iso,day:d.getUTCDate(),dow:d.getUTCDay(),month:iso.slice(0,7)}});
   const months=[];
   for(const d of days){const last=months.at(-1);if(last?.month===d.month)last.count++;else months.push({month:d.month,offset:d.n-model.start,count:1})}
   const todayLine=`<i class="gantt-today-line" style="left:${(model.today-model.start+.5)*dayWidth}px" aria-hidden="true"></i>`;
-  grid.innerHTML=`<div class="gantt-header"><div class="gantt-corner"><strong>项目 / Owner</strong><small>每行一个项目</small></div><div class="gantt-axis"><div class="gantt-months">${months.map(m=>`<span style="left:${m.offset*dayWidth}px;width:${m.count*dayWidth}px"><b>${m.month.replace('-',' 年 ')} 月</b></span>`).join('')}</div><div class="gantt-dates">${days.map(d=>`<div class="gantt-date ${[0,6].includes(d.dow)?'weekend':''} ${d.n===model.today?'is-today':''}" title="${d.iso}"><strong>${d.day}</strong><small>${['日','一','二','三','四','五','六'][d.dow]}</small></div>`).join('')}</div></div></div>${model.rows.map((r,i)=>{
+  grid.innerHTML=`<div class="gantt-header"><div class="gantt-corner"><strong>项目 / Owner</strong></div><div class="gantt-axis"><div class="gantt-months">${months.map(m=>`<span style="left:${m.offset*dayWidth}px;width:${m.count*dayWidth}px"><b>${m.month.replace('-',' 年 ')} 月</b></span>`).join('')}</div><div class="gantt-dates">${days.map(d=>`<div class="gantt-date ${[0,6].includes(d.dow)?'weekend':''} ${d.n===model.today?'is-today':''}" title="${d.iso}"><strong>${d.day}</strong><small>${['日','一','二','三','四','五','六'][d.dow]}</small></div>`).join('')}</div></div></div>${model.rows.map((r,i)=>{
     const p=r.project,palette=['coral','blue','green','purple','gold'][i%5],range=r.invalid?'日期待修正':`${p.start} → ${p.end||'未设截止'}`;
-    return `<div class="gantt-row" data-project="${escapeHTML(p.id)}"><div class="gantt-project"><div><i class="project-color ${palette}"></i><strong title="${escapeHTML(p.name)}">${escapeHTML(p.name)}</strong></div><small>${escapeHTML(p.owner)} <span>· ${projectStatus(p)}</span></small><span class="gantt-range">${escapeHTML(range)}</span></div><div class="gantt-track">${todayLine}${r.invalid?'<span class="gantt-invalid">请修正项目起止日期</span>':`<div class="gantt-bar ${palette} ${r.openEnded?'open-ended':''} ${['pending','rejected'].includes(p.status)?'awaiting':''}" style="left:${r.offset*dayWidth+3}px;width:${Math.max(26,r.span*dayWidth-6)}px" tabindex="0" aria-label="${escapeHTML(p.name)}，${escapeHTML(range)}，${projectStatus(p)}" title="${escapeHTML(p.name)} · ${escapeHTML(p.owner)}\n${escapeHTML(range)} · ${projectStatus(p)}"><span>${escapeHTML(p.name)}${r.openEnded?' · 未设截止 →':''}</span></div>`}</div></div>`;
+    return `<div class="gantt-row" data-project="${escapeHTML(p.id)}"><div class="gantt-project"><div><i class="project-color ${palette}"></i><strong title="${escapeHTML(p.name)}">${escapeHTML(p.name)}</strong></div><small>${escapeHTML(nameOf(p.owner))} <span>· ${projectStatus(p)}</span></small><span class="gantt-range">${escapeHTML(range)}</span></div><div class="gantt-track">${todayLine}${r.invalid?'<span class="gantt-invalid">请修正项目起止日期</span>':`<div class="gantt-bar ${palette} ${r.openEnded?'open-ended':''} ${['pending','rejected'].includes(p.status)?'awaiting':''}" style="left:${r.offset*dayWidth+3}px;width:${Math.max(26,r.span*dayWidth-6)}px" tabindex="0" aria-label="${escapeHTML(p.name)}，${escapeHTML(range)}，${projectStatus(p)}" title="${escapeHTML(p.name)} · ${escapeHTML(p.owner)}\n${escapeHTML(range)} · ${projectStatus(p)}"><span>${escapeHTML(p.name)}${r.openEnded?' · 未设截止 →':''}</span></div>`}</div></div>`;
   }).join('')}`;
   const updateRange=()=>{
     UI.timelineScroll=scroll.scrollLeft;
@@ -1229,7 +1052,7 @@ document.addEventListener('click',e=>{
   if(e.target.closest('#accountMenu')||e.target.closest('#workspaceSwitcher'))return;
   toggleAccountMenu(false);
 });
-document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleAccountMenu(false)});$$('.filter-link').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;switchView('today')});$$('.quick-tab').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;renderToday()});$('#prevDay').onclick=()=>{UI.dayOffset=(UI.dayOffset||0)-1;renderToday()};$('#nextDay').onclick=()=>{if(displayDay()>=DATE_HORIZON){toast(`日期范围目前只支持到 ${DATE_HORIZON}`);return}UI.dayOffset=(UI.dayOffset||0)+1;renderToday()};$('#inboxBtn').onclick=()=>switchView('inbox');document.querySelector('.icon-btn[title="搜索"]').onclick=openSearch;$('#closeDrawer').onclick=closeDrawer;$('#closeModal').onclick=closeModal;$('#modalBackdrop').onclick=e=>{if(e.target.id==='modalBackdrop')closeModal()};$('#taskDrawer').onclick=e=>{if(e.target.id==='taskDrawer')closeDrawer()};$('#backWeekBtn').onclick=()=>switchView('calendar');$('#backTodayBtn').onclick=()=>{UI.selectedWeek=0;UI.dayOffset=0;switchView('calendar')};$('#addProjectBtn').onclick=newProject;$('#addProjectTopBtn').onclick=newProject;$('#addTaskBtn').onclick=newTask;$('#emptyAddBtn').onclick=newTask;$('#timelineAddProjectBtn').onclick=newProject;$('#createFixedBtn').onclick=fixedTask;$('#collectionSettingsBtn').onclick=collectionSettings;$('#forceAssignBtn').onclick=()=>switchView('projects');$('#runAutomationBtn').onclick=()=>act('scheduler.run',{});$('#markAllReadBtn').onclick=()=>act('inbox.read',{all:true});$('#generateSummaryBtn').onclick=openTodayDiary;
+document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleAccountMenu(false)});$$('.filter-link').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;switchView('today')});$$('.quick-tab').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;renderToday()});$('#prevDay').onclick=()=>{UI.dayOffset=(UI.dayOffset||0)-1;renderToday()};$('#nextDay').onclick=()=>{if(displayDay()>=DATE_HORIZON){toast(`日期范围目前只支持到 ${DATE_HORIZON}`);return}UI.dayOffset=(UI.dayOffset||0)+1;renderToday()};$('#inboxBtn').onclick=()=>switchView('inbox');document.querySelector('.icon-btn[title="搜索"]').onclick=openSearch;$('#closeDrawer').onclick=closeDrawer;$('#closeModal').onclick=closeModal;$('#modalBackdrop').onclick=e=>{if(e.target.id==='modalBackdrop')closeModal()};$('#taskDrawer').onclick=e=>{if(e.target.id==='taskDrawer')closeDrawer()};$('#backWeekBtn').onclick=()=>switchView('calendar');$('#backTodayBtn').onclick=()=>{if(UI.selectedWeek)UI.weekDir=UI.selectedWeek>0?'prev':'next';UI.selectedWeek=0;UI.dayOffset=0;switchView('calendar');renderCalendar()};$('#prevWeekBtn').onclick=()=>turnWeek(-1);$('#nextWeekBtn').onclick=()=>turnWeek(1);document.addEventListener('keydown',e=>{if(UI.view!=='calendar'||e.altKey||e.ctrlKey||e.metaKey||e.target.closest('input,textarea,select,[contenteditable]')||!$('#modalBackdrop').classList.contains('hidden')||!$('#taskDrawer').classList.contains('hidden'))return;if(e.key==='ArrowLeft'){e.preventDefault();turnWeek(-1)}else if(e.key==='ArrowRight'){e.preventDefault();turnWeek(1)}});$('#addProjectBtn').onclick=newProject;$('#addProjectTopBtn').onclick=newProject;$('#addTaskBtn').onclick=newTask;$('#emptyAddBtn').onclick=newTask;$('#timelineAddProjectBtn').onclick=newProject;$('#createFixedBtn').onclick=fixedTask;$('#collectionSettingsBtn').onclick=collectionSettings;$('#forceAssignBtn').onclick=()=>switchView('projects');$('#runAutomationBtn').onclick=()=>act('scheduler.run',{});$('#markAllReadBtn').onclick=()=>act('inbox.read',{all:true});$('#generateSummaryBtn').onclick=openTodayDiary;
 window.addEventListener('focus',()=>{if(UI.view==='inbox')refreshInboxState()});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&UI.view==='inbox')refreshInboxState()});
 hydrateIcons();
