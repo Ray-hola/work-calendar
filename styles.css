@@ -2348,6 +2348,55 @@ body::before { display: none; }
 .account-group > .muted { padding: 4px 8px 10px; margin: 0; }
 
 /* --------------------------------------------------------------------------
+   Timeline · ruled like the week board, bars as slim bands of ink
+   -------------------------------------------------------------------------- */
+.timeline-toolbar { margin: -6px 0 16px; }
+.timeline-scroll { border: 0; border-top: 1px solid var(--ink); border-radius: 0; box-shadow: none; background: transparent; }
+#timelineView .page-intro, #chatView .page-intro { border-bottom: 0; padding-bottom: 16px; margin-bottom: 8px; }
+#timelineView .page-intro::after, #chatView .page-intro::after { display: none; }
+@media (max-width: 640px) { .gantt-grid { --label-width: 128px; } .gantt-project strong { font-size: 14px; } .gantt-range { display: none; } }
+.timeline-toolbar strong { font-size: 15px; }
+#timelineVisibleRange { font: 600 10.5px/1 var(--font-sans); letter-spacing: .12em; color: var(--muted); margin-top: 6px; }
+.timeline-scroll { border-top: 0; }
+.gantt-grid { border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+.gantt-header { background: var(--surface); border-bottom: 1px solid var(--line-soft); }
+.gantt-corner { background: var(--surface); border-right: 1px solid var(--line-soft); }
+.gantt-corner strong { font: 600 10.5px/1 var(--font-sans); letter-spacing: .14em; color: var(--muted); }
+.gantt-months span b { font: 600 10.5px/1 var(--font-sans); letter-spacing: .14em; color: var(--muted); }
+.gantt-date strong { font-family: var(--font-serif); font-size: 14px; font-weight: 600; color: var(--ink); }
+.gantt-date small { font-size: 10px; color: var(--faint); }
+.gantt-date.weekend { background: var(--surface-sunk); }
+.gantt-date.weekend strong { color: var(--faint); }
+.gantt-date.is-today strong { color: var(--surface); background: var(--accent); border-radius: 6px; padding: 1px 5px; }
+.gantt-row { border-bottom: 1px solid var(--line-soft); transition: background var(--t) var(--ease); }
+.gantt-row:hover { background: var(--surface-sunk); }
+.gantt-project { background: var(--surface); border-right: 1px solid var(--line-soft); }
+.gantt-row:hover .gantt-project { background: var(--surface-sunk); }
+.gantt-project strong { font-family: var(--font-serif); font-size: 16px; font-weight: 600; }
+.gantt-project small, .gantt-range { color: var(--muted); }
+.gantt-today-line { background: var(--accent); width: 2px; opacity: .8; }
+.gantt-bar { height: 26px; border-radius: 8px; box-shadow: none; font-size: 12px; font-weight: 600; transition: transform var(--t-slow) var(--ease-out), box-shadow var(--t-slow) var(--ease-out); }
+.gantt-bar:hover, .gantt-bar:focus-visible { transform: translateY(-2px); box-shadow: 0 12px 22px -14px rgba(64, 54, 42, .6); outline: none; }
+
+/* --------------------------------------------------------------------------
+   Chat · the room sits on the sheet; channels are a quiet index
+   -------------------------------------------------------------------------- */
+.chat-room { background: transparent; border: 0; border-top: 1px solid var(--ink); border-radius: 0; box-shadow: none; min-height: calc(100vh - 300px); }
+.chat-side { background: transparent; border-right: 1px solid var(--line-soft); padding: 14px 12px 14px 0; }
+.chat-side-title { font: 600 10.5px/1 var(--font-sans); letter-spacing: .14em; color: var(--muted); padding: 0 8px 10px; }
+.chat-channel { border-radius: 10px; border: 1px solid transparent; transition: background var(--t) var(--ease), border-color var(--t) var(--ease); }
+.chat-channel:hover { background: var(--surface-sunk); }
+.chat-channel.active, .chat-channel[aria-selected="true"] { background: var(--surface-sunk); border-color: var(--line-soft); box-shadow: none; }
+.chat-main { background: transparent; }
+.chat-bar { background: transparent; border-bottom: 1px solid var(--line-soft); padding-left: 20px; }
+.chat-current { font-size: 18px; }
+.chat-log { padding: 18px 20px; }
+.chat-text { border-radius: 12px; background: var(--surface-sunk); border-color: var(--line-soft); }
+.chat-compose { background: transparent; border-top: 1px solid var(--line-soft); padding-left: 20px; }
+.chat-compose textarea { border-radius: 12px; background: var(--surface); }
+.chat-day { background: var(--surface); }
+
+/* --------------------------------------------------------------------------
    Responsive · the sheet reflows, the rail folds into a masthead strip
    -------------------------------------------------------------------------- */
 @media (max-width: 1180px) {
