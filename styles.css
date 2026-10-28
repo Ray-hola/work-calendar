@@ -17,7 +17,7 @@
 --c-purple-soft:#EFEAF8;--c-purple-line:#C6B6E4;--c-purple-ink:#775C9E;--c-purple:#8B6BAE;
 --c-gold-soft:#F8EFD9;--c-gold-line:#E0C98F;--c-gold-ink:#8E6E2B;
 --font-sans:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Noto Sans SC','Microsoft YaHei',sans-serif;
---font-serif:'Palatino Linotype','Iowan Old Style',Palatino,'Book Antiqua','Noto Serif SC','Songti SC','Source Han Serif SC','STSong',Georgia,serif;
+--font-serif:'Palatino Linotype','Iowan Old Style',Palatino,'Book Antiqua','Noto Serif SC','Source Han Serif SC','Songti SC','PingFang SC','Microsoft YaHei',serif;
 --shadow:0 1px 2px rgba(64,54,42,.04),0 12px 30px rgba(64,54,42,.07);
 --shadow-sm:0 1px 2px rgba(64,54,42,.05);
 --shadow-md:0 4px 14px rgba(64,54,42,.08),0 18px 44px rgba(64,54,42,.08);
@@ -2395,6 +2395,27 @@ body::before { display: none; }
 .chat-compose { background: transparent; border-top: 1px solid var(--line-soft); padding-left: 20px; }
 .chat-compose textarea { border-radius: 12px; background: var(--surface); }
 .chat-day { background: var(--surface); }
+
+/* --------------------------------------------------------------------------
+   Day tab · a tear-off calendar leaf beside the day's title
+   -------------------------------------------------------------------------- */
+@keyframes leafTurn { 0% { transform: perspective(500px) rotateX(-70deg); opacity: 0; } 60% { transform: perspective(500px) rotateX(8deg); opacity: 1; } 100% { transform: none; } }
+#todayView .page-intro { justify-content: flex-start; align-items: center; gap: 28px; }
+#todayView .page-intro > .date-chip { margin-left: auto; }
+.day-tab { position: relative; flex: none; display: grid; justify-items: center; width: 92px; padding: 14px 0 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 1px 0 var(--surface) inset, 0 16px 30px -22px rgba(64, 54, 42, .55); transform-origin: top center; }
+.day-tab::before { content: ''; position: absolute; left: -1px; right: -1px; top: -1px; height: 22px; border-radius: 14px 14px 0 0; background: var(--accent); }
+.day-tab::after { content: ''; position: absolute; left: 10px; right: 10px; top: 21px; height: 0; border-top: 1px dashed rgba(255, 253, 249, .7); }
+.day-tab span { position: relative; z-index: 1; margin-top: -9px; font: 600 10.5px/1 var(--font-sans); letter-spacing: .14em; color: var(--surface); }
+.day-tab strong { margin-top: 16px; font-family: var(--font-serif); font-size: 44px; font-weight: 600; line-height: .9; letter-spacing: -.02em; color: var(--ink); }
+.day-tab small { margin-top: 8px; font: 600 10.5px/1 var(--font-sans); letter-spacing: .14em; color: var(--muted); }
+.day-tab:not(.is-today)::before { background: var(--line-strong); }
+.day-tab.turn { animation: leafTurn .5s var(--ease-out) both; }
+@media (max-width: 640px) {
+  #todayView .page-intro { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 16px; }
+  #todayView .page-intro > .date-chip { margin-left: 0; }
+  .day-tab { width: 72px; padding: 12px 0 10px; }
+  .day-tab strong { font-size: 34px; margin-top: 14px; }
+}
 
 /* --------------------------------------------------------------------------
    Responsive · the sheet reflows, the rail folds into a masthead strip
