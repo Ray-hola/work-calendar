@@ -227,20 +227,21 @@ test('notices can be deleted from the inbox, invitations cannot', () => {
   assert.ok(els['#inboxToolbar'].innerHTML.includes('已选 1 条'));
 });
 
-test('the archive files briefs into month drawers, newest first', () => {
+test('the archive files briefs into month boxes, newest first', () => {
   const a=app();
   const drawers=a.json(`archiveDrawers([{date:'2026-09-30'},{date:'2026-10-02'},{date:'2026-10-28'},{date:'2026-09-01'}]).map(d=>[d.month,d.files.map(f=>f.date)])`);
   assert.deepEqual(drawers, [['2026-10',['2026-10-28','2026-10-02']],['2026-09',['2026-09-30','2026-09-01']]]);
   const folder=a.run(`archiveFile({date:'2026-10-28',totals:{completed:3,tasks:4,load:90,members:2,projects:1},riskCount:2},5)`);
   assert.ok(folder.includes('--i:5;--tab:1')&&folder.includes('<b>28</b>周三')&&folder.includes('完成 3/4 项 · 1.5h')&&folder.includes('2 条关注'));
-  // One cabinet a year with a drawer for every month; empty months cannot be opened.
-  a.run(`UI.archiveOpen='2026-10'`);
-  const cabinet=a.run(`archiveCabinet(2026,new Map([['2026-10',[{date:'2026-10-28'},{date:'2026-10-02'}]]]))`);
-  assert.equal((cabinet.match(/class="cab-drawer/g)||[]).length,12);
-  assert.equal((cabinet.match(/ disabled/g)||[]).length,11);
-  assert.ok(cabinet.includes('cab-drawer is-out" data-month="2026-10"')&&cabinet.includes('<small>2 份</small>'));
-  const stage=a.run(`archiveDrawerStage('2026-10',[{date:'2026-10-28'},{date:'2026-10-02'}])`);
-  assert.ok(stage.includes('--n:2')&&stage.indexOf('2026-10-28')<stage.indexOf('2026-10-02')&&stage.includes('把 10 月抽屉放回'));
+  // One box a month: the picked folder is marked, the newest stands at the front.
+  const box=a.run(`archiveBox('2026-10',[{date:'2026-10-28'},{date:'2026-10-02'}],'2026-10-02')`);
+  assert.ok(box.includes('--n:2')&&box.indexOf('2026-10-28')<box.indexOf('2026-10-02')&&box.includes('<b>10 月</b>'));
+  assert.equal((box.match(/is-picked/g)||[]).length,1);
+  assert.ok(box.includes('archive-file is-picked" data-date="2026-10-02"'));
+  // Ruler ticks sit at their day of the month, so 1st and 31st reach the ends.
+  const ruler=a.run(`archiveRuler('2026-10',[{date:'2026-10-31'},{date:'2026-10-16'},{date:'2026-10-01'}],'2026-10-16')`);
+  assert.ok(ruler.includes('--at:100.00%')&&ruler.includes('--at:50.00%')&&ruler.includes('--at:0.00%'));
+  assert.ok(ruler.includes('aria-valuemax="31"')&&ruler.includes('aria-valuenow="16"')&&ruler.includes('ruler-tick is-picked" data-date="2026-10-16"'));
   const doc=a.run(`briefDocument({date:'2026-10-28',content:{totals:{completed:3,tasks:4,load:90,members:2,projects:1},risks:['<b>风险</b>'],projects:[],members:[{name:'王二',completed:3,tasks:4,load:90,source:'diary',summary:{done:'联调',next:'上线'}}]}})`);
   assert.ok(doc.includes('2026年10月28日 · 周三')&&doc.includes('本人日记')&&doc.includes('<dt>完成</dt><dd>联调</dd>'));
   assert.ok(!doc.includes('<b>风险</b>'), '档案内容要转义');

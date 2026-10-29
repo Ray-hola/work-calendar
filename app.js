@@ -1226,11 +1226,11 @@ async function openPip(){
   pipWindow.addEventListener('pagehide',()=>{pipTimers.forEach(clearInterval);pipTimers=[];pipWindow=null});
 }
 /* ---------------------------------------------------------------------------
-   档案室 · line-drawn, isometric: one card-catalogue cabinet per year, one
-   drawer per month. Taking a drawer out brings it forward with its folders
-   standing newest-first; hovering or focusing one lifts it clear of the stack
-   and a click opens the whole brief. The snapshot only carries index cards;
-   the full brief is fetched on open.
+   档案室 · one line-drawn archive box per month, its folders standing newest
+   at the front. The arrows change the box. Sliding the pointer across the box
+   or along the date ruler picks a folder, which lifts clear of the stack and
+   reads out in the caption; a click opens the whole brief. The snapshot only
+   carries index cards; the full brief is fetched on open.
    ------------------------------------------------------------------------- */
 const WEEKDAY_SHORT=['周日','周一','周二','周三','周四','周五','周六'];
 const briefCards=()=>(S.reports||[]).filter(r=>r.kind==='brief');
@@ -1244,101 +1244,107 @@ function archiveDrawers(cards){
   return [...months].map(([month,files])=>({month,files}));
 }
 const hours=minutes=>(Number(minutes||0)/60).toFixed(1);
-function archiveFile(card,index){
+const archiveDay=date=>{const d=new Date(`${date}T12:00:00`);return `${d.getMonth()+1}月${d.getDate()}日 · ${WEEKDAY_SHORT[d.getDay()]}`};
+function archiveFile(card,index,picked=false){
   const d=new Date(`${card.date}T12:00:00`),t=card.totals||{};
-  return `<button class="archive-file" data-date="${escapeHTML(card.date)}" style="--i:${index};--tab:${index%4}" aria-label="${escapeHTML(card.date)} 团队日报"><span class="file-sheet" aria-hidden="true"><span class="file-tab"><b>${d.getDate()}</b>${WEEKDAY_SHORT[d.getDay()]}</span><span class="file-face"></span></span><span class="file-body" hidden><strong>团队日报 · ${d.getMonth()+1}月${d.getDate()}日</strong><span>完成 ${t.completed||0}/${t.tasks||0} 项 · ${hours(t.load)}h</span><span>${t.members||0} 位成员 · ${t.projects||0} 个项目${card.riskCount?` · ${card.riskCount} 条关注`:''}</span></span></button>`;
+  return `<button class="archive-file${picked?' is-picked':''}" data-date="${escapeHTML(card.date)}" style="--i:${index};--tab:${index%4}" tabindex="-1" aria-label="${escapeHTML(card.date)} 团队日报"><span class="file-sheet" aria-hidden="true"><span class="file-tab"><b>${d.getDate()}</b>${WEEKDAY_SHORT[d.getDay()]}</span><span class="file-face"></span></span><span class="file-body" hidden><strong>团队日报 · ${archiveDay(card.date)}</strong><span>完成 ${t.completed||0}/${t.tasks||0} 项 · ${hours(t.load)}h</span><span>${t.members||0} 位成员 · ${t.projects||0} 个项目${card.riskCount?` · ${card.riskCount} 条关注`:''}</span></span></button>`;
 }
-function archiveCabinet(year,drawers){
-  const slots=Array.from({length:12},(_,i)=>{
-    const month=`${year}-${String(i+1).padStart(2,'0')}`,files=drawers.get(month)||[],out=UI.archiveOpen===month;
-    return `<button class="cab-drawer${out?' is-out':''}" data-month="${month}"${files.length?'':' disabled'} aria-expanded="${out}" aria-label="${year} 年 ${i+1} 月 · ${files.length} 份"><span class="cab-label"><b>${i+1}月</b>${files.length?`<small>${files.length} 份</small>`:''}</span><span class="cab-pull" aria-hidden="true"></span></button>`;
-  }).join('');
-  return `<div class="cabinet"><span class="cabinet-ground"></span><span class="cabinet-top"></span><span class="cabinet-side"></span><div class="cabinet-front"><span class="cabinet-plaque">${year}</span><div class="cabinet-drawers">${slots}</div></div></div>`;
-}
-function archiveDrawerStage(month,files){
+function archiveBox(month,files,pick){
   const [year,mon]=month.split('-');
-  return `<div class="drawer-stage" style="--n:${files.length}"><div class="open-drawer"><span class="od-ground"></span><span class="od-floor"></span><span class="od-side is-left"></span><span class="od-side is-right"></span><span class="od-back"></span>${files.map(archiveFile).join('')}<button class="od-front" aria-label="把 ${Number(mon)} 月抽屉放回"><span class="od-label"><b>${Number(mon)} 月</b><small>${escapeHTML(year)} · ${files.length} 份</small></span><span class="od-pull" aria-hidden="true"></span></button></div></div><div class="drawer-caption" aria-hidden="true"><div class="eyebrow">${escapeHTML(year)} 年 ${Number(mon)} 月 · ${files.length} 份</div><div class="caption-body"></div></div><button class="secondary-btn drawer-return">放回抽屉</button>`;
+  return `<div class="drawer-stage" style="--n:${files.length}"><div class="open-drawer"><span class="od-ground"></span><span class="od-floor"></span><span class="od-side is-left"></span><span class="od-side is-right"></span><span class="od-back"></span>${files.map((f,i)=>archiveFile(f,i,f.date===pick)).join('')}<span class="od-front"><span class="od-label"><b>${Number(mon)} 月</b><small>${escapeHTML(year)} · ${files.length} 份</small></span><span class="od-pull"></span></span></div></div>`;
+}
+/* Ticks sit where their day falls in the month, so gaps in the record show. */
+function archiveRuler(month,files,pick){
+  const [y,m]=month.split('-').map(Number),days=new Date(y,m,0).getDate();
+  const ticks=files.map(f=>{const day=Number(String(f.date).slice(8,10));return `<span class="ruler-tick${f.date===pick?' is-picked':''}" data-date="${escapeHTML(f.date)}" style="--at:${((day-1)/(days-1)*100).toFixed(2)}%"><b>${day}</b></span>`}).join('');
+  return `<div class="archive-ruler" role="slider" tabindex="0" aria-label="选择日期" aria-valuemin="1" aria-valuemax="${days}" aria-valuenow="${Number(String(pick||'').slice(8,10))||1}" aria-valuetext="${pick?archiveDay(pick):''}"><span class="ruler-end">1</span><div class="ruler-track">${ticks}</div><span class="ruler-end">${days}</span></div>`;
 }
 const archiveStill=()=>matchMedia('(prefers-reduced-motion: reduce)').matches||!document.body.animate;
 function renderArchive(){
   const root=$('#archiveCabinet');if(!root)return;
-  const cards=briefCards(),drawers=new Map(archiveDrawers(cards).map(x=>[x.month,x.files]));
-  if(UI.archiveOpen&&!drawers.has(UI.archiveOpen))UI.archiveOpen=null;
-  const thisYear=Number(String(S.today||'').slice(0,4))||new Date().getFullYear();
-  const first=Math.min(thisYear,...cards.map(c=>Number(String(c.date).slice(0,4))).filter(Boolean));
-  const years=Array.from({length:thisYear-first+1},(_,i)=>first+i);
+  const cards=briefCards(),drawers=archiveDrawers(cards),months=drawers.map(x=>x.month);
+  if(!months.includes(UI.archiveMonth))UI.archiveMonth=months[0]||null;
+  const files=drawers.find(x=>x.month===UI.archiveMonth)?.files||[];
+  if(!files.some(f=>f.date===UI.archivePick))UI.archivePick=files[0]?.date||null;
   $('#archiveEyebrow').textContent=`团队日报 · ${cards.length} 份`;
-  /* Refreshes re-render every view; leave the room alone unless something in it
-     changed, so a lifted folder does not drop back mid-hover. */
-  const key=JSON.stringify([cards,UI.archiveOpen]);
+  /* Refreshes re-render every view; leave the box alone unless something in it
+     changed, so the picked folder does not drop back mid-slide. */
+  const key=JSON.stringify([cards,UI.archiveMonth]);
   if(root.dataset.key===key)return;
   root.dataset.key=key;
-  const open=UI.archiveOpen;
-  root.innerHTML=`<div class="archive-room${open?' is-open':''}" style="--years:${years.length}"><div class="room-space"><div class="cabinet-row">${years.map(y=>archiveCabinet(y,drawers)).join('')}</div></div><span class="room-dim"></span><div class="drawer-slot">${open?archiveDrawerStage(open,drawers.get(open)):''}</div></div>`;
-  $$('#archiveCabinet .cab-drawer').forEach(b=>b.onclick=e=>UI.archiveOpen===b.dataset.month?closeArchiveDrawer():openArchiveDrawer(b.dataset.month,b,e.detail===0));
-  bindArchiveDrawer();
+  if(!files.length){root.innerHTML=`<div class="archive-room is-empty"><div class="empty-state"><div class="empty-icon">${icon('archive')}</div><h3>档案室还是空的</h3></div></div>`;return}
+  const at=months.indexOf(UI.archiveMonth),[year,mon]=UI.archiveMonth.split('-');
+  root.innerHTML=`<div class="archive-room"><header class="box-title"><strong>${escapeHTML(year)} 年 ${Number(mon)} 月</strong><small>${files.length} 份</small></header><div class="box-stage">${archiveBox(UI.archiveMonth,files,UI.archivePick)}<button class="box-step is-prev" data-step="1"${at<months.length-1?'':' disabled'} aria-label="上一个月">${icon('chevron-left')}</button><button class="box-step is-next" data-step="-1"${at>0?'':' disabled'} aria-label="下一个月">${icon('chevron-right')}</button></div><footer class="box-foot"><div class="drawer-caption"><div class="caption-body" aria-live="polite"></div><button class="secondary-btn caption-open">打开</button></div>${archiveRuler(UI.archiveMonth,files,UI.archivePick)}</footer></div>`;
+  bindArchive();
   fitArchiveDrawer(root.querySelector('.drawer-stage'));
+  pickArchive(UI.archivePick);
 }
-/* The card beside the drawer reads out whichever folder is up, in flat type,
-   so the 3D tabs only need to carry the day. */
-function bindArchiveDrawer(){
-  const caption=$('#archiveCabinet .caption-body'),show=b=>{if(caption&&b)caption.innerHTML=b.querySelector('.file-body').innerHTML};
-  $$('#archiveCabinet .archive-file').forEach(b=>{b.onclick=()=>openBrief(b.dataset.date);b.onpointerenter=b.onfocus=()=>show(b)});
-  show($('#archiveCabinet .archive-file'));
-  $$('#archiveCabinet .od-front,#archiveCabinet .drawer-return,#archiveCabinet .room-dim').forEach(b=>b.onclick=closeArchiveDrawer);
+function pickArchive(date){
+  const root=$('#archiveCabinet'),file=date&&root?.querySelector(`.archive-file[data-date="${date}"]`);if(!file)return;
+  UI.archivePick=date;
+  root.querySelectorAll('.archive-file').forEach(b=>b.classList.toggle('is-picked',b===file));
+  root.querySelectorAll('.ruler-tick').forEach(t=>t.classList.toggle('is-picked',t.dataset.date===date));
+  const caption=root.querySelector('.caption-body'),ruler=root.querySelector('.archive-ruler');
+  if(caption)caption.innerHTML=file.querySelector('.file-body').innerHTML;
+  if(ruler){ruler.setAttribute('aria-valuenow',String(Number(date.slice(8,10))));ruler.setAttribute('aria-valuetext',archiveDay(date))}
 }
-/* Long months make a long drawer: shrink it about its front until the back and
-   a lifted folder clear the 放回抽屉 button, then centre it in the room left
-   over beside a narrow caption, or across the room above a full-width one. */
+/* Folders run newest (front) to oldest (back), so +1 steps back in time. */
+function stepArchive(delta){
+  const dates=$$('#archiveCabinet .archive-file').map(b=>b.dataset.date),i=dates.indexOf(UI.archivePick);
+  if(i>=0)pickArchive(dates[Math.max(0,Math.min(dates.length-1,i+delta))]);
+}
+function switchArchiveMonth(step){
+  const months=archiveDrawers(briefCards()).map(x=>x.month),next=months[months.indexOf(UI.archiveMonth)+step];
+  if(!next)return;
+  UI.archiveMonth=next;UI.archivePick=null;renderArchive();
+  const stage=$('#archiveCabinet .drawer-stage');
+  if(stage&&!archiveStill())stage.animate([{transform:`translateX(${step>0?-64:64}px)`,opacity:0},{transform:'none',opacity:1}],{duration:380,easing:'cubic-bezier(.2,.8,.2,1)'});
+}
+function bindArchive(){
+  const root=$('#archiveCabinet'),stage=root.querySelector('.drawer-stage'),ruler=root.querySelector('.archive-ruler');
+  root.querySelectorAll('.box-step').forEach(b=>b.onclick=()=>switchArchiveMonth(Number(b.dataset.step)));
+  root.querySelector('.caption-open').onclick=()=>openBrief(UI.archivePick);
+  root.querySelectorAll('.archive-file').forEach(b=>b.onclick=()=>openBrief(UI.archivePick));
+  /* Sliding across the box riffles the folders: the pointer is projected onto
+     the line from the front folder to the back one, so it never has to land
+     on a thin tab. */
+  stage.onpointermove=e=>{
+    const files=root.querySelectorAll('.archive-file');if(files.length<2)return;
+    const mid=b=>{const r=b.getBoundingClientRect();return [r.left+r.width/2,r.top+r.height/2]};
+    const [ax,ay]=mid(files[0]),[bx,by]=mid(files[files.length-1]),dx=bx-ax,dy=by-ay;
+    const t=((e.clientX-ax)*dx+(e.clientY-ay)*dy)/(dx*dx+dy*dy||1);
+    pickArchive(files[Math.max(0,Math.min(files.length-1,Math.round(t*(files.length-1))))].dataset.date);
+  };
+  let wheel=0;
+  stage.onwheel=e=>{e.preventDefault();wheel+=e.deltaY;while(Math.abs(wheel)>=40){stepArchive(wheel>0?1:-1);wheel-=Math.sign(wheel)*40}};
+  /* The ruler picks the nearest tick, so a drag anywhere along it works. */
+  const pickAt=x=>{let best=null,gap=Infinity;ruler.querySelectorAll('.ruler-tick').forEach(t=>{const r=t.getBoundingClientRect(),d=Math.abs(r.left+r.width/2-x);if(d<gap){gap=d;best=t}});if(best)pickArchive(best.dataset.date)};
+  ruler.onpointerdown=e=>{ruler.setPointerCapture?.(e.pointerId);pickAt(e.clientX)};
+  ruler.onpointermove=e=>pickAt(e.clientX);
+  ruler.onkeydown=e=>{
+    const step={ArrowLeft:1,ArrowDown:1,ArrowRight:-1,ArrowUp:-1}[e.key];
+    if(step){e.preventDefault();stepArchive(step)}
+    else if(e.key==='Home'||e.key==='End'){e.preventDefault();stepArchive(e.key==='Home'?Infinity:-Infinity)}
+    else if(e.key==='Enter'||e.key===' '){e.preventDefault();openBrief(UI.archivePick)}
+  };
+}
+/* Long months make a long box: shrink it about its front until it and a lifted
+   folder fit between the arrows (which move up beside the month on narrow
+   screens), then centre it in the stage. */
 function fitArchiveDrawer(stage){
-  const drawer=stage?.querySelector('.open-drawer'),room=stage?.closest('.archive-room');if(!drawer||!room)return;
-  drawer.style.setProperty('--fit','1');drawer.style.setProperty('--shift','0px');
-  const box=room.getBoundingClientRect(),at=stage.getBoundingClientRect(),parts=[...drawer.children].map(e=>e.getBoundingClientRect());
-  const cap=room.querySelector('.drawer-caption')?.getBoundingClientRect(),lift=parseFloat(getComputedStyle(drawer).getPropertyValue('--lift'))||0;
+  const drawer=stage?.querySelector('.open-drawer'),area=stage?.closest('.box-stage');if(!drawer||!area)return;
+  ['--fit','--shift','--shift-y'].forEach(p=>drawer.style.removeProperty(p));
+  const box=area.getBoundingClientRect(),at=stage.getBoundingClientRect(),parts=[...drawer.children].map(e=>e.getBoundingClientRect());
+  const lift=parseFloat(getComputedStyle(drawer).getPropertyValue('--lift'))||0,side=area.querySelector('.box-step')?.offsetTop<0?12:68;
   const ax=at.left+drawer.offsetLeft+drawer.offsetWidth/2,ay=at.top+drawer.offsetTop+drawer.offsetHeight;
-  const top=Math.min(...parts.map(r=>r.top))-lift,left=Math.min(...parts.map(r=>r.left)),right=Math.max(...parts.map(r=>r.right));
-  const minX=cap&&cap.right<box.right-240?cap.right+24:box.left+16,maxX=box.right-16;
-  const fit=Math.max(.3,Math.min(1,(ay-box.top-56)/(ay-top),(maxX-minX)/(right-left)));
+  const top=Math.min(...parts.map(r=>r.top))-lift,bottom=Math.max(...parts.map(r=>r.bottom));
+  const left=Math.min(...parts.map(r=>r.left)),right=Math.max(...parts.map(r=>r.right));
+  const fit=Math.max(.3,Math.min(1,(box.height-24)/(bottom-top),(box.width-2*side)/(right-left)));
   drawer.style.setProperty('--fit',fit.toFixed(3));
-  drawer.style.setProperty('--shift',`${Math.round((minX+maxX)/2-ax-fit*(right+left-2*ax)/2)}px`);
+  drawer.style.setProperty('--shift',`${Math.round(box.left+box.width/2-ax-fit*(right+left-2*ax)/2)}px`);
+  drawer.style.setProperty('--shift-y',`${Math.round(box.top+box.height/2-ay-fit*(bottom+top-2*ay)/2)}px`);
 }
-/* The drawer flies from its slot in the cabinet to the front of the room, and
-   back again when it is returned. */
-function archiveFlight(slot,stage){
-  const a=slot.getBoundingClientRect(),front=stage.querySelector('.od-front').getBoundingClientRect(),box=stage.getBoundingClientRect();
-  const ox=front.left+front.width/2-box.left,oy=front.top+front.height/2-box.top;
-  stage.style.transformOrigin=`${ox}px ${oy}px`;
-  return [{transform:`translate(${a.left+a.width/2-box.left-ox}px,${a.top+a.height/2-box.top-oy}px) scale(${a.width/front.width})`,opacity:.25},{transform:'none',opacity:1}];
-}
-function openArchiveDrawer(month,slot,byKey=false){
-  const root=$('#archiveCabinet'),room=root?.querySelector('.archive-room');if(!room)return;
-  const drawers=new Map(archiveDrawers(briefCards()).map(x=>[x.month,x.files]));
-  if(!drawers.has(month))return;
-  UI.archiveOpen=month;
-  root.dataset.key=JSON.stringify([briefCards(),month]);
-  root.querySelectorAll('.cab-drawer').forEach(b=>{const out=b.dataset.month===month;b.classList.toggle('is-out',out);b.setAttribute('aria-expanded',String(out))});
-  room.classList.add('is-open');
-  const holder=room.querySelector('.drawer-slot');
-  holder.innerHTML=archiveDrawerStage(month,drawers.get(month));
-  bindArchiveDrawer();
-  const stage=holder.querySelector('.drawer-stage');
-  fitArchiveDrawer(stage);
-  if(slot&&!archiveStill())stage.animate(archiveFlight(slot,stage),{duration:560,easing:'cubic-bezier(.2,.8,.2,1)'});
-  /* Keyboard users land on the front folder; a pointer is already where it wants to be. */
-  if(byKey)holder.querySelector('.archive-file')?.focus({preventScroll:true});
-}
-function closeArchiveDrawer(){
-  const root=$('#archiveCabinet'),room=root?.querySelector('.archive-room'),month=UI.archiveOpen;
-  if(!room||!month)return;
-  const slot=root.querySelector(`.cab-drawer[data-month="${month}"]`),stage=room.querySelector('.drawer-stage');
-  UI.archiveOpen=null;
-  root.dataset.key=JSON.stringify([briefCards(),null]);
-  room.classList.remove('is-open');
-  const done=()=>{if(UI.archiveOpen)return;room.querySelector('.drawer-slot').innerHTML='';slot?.classList.remove('is-out');slot?.setAttribute('aria-expanded','false');slot?.focus({preventScroll:true})};
-  if(!slot||!stage||archiveStill()){done();return}
-  const flight=stage.animate(archiveFlight(slot,stage).reverse(),{duration:420,easing:'cubic-bezier(.5,0,.75,0)',fill:'forwards'});
-  flight.onfinish=done;
-}
+
 function briefFields(content){
   if(!content)return '';
   if(typeof content!=='object')return `<p class="brief-text">${escapeHTML(content)}</p>`;
@@ -1392,7 +1398,7 @@ document.addEventListener('click',e=>{
   if(e.target.closest('#accountMenu')||e.target.closest('#workspaceSwitcher'))return;
   toggleAccountMenu(false);
 });
-document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleAccountMenu(false)});document.addEventListener('keydown',e=>{if(e.key==='Escape'&&UI.view==='archive'&&UI.archiveOpen&&$('#modalBackdrop').classList.contains('hidden'))closeArchiveDrawer()});$$('.filter-link').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;switchView('today')});$$('.quick-tab').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;renderToday()});$('#prevDay').onclick=()=>{UI.dayOffset=(UI.dayOffset||0)-1;renderToday()};$('#nextDay').onclick=()=>{if(displayDay()>=DATE_HORIZON){toast(`日期范围目前只支持到 ${DATE_HORIZON}`);return}UI.dayOffset=(UI.dayOffset||0)+1;renderToday()};$('#inboxBtn').onclick=()=>switchView('inbox');document.querySelector('.icon-btn[title="搜索"]').onclick=openSearch;$('#closeDrawer').onclick=closeDrawer;$('#closeModal').onclick=closeModal;$('#modalBackdrop').onclick=e=>{if(e.target.id==='modalBackdrop')closeModal()};$('#taskDrawer').onclick=e=>{if(e.target.id==='taskDrawer')closeDrawer()};$('#backWeekBtn').onclick=()=>switchView('calendar');$('#backTodayBtn').onclick=()=>{if(UI.selectedWeek)UI.weekDir=UI.selectedWeek>0?'prev':'next';UI.selectedWeek=0;UI.dayOffset=0;switchView('calendar');renderCalendar()};$('#prevWeekBtn').onclick=()=>turnWeek(-1);$('#nextWeekBtn').onclick=()=>turnWeek(1);document.addEventListener('keydown',e=>{if(UI.view!=='calendar'||e.altKey||e.ctrlKey||e.metaKey||e.target.closest('input,textarea,select,[contenteditable]')||!$('#modalBackdrop').classList.contains('hidden')||!$('#taskDrawer').classList.contains('hidden'))return;if(e.key==='ArrowLeft'){e.preventDefault();turnWeek(-1)}else if(e.key==='ArrowRight'){e.preventDefault();turnWeek(1)}});$('#addProjectBtn').onclick=newProject;$('#addProjectTopBtn').onclick=newProject;$('#addTaskBtn').onclick=newTask;$('#emptyAddBtn').onclick=newTask;$('#timelineAddProjectBtn').onclick=newProject;$('#createFixedBtn').onclick=fixedTask;$('#collectionSettingsBtn').onclick=collectionSettings;$('#forceAssignBtn').onclick=()=>switchView('projects');$('#runAutomationBtn').onclick=()=>act('scheduler.run',{});$('#markAllReadBtn').onclick=()=>act('inbox.read',{all:true});$('#manageInboxBtn').onclick=()=>{UI.inboxManage=!UI.inboxManage;UI.inboxPicked=new Set();renderInbox()};$('#generateSummaryBtn').onclick=openTodayDiary;
+document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleAccountMenu(false)});document.addEventListener('keydown',e=>{if(UI.view!=='archive'||e.altKey||e.ctrlKey||e.metaKey||e.target.closest('input,textarea,select,[contenteditable],.archive-ruler')||!$('#modalBackdrop').classList.contains('hidden'))return;if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();stepArchive(e.key==='ArrowLeft'?1:-1)}});addEventListener('resize',()=>{if(UI.view==='archive')fitArchiveDrawer($('#archiveCabinet .drawer-stage'))});$$('.filter-link').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;switchView('today')});$$('.quick-tab').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;renderToday()});$('#prevDay').onclick=()=>{UI.dayOffset=(UI.dayOffset||0)-1;renderToday()};$('#nextDay').onclick=()=>{if(displayDay()>=DATE_HORIZON){toast(`日期范围目前只支持到 ${DATE_HORIZON}`);return}UI.dayOffset=(UI.dayOffset||0)+1;renderToday()};$('#inboxBtn').onclick=()=>switchView('inbox');document.querySelector('.icon-btn[title="搜索"]').onclick=openSearch;$('#closeDrawer').onclick=closeDrawer;$('#closeModal').onclick=closeModal;$('#modalBackdrop').onclick=e=>{if(e.target.id==='modalBackdrop')closeModal()};$('#taskDrawer').onclick=e=>{if(e.target.id==='taskDrawer')closeDrawer()};$('#backWeekBtn').onclick=()=>switchView('calendar');$('#backTodayBtn').onclick=()=>{if(UI.selectedWeek)UI.weekDir=UI.selectedWeek>0?'prev':'next';UI.selectedWeek=0;UI.dayOffset=0;switchView('calendar');renderCalendar()};$('#prevWeekBtn').onclick=()=>turnWeek(-1);$('#nextWeekBtn').onclick=()=>turnWeek(1);document.addEventListener('keydown',e=>{if(UI.view!=='calendar'||e.altKey||e.ctrlKey||e.metaKey||e.target.closest('input,textarea,select,[contenteditable]')||!$('#modalBackdrop').classList.contains('hidden')||!$('#taskDrawer').classList.contains('hidden'))return;if(e.key==='ArrowLeft'){e.preventDefault();turnWeek(-1)}else if(e.key==='ArrowRight'){e.preventDefault();turnWeek(1)}});$('#addProjectBtn').onclick=newProject;$('#addProjectTopBtn').onclick=newProject;$('#addTaskBtn').onclick=newTask;$('#emptyAddBtn').onclick=newTask;$('#timelineAddProjectBtn').onclick=newProject;$('#createFixedBtn').onclick=fixedTask;$('#collectionSettingsBtn').onclick=collectionSettings;$('#forceAssignBtn').onclick=()=>switchView('projects');$('#runAutomationBtn').onclick=()=>act('scheduler.run',{});$('#markAllReadBtn').onclick=()=>act('inbox.read',{all:true});$('#manageInboxBtn').onclick=()=>{UI.inboxManage=!UI.inboxManage;UI.inboxPicked=new Set();renderInbox()};$('#generateSummaryBtn').onclick=openTodayDiary;
 window.addEventListener('focus',()=>{if(UI.view==='inbox')refreshInboxState()});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&UI.view==='inbox')refreshInboxState()});
 $('#pipBtn').classList.toggle('hidden',!pipSupported());$('#pipBtn').onclick=openPip;

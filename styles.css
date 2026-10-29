@@ -4241,22 +4241,19 @@ select {
   }
 }
 
-/* 14c · Archive room · line-drawn isometric cabinets on paper ----------------- */
+/* 14c · Archive room · one line-drawn archive box per month ------------------- */
 
 .archive-cabinet {
   container-type: inline-size;
 }
 
-/* Everything is drawn in one orthographic view (--view): cabinet size
-   (--cw/--ch/--cd), and the drawer taken out: width, folder height, front,
-   sides, folder spacing and how far a folder lifts. */
+/* The box is drawn in one orthographic view (--view), receding to the upper
+   left so that left on screen, like left on the ruler, is earlier. Sizes: box
+   width, folder height, front, sides, folder spacing and how far a picked
+   folder lifts. */
 .archive-room {
   --ink-line: rgba(31, 27, 21, .6);
-  --view: rotateX(-26deg) rotateY(-36deg);
-  --cw: 270px;
-  --ch: 390px;
-  --cd: 210px;
-  --k: min(1, calc(2.2 / var(--years, 1)));
+  --view: rotateX(-26deg) rotateY(36deg);
   --dw: 380px;
   --fh: 190px;
   --fp: 70px;
@@ -4264,6 +4261,8 @@ select {
   --step: 18px;
   --lift: 118px;
   position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   height: clamp(600px, calc(100vh - 270px), 800px);
   overflow: hidden;
   border: 1px solid var(--line);
@@ -4272,266 +4271,95 @@ select {
   isolation: isolate;
 }
 
-.room-space {
-  position: absolute;
-  inset: 0;
-  transition: transform .6s var(--ease-out);
+.archive-room.is-empty {
+  display: grid;
+  place-items: center;
 }
 
-.archive-room.is-open .room-space {
-  transform: translate(-31%, -20%) scale(.5);
-}
-
-/* Centre the drawn cabinet, front and side together, rather than its front. */
-.cabinet-row {
-  position: absolute;
-  left: calc(50% - var(--cd) * .3 * var(--k));
-  top: 52%;
+.box-title {
   display: flex;
-  align-items: flex-end;
-  gap: 64px;
-  transform-style: preserve-3d;
-  transform: translate(-50%, -50%) var(--view) scale3d(var(--k), var(--k), var(--k));
+  align-items: baseline;
+  justify-content: center;
+  gap: 10px;
+  padding: 18px 24px 0;
 }
 
-.cabinet {
-  position: relative;
-  flex: none;
-  width: var(--cw);
-  height: var(--ch);
-  transform-style: preserve-3d;
-}
-
-.cabinet > span {
-  position: absolute;
-  box-shadow: inset 0 0 0 1px var(--ink-line);
-}
-
-/* A plinth line runs round the bottom of every face; the side carries a
-   recessed panel. */
-.cabinet-side {
-  top: 0;
-  right: 0;
-  width: var(--cd);
-  height: 100%;
-  transform-origin: 100% 50%;
-  transform: rotateY(-90deg);
-  background: linear-gradient(0deg, transparent 24px, var(--ink-line) 24px 25px, transparent 25px), #F2EEE4;
-}
-
-.cabinet-side::before {
-  content: '';
-  position: absolute;
-  inset: 18px 18px 42px;
-  border: 1px solid var(--line-strong);
-  border-radius: 2px;
-}
-
-.cabinet-top {
-  left: 0;
-  top: 0;
-  width: 100%;
-  height: var(--cd);
-  transform-origin: 50% 0;
-  transform: rotateX(-90deg);
-  background: #FAF7F1;
-}
-
-.cabinet-ground {
-  left: -36px;
-  top: calc(100% + 1px);
-  width: calc(100% + 72px);
-  height: calc(var(--cd) + 72px);
-  border-radius: 6px;
-  transform-origin: 50% 0;
-  transform: translateZ(36px) rotateX(-90deg);
-  background: radial-gradient(closest-side, rgba(31, 27, 21, .1), rgba(31, 27, 21, 0));
-}
-
-.cabinet > .cabinet-ground {
-  box-shadow: inset 0 0 0 1px var(--line-strong);
-}
-
-.cabinet-front {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 14px;
-  padding: 18px 16px 38px;
-  border-radius: 3px;
-  background: linear-gradient(0deg, transparent 24px, var(--ink-line) 24px 25px, transparent 25px), var(--surface);
-  box-shadow: inset 0 0 0 1px var(--ink-line);
-  transform-style: preserve-3d;
-}
-
-/* Children sit a pixel proud of the face they are on, so the 3D sort never has
-   two parallel layers in the same plane to choose between. */
-.cabinet-plaque {
-  justify-self: center;
-  padding: 3px 16px;
-  border: 1px solid var(--ink-line);
-  border-radius: 2px;
-  background: var(--surface);
-  font: 600 13px/1.3 var(--font-serif);
-  letter-spacing: .3em;
-  color: var(--ink-2);
-  transform: translateZ(1px);
-}
-
-.cabinet-drawers {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  grid-template-rows: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  transform-style: preserve-3d;
-}
-
-.cab-drawer {
-  position: relative;
-  display: grid;
-  place-content: center;
-  justify-items: center;
-  gap: 6px;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 2px;
-  background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--ink-line), inset 0 0 0 4px var(--surface), inset 0 0 0 5px var(--line);
+.box-title strong {
+  font: 600 20px/1.3 var(--font-serif);
   color: var(--ink);
-  cursor: pointer;
-  transform: translateZ(1px);
-  transform-style: preserve-3d;
-  transition: transform .28s var(--ease-out);
 }
 
-/* The top and side of the drawer box: hidden inside the cabinet until the
-   drawer slides forward under the pointer. */
-.cab-drawer::before,
-.cab-drawer::after {
-  content: '';
-  position: absolute;
-  background: var(--surface-sunk);
-  box-shadow: inset 0 0 0 1px var(--ink-line);
+.box-title small {
+  font-size: 12.5px;
+  color: var(--muted);
 }
 
-.cab-drawer::before {
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 20px;
-  transform-origin: 50% 0;
-  transform: rotateX(-90deg);
+/* The whole stage is the slide area: the pointer anywhere over it picks the
+   nearest folder. Vertical swipes still scroll the page on touch screens. */
+.box-stage {
+  position: relative;
+  min-height: 0;
 }
 
-.cab-drawer::after {
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 20px;
-  transform-origin: 100% 50%;
-  transform: rotateY(-90deg);
-}
-
-.cab-drawer:not(:disabled):not(.is-out):hover,
-.cab-drawer:not(.is-out):focus-visible {
-  transform: translateZ(20px);
-}
-
-.cab-drawer:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.cab-drawer:disabled {
-  cursor: default;
-}
-
-/* A drawer that has been taken out leaves its empty slot behind. */
-.cab-drawer.is-out {
-  background: var(--paper-2);
-  box-shadow: inset 0 0 0 1px var(--ink-line), inset 6px 6px 0 rgba(31, 27, 21, .06);
-}
-
-.cab-drawer.is-out > *,
-.cab-drawer.is-out::before,
-.cab-drawer.is-out::after {
-  visibility: hidden;
-}
-
-.cab-label {
-  display: grid;
-  justify-items: center;
-  gap: 1px;
-  min-width: 56%;
-  padding: 3px 6px 2px;
-  border: 1px solid var(--accent-line);
-  border-radius: 2px;
-  background: var(--accent-soft);
-  color: var(--accent-dark);
-  transform: translateZ(1px);
-}
-
-.cab-label b {
-  font: 600 13px/1.2 var(--font-serif);
-}
-
-.cab-label small {
-  font-size: 9.5px;
-  line-height: 1.2;
-}
-
-.cab-drawer:disabled .cab-label {
-  border: 1px dashed var(--line-strong);
-  background: transparent;
-  color: var(--faint);
-}
-
-.cab-pull {
-  width: 32%;
-  height: 7px;
-  border: 1.5px solid var(--ink-line);
-  border-top: 0;
-  border-radius: 0 0 9px 9px;
-  transform: translateZ(1px);
-}
-
-/* A paper wash sends the cabinet back once a drawer is out; a click on it
-   returns the drawer. */
-.room-dim {
-  position: absolute;
-  inset: 0;
-  background: rgba(255, 253, 249, .74);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity .45s var(--ease-out);
-}
-
-.archive-room.is-open .room-dim {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-/* The drawer taken out, folders standing front to back. Only the folders and
-   the front catch the pointer; anywhere else falls through to the wash. */
-.drawer-slot,
 .drawer-stage {
   position: absolute;
   inset: 0;
-  pointer-events: none;
+  touch-action: pan-y;
+}
+
+.box-step {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-top: -22px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 8px 18px -14px rgba(31, 27, 21, .5);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: border-color var(--t), color var(--t);
+}
+
+.box-step.is-prev {
+  left: 16px;
+}
+
+.box-step.is-next {
+  right: 16px;
+}
+
+.box-step:hover:not(:disabled) {
+  border-color: var(--accent-line);
+  color: var(--accent-dark);
+}
+
+.box-step:disabled {
+  opacity: .35;
+  cursor: default;
+}
+
+.box-step svg {
+  width: 18px;
+  height: 18px;
 }
 
 .open-drawer {
   --dd: max(200px, calc(var(--n) * var(--step) + 48px));
   position: absolute;
-  left: max(calc(54% - var(--dw) / 2), calc(min(300px, 34%) + 48px));
-  bottom: 16%;
+  left: calc(50% - var(--dw) / 2);
+  bottom: 10%;
   width: var(--dw);
   height: var(--fh);
+  pointer-events: none;
   transform-style: preserve-3d;
   transform-origin: 50% 100%;
-  transform: translateX(var(--shift, 0px)) scale3d(var(--fit, 1), var(--fit, 1), var(--fit, 1)) var(--view);
+  transform: translate(var(--shift, 0px), var(--shift-y, 0px)) scale3d(var(--fit, 1), var(--fit, 1), var(--fit, 1)) var(--view);
 }
 
 .open-drawer > span {
@@ -4561,6 +4389,8 @@ select {
   background: var(--paper-2);
 }
 
+/* Seen from the right, the left wall shows its outside and the right wall
+   its inside. */
 .od-side {
   width: var(--dd);
   height: var(--sh);
@@ -4571,13 +4401,13 @@ select {
   left: 0;
   transform-origin: 0 100%;
   transform: rotateY(90deg);
-  background: var(--paper);
 }
 
 .od-side.is-right {
   right: 0;
   transform-origin: 100% 100%;
   transform: rotateY(-90deg);
+  background: var(--paper);
 }
 
 .od-back {
@@ -4588,9 +4418,8 @@ select {
   background: var(--paper);
 }
 
-/* Each folder is a still hit area the size of its face; the tab hangs above
-   it, so the bare strip beside a tab never hides the folder behind. The sheet
-   is what lifts, so the pointer stays on the folder while it rises. */
+/* Each folder is a still box the size of its face; the tab hangs above it and
+   the sheet is what lifts when the folder is picked. */
 .archive-file {
   position: absolute;
   left: 12px;
@@ -4605,10 +4434,6 @@ select {
   transform: translateZ(calc(-28px - var(--i, 0) * var(--step)));
 }
 
-.archive-file:focus-visible {
-  outline: none;
-}
-
 .archive-file .file-body {
   display: none;
 }
@@ -4616,7 +4441,7 @@ select {
 .file-sheet {
   position: absolute;
   inset: 0;
-  transition: transform .36s var(--ease-out);
+  transition: transform .3s var(--ease-out);
 }
 
 .file-tab {
@@ -4654,7 +4479,7 @@ select {
   transition: background-color .25s, border-color .25s;
 }
 
-/* Guides from a lifted folder back down to its place in the stack. */
+/* Guides from the picked folder back down to its place in the stack. */
 .file-sheet::before,
 .file-sheet::after {
   content: '';
@@ -4674,33 +4499,27 @@ select {
   right: 10%;
 }
 
-.archive-file:hover .file-sheet,
-.archive-file:focus-visible .file-sheet {
+.archive-file.is-picked .file-sheet {
   transform: translateY(calc(var(--lift) * -1));
 }
 
-.archive-file:hover .file-sheet::before,
-.archive-file:hover .file-sheet::after,
-.archive-file:focus-visible .file-sheet::before,
-.archive-file:focus-visible .file-sheet::after {
+.archive-file.is-picked .file-sheet::before,
+.archive-file.is-picked .file-sheet::after {
   opacity: 1;
   transition-delay: .12s;
 }
 
-.archive-file:hover .file-tab,
-.archive-file:focus-visible .file-tab {
+.archive-file.is-picked .file-tab {
   border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--accent-dark);
 }
 
-.archive-file:hover .file-tab b,
-.archive-file:focus-visible .file-tab b {
+.archive-file.is-picked .file-tab b {
   color: var(--accent-dark);
 }
 
-.archive-file:hover .file-face,
-.archive-file:focus-visible .file-face {
+.archive-file.is-picked .file-face {
   border-color: var(--accent);
   background:
     repeating-linear-gradient(180deg, transparent 0 13px, rgba(217, 119, 87, .3) 13px 14.5px) 20px 26px / 60% 58% no-repeat,
@@ -4708,23 +4527,16 @@ select {
 }
 
 .od-front {
-  position: absolute;
   left: -6px;
   right: -6px;
-  bottom: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 8px;
   height: var(--fp);
-  padding: 0;
-  border: 0;
   border-radius: 3px;
   background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--ink-line);
-  cursor: pointer;
-  pointer-events: auto;
   transform: translateZ(2px);
   transform-style: preserve-3d;
 }
@@ -4749,17 +4561,12 @@ select {
 
 .od-front::after {
   top: 0;
-  right: 0;
+  left: 0;
   bottom: 0;
   width: 14px;
-  transform-origin: 100% 50%;
-  transform: rotateY(-90deg);
+  transform-origin: 0 50%;
+  transform: rotateY(90deg);
   background: #F2EEE4;
-}
-
-.od-front:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
 }
 
 .od-label {
@@ -4788,89 +4595,139 @@ select {
   transform: translateZ(1px);
 }
 
-.drawer-caption {
-  position: absolute;
-  left: 24px;
-  bottom: 24px;
+/* Under the box: the picked brief in flat type, and the month's date ruler. */
+.box-foot {
   display: grid;
-  gap: 8px;
-  width: min(300px, 34%);
-  padding: 14px 16px;
+  grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+  align-items: stretch;
+  gap: 16px;
+  padding: 0 24px 22px;
+}
+
+.drawer-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 12px 16px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface);
-  box-shadow: 0 12px 26px -20px rgba(31, 27, 21, .45);
+  box-shadow: 0 12px 26px -22px rgba(31, 27, 21, .45);
 }
 
 .caption-body {
   display: grid;
-  gap: 3px;
-  font-size: 12.5px;
+  gap: 2px;
+  min-width: 0;
+  font-size: 12px;
   color: var(--muted);
 }
 
 .caption-body strong {
-  font: 600 16px/1.35 var(--font-serif);
+  font: 600 15px/1.35 var(--font-serif);
   color: var(--ink);
 }
 
-.drawer-return {
+.archive-ruler {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  min-height: 64px;
+  padding: 0 16px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  cursor: pointer;
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.archive-ruler:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.ruler-end {
+  font-size: 10.5px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--faint);
+}
+
+.ruler-track {
+  position: relative;
+  height: 40px;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.ruler-tick {
   position: absolute;
-  top: 16px;
-  right: 16px;
-  pointer-events: auto;
+  bottom: 0;
+  left: var(--at);
+  width: 2px;
+  height: 10px;
+  border-radius: 1px 1px 0 0;
+  background: var(--ink-line);
+  transform: translateX(-50%);
+  transition: height .2s var(--ease-out), background-color .2s;
+}
+
+.ruler-tick b {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 4px);
+  font: 600 10px/1 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  transform: translateX(-50%);
+}
+
+.ruler-tick.is-picked {
+  width: 3px;
+  height: 18px;
+  background: var(--accent);
+}
+
+.ruler-tick.is-picked b {
+  font-size: 12px;
+  color: var(--accent-dark);
 }
 
 @container (max-width: 760px) {
   .archive-room {
-    --cw: 220px;
-    --ch: 320px;
-    --cd: 170px;
-    --k: min(.86, calc(1.1 / var(--years, 1)));
     --dw: 300px;
     --fh: 160px;
     --fp: 58px;
     --sh: 78px;
     --step: 14px;
     --lift: 80px;
-    height: 680px;
+    height: 640px;
   }
 
-  .archive-room.is-open .room-space {
-    transform: translate(0, -34%) scale(.5);
+  .box-title strong {
+    font-size: 18px;
   }
 
-  .open-drawer {
-    left: calc(46% - var(--dw) / 2);
-    bottom: 190px;
+  .box-step {
+    width: 36px;
+    height: 36px;
+    margin-top: -18px;
   }
 
-  .drawer-caption {
-    left: 12px;
-    right: 12px;
-    bottom: 12px;
-    width: auto;
+  .box-step.is-prev {
+    left: 8px;
   }
 
-  .cabinet-front {
+  .box-step.is-next {
+    right: 8px;
+  }
+
+  .box-foot {
+    grid-template-columns: minmax(0, 1fr);
     gap: 10px;
-    padding: 14px 12px 34px;
-  }
-
-  .cabinet-drawers {
-    gap: 6px;
-  }
-
-  .cab-label {
-    padding: 2px 4px 1px;
-  }
-
-  .cab-label b {
-    font-size: 11.5px;
-  }
-
-  .cab-label small {
-    font-size: 8.5px;
+    padding: 0 12px 12px;
   }
 
   .file-tab {
@@ -4881,12 +4738,27 @@ select {
   }
 }
 
+/* Too narrow for every day number: keep the picked one. The arrows move up
+   beside the month so the box can use the full width. */
+@container (max-width: 560px) {
+  .archive-room {
+    height: 600px;
+  }
+
+  .ruler-tick:not(.is-picked) b {
+    display: none;
+  }
+
+  .box-step {
+    top: -42px;
+    margin-top: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .room-space,
-  .room-dim,
-  .cab-drawer,
   .file-sheet,
-  .file-face {
+  .file-face,
+  .ruler-tick {
     transition: none;
   }
 }
