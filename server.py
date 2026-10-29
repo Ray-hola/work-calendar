@@ -1544,6 +1544,46 @@ class Store:
                 'lastAt': last.get('createdAt', ''),
                 'lastBy': last.get('author', '')}
 
+    def fold_in_span_carries(self):
+        """Undo overnight carries that happened inside a task's own span.
+
+        The rollover used to move a multi-day task to the next day even though
+        that day was still part of it, which hid the first day and labelled the
+        task deferred. The carried copy is folded back into its source: the
+        source takes over the copy's progress and records, and the copy and its
+        defer log go. Only a copy that is still the live end of its chain is
+        folded, so a chain unwinds from the newest hop back.
+        """
+        folded=0
+        while True:
+            tasks={t['id']:t for t in self.all('tasks')}
+            pair=None
+            for log in self.all('logs'):
+                if log.get('kind')!='defer' or log.get('actor')!='system':continue
+                source,copy=tasks.get(log.get('taskId')),tasks.get(log.get('nextTaskId'))
+                if not source or not copy or copy.get('supersededBy') or source.get('supersededBy')!=copy['id']:continue
+                if source.get('deadline') and source['deadline']>=copy.get('date',''):
+                    pair=(log,source,copy);break
+            if not pair:
+                return folded
+            log,source,copy=pair
+            keep=('id','date','deadline','originId','createdAt','supersededBy','supersededAt')
+            source.update({k:v for k,v in copy.items() if k not in keep})
+            if not copy.get('carriedCompletion'):source.pop('carriedCompletion',None)
+            source['supersededBy']=None;source['supersededAt']=None
+            self.put('tasks',source)
+            for table in ('logs','edit_requests','reports','suggestions','requests'):
+                for row in self.all(table):
+                    if row.get('taskId')==copy['id']:
+                        row['taskId']=source['id'];self.put(table,row)
+            for notice in self.all('notifications'):
+                if notice.get('reference')==copy['id']:
+                    notice['reference']=source['id'];self.put('notifications',notice)
+            self.db.execute('DELETE FROM logs WHERE id=?',(log['id'],))
+            self.db.execute('DELETE FROM tasks WHERE id=?',(copy['id'],))
+            self.audit('system','task.carry_folded',{'taskId':source['id'],'removedCopy':copy['id'],'copyDate':copy.get('date')})
+            folded+=1
+
     def settle_legacy_task_approvals(self):
         """Finish submissions left waiting from when completion needed approval.
 
@@ -2093,7 +2133,7 @@ class Store:
                 raise Problem(409,'项目已结束，完成记录不能再修改')
             before={k:t.get(k) for k in ('completionSummary','completionActual','completionFeeling')}
             t['completionSummary']=required(d,'summary')
-            t['completionActual']=duration(d.get('actual',t.get('completionActual')))
+            t['completionActual']=duration(d.get('actual') or t.get('completionActual') or t.get('duration'))
             t['completionFeeling']=str(d.get('feeling') or t.get('completionFeeling') or '一般')
             t['completionEditedAt']=timestamp()
             self.put('tasks',t)
@@ -2480,14 +2520,19 @@ class Store:
             # copy resolves the whole chain. Ordinary unfinished work is copied as todo.
             # Fixed-task occurrences carry too: the day's own occurrence of the
             # rule is separate work and does not replace yesterday's.
+            # A task that spans several days is not late until its last day has
+            # passed; it then moves to the day after its span.
+            self.fold_in_span_carries()
+            today=at.date().isoformat()
+            last_day=lambda t:max(t.get('date',''),t.get('deadline') or '')
             for task in list(self.all('tasks')):
-                if task.get('date','') >= at.date().isoformat():
+                if last_day(task) >= today:
                     continue
                 if task.get('status') not in ('todo','doing','pending_approval'):
                     continue
                 current=task
-                while current.get('date','') < at.date().isoformat() and current.get('status') in ('todo','doing','pending_approval'):
-                    target=(date.fromisoformat(current['date']) + timedelta(days=1)).isoformat()
+                while last_day(current) < today and current.get('status') in ('todo','doing','pending_approval'):
+                    target=(date.fromisoformat(last_day(current)) + timedelta(days=1)).isoformat()
                     carry_key=f'carry:{current["id"]}:{target}'
                     copy=None
                     if not self.db.execute('SELECT 1 FROM jobs WHERE id=?',(carry_key,)).fetchone():
