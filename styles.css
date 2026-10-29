@@ -4241,94 +4241,57 @@ select {
   }
 }
 
-/* 14c · Archive room · a CSS 3D room of card-catalogue cabinets -------------- */
+/* 14c · Archive room · line-drawn isometric cabinets on paper ----------------- */
 
 .archive-cabinet {
   container-type: inline-size;
 }
 
-/* Cabinet size (--cw/--ch/--cd), where the cabinets stand (--base), and the
-   drawer taken out: width, folder height, front, sides, folder spacing, lift. */
+/* Everything is drawn in one orthographic view (--view): cabinet size
+   (--cw/--ch/--cd), and the drawer taken out: width, folder height, front,
+   sides, folder spacing and how far a folder lifts. */
 .archive-room {
-  --cw: 300px;
-  --ch: 430px;
-  --cd: 240px;
-  --base: 86%;
-  --k: min(1, calc(2.4 / var(--years, 1)));
-  --dw: min(700px, 90cqw);
-  --fh: 186px;
-  --fp: 76px;
-  --sh: 104px;
-  --step: 22px;
-  --lift: 106px;
+  --ink-line: rgba(31, 27, 21, .6);
+  --view: rotateX(-26deg) rotateY(-36deg);
+  --cw: 270px;
+  --ch: 390px;
+  --cd: 210px;
+  --k: min(1, calc(2.2 / var(--years, 1)));
+  --dw: 380px;
+  --fh: 190px;
+  --fp: 70px;
+  --sh: 92px;
+  --step: 18px;
+  --lift: 118px;
   position: relative;
   height: clamp(600px, calc(100vh - 270px), 800px);
   overflow: hidden;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: 18px;
-  background: #D9CFBD;
+  background: radial-gradient(circle at 1px 1px, rgba(31, 27, 21, .1) 1px, transparent 1.4px) 0 0 / 22px 22px, var(--surface);
   isolation: isolate;
 }
 
-.room-stage {
-  position: absolute;
-  inset: 0;
-  perspective: 1500px;
-  perspective-origin: 50% 6%;
-}
-
-/* The room is seen a little from the side, so the cabinets show their depth. */
 .room-space {
   position: absolute;
   inset: 0;
-  transform-style: preserve-3d;
-  transform: rotateY(14deg);
-  transition: transform .7s var(--ease-out);
+  transition: transform .6s var(--ease-out);
 }
 
 .archive-room.is-open .room-space {
-  transform: translate3d(0, -3%, -340px) rotateY(14deg);
+  transform: translate(-31%, -20%) scale(.5);
 }
 
-/* The wall and floor meet behind the cabinets; planks run towards you. */
-.room-wall {
-  position: absolute;
-  left: -100%;
-  right: -100%;
-  top: -80%;
-  bottom: calc(100% - var(--base));
-  transform: translateZ(calc(var(--cd) * -1 - 40px));
-  background:
-    linear-gradient(0deg, #5F4632 0 34px, #7D6248 34px 38px, transparent 38px),
-    repeating-linear-gradient(90deg, rgba(120, 95, 60, .05) 0 1px, transparent 1px 72px),
-    linear-gradient(180deg, #EAE3D5 0%, #E2D9C8 72%, #D3C7B1 100%);
-}
-
-.room-floor {
-  position: absolute;
-  left: -120%;
-  right: -120%;
-  top: var(--base);
-  height: 1100px;
-  transform-origin: 50% 0;
-  transform: translateZ(calc(var(--cd) * -1 - 40px)) rotateX(90deg);
-  background:
-    linear-gradient(180deg, rgba(40, 26, 14, .42), rgba(40, 26, 14, 0) 320px),
-    radial-gradient(ellipse 22% 34% at 50% 34%, rgba(255, 240, 205, .32), transparent 72%),
-    repeating-linear-gradient(90deg, #B39570 0 108px, #A3855F 108px 110px),
-    #B39570;
-}
-
+/* Centre the drawn cabinet, front and side together, rather than its front. */
 .cabinet-row {
   position: absolute;
-  left: 50%;
-  top: var(--base);
+  left: calc(50% - var(--cd) * .3 * var(--k));
+  top: 52%;
   display: flex;
   align-items: flex-end;
-  gap: 72px;
+  gap: 64px;
   transform-style: preserve-3d;
-  transform-origin: 50% 100%;
-  transform: translate(-50%, -100%) scale3d(var(--k), var(--k), var(--k));
+  transform: translate(-50%, -50%) var(--view) scale3d(var(--k), var(--k), var(--k));
 }
 
 .cabinet {
@@ -4341,27 +4304,27 @@ select {
 
 .cabinet > span {
   position: absolute;
-  box-shadow: inset 0 0 0 1px rgba(40, 22, 8, .4);
+  box-shadow: inset 0 0 0 1px var(--ink-line);
 }
 
+/* A plinth line runs round the bottom of every face; the side carries a
+   recessed panel. */
 .cabinet-side {
   top: 0;
+  right: 0;
   width: var(--cd);
   height: 100%;
-  background: linear-gradient(0deg, #48301C 0 26px, transparent 26px), linear-gradient(90deg, #7A5132, #61401F);
-}
-
-.cabinet-side.is-left {
-  left: 0;
-  transform-origin: 0 50%;
-  transform: rotateY(90deg);
-}
-
-.cabinet-side.is-right {
-  right: 0;
   transform-origin: 100% 50%;
   transform: rotateY(-90deg);
-  background: linear-gradient(0deg, #48301C 0 26px, transparent 26px), linear-gradient(270deg, #7A5132, #61401F);
+  background: linear-gradient(0deg, transparent 24px, var(--ink-line) 24px 25px, transparent 25px), #F2EEE4;
+}
+
+.cabinet-side::before {
+  content: '';
+  position: absolute;
+  inset: 18px 18px 42px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
 }
 
 .cabinet-top {
@@ -4371,7 +4334,22 @@ select {
   height: var(--cd);
   transform-origin: 50% 0;
   transform: rotateX(-90deg);
-  background: linear-gradient(180deg, #C69A70, #A97C53);
+  background: #FAF7F1;
+}
+
+.cabinet-ground {
+  left: -36px;
+  top: calc(100% + 1px);
+  width: calc(100% + 72px);
+  height: calc(var(--cd) + 72px);
+  border-radius: 6px;
+  transform-origin: 50% 0;
+  transform: translateZ(36px) rotateX(-90deg);
+  background: radial-gradient(closest-side, rgba(31, 27, 21, .1), rgba(31, 27, 21, 0));
+}
+
+.cabinet > .cabinet-ground {
+  box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 
 .cabinet-front {
@@ -4380,13 +4358,10 @@ select {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 14px;
-  padding: 18px 16px 40px;
-  border-radius: 5px 5px 2px 2px;
-  background:
-    linear-gradient(0deg, #5C3C23 0 26px, transparent 26px),
-    repeating-linear-gradient(92deg, rgba(70, 40, 18, .06) 0 2px, transparent 2px 9px),
-    linear-gradient(180deg, #B4825A, #9A6943);
-  box-shadow: inset 0 0 0 1px rgba(56, 32, 14, .45), inset 0 2px 0 rgba(255, 232, 196, .28);
+  padding: 18px 16px 38px;
+  border-radius: 3px;
+  background: linear-gradient(0deg, transparent 24px, var(--ink-line) 24px 25px, transparent 25px), var(--surface);
+  box-shadow: inset 0 0 0 1px var(--ink-line);
   transform-style: preserve-3d;
 }
 
@@ -4394,13 +4369,13 @@ select {
    two parallel layers in the same plane to choose between. */
 .cabinet-plaque {
   justify-self: center;
-  padding: 5px 18px 4px;
-  border-radius: 3px;
-  background: linear-gradient(180deg, #E8CF8E, #B99448);
-  box-shadow: inset 0 0 0 1px rgba(90, 62, 18, .55), inset 0 1px 0 rgba(255, 248, 220, .7), 0 1px 2px rgba(30, 16, 4, .45);
-  font: 600 15px/1.2 var(--font-serif);
-  letter-spacing: .24em;
-  color: #3B2810;
+  padding: 3px 16px;
+  border: 1px solid var(--ink-line);
+  border-radius: 2px;
+  background: var(--surface);
+  font: 600 13px/1.3 var(--font-serif);
+  letter-spacing: .3em;
+  color: var(--ink-2);
   transform: translateZ(1px);
 }
 
@@ -4408,7 +4383,7 @@ select {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   grid-template-rows: repeat(4, minmax(0, 1fr));
-  gap: 9px;
+  gap: 8px;
   transform-style: preserve-3d;
 }
 
@@ -4417,37 +4392,51 @@ select {
   display: grid;
   place-content: center;
   justify-items: center;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
   padding: 0;
   border: 0;
-  border-radius: 3px;
-  background: linear-gradient(180deg, #BC8B60, #A3724A);
-  box-shadow: inset 0 0 0 1px rgba(56, 32, 14, .5), inset 0 1px 0 rgba(255, 232, 196, .35), inset 0 -2px 0 rgba(56, 32, 14, .25);
-  color: #3B2810;
+  border-radius: 2px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--ink-line), inset 0 0 0 4px var(--surface), inset 0 0 0 5px var(--line);
+  color: var(--ink);
   cursor: pointer;
   transform: translateZ(1px);
   transform-style: preserve-3d;
   transition: transform .28s var(--ease-out);
 }
 
-/* The top of the drawer box: hidden inside the cabinet until the drawer slides
-   forward under the pointer. */
-.cab-drawer::before {
+/* The top and side of the drawer box: hidden inside the cabinet until the
+   drawer slides forward under the pointer. */
+.cab-drawer::before,
+.cab-drawer::after {
   content: '';
   position: absolute;
-  left: 2px;
-  right: 2px;
+  background: var(--surface-sunk);
+  box-shadow: inset 0 0 0 1px var(--ink-line);
+}
+
+.cab-drawer::before {
+  left: 0;
+  right: 0;
   top: 0;
-  height: 18px;
+  height: 20px;
   transform-origin: 50% 0;
   transform: rotateX(-90deg);
-  background: linear-gradient(0deg, #6B4528, #A8784F);
+}
+
+.cab-drawer::after {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 20px;
+  transform-origin: 100% 50%;
+  transform: rotateY(-90deg);
 }
 
 .cab-drawer:not(:disabled):not(.is-out):hover,
 .cab-drawer:not(.is-out):focus-visible {
-  transform: translateZ(16px);
+  transform: translateZ(20px);
 }
 
 .cab-drawer:focus-visible {
@@ -4459,18 +4448,15 @@ select {
   cursor: default;
 }
 
-.cab-drawer:disabled .cab-label {
-  opacity: .6;
-}
-
-/* A drawer that has been taken out leaves its dark slot behind. */
+/* A drawer that has been taken out leaves its empty slot behind. */
 .cab-drawer.is-out {
-  background: linear-gradient(180deg, #1B120B, #3A2617);
-  box-shadow: inset 0 7px 10px rgba(0, 0, 0, .6), inset 0 0 0 1px rgba(20, 10, 4, .8);
+  background: var(--paper-2);
+  box-shadow: inset 0 0 0 1px var(--ink-line), inset 6px 6px 0 rgba(31, 27, 21, .06);
 }
 
 .cab-drawer.is-out > *,
-.cab-drawer.is-out::before {
+.cab-drawer.is-out::before,
+.cab-drawer.is-out::after {
   visibility: hidden;
 }
 
@@ -4478,70 +4464,45 @@ select {
   display: grid;
   justify-items: center;
   gap: 1px;
-  min-width: 58%;
-  padding: 4px 8px 3px;
-  border: 2px solid #C7A35A;
+  min-width: 56%;
+  padding: 3px 6px 2px;
+  border: 1px solid var(--accent-line);
   border-radius: 2px;
-  background: #F5EEDB;
-  box-shadow: 0 1px 1px rgba(40, 22, 8, .35), inset 0 0 0 1px rgba(150, 110, 40, .3);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
   transform: translateZ(1px);
 }
 
 .cab-label b {
-  font: 600 14px/1.2 var(--font-serif);
-  color: #2E2215;
+  font: 600 13px/1.2 var(--font-serif);
 }
 
 .cab-label small {
-  font-size: 10px;
+  font-size: 9.5px;
   line-height: 1.2;
-  color: #7A6646;
+}
+
+.cab-drawer:disabled .cab-label {
+  border: 1px dashed var(--line-strong);
+  background: transparent;
+  color: var(--faint);
 }
 
 .cab-pull {
-  width: 38%;
-  height: 9px;
-  border-radius: 1px 1px 9px 9px;
-  background: linear-gradient(180deg, #E2C27A, #9C7834);
-  box-shadow: 0 2px 2px rgba(30, 16, 4, .45), inset 0 1px 0 rgba(255, 246, 214, .6);
+  width: 32%;
+  height: 7px;
+  border: 1.5px solid var(--ink-line);
+  border-top: 0;
+  border-radius: 0 0 9px 9px;
   transform: translateZ(1px);
 }
 
-/* Pendant lamp and its light; the dim layer pushes the room back once a
-   drawer is out, and a click on it returns the drawer. */
-.room-lamp {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: radial-gradient(ellipse 48% 62% at 50% 6%, rgba(255, 244, 214, .5), rgba(255, 244, 214, 0) 72%);
-}
-
-.room-lamp::before {
-  content: '';
-  position: absolute;
-  left: calc(50% - 1px);
-  top: 0;
-  width: 2px;
-  height: 40px;
-  background: #3B2E22;
-}
-
-.room-lamp::after {
-  content: '';
-  position: absolute;
-  left: calc(50% - 62px);
-  top: 40px;
-  width: 124px;
-  height: 34px;
-  border-radius: 62px 62px 6px 6px / 40px 40px 6px 6px;
-  background: linear-gradient(180deg, #4A3B2C, #2A2118);
-  box-shadow: 0 16px 26px -8px rgba(255, 236, 190, .95);
-}
-
+/* A paper wash sends the cabinet back once a drawer is out; a click on it
+   returns the drawer. */
 .room-dim {
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, rgba(36, 26, 16, .26), rgba(36, 26, 16, .5));
+  background: rgba(255, 253, 249, .74);
   opacity: 0;
   pointer-events: none;
   transition: opacity .45s var(--ease-out);
@@ -4552,9 +4513,8 @@ select {
   pointer-events: auto;
 }
 
-/* The drawer taken out, seen from above with its folders standing front to
-   back. Only the folders and the front catch the pointer; anywhere else falls
-   through to the dim layer. */
+/* The drawer taken out, folders standing front to back. Only the folders and
+   the front catch the pointer; anywhere else falls through to the wash. */
 .drawer-slot,
 .drawer-stage {
   position: absolute;
@@ -4562,26 +4522,34 @@ select {
   pointer-events: none;
 }
 
-.drawer-stage {
-  perspective: 1300px;
-  perspective-origin: 50% -20%;
-}
-
 .open-drawer {
-  --dd: max(220px, calc(var(--n) * var(--step) + 52px));
+  --dd: max(200px, calc(var(--n) * var(--step) + 48px));
   position: absolute;
-  left: calc(50% - var(--dw) / 2);
-  bottom: 7%;
+  left: max(calc(54% - var(--dw) / 2), calc(min(300px, 34%) + 48px));
+  bottom: 16%;
   width: var(--dw);
   height: var(--fh);
   transform-style: preserve-3d;
   transform-origin: 50% 100%;
-  transform: rotateX(-28deg);
+  transform: translateX(var(--shift, 0px)) scale3d(var(--fit, 1), var(--fit, 1), var(--fit, 1)) var(--view);
 }
 
 .open-drawer > span {
   position: absolute;
   bottom: 0;
+  box-shadow: inset 0 0 0 1px var(--ink-line);
+}
+
+.open-drawer > .od-ground {
+  left: -16px;
+  bottom: -1px;
+  width: calc(100% + 32px);
+  height: calc(var(--dd) + 32px);
+  border-radius: 4px;
+  transform-origin: 50% 100%;
+  transform: translateZ(16px) rotateX(90deg);
+  background: rgba(31, 27, 21, .045);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 
 .od-floor {
@@ -4590,27 +4558,26 @@ select {
   height: var(--dd);
   transform-origin: 50% 100%;
   transform: rotateX(90deg);
-  background: linear-gradient(0deg, #5A3A22, #3B2515);
+  background: var(--paper-2);
 }
 
 .od-side {
   width: var(--dd);
   height: var(--sh);
-  background: linear-gradient(90deg, #A0704A, #75502F);
-  box-shadow: inset 0 0 0 1px rgba(56, 32, 14, .45), inset 0 2px 0 rgba(255, 232, 196, .3);
+  background: #F2EEE4;
 }
 
 .od-side.is-left {
   left: 0;
   transform-origin: 0 100%;
   transform: rotateY(90deg);
+  background: var(--paper);
 }
 
 .od-side.is-right {
   right: 0;
   transform-origin: 100% 100%;
   transform: rotateY(-90deg);
-  background: linear-gradient(270deg, #A0704A, #75502F);
 }
 
 .od-back {
@@ -4618,107 +4585,93 @@ select {
   width: 100%;
   height: var(--sh);
   transform: translateZ(calc(var(--dd) * -1));
-  background: #6A472B;
+  background: var(--paper);
 }
 
-/* Each folder is a still hit area; its sheet is what lifts, so the pointer
-   stays on the folder while it rises. */
+/* Each folder is a still hit area the size of its face; the tab hangs above
+   it, so the bare strip beside a tab never hides the folder behind. The sheet
+   is what lifts, so the pointer stays on the folder while it rises. */
 .archive-file {
   position: absolute;
-  left: 14px;
-  right: 14px;
-  bottom: 3px;
-  height: var(--fh);
+  left: 12px;
+  right: 12px;
+  bottom: 2px;
+  height: calc(var(--fh) - 25px);
   padding: 0;
   border: 0;
   background: none;
-  text-align: left;
   cursor: pointer;
   pointer-events: auto;
-  transform: translateZ(calc(-30px - var(--i, 0) * var(--step)));
+  transform: translateZ(calc(-28px - var(--i, 0) * var(--step)));
 }
 
 .archive-file:focus-visible {
   outline: none;
 }
 
+.archive-file .file-body {
+  display: none;
+}
+
 .file-sheet {
   position: absolute;
   inset: 0;
-  transition: transform .34s var(--ease-out);
+  transition: transform .36s var(--ease-out);
 }
 
 .file-tab {
   position: absolute;
-  z-index: 2;
-  top: 0;
-  left: calc(3% + var(--tab) * 24%);
+  z-index: 1;
+  top: -25px;
+  left: calc(4% + var(--tab) * 23%);
   display: inline-flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 5px;
   width: 21%;
-  height: 30px;
-  padding: 6px 12px 0;
+  height: 26px;
+  padding: 5px 10px 0;
   overflow: hidden;
-  border: 1px solid #C9B288;
+  border: 1px solid var(--ink-line);
   border-bottom: 0;
-  border-radius: 8px 8px 0 0;
-  background: #EEDFBD;
-  font-size: 11.5px;
+  border-radius: 6px 6px 0 0;
+  background: var(--surface);
+  font-size: 10.5px;
   white-space: nowrap;
-  color: #6B5A3A;
+  color: var(--muted);
 }
 
 .file-tab b {
-  font: 600 16px/1 var(--font-serif);
+  font: 600 14px/1 var(--font-serif);
   color: var(--ink);
 }
 
-.file-paper {
+.file-face {
   position: absolute;
-  z-index: 1;
-  top: 34px;
-  left: 5%;
-  right: 5%;
-  height: 80px;
-  border: 1px solid #D9D2C3;
-  border-radius: 2px;
-  background: repeating-linear-gradient(180deg, #FBF8F1 0 13px, #E7E0D0 13px 14px);
-  transition: transform .4s var(--ease-out);
+  inset: 0;
+  border: 1px solid var(--ink-line);
+  border-radius: 2px 6px 2px 2px;
+  background: var(--surface);
+  transition: background-color .25s, border-color .25s;
 }
 
-.file-body {
+/* Guides from a lifted folder back down to its place in the stack. */
+.file-sheet::before,
+.file-sheet::after {
+  content: '';
   position: absolute;
-  z-index: 3;
-  top: 29px;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  display: grid;
-  align-content: start;
-  gap: 4px;
-  padding: 16px 22px;
-  border: 1px solid #C9B288;
-  border-radius: 3px 10px 3px 3px;
-  background: linear-gradient(180deg, #EEDFBD, #E1CCA2);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), 0 -7px 14px -10px rgba(31, 27, 21, .55);
-  color: #5E4E31;
-  font-size: 12.5px;
-}
-
-.file-body strong {
-  font: 600 15px/1.35 var(--font-serif);
-  color: var(--ink);
-}
-
-/* Only the front folder shows its face; the others reveal theirs as they rise,
-   so the thin strips between tabs stay plain. */
-.file-body > * {
-  transition: opacity .25s var(--ease-out);
-}
-
-.archive-file ~ .archive-file:not(:hover):not(:focus-visible) .file-body > * {
+  top: 100%;
+  height: var(--lift);
+  border-left: 1.5px dashed var(--accent);
   opacity: 0;
+  transition: opacity .2s;
+}
+
+.file-sheet::before {
+  left: 10%;
+}
+
+.file-sheet::after {
+  right: 10%;
 }
 
 .archive-file:hover .file-sheet,
@@ -4726,50 +4679,82 @@ select {
   transform: translateY(calc(var(--lift) * -1));
 }
 
-.archive-file:hover .file-paper,
-.archive-file:focus-visible .file-paper {
-  transform: translateY(-42px);
+.archive-file:hover .file-sheet::before,
+.archive-file:hover .file-sheet::after,
+.archive-file:focus-visible .file-sheet::before,
+.archive-file:focus-visible .file-sheet::after {
+  opacity: 1;
+  transition-delay: .12s;
 }
 
+.archive-file:hover .file-tab,
 .archive-file:focus-visible .file-tab {
-  box-shadow: 0 0 0 2px var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+.archive-file:hover .file-tab b,
+.archive-file:focus-visible .file-tab b {
+  color: var(--accent-dark);
+}
+
+.archive-file:hover .file-face,
+.archive-file:focus-visible .file-face {
+  border-color: var(--accent);
+  background:
+    repeating-linear-gradient(180deg, transparent 0 13px, rgba(217, 119, 87, .3) 13px 14.5px) 20px 26px / 60% 58% no-repeat,
+    var(--accent-soft);
 }
 
 .od-front {
   position: absolute;
-  left: -8px;
-  right: -8px;
+  left: -6px;
+  right: -6px;
   bottom: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 9px;
+  gap: 8px;
   height: var(--fp);
   padding: 0;
   border: 0;
-  border-radius: 4px;
-  background:
-    repeating-linear-gradient(92deg, rgba(70, 40, 18, .06) 0 2px, transparent 2px 9px),
-    linear-gradient(180deg, #BE8D62, #9E6D46);
-  box-shadow: inset 0 0 0 1px rgba(56, 32, 14, .5), inset 0 2px 0 rgba(255, 232, 196, .35);
+  border-radius: 3px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--ink-line);
   cursor: pointer;
   pointer-events: auto;
   transform: translateZ(2px);
   transform-style: preserve-3d;
 }
 
-/* The front board's top edge, so it reads as solid wood from above. */
-.od-front::before {
+/* The front board's top and end, so it reads as a solid board. */
+.od-front::before,
+.od-front::after {
   content: '';
   position: absolute;
+  background: var(--surface-sunk);
+  box-shadow: inset 0 0 0 1px var(--ink-line);
+}
+
+.od-front::before {
   left: 0;
   right: 0;
   top: 0;
-  height: 16px;
+  height: 14px;
   transform-origin: 50% 0;
   transform: rotateX(-90deg);
-  background: linear-gradient(0deg, #87593A, #C99A6E);
+}
+
+.od-front::after {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  transform-origin: 100% 50%;
+  transform: rotateY(-90deg);
+  background: #F2EEE4;
 }
 
 .od-front:focus-visible {
@@ -4780,29 +4765,53 @@ select {
 .od-label {
   display: inline-flex;
   align-items: baseline;
-  gap: 10px;
-  padding: 4px 16px 3px;
-  border: 2px solid #C7A35A;
+  gap: 8px;
+  padding: 4px 14px 3px;
   border-radius: 2px;
-  background: #F5EEDB;
-  box-shadow: 0 1px 1px rgba(40, 22, 8, .35), inset 0 0 0 1px rgba(150, 110, 40, .3);
-  color: #7A6646;
-  font-size: 11px;
+  background: var(--accent);
+  color: rgba(255, 253, 249, .85);
+  font-size: 10.5px;
   transform: translateZ(1px);
 }
 
 .od-label b {
-  font: 600 16px/1.3 var(--font-serif);
-  color: #2E2215;
+  font: 600 15px/1.3 var(--font-serif);
+  color: var(--surface);
 }
 
 .od-pull {
-  width: 120px;
+  width: 72px;
   height: 12px;
-  border-radius: 1px 1px 12px 12px;
-  background: linear-gradient(180deg, #E2C27A, #9C7834);
-  box-shadow: 0 3px 3px rgba(30, 16, 4, .45), inset 0 1px 0 rgba(255, 246, 214, .6);
+  border: 1.5px solid var(--ink-line);
+  border-top: 0;
+  border-radius: 0 0 14px 14px;
   transform: translateZ(1px);
+}
+
+.drawer-caption {
+  position: absolute;
+  left: 24px;
+  bottom: 24px;
+  display: grid;
+  gap: 8px;
+  width: min(300px, 34%);
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 12px 26px -20px rgba(31, 27, 21, .45);
+}
+
+.caption-body {
+  display: grid;
+  gap: 3px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.caption-body strong {
+  font: 600 16px/1.35 var(--font-serif);
+  color: var(--ink);
 }
 
 .drawer-return {
@@ -4814,17 +4823,33 @@ select {
 
 @container (max-width: 760px) {
   .archive-room {
-    --cw: 228px;
-    --ch: 330px;
-    --cd: 180px;
-    --k: min(1, calc(1.25 / var(--years, 1)));
-    --dw: 94cqw;
-    --fh: 152px;
-    --fp: 62px;
-    --sh: 86px;
-    --step: 15px;
-    --lift: 86px;
-    height: 560px;
+    --cw: 220px;
+    --ch: 320px;
+    --cd: 170px;
+    --k: min(.86, calc(1.1 / var(--years, 1)));
+    --dw: 300px;
+    --fh: 160px;
+    --fp: 58px;
+    --sh: 78px;
+    --step: 14px;
+    --lift: 80px;
+    height: 680px;
+  }
+
+  .archive-room.is-open .room-space {
+    transform: translate(0, -34%) scale(.5);
+  }
+
+  .open-drawer {
+    left: calc(46% - var(--dw) / 2);
+    bottom: 190px;
+  }
+
+  .drawer-caption {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    width: auto;
   }
 
   .cabinet-front {
@@ -4833,30 +4858,26 @@ select {
   }
 
   .cabinet-drawers {
-    gap: 7px;
+    gap: 6px;
   }
 
   .cab-label {
-    padding: 3px 5px 2px;
+    padding: 2px 4px 1px;
   }
 
   .cab-label b {
-    font-size: 12px;
+    font-size: 11.5px;
   }
 
   .cab-label small {
-    font-size: 9px;
+    font-size: 8.5px;
   }
 
   .file-tab {
-    gap: 4px;
-    width: 23%;
-    padding: 6px 7px 0;
-    font-size: 10px;
-  }
-
-  .file-body {
-    padding: 13px 14px;
+    gap: 3px;
+    width: 22%;
+    padding: 5px 6px 0;
+    font-size: 9.5px;
   }
 }
 
@@ -4865,7 +4886,7 @@ select {
   .room-dim,
   .cab-drawer,
   .file-sheet,
-  .file-paper {
+  .file-face {
     transition: none;
   }
 }

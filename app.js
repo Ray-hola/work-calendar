@@ -1226,9 +1226,9 @@ async function openPip(){
   pipWindow.addEventListener('pagehide',()=>{pipTimers.forEach(clearInterval);pipTimers=[];pipWindow=null});
 }
 /* ---------------------------------------------------------------------------
-   档案室 · a CSS 3D room: one card-catalogue cabinet per year, one drawer per
-   month. Taking a drawer out brings it to the front of the room, its folders
-   standing newest-first; hovering or focusing one lifts it out of the drawer
+   档案室 · line-drawn, isometric: one card-catalogue cabinet per year, one
+   drawer per month. Taking a drawer out brings it forward with its folders
+   standing newest-first; hovering or focusing one lifts it clear of the stack
    and a click opens the whole brief. The snapshot only carries index cards;
    the full brief is fetched on open.
    ------------------------------------------------------------------------- */
@@ -1246,18 +1246,18 @@ function archiveDrawers(cards){
 const hours=minutes=>(Number(minutes||0)/60).toFixed(1);
 function archiveFile(card,index){
   const d=new Date(`${card.date}T12:00:00`),t=card.totals||{};
-  return `<button class="archive-file" data-date="${escapeHTML(card.date)}" style="--i:${index};--tab:${index%4}" aria-label="${escapeHTML(card.date)} 团队日报"><span class="file-sheet" aria-hidden="true"><span class="file-tab"><b>${d.getDate()}</b>${WEEKDAY_SHORT[d.getDay()]}</span><span class="file-paper"></span><span class="file-body"><strong>团队日报 · ${d.getMonth()+1}月${d.getDate()}日</strong><span>完成 ${t.completed||0}/${t.tasks||0} 项 · ${hours(t.load)}h</span><span>${t.members||0} 位成员 · ${t.projects||0} 个项目${card.riskCount?` · ${card.riskCount} 条关注`:''}</span></span></span></button>`;
+  return `<button class="archive-file" data-date="${escapeHTML(card.date)}" style="--i:${index};--tab:${index%4}" aria-label="${escapeHTML(card.date)} 团队日报"><span class="file-sheet" aria-hidden="true"><span class="file-tab"><b>${d.getDate()}</b>${WEEKDAY_SHORT[d.getDay()]}</span><span class="file-face"></span></span><span class="file-body" hidden><strong>团队日报 · ${d.getMonth()+1}月${d.getDate()}日</strong><span>完成 ${t.completed||0}/${t.tasks||0} 项 · ${hours(t.load)}h</span><span>${t.members||0} 位成员 · ${t.projects||0} 个项目${card.riskCount?` · ${card.riskCount} 条关注`:''}</span></span></button>`;
 }
 function archiveCabinet(year,drawers){
   const slots=Array.from({length:12},(_,i)=>{
     const month=`${year}-${String(i+1).padStart(2,'0')}`,files=drawers.get(month)||[],out=UI.archiveOpen===month;
     return `<button class="cab-drawer${out?' is-out':''}" data-month="${month}"${files.length?'':' disabled'} aria-expanded="${out}" aria-label="${year} 年 ${i+1} 月 · ${files.length} 份"><span class="cab-label"><b>${i+1}月</b>${files.length?`<small>${files.length} 份</small>`:''}</span><span class="cab-pull" aria-hidden="true"></span></button>`;
   }).join('');
-  return `<div class="cabinet"><span class="cabinet-top"></span><span class="cabinet-side is-left"></span><span class="cabinet-side is-right"></span><div class="cabinet-front"><span class="cabinet-plaque">${year}</span><div class="cabinet-drawers">${slots}</div></div></div>`;
+  return `<div class="cabinet"><span class="cabinet-ground"></span><span class="cabinet-top"></span><span class="cabinet-side"></span><div class="cabinet-front"><span class="cabinet-plaque">${year}</span><div class="cabinet-drawers">${slots}</div></div></div>`;
 }
 function archiveDrawerStage(month,files){
   const [year,mon]=month.split('-');
-  return `<div class="drawer-stage" style="--n:${files.length}"><div class="open-drawer"><span class="od-floor"></span><span class="od-side is-left"></span><span class="od-side is-right"></span><span class="od-back"></span>${files.map(archiveFile).join('')}<button class="od-front" aria-label="把 ${Number(mon)} 月抽屉放回"><span class="od-label"><small>${escapeHTML(year)}</small><b>${Number(mon)} 月</b><small>${files.length} 份</small></span><span class="od-pull" aria-hidden="true"></span></button></div></div><button class="secondary-btn drawer-return">放回抽屉</button>`;
+  return `<div class="drawer-stage" style="--n:${files.length}"><div class="open-drawer"><span class="od-ground"></span><span class="od-floor"></span><span class="od-side is-left"></span><span class="od-side is-right"></span><span class="od-back"></span>${files.map(archiveFile).join('')}<button class="od-front" aria-label="把 ${Number(mon)} 月抽屉放回"><span class="od-label"><b>${Number(mon)} 月</b><small>${escapeHTML(year)} · ${files.length} 份</small></span><span class="od-pull" aria-hidden="true"></span></button></div></div><div class="drawer-caption" aria-hidden="true"><div class="eyebrow">${escapeHTML(year)} 年 ${Number(mon)} 月 · ${files.length} 份</div><div class="caption-body"></div></div><button class="secondary-btn drawer-return">放回抽屉</button>`;
 }
 const archiveStill=()=>matchMedia('(prefers-reduced-motion: reduce)').matches||!document.body.animate;
 function renderArchive(){
@@ -1274,13 +1274,33 @@ function renderArchive(){
   if(root.dataset.key===key)return;
   root.dataset.key=key;
   const open=UI.archiveOpen;
-  root.innerHTML=`<div class="archive-room${open?' is-open':''}" style="--years:${years.length}"><div class="room-stage"><div class="room-space"><span class="room-wall"></span><span class="room-floor"></span><div class="cabinet-row">${years.map(y=>archiveCabinet(y,drawers)).join('')}</div></div></div><span class="room-lamp" aria-hidden="true"></span><span class="room-dim"></span><div class="drawer-slot">${open?archiveDrawerStage(open,drawers.get(open)):''}</div></div>`;
+  root.innerHTML=`<div class="archive-room${open?' is-open':''}" style="--years:${years.length}"><div class="room-space"><div class="cabinet-row">${years.map(y=>archiveCabinet(y,drawers)).join('')}</div></div><span class="room-dim"></span><div class="drawer-slot">${open?archiveDrawerStage(open,drawers.get(open)):''}</div></div>`;
   $$('#archiveCabinet .cab-drawer').forEach(b=>b.onclick=e=>UI.archiveOpen===b.dataset.month?closeArchiveDrawer():openArchiveDrawer(b.dataset.month,b,e.detail===0));
   bindArchiveDrawer();
+  fitArchiveDrawer(root.querySelector('.drawer-stage'));
 }
+/* The card beside the drawer reads out whichever folder is up, in flat type,
+   so the 3D tabs only need to carry the day. */
 function bindArchiveDrawer(){
-  $$('#archiveCabinet .archive-file').forEach(b=>b.onclick=()=>openBrief(b.dataset.date));
+  const caption=$('#archiveCabinet .caption-body'),show=b=>{if(caption&&b)caption.innerHTML=b.querySelector('.file-body').innerHTML};
+  $$('#archiveCabinet .archive-file').forEach(b=>{b.onclick=()=>openBrief(b.dataset.date);b.onpointerenter=b.onfocus=()=>show(b)});
+  show($('#archiveCabinet .archive-file'));
   $$('#archiveCabinet .od-front,#archiveCabinet .drawer-return,#archiveCabinet .room-dim').forEach(b=>b.onclick=closeArchiveDrawer);
+}
+/* Long months make a long drawer: shrink it about its front until the back and
+   a lifted folder clear the 放回抽屉 button, then centre it in the room left
+   over beside a narrow caption, or across the room above a full-width one. */
+function fitArchiveDrawer(stage){
+  const drawer=stage?.querySelector('.open-drawer'),room=stage?.closest('.archive-room');if(!drawer||!room)return;
+  drawer.style.setProperty('--fit','1');drawer.style.setProperty('--shift','0px');
+  const box=room.getBoundingClientRect(),at=stage.getBoundingClientRect(),parts=[...drawer.children].map(e=>e.getBoundingClientRect());
+  const cap=room.querySelector('.drawer-caption')?.getBoundingClientRect(),lift=parseFloat(getComputedStyle(drawer).getPropertyValue('--lift'))||0;
+  const ax=at.left+drawer.offsetLeft+drawer.offsetWidth/2,ay=at.top+drawer.offsetTop+drawer.offsetHeight;
+  const top=Math.min(...parts.map(r=>r.top))-lift,left=Math.min(...parts.map(r=>r.left)),right=Math.max(...parts.map(r=>r.right));
+  const minX=cap&&cap.right<box.right-240?cap.right+24:box.left+16,maxX=box.right-16;
+  const fit=Math.max(.3,Math.min(1,(ay-box.top-56)/(ay-top),(maxX-minX)/(right-left)));
+  drawer.style.setProperty('--fit',fit.toFixed(3));
+  drawer.style.setProperty('--shift',`${Math.round((minX+maxX)/2-ax-fit*(right+left-2*ax)/2)}px`);
 }
 /* The drawer flies from its slot in the cabinet to the front of the room, and
    back again when it is returned. */
@@ -1302,6 +1322,7 @@ function openArchiveDrawer(month,slot,byKey=false){
   holder.innerHTML=archiveDrawerStage(month,drawers.get(month));
   bindArchiveDrawer();
   const stage=holder.querySelector('.drawer-stage');
+  fitArchiveDrawer(stage);
   if(slot&&!archiveStill())stage.animate(archiveFlight(slot,stage),{duration:560,easing:'cubic-bezier(.2,.8,.2,1)'});
   /* Keyboard users land on the front folder; a pointer is already where it wants to be. */
   if(byKey)holder.querySelector('.archive-file')?.focus({preventScroll:true});
