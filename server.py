@@ -1062,7 +1062,7 @@ class Store:
         if closed:
             for r in self.all('repeats'):
                 if r.get('projectId')==p['id'] and r.get('active'):
-                    r['active']=False;self.put('repeats',r)
+                    r['active']=False;r['endedWithProject']=True;self.put('repeats',r)
         for t in self.all('tasks'):
             if not t.get('repeatId') or t.get('projectId')!=p['id']:continue
             outside=bool((p.get('end') and t['date']>p['end']) or (p.get('start') and t['date']<p['start']))
@@ -2251,14 +2251,29 @@ class Store:
                 if 'start' in d:r['start']=valid_date(d['start'])
                 if 'end' in d:r['end']=valid_date(d['end']) if d.get('end') else None
                 if r.get('end') and r['end']<r.get('start',''):raise Problem(400,'结束日期不能早于开始日期')
-                if 'projectId' in d:
-                    r['projectId']=d['projectId'] or None
-                    if r['projectId']:self.repeat_project(r['projectId'],r['assignees'])
+                moved=None
+                if 'projectId' in d and (d['projectId'] or None)!=r.get('projectId'):
+                    # Attach, move or detach: from today on the occurrences
+                    # follow the rule; what already happened stays where it was.
+                    old_pid,new_pid=r.get('projectId'),d['projectId'] or None
+                    target=self.repeat_project(new_pid,r['assignees']) if new_pid else None
+                    r['projectId']=new_pid
+                    if r.pop('endedWithProject',None):r['active']=True
                     today=now().date().isoformat()
                     for task in self.all('tasks'):
-                        if task.get('repeatId')==r['id'] and task.get('status')=='todo' and task['date']>=today:
-                            task['projectId']=r['projectId'];self.put('tasks',task)
-                self.put('repeats',r);self.materialize(now().date(), CALENDAR_END);return r
+                        if task.get('repeatId')!=r['id'] or task['date']<today:continue
+                        if task.get('status')=='skipped' and task.get('skipReason') in ('项目已结束','项目周期已调整'):
+                            task['status']='todo';task['skipReason']=''
+                        if task.get('status')=='todo':
+                            task['projectId']=new_pid;self.put('tasks',task)
+                    moved=(old_pid,target)
+                self.put('repeats',r)
+                if moved and moved[1]:self.trim_project_repeats(moved[1],'项目周期已调整')
+                self.materialize(now().date(), CALENDAR_END)
+                if moved:
+                    where=f'挂到项目「{moved[1]["name"]}」' if moved[1] else '移出项目，不再归属任何项目'
+                    for a in r['assignees']:self.notify(a,'固定安排调整',f'「{r["name"]}」已{where}，从今天起生效。','repeat',r['id'])
+                return r
             day=valid_date(d.get('date') or d.get('day'))
             skip=bool(d.get('skip',True));dates=set(r.get('skipDates',[]))
             if skip: dates.add(day)
