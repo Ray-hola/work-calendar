@@ -1,0 +1,12 @@
+# Only the four runtime files go into the image. data/ holds accounts and the
+# database, so it must never reach the build context.
+.git
+.github
+data/
+tests/
+deploy/
+assets/
+*.md
+__pycache__/
+*.py[cod]
+*.log

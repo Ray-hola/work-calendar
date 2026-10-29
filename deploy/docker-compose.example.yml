@@ -1,0 +1,33 @@
+# Run Work Calendar with Docker Compose. From the repository root:
+#
+#   docker compose -f deploy/docker-compose.example.yml up -d --build
+#
+# Then open http://127.0.0.1:4173/. The first start writes the account
+# passwords to data/initial-accounts.txt. Paths below are relative to this file.
+services:
+  app:
+    build: ..
+    environment:
+      # Serving over https? List every public origin and turn on the Secure cookie:
+      # WORK_CALENDAR_ORIGINS: https://work.your-domain.example
+      # WORK_CALENDAR_SECURE_COOKIE: "1"
+      WORK_CALENDAR_SECURE_COOKIE: "0"
+    volumes:
+      - ../data:/app/data
+    # Loopback only. The app allows http://127.0.0.1:4173 by itself; mapping a
+    # different host port means adding that origin to WORK_CALENDAR_ORIGINS.
+    ports:
+      - "127.0.0.1:4173:4173"
+    restart: unless-stopped
+
+  # Optional: publish through Cloudflare Tunnel instead of a public port. The
+  # tunnel's ingress points at http://app:4173 on the compose network.
+  # tunnel:
+  #   image: cloudflare/cloudflared:latest
+  #   command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+  #   volumes:
+  #     - ~/.cloudflared/config.yml:/etc/cloudflared/config.yml:ro
+  #     - ~/.cloudflared/YOUR-TUNNEL-ID.json:/etc/cloudflared/creds.json:ro
+  #   depends_on:
+  #     - app
+  #   restart: unless-stopped
