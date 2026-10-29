@@ -82,13 +82,15 @@ class ScheduleAccessTests(unittest.TestCase):
         })
         self.assertIsNone(own['projectId'])
         self.assertEqual(own['type'], '临时')
-        self.assertIsNone(self.store.task_approver(own))
         self.store.action(member, 'task.complete', {'id': own['id'], 'summary': 'done', 'actual': 20, 'feeling': '顺利'})
         self.assertEqual(self.store.get('tasks', own['id'])['status'], 'done')
         handed = self.store.action(self.admin, 'task.create', {
             'name': 'admin errand', 'assignee': 'test002', 'date': self.day, 'duration': 20,
         })
-        self.assertEqual(self.store.task_approver(handed), 'superadmin')
+        # Finishing it needs no sign-off; whoever handed it over is told.
+        self.store.action(self.store.user('test002'), 'task.complete', {'id': handed['id'], 'summary': 'done', 'actual': 20})
+        self.assertEqual(self.store.get('tasks', handed['id'])['status'], 'done')
+        self.assertTrue(any(n['to'] == 'superadmin' and n['title'] == '任务已完成' for n in self.store.all('notifications')))
         self.assertIn(handed['id'], {t['id'] for t in self.store.snapshot(self.store.user('test002'))['tasks']})
         self.assertNotIn(handed['id'], {t['id'] for t in self.store.snapshot(member)['tasks']})
         with self.assertRaises(Problem):
@@ -339,7 +341,6 @@ class ScheduleAccessTests(unittest.TestCase):
         successor = next(t for t in self.store.all('tasks') if t.get('originId') == task['id'])
         self.store.action(self.store.user('test002'), 'task.complete',
                           {'id': successor['id'], 'summary': '依赖已完成', 'actual': 20})
-        self.store.action(self.admin, 'task.review', {'id': successor['id'], 'accept': True})
         settled = self.store.get('tasks', task['id'])
         self.assertEqual(settled['status'], 'done')
         self.assertTrue(settled.get('carriedCompletion'))
@@ -460,32 +461,47 @@ class TaskApprovalTests(unittest.TestCase):
         self.admin=self.store.user('superadmin'); self.owner=self.store.user('test001'); self.member=self.store.user('test002'); self.day=now().date().isoformat()
         self.project=self.store.action(self.admin,'project.create',{'name':'approval','owner':'test001','members':['test002'],'start':self.day})
     def tearDown(self): self.store.close(); self.temp.cleanup()
-    def test_member_completion_waits_for_owner_then_approves(self):
+    def test_member_completion_is_done_at_once_and_the_owner_is_told(self):
         task=self.store.action(self.admin,'task.create',{'name':'child','projectId':self.project['id'],'assignee':'test002','date':self.day})
         result=self.store.action(self.member,'task.complete',{'id':task['id'],'summary':'已完成','actual':30})
-        self.assertEqual(result['status'],'pending_approval'); self.assertEqual(result['completionSummary'],'已完成')
-        notice=next(n for n in self.store.all('notifications') if n['to']=='test001' and n['kind']=='task_approval')
-        self.store.action(self.owner,'task.review',{'id':task['id'],'accept':True})
-        self.assertEqual(self.store.get('tasks',task['id'])['status'],'done')
-        self.assertTrue(any(n['to']=='test002' and n['kind']=='task_approval' for n in self.store.all('notifications')))
+        self.assertEqual(result['status'],'done'); self.assertEqual(result['completionSummary'],'已完成')
+        self.assertFalse(any(n['kind']=='task_approval' for n in self.store.all('notifications')))
+        self.assertTrue(any(n['to']=='test001' and n['kind']=='progress' and n['reference']==task['id'] for n in self.store.all('notifications')))
+        with self.assertRaises(Problem):
+            self.store.action(self.owner,'task.review',{'id':task['id'],'accept':True})
 
-    def test_snapshot_repairs_legacy_task_approval_delivery_to_owner(self):
-        task=self.store.action(self.admin,'task.create',{'name':'legacy route','projectId':self.project['id'],'assignee':'test002','date':self.day})
-        self.store.action(self.member,'task.complete',{'id':task['id'],'summary':'待审批','actual':20})
-        stored=self.store.get('tasks',task['id']);stored['approval']['approver']='superadmin';self.store.put('tasks',stored)
-        notices=[n for n in self.store.all('notifications') if n.get('reference')==task['id'] and n.get('kind')=='task_approval']
-        notices[0]['to']='superadmin';self.store.put('notifications',notices[0]);self.store.db.commit()
+    def test_submissions_left_pending_are_settled_as_done(self):
+        task=self.store.action(self.admin,'task.create',{'name':'旧待审','projectId':self.project['id'],'assignee':'test002','date':self.day})
+        stored=self.store.get('tasks',task['id'])
+        stored.update(status='pending_approval',completionSummary='旧提交',approval={'status':'pending','approver':'test001','summary':'旧提交'})
+        self.store.put('tasks',stored)
+        notice=self.store.notify('test001','任务完成待审批','请审批','task_approval',task['id']);self.store.db.commit()
         self.store.snapshot(self.owner)
-        repaired=self.store.get('tasks',task['id'])
-        self.assertEqual(repaired['approval']['approver'],'test001')
-        self.assertTrue(any(n['to']=='test001' and n['reference']==task['id'] and not n['read'] for n in self.store.all('notifications')))
+        settled=self.store.get('tasks',task['id'])
+        self.assertEqual(settled['status'],'done')
+        self.assertTrue(self.store.get('notifications',notice['id'])['read'])
+        self.assertTrue(self.store.project_tasks_complete(self.project['id']))
+
+    def test_assignee_corrects_the_completion_record(self):
+        task=self.store.action(self.admin,'task.create',{'name':'可修改','projectId':self.project['id'],'assignee':'test002','date':self.day})
+        with self.assertRaises(Problem):
+            self.store.action(self.member,'task.completion.update',{'id':task['id'],'summary':'还没做完'})
+        self.store.action(self.member,'task.complete',{'id':task['id'],'summary':'初稿','actual':20,'feeling':'一般'})
+        edited=self.store.action(self.member,'task.completion.update',{'id':task['id'],'summary':'补上了验收截图','actual':35,'feeling':'顺利'})
+        self.assertEqual((edited['status'],edited['completionSummary'],edited['completionActual'],edited['completionFeeling']),('done','补上了验收截图',35,'顺利'))
+        log=next(l for l in self.store.all('logs') if l['taskId']==task['id'] and l['kind']=='complete_edit')
+        self.assertEqual(log['before']['completionSummary'],'初稿')
+        self.assertTrue(any(n['to']=='test001' and n['title']=='完成记录已修改' for n in self.store.all('notifications')))
+        # Only the assignee edits their own record.
+        for other in (self.owner,self.admin):
+            with self.assertRaises(Problem):
+                self.store.action(other,'task.completion.update',{'id':task['id'],'summary':'代改'})
 
     def test_project_completion_requires_all_tasks_and_report_then_superadmin_review(self):
         task=self.store.action(self.admin,'task.create',{'name':'结项子任务','projectId':self.project['id'],'assignee':'test002','date':self.day})
         with self.assertRaises(Problem):
             self.store.action(self.owner,'project.complete_request',{'id':self.project['id'],'report':'未完成报告'})
         self.store.action(self.member,'task.complete',{'id':task['id'],'summary':'完成','actual':20})
-        self.store.action(self.owner,'task.review',{'id':task['id'],'accept':True})
         p=self.store.action(self.owner,'project.complete_request',{'id':self.project['id'],'report':'全部子任务已完成，验收通过。'})
         self.assertEqual(p['status'],'pending_completion')
         self.assertEqual(p['completionReport'],'全部子任务已完成，验收通过。')
@@ -504,7 +520,6 @@ class TaskApprovalTests(unittest.TestCase):
         })
         carried=next(t for t in self.store.all('tasks') if t.get('originId')==task['id'])
         self.store.action(self.member,'task.complete',{'id':carried['id'],'summary':'依赖已完成','actual':20})
-        self.store.action(self.owner,'task.review',{'id':carried['id'],'accept':True})
         result=self.store.action(self.owner,'project.complete_request',{
             'id':self.project['id'],'report':'递延任务已在下一工作日完成并验收。',
         })
@@ -529,52 +544,57 @@ class TaskApprovalTests(unittest.TestCase):
         original=self.store.action(self.member,'task.defer',{'id':task['id'],'date':target,'reason':'等待依赖','remaining':'继续处理'})
         successor=next(t for t in self.store.all('tasks') if t.get('originId')==original['id'])
         self.store.action(self.member,'task.complete',{'id':successor['id'],'summary':'递延后完成','actual':20})
-        self.store.action(self.owner,'task.review',{'id':successor['id'],'accept':True})
         result=self.store.action(self.owner,'project.complete_request',{'id':self.project['id'],'report':'递延任务已完成'})
         self.assertEqual(result['status'],'pending_completion')
-    def test_standalone_member_task_also_requires_superadmin(self):
+    def test_standalone_member_task_completes_directly(self):
         task=self.store.put('tasks', {'name':'standalone','date':self.day,'duration':30,'assignee':'test002','projectId':None,'priority':'P1','status':'todo','fixed':False,'type':'通用'})
         self.store.db.commit()
         self.store.action(self.member,'task.complete',{'id':task['id'],'summary':'已完成','actual':30})
-        self.assertEqual(self.store.get('tasks',task['id'])['status'],'pending_approval')
-        with self.assertRaises(Problem): self.store.action(self.owner,'task.review',{'id':task['id'],'accept':True})
-        self.store.action(self.admin,'task.review',{'id':task['id'],'accept':True})
         self.assertEqual(self.store.get('tasks',task['id'])['status'],'done')
+        # Outside a project only an admin can send it back.
+        with self.assertRaises(Problem): self.store.action(self.owner,'task.reopen',{'id':task['id'],'reason':'再看看'})
+        self.assertEqual(self.store.action(self.admin,'task.reopen',{'id':task['id'],'reason':'再看看'})['status'],'todo')
 
-    def test_rejection_creates_rework_task(self):
+    def test_owner_sends_finished_work_back(self):
         task=self.store.action(self.admin,'task.create',{'name':'child','projectId':self.project['id'],'assignee':'test002','date':self.day})
-        self.store.action(self.member,'task.complete',{'id':task['id'],'summary':'请审核','actual':20})
-        retry=self.store.action(self.owner,'task.review',{'id':task['id'],'accept':False,'reason':'请补充验收证据'})
-        self.assertEqual(self.store.get('tasks',task['id'])['status'],'rejected')
-        self.assertEqual(retry['status'],'todo'); self.assertEqual(retry['assignee'],'test002'); self.assertIn('补充验收证据',retry['desc'])
+        self.store.action(self.member,'task.complete',{'id':task['id'],'summary':'请看','actual':20})
+        self.assertTrue(any(e['taskId']==task['id'] for e in self.store.work_completions(self.admin)))
+        with self.assertRaises(Problem):
+            self.store.action(self.member,'task.reopen',{'id':task['id'],'reason':'自己打回'})
+        with self.assertRaises(Problem):
+            self.store.action(self.owner,'task.reopen',{'id':task['id'],'reason':' '})
+        back=self.store.action(self.owner,'task.reopen',{'id':task['id'],'reason':'请补充验收证据'})
+        self.assertEqual((back['status'],back['reopen']['reason'],back['reopen']['by']),('todo','请补充验收证据','test001'))
+        self.assertTrue(any(n['to']=='test002' and n['title']=='任务被打回' and '补充验收证据' in n['body'] for n in self.store.all('notifications')))
+        self.assertFalse(self.store.project_tasks_complete(self.project['id']))
+        self.assertFalse(any(e['taskId']==task['id'] for e in self.store.work_completions(self.admin)))
+        # Open work cannot be sent back again; finishing it closes the loop.
+        with self.assertRaises(Problem):
+            self.store.action(self.owner,'task.reopen',{'id':task['id'],'reason':'再打回'})
+        done=self.store.action(self.member,'task.complete',{'id':task['id'],'summary':'已补充','actual':10})
+        self.assertEqual(done['status'],'done')
+        self.assertTrue(any(l['taskId']==task['id'] and l['kind']=='reopen' and l['reason']=='请补充验收证据' for l in self.store.all('logs')))
 
-    def test_rejection_after_carry_starts_rework_after_today(self):
+    def test_sending_back_a_past_task_puts_it_on_today(self):
         old_day = (date.fromisoformat(self.day) - timedelta(days=2)).isoformat()
         project = self.store.action(self.admin, 'project.create', {
-            'name': '跨日审批', 'owner': 'test001', 'members': ['test002'], 'start': old_day,
+            'name': '跨日打回', 'owner': 'test001', 'members': ['test002'], 'start': old_day,
         })
         task = self.store.action(self.admin, 'task.create', {
-            'name': '跨日待审', 'projectId': project['id'], 'assignee': 'test002', 'date': old_day,
+            'name': '前天的任务', 'projectId': project['id'], 'assignee': 'test002', 'date': old_day, 'deadline': old_day,
         })
-        self.store.action(self.member, 'task.complete', {'id': task['id'], 'summary': '待审', 'actual': 20})
+        self.store.action(self.member, 'task.complete', {'id': task['id'], 'summary': '做完', 'actual': 20})
+        back = self.store.action(self.admin, 'task.reopen', {'id': task['id'], 'reason': '数据有误'})
+        self.assertEqual((back['date'], back['deadline']), (self.day, self.day))
+        # The overnight rollover leaves it alone today.
         self.store.schedule(datetime.combine(date.fromisoformat(self.day), time(8), TZ))
-        self.store.action(self.owner, 'task.review', {'id': task['id'], 'accept': False, 'reason': '请补充证据'})
-        retry = next(t for t in self.store.all('tasks') if t.get('reworkOf') == task['id'])
-        self.assertGreater(retry['date'], self.day)
+        self.assertEqual(self.store.get('tasks', task['id'])['status'], 'todo')
     def test_owner_own_task_completes_without_self_review(self):
         task=self.store.action(self.owner,'task.create',{'name':'owner task','projectId':self.project['id'],'assignee':'test001','date':self.day})
         self.store.action(self.owner,'task.complete',{'id':task['id'],'summary':'owner done','actual':30})
         self.assertEqual(self.store.get('tasks',task['id'])['status'],'done')
         self.assertFalse(any(n['to']=='test001' and n['kind']=='task_approval' for n in self.store.all('notifications')),
                          'Owner 自己的任务不应再给自己发审批通知')
-
-    def test_owner_submission_from_before_the_rule_can_still_be_reviewed(self):
-        task=self.store.action(self.owner,'task.create',{'name':'旧待审','projectId':self.project['id'],'assignee':'test001','date':self.day})
-        stored=self.store.get('tasks',task['id'])
-        stored.update(status='pending_approval',approval={'status':'pending','approver':'test001','summary':'旧提交'})
-        self.store.put('tasks',stored)
-        self.store.action(self.owner,'task.review',{'id':task['id'],'accept':True})
-        self.assertEqual(self.store.get('tasks',task['id'])['status'],'done')
 
     def test_a_bad_assignee_is_a_form_error_not_a_login_error(self):
         """反馈 #1：负责人取到空值时服务端曾回 401「请重新登录」。"""

@@ -135,7 +135,8 @@ AGENT_ACTION_TO_TOOL = {
     'project.complete_review': 'project.complete_review',
     'task.create': 'task.create', 'task.update': 'task.update',
     'task.delete': 'task.delete', 'task.complete': 'task.review',
-    'task.review': 'task.review', 'task.edit_request': 'task.edit_review',
+    'task.completion.update': 'task.review', 'task.reopen': 'task.review',
+    'task.edit_request': 'task.edit_review',
     'task.edit_review': 'task.edit_review', 'repeat.create': 'repeat.manage',
     'repeat.update': 'repeat.manage', 'repeat.skip': 'repeat.manage',
     'automation.update': 'automation.manage', 'collection.update': 'collection.manage',
@@ -921,29 +922,9 @@ class Store:
         if t['status'] in ('done','deferred','skipped','pending_approval','rejected'):
             raise Problem(409, '本次任务已记录，不能重复提交')
 
-    def task_approver(self, task):
-        """Return the account that must approve a submitted task."""
-        # superadmin's own work has no higher approver.
-        if task.get('assignee') == 'superadmin':
-            return None
-        pid = task.get('projectId')
-        if not pid:
-            # A one-off task somebody wrote for themselves has nobody else to
-            # sign it off; one an admin handed over goes back to superadmin.
-            return None if task.get('creator') and task.get('creator') == task.get('assignee') else 'superadmin'
-        project = self.get('projects', pid)
-        # Every project task is approved by that project's Owner. Project
-        # closure itself is the separate superadmin approval boundary. The
-        # Owner's own task has nobody else to sign it off, so it completes
-        # directly instead of waiting for a self-review.
-        if task.get('assignee') == project.get('owner'):
-            return None
-        return project.get('owner')
-
     def task_edit_approver(self, task):
         """Return the account that must approve a requested task change."""
-        # Editing an Owner's own task still requires superadmin review; the
-        # task-completion approval rule above is intentionally independent.
+        # Editing an Owner's own task still requires superadmin review.
         if task.get('assignee') == 'superadmin':
             return None
         pid = task.get('projectId')
@@ -1190,7 +1171,7 @@ class Store:
     def snapshot(self, user):
         with self.lock, self.db:
             self.advance_due_tasks()
-            self.reconcile_task_approvals()
+            self.settle_legacy_task_approvals()
             projects=[p for p in self.all('projects') if self.can_view_project(user,p)]
             all_tasks=self.all('tasks')
             superseded=self._superseded_map(all_tasks)
@@ -1259,7 +1240,9 @@ class Store:
             completes=[l for l in logs if l.get('taskId') in ids and l.get('kind') in ('complete','complete_pending')]
             event=max(approvals or completes,key=lambda l:str(l.get('createdAt','')),default=None)
             task=max(chain,key=lambda t:(str(t.get('date','')),str(t.get('createdAt',''))))
-            if not event and task.get('status')=='done': event={'createdAt':task.get('completedAt') or task.get('date','')+'T23:59:59+08:00'}
+            # A task sent back by its Owner is open again, whatever its log says.
+            if task.get('status')!='done': continue
+            if not event: event={'createdAt':task.get('completedAt') or task.get('date','')+'T23:59:59+08:00'}
             if not event or root in seen: continue
             seen.add(root);project=projects.get(task.get('projectId'))
             events.append({'kind':'task','taskId':task.get('id'),'projectId':task.get('projectId'),
@@ -1561,58 +1544,29 @@ class Store:
                 'lastAt': last.get('createdAt', ''),
                 'lastBy': last.get('author', '')}
 
-    def reconcile_task_approvals(self):
-        """Keep persisted pending approvals and inbox delivery in sync with the Owner.
+    def settle_legacy_task_approvals(self):
+        """Finish submissions left waiting from when completion needed approval.
 
-        Called inside the snapshot transaction. This repairs pre-existing requests
-        after a routing change and missing notices, without resubmitting tasks.
+        Completing a task no longer goes through review, so anything still
+        pending was already finished by its assignee: it is closed as done and
+        its approval cards are cleared. Runs inside the snapshot and scheduler
+        transactions; after the first pass there is nothing left to do.
         """
-        tasks = self.all('tasks')
-        projects = {p['id']: p for p in self.all('projects')}
-        groups = {}
-        for task in tasks:
-            if task.get('status') != 'pending_approval':
-                continue
-            project = projects.get(task.get('projectId'))
-            if task.get('projectId') and (not project or project.get('status') != 'active' or
-                                         (project.get('end') and project['end'] < now().date().isoformat())):
-                continue
-            groups.setdefault(task.get('originId') or task['id'], []).append(task)
-        notifications = self.all('notifications')
-        for root, pending in groups.items():
-            task = max(pending, key=lambda t: (t.get('date', ''), t.get('createdAt', '')))
-            approver = self.task_approver(task)
-            if not approver:
-                continue
-            changed = False
-            for item in pending:
-                approval = item.get('approval') or {}
-                if approval.get('approver') != approver or approval.get('status') != 'pending':
-                    item['approval'] = {**approval, 'approver': approver, 'status': 'pending'}
-                    self.put('tasks', item)
-                    changed = True
-            ids = {t['id'] for t in tasks if t['id'] == root or t.get('originId') == root}
-            notices = [n for n in notifications if n.get('kind') == 'task_approval' and
-                       n.get('title') == '任务完成待审批' and n.get('reference') in ids]
-            notice = next((n for n in notices if n.get('to') == approver), None)
-            if notice is None and notices:
-                notice = notices[0]
-                previous = notice['to']
-                notice.update(to=approver, read=False)
-                self.put('notifications', notice)
-                self.audit('system', 'task.approval_reroute', {'taskId': task['id'], 'from': previous, 'to': approver})
-            elif notice is None:
-                summary = task.get('completionSummary') or (task.get('approval') or {}).get('summary', '')
-                notice = self.notify(approver, '任务完成待审批',
-                                     f'{task["assignee"]} 提交「{task["name"]}」完成总结，请审批。\n完成总结：{summary}',
-                                     'task_approval', task['id'])
-            elif changed:
-                notice['read'] = False
-                self.put('notifications', notice)
-            for duplicate in notices:
-                if duplicate['id'] != notice['id']:
-                    duplicate.update(kind='task_approval_superseded', read=True)
-                    self.put('notifications', duplicate)
+        pending=[t for t in self.all('tasks') if t.get('status')=='pending_approval']
+        if not pending:
+            return 0
+        ids={t['id'] for t in pending}
+        for t in pending:
+            t['status']='done';t['approval']={**(t.get('approval') or {}),'status':'retired'}
+            t.setdefault('completedAt',t.get('submittedAt') or timestamp());t.setdefault('completedBy',t.get('assignee'))
+            self.put('tasks',t)
+        for t in pending:
+            if not t.get('supersededBy'):self._settle_lineage(t,'system')
+        for n in self.all('notifications'):
+            if n.get('kind')=='task_approval' and n.get('reference') in ids and not n.get('read'):
+                n['read']=True;self.put('notifications',n)
+        self.audit('system','task.approval_retired',{'tasks':sorted(ids)})
+        return len(pending)
 
     def _action(self, user, action, d):
         if action=='chat.list':
@@ -1849,7 +1803,7 @@ class Store:
             p=self.get('projects',d['id']);self.project_owner(user,p)
             if p['status']!='active':raise Problem(409,'只有进行中的项目可以申请完成')
             if not self.project_tasks_complete(p['id']):
-                raise Problem(409,'项目下所有子任务完成并审批通过后才能申请结项')
+                raise Problem(409,'项目下所有子任务完成后才能申请结项')
             report=required(d,'report')
             if len(report)>10000: raise Problem(400,'结项报告不能超过 10000 个字符')
             p['status']='pending_completion';p['completionReport']=report;p['completionRequestedBy']=user['id'];p['completionRequestedAt']=timestamp();self.put('projects',p)
@@ -2100,17 +2054,14 @@ class Store:
             t=self.get('tasks',d['id']);self.performer(user,t)
             log={'taskId':t['id'],'actor':user['id'],'date':t['date'],'createdAt':timestamp(),'estimated':t['duration'],'type':t['type']}
             if action=='task.complete':
+                # Finishing a task needs no sign-off; only closing a project does.
                 summary=required(d,'summary')
-                approver=self.task_approver(t)
-                log.update(kind='complete_pending' if approver else 'complete',summary=summary,actual=duration(d.get('actual')),feeling=d.get('feeling','一般'),followup=str(d.get('followup','')))
+                log.update(kind='complete',summary=summary,actual=duration(d.get('actual')),feeling=d.get('feeling','一般'),followup=str(d.get('followup','')))
                 t['completionSummary']=summary; t['completionActual']=log['actual']; t['completionFeeling']=log['feeling']; t['submittedAt']=timestamp()
-                if approver:
-                    t['status']='pending_approval'
-                    t['approval']={'status':'pending','approver':approver,'summary':summary,'submittedBy':user['id'],'submittedAt':timestamp()}
-                    self.notify(approver,'任务完成待审批',f'{user["id"]} 提交「{t["name"]}」完成总结，请审批。\n完成总结：{summary}','task_approval',t['id'])
-                else:
-                    t['status']='done'
-                    self._settle_lineage(t,user['id'])
+                t['status']='done';t['completedAt']=timestamp();t['completedBy']=user['id']
+                self._settle_lineage(t,user['id'])
+                if not t.get('projectId') and t.get('creator') not in (None,user['id']):
+                    self.notify(t['creator'],'任务已完成',f'{user["id"]} 完成了「{t["name"]}」。\n完成总结：{summary}','progress',t['id'])
             elif action=='task.defer':
                 target=valid_date(d.get('date'))
                 if target<=t['date']:raise Problem(400,'递延日期必须晚于原日期')
@@ -2131,52 +2082,49 @@ class Store:
                 p=self.get('projects',t['projectId'])
                 if p['owner']!=user['id']:self.notify(p['owner'],'项目任务进度',f'{user["id"]} 将「{t["name"]}」记录为 {t["status"]}。'+json.dumps(log,ensure_ascii=False),'progress',t['id'])
             return t
-        if action=='task.review':
+        if action=='task.completion.update':
+            # The assignee corrects what they recorded; the task stays done.
             t=self.get('tasks',d['id'])
-            if t.get('status')!='pending_approval':
-                raise Problem(409,'该任务当前没有待审批记录')
-            # Submissions made before the Owner rule changed still name their
-            # approver, so they can be signed off instead of getting stuck.
-            approver=self.task_approver(t) or (t.get('approval') or {}).get('approver')
+            if user.get('admin') or t['assignee']!=user['id'] or not self.can_view_task(user,t):
+                raise Problem(403,'只能修改自己提交的完成记录')
+            if t.get('status')!='done' or t.get('carriedCompletion'):
+                raise Problem(409,'只有已完成的任务可以修改完成记录')
+            if t.get('projectId') and self.get('projects',t['projectId']).get('status')!='active':
+                raise Problem(409,'项目已结束，完成记录不能再修改')
+            before={k:t.get(k) for k in ('completionSummary','completionActual','completionFeeling')}
+            t['completionSummary']=required(d,'summary')
+            t['completionActual']=duration(d.get('actual',t.get('completionActual')))
+            t['completionFeeling']=str(d.get('feeling') or t.get('completionFeeling') or '一般')
+            t['completionEditedAt']=timestamp()
+            self.put('tasks',t)
+            self.put('logs',{'taskId':t['id'],'actor':user['id'],'kind':'complete_edit','summary':t['completionSummary'],'actual':t['completionActual'],'feeling':t['completionFeeling'],'before':before,'date':t['date'],'createdAt':timestamp()})
             if t.get('projectId'):
-                project=self.get('projects', t['projectId'])
-                if project.get('status') != 'active' or (project.get('end') and project['end'] < now().date().isoformat()):
-                    raise Problem(409,'项目已结束，任务审批已关闭')
-            if not approver or user['id']!=approver:
-                raise Problem(403,'只有指定审批人可以审批该任务')
-            chain=self._approval_chain(t)
-            # Resolve inbox cards for the approver as soon as a decision is made.
-            for n in self.all('notifications'):
-                if n.get('to') == user['id'] and n.get('kind') == 'task_approval' and n.get('reference') in {x['id'] for x in chain} and not n.get('read'):
-                    n['read'] = True; self.put('notifications', n)
-            if d.get('accept'):
-                for item in chain:
-                    if item.get('status')=='pending_approval':
-                        item['status']='done';item['approval']={**item.get('approval',{}),'status':'approved','reviewedBy':user['id'],'reviewedAt':timestamp()};self.put('tasks',item);self.put('logs',{'taskId':item['id'],'actor':user['id'],'kind':'approval','decision':'approved','createdAt':timestamp(),'date':now().date().isoformat()})
-                latest=max(chain,key=lambda x:(str(x.get('date','')),str(x.get('createdAt',''))))
-                self._settle_lineage(latest,user['id'])
-                for recipient in sorted({item['assignee'] for item in chain}):
-                    self.notify(recipient,'任务完成已通过',f'「{t["name"]}」已由 {user["id"]} 审批通过，任务已结束。','task_approval',t['id'])
-                return self.get('tasks',t['id'])
-            reason=required(d,'reason')
-            for item in chain:
-                if item.get('status')=='pending_approval':
-                    item['status']='rejected';item['approval']={**item.get('approval',{}),'status':'rejected','reason':reason,'reviewedBy':user['id'],'reviewedAt':timestamp()};self.put('tasks',item);self.put('logs',{'taskId':item['id'],'actor':user['id'],'kind':'approval','decision':'rejected','reason':reason,'createdAt':timestamp(),'date':now().date().isoformat()})
-            # A pending approval may have been carried across several days.
-            # Rework must start after the latest occurrence and never land in
-            # the past when the reviewer acts later.
-            latest=max((x.get('date') for x in chain if x.get('date')), default=t['date'])
-            minimum=(max(date.fromisoformat(latest), now().date())+timedelta(days=1)).isoformat()
-            target=valid_date(d.get('date') or minimum)
-            if target < minimum:
-                raise Problem(400,'重做日期必须晚于当前待审批任务日期')
+                owner=self.get('projects',t['projectId'])['owner']
+                if owner!=user['id']:self.notify(owner,'完成记录已修改',f'{user["id"]} 修改了「{t["name"]}」的完成记录。\n完成总结：{t["completionSummary"]}','progress',t['id'])
+            return t
+        if action=='task.reopen':
+            # The Owner (or an admin) sends finished work back with a reason.
+            t=self.get('tasks',d['id']);project=None
             if t.get('projectId'):
-                project=self.get('projects',t['projectId'])
-                if project.get('status')!='active':raise Problem(409,'项目已结束，不能创建驳回重做任务')
-                if project.get('end') and target>project['end']:raise Problem(409,'项目截止日期已到，无法创建重做任务')
-            retry={**t,'id':uid(),'name':'驳回重做：'+t['name'],'desc':reason,'date':target,'status':'todo','fixed':False,'originId':None,'reworkOf':t['id'],'approval':None,'createdAt':timestamp()}
-            self.put('tasks',retry);self.notify(t['assignee'],'任务完成被驳回',f'「{t["name"]}」被 {user["id"]} 驳回，请于 {target} 重做。建议：{reason}','task_rejected',retry['id'])
-            return retry
+                project=self.get('projects',t['projectId']);self.project_owner(user,project)
+                if project.get('status')!='active':raise Problem(409,'项目已结束，不能打回任务')
+            else:
+                self.admin(user)
+            if t.get('status')!='done' or t.get('supersededBy') or t.get('carriedCompletion'):
+                raise Problem(409,'只有已完成的任务可以打回')
+            reason=required(d,'reason');today=now().date().isoformat()
+            if project and project.get('end') and project['end']<today:
+                raise Problem(409,'项目已过截止日期，不能打回任务')
+            t['status']='todo';t['reopen']={'reason':reason,'by':user['id'],'at':timestamp()}
+            # It goes back on today's list rather than an old day that has passed.
+            if t['date']<today:t['date']=today
+            if t.get('deadline') and t['deadline']<t['date']:t['deadline']=t['date']
+            t.pop('completedAt',None);t.pop('completedBy',None)
+            self.put('tasks',t)
+            self.put('logs',{'taskId':t['id'],'actor':user['id'],'kind':'reopen','reason':reason,'date':today,'createdAt':timestamp()})
+            if t['assignee']!=user['id']:
+                self.notify(t['assignee'],'任务被打回',f'「{t["name"]}」被 {user["id"]} 打回，请继续处理。\n原因：{reason}','task_rejected',t['id'])
+            return t
 
         if action=='repeat.create':
             self.admin(user);assignees=d.get('assignees',[])
@@ -2525,6 +2473,7 @@ class Store:
         if at.tzinfo is None:raise ValueError('scheduler requires timezone aware time')
         at=at.astimezone(TZ);count=0
         with self.lock, self.db:
+            self.settle_legacy_task_approvals()
             self.materialize(at.date(), CALENDAR_END)
             # Roll unfinished work forward at the first scheduler run of a new day.
             # Pending approvals are copied with their pending status; approval of any
