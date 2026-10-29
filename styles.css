@@ -3313,6 +3313,22 @@ select {
   padding: 10px 6px 14px;
 }
 
+/* A fixed task under a project is listed once, as its rule. */
+.project-fixed-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 8px 6px;
+  border-top: 1px solid var(--line);
+  font-size: 13.5px;
+}
+
+.project-fixed-row small {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .project-node .project-status {
   white-space: nowrap;
   font: 600 10px/1 var(--font-sans);

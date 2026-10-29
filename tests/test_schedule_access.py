@@ -70,12 +70,29 @@ class ScheduleAccessTests(unittest.TestCase):
             self.assertEqual(len(tasks), 2)
             self.assertTrue(all(t['assignee'] == name for t in tasks))
 
-    def test_new_tasks_require_a_project(self):
+    def test_temp_tasks_outside_projects(self):
+        member = self.store.user('test001')
         with self.assertRaises(Problem) as error:
-            self.store.action(self.store.user('test001'), 'task.create', {
+            self.store.action(member, 'task.create', {
                 'name': 'unauthorized', 'assignee': 'test002', 'date': self.day,
             })
-        self.assertEqual(error.exception.status, 400)
+        self.assertEqual(error.exception.status, 403)
+        own = self.store.action(member, 'task.create', {
+            'name': 'own errand', 'assignee': 'test001', 'date': self.day, 'duration': 20,
+        })
+        self.assertIsNone(own['projectId'])
+        self.assertEqual(own['type'], '临时')
+        self.assertIsNone(self.store.task_approver(own))
+        self.store.action(member, 'task.complete', {'id': own['id'], 'summary': 'done', 'actual': 20, 'feeling': '顺利'})
+        self.assertEqual(self.store.get('tasks', own['id'])['status'], 'done')
+        handed = self.store.action(self.admin, 'task.create', {
+            'name': 'admin errand', 'assignee': 'test002', 'date': self.day, 'duration': 20,
+        })
+        self.assertEqual(self.store.task_approver(handed), 'superadmin')
+        self.assertIn(handed['id'], {t['id'] for t in self.store.snapshot(self.store.user('test002'))['tasks']})
+        self.assertNotIn(handed['id'], {t['id'] for t in self.store.snapshot(member)['tasks']})
+        with self.assertRaises(Problem):
+            self.store.action(self.admin, 'task.create', {'name': 'self', 'assignee': 'superadmin', 'date': self.day})
 
     def test_project_application_sets_creator_as_owner_and_owner_can_invite(self):
         applicant = self.store.user('test002')
@@ -163,9 +180,35 @@ class ScheduleAccessTests(unittest.TestCase):
                                  'status': 'todo', 'fixed': False, 'type': '通用'})
         self.store.db.commit()
         loads = self.store.action(self.store.user('test001'), 'project.member_loads', {'id': project['id']})
-        self.assertEqual(loads, {'projectId': project['id'], 'counts': {'test002': 3, 'test003': 1}})
+        # setUp's standalone tasks are dated today, so they count only while
+        # today falls inside the project period.
+        in_period = '2026-09-01' <= self.day <= '2026-09-30'
+        self.assertEqual(loads['counts'], {'test002': 2 + in_period, 'test003': int(in_period)})
+        self.assertNotIn('tasks', loads)
         with self.assertRaises(Problem):
             self.store.action(self.store.user('test002'), 'project.member_loads', {'id': project['id']})
+
+    def test_member_loads_for_a_task_window_sum_minutes_inside_it(self):
+        project = self.store.action(self.admin, 'project.create', {
+            'name': 'window check', 'owner': 'test001', 'members': ['test002'],
+            'start': '2026-12-01', 'end': '2026-12-31', 'cycle': 'range',
+        })
+        for name, day, deadline, minutes in (('early', '2026-12-05', None, 60), ('spans', '2026-12-18', '2026-12-20', 30)):
+            self.store.action(self.admin, 'task.create', {
+                'name': name, 'projectId': project['id'], 'assignee': 'test002',
+                'date': day, 'deadline': deadline, 'duration': minutes,
+            })
+        self.store.put('tasks', {'name': 'elsewhere', 'assignee': 'test002', 'projectId': None,
+                                 'date': '2026-12-21', 'duration': 45, 'priority': 'P1',
+                                 'status': 'todo', 'fixed': False, 'type': '通用'})
+        self.store.db.commit()
+        loads = self.store.action(self.store.user('test001'), 'project.member_loads',
+                                  {'id': project['id'], 'start': '2026-12-20', 'end': '2026-12-21'})
+        self.assertEqual(loads['minutes']['test002'], 75)
+        self.assertEqual(loads['minutes']['test003'], 0)
+        with self.assertRaises(Problem):
+            self.store.action(self.store.user('test001'), 'project.member_loads',
+                              {'id': project['id'], 'start': '2026-12-21', 'end': '2026-12-20'})
 
     def test_owner_can_create_and_reassign_project_tasks_with_notifications(self):
         project = self.store.action(self.admin, 'project.create', {
@@ -660,6 +703,74 @@ class TaskApprovalTests(unittest.TestCase):
         self.assertFalse(any(r.get('to') == 'extra' for r in self.store.all('requests')))
         self.assertFalse(any(r['user_id'] == 'extra' for r in self.store.db.execute('SELECT user_id FROM sessions')))
         self.assertNotIn('extra', self.store.get('projects', project['id'])['members'])
+
+    def test_project_settings_rename_move_dates_and_hand_over_owner(self):
+        self.store.create_user('test003', 'test-only-password')
+        project = self.store.action(self.admin, 'project.create', {
+            'name': 'settings', 'owner': 'test001', 'members': ['test002'],
+            'start': '2026-12-01', 'end': '2026-12-31', 'cycle': 'range',
+        })
+        owner = self.store.user('test001')
+        self.store.action(owner, 'task.create', {
+            'name': 'mid', 'assignee': 'test002', 'projectId': project['id'], 'date': '2026-12-20', 'duration': 30,
+        })
+        renamed = self.store.action(owner, 'project.update', {
+            'id': project['id'], 'name': 'settings v2', 'start': '2026-12-01', 'end': '2026-12-25', 'cycle': 'range',
+        })
+        self.assertEqual((renamed['name'], renamed['end']), ('settings v2', '2026-12-25'))
+        self.assertTrue(any(n['to'] == 'test002' and n['title'] == '项目信息调整' for n in self.store.all('notifications')))
+        # Open work may not be left outside the project's dates, and the name stays required.
+        with self.assertRaises(Problem):
+            self.store.action(owner, 'project.update', {'id': project['id'], 'end': '2026-12-10'})
+        with self.assertRaises(Problem):
+            self.store.action(owner, 'project.update', {'id': project['id'], 'name': '  '})
+        self.assertEqual(self.store.get('projects', project['id'])['end'], '2026-12-25')
+        # Only an admin hands a project to a new Owner; the old one stays on as a collaborator.
+        with self.assertRaises(Problem):
+            self.store.action(owner, 'project.update', {'id': project['id'], 'owner': 'test003'})
+        moved = self.store.action(self.admin, 'project.update', {'id': project['id'], 'owner': 'test003'})
+        self.assertEqual(moved['owner'], 'test003')
+        self.assertEqual(moved['members']['test001'], 'accepted')
+        self.assertTrue(any(n['to'] == 'test003' and n['title'] == '项目 Owner 指派' for n in self.store.all('notifications')))
+
+    def test_fixed_task_under_a_project_lives_and_ends_with_it(self):
+        self.store.create_user('test003', 'test-only-password')
+        today = now().date()
+        start, end = (today + timedelta(days=1)).isoformat(), (today + timedelta(days=10)).isoformat()
+        project = self.store.action(self.admin, 'project.create', {
+            'name': 'with routine', 'owner': 'test001', 'members': ['test002'],
+            'start': self.day, 'end': end, 'cycle': 'range',
+        })
+        # Only project members can take a fixed task attached to it.
+        with self.assertRaises(Problem):
+            self.store.action(self.admin, 'repeat.create', {
+                'name': 'standup', 'assignees': ['test003'], 'frequency': 'daily', 'start': start, 'projectId': project['id'],
+            })
+        rule = self.store.action(self.admin, 'repeat.create', {
+            'name': 'standup', 'assignees': ['test002'], 'frequency': 'daily', 'start': start, 'projectId': project['id'],
+        })
+        occurrences = [t for t in self.store.all('tasks') if t.get('repeatId') == rule['id']]
+        self.assertEqual(len(occurrences), 10)
+        self.assertTrue(all(t['projectId'] == project['id'] for t in occurrences))
+        self.assertEqual(max(t['date'] for t in occurrences), end)
+        owner_view = self.store.snapshot(self.store.user('test001'))
+        self.assertIn(rule['id'], {r['id'] for r in owner_view['repeats']})
+        self.assertTrue(any(t.get('repeatId') == rule['id'] for t in owner_view['tasks']))
+        self.assertNotIn(rule['id'], {r['id'] for r in self.store.snapshot(self.store.user('test003'))['repeats']})
+        # Occurrences never hold up closeout; closing the project ends the rule.
+        self.store.put('tasks', {
+            'name': 'deliver', 'date': self.day, 'duration': 30, 'assignee': 'test002', 'projectId': project['id'],
+            'priority': 'P1', 'status': 'done', 'fixed': False, 'type': '通用',
+        })
+        self.store.db.commit()
+        self.assertTrue(self.store.project_tasks_complete(project['id']))
+        self.store.action(self.store.user('test001'), 'project.complete_request', {'id': project['id'], 'report': 'done'})
+        self.store.action(self.admin, 'project.complete_review', {'id': project['id'], 'accept': True})
+        self.assertFalse(self.store.get('repeats', rule['id'])['active'])
+        statuses = {t['status'] for t in self.store.all('tasks') if t.get('repeatId') == rule['id']}
+        self.assertEqual(statuses, {'skipped'})
+        self.store.action(self.admin, 'project.delete', {'id': project['id'], 'confirm': 'with routine'})
+        self.assertFalse(any(r['id'] == rule['id'] for r in self.store.all('repeats')))
 
 
 if __name__ == '__main__':
