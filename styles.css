@@ -4441,7 +4441,7 @@ select {
 .file-sheet {
   position: absolute;
   inset: 0;
-  transition: transform .3s var(--ease-out);
+  transition: transform .3s var(--ease-out), opacity .2s;
 }
 
 .file-tab {
@@ -4524,6 +4524,16 @@ select {
   background:
     repeating-linear-gradient(180deg, transparent 0 13px, rgba(217, 119, 87, .3) 13px 14.5px) 20px 26px / 60% 58% no-repeat,
     var(--accent-soft);
+}
+
+/* Opening: the folder rises a little further while the brief loads, then
+   leaves the box while the dialog stands in for it. */
+.archive-file.is-opening .file-sheet {
+  transform: translateY(calc(var(--lift) * -1 - 26px));
+}
+
+.archive-file.is-out .file-sheet {
+  opacity: 0;
 }
 
 .od-front {
@@ -4639,9 +4649,13 @@ select {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface);
-  cursor: pointer;
+  cursor: grab;
   touch-action: pan-y;
   user-select: none;
+}
+
+.archive-ruler.is-dragging {
+  cursor: grabbing;
 }
 
 .archive-ruler:focus-visible {
@@ -4672,6 +4686,15 @@ select {
   background: var(--ink-line);
   transform: translateX(-50%);
   transition: height .2s var(--ease-out), background-color .2s;
+  animation: archiveTickIn .36s var(--ease-out) both;
+  animation-delay: calc(var(--k, 0) * 14ms);
+}
+
+@keyframes archiveTickIn {
+  from {
+    height: 0;
+    opacity: 0;
+  }
 }
 
 .ruler-tick b {
@@ -4690,9 +4713,85 @@ select {
   background: var(--accent);
 }
 
+/* The pointer carries the picked day, so that tick drops its own number. */
 .ruler-tick.is-picked b {
-  font-size: 12px;
-  color: var(--accent-dark);
+  opacity: 0;
+}
+
+/* Needle, knob on the baseline and a label above. It springs to each pick
+   and follows the hand exactly while dragged. */
+.ruler-pointer {
+  position: absolute;
+  z-index: 1;
+  bottom: 0;
+  left: var(--at);
+  width: 0;
+  height: 26px;
+  pointer-events: none;
+  transition: left .42s cubic-bezier(.34, 1.4, .64, 1);
+  animation: archivePointerIn .32s var(--ease-out) .18s both;
+}
+
+.ruler-pointer::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  bottom: 0;
+  width: 2px;
+  height: 100%;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.ruler-pointer::after {
+  content: '';
+  position: absolute;
+  left: -6px;
+  bottom: -6px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  background: var(--surface);
+  transition: transform .18s var(--ease-out), box-shadow .18s;
+}
+
+.ruler-pointer b {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 2px);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 6px 12px -8px rgba(192, 95, 65, .8);
+  font: 600 11px/1.3 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--surface);
+  transform: translateX(-50%);
+}
+
+.archive-ruler.is-dragging .ruler-pointer {
+  transition: none;
+}
+
+.archive-ruler.is-dragging .ruler-pointer::after,
+.archive-ruler:focus-visible .ruler-pointer::after {
+  transform: scale(1.3);
+  box-shadow: 0 0 0 4px rgba(217, 119, 87, .18);
+}
+
+@keyframes archivePointerIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+/* The folder unfolding into the dialog runs on its own, so the dialog's usual
+   pop-in stays off. */
+.modal.is-flown {
+  animation: none;
 }
 
 @container (max-width: 760px) {
@@ -4738,14 +4837,14 @@ select {
   }
 }
 
-/* Too narrow for every day number: keep the picked one. The arrows move up
-   beside the month so the box can use the full width. */
+/* Too narrow for every day number: the pointer's label is enough. The arrows
+   move up beside the month so the box can use the full width. */
 @container (max-width: 560px) {
   .archive-room {
     height: 600px;
   }
 
-  .ruler-tick:not(.is-picked) b {
+  .ruler-tick b {
     display: none;
   }
 
@@ -4758,8 +4857,11 @@ select {
 @media (prefers-reduced-motion: reduce) {
   .file-sheet,
   .file-face,
-  .ruler-tick {
+  .ruler-tick,
+  .ruler-pointer,
+  .ruler-pointer::after {
     transition: none;
+    animation: none;
   }
 }
 

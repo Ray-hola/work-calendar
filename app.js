@@ -888,7 +888,7 @@ function deleteAccount(id){
   };
 }
 async function act(action,data){try{await api('/api/action',{action,data});await refresh();toast('操作已完成')}catch(e){toast(e.message);throw e}}
-function openModal(html){$('#modalContent').innerHTML=html;$('#modalBackdrop .modal')?.classList?.remove('is-wide');$('#modalBackdrop').classList.remove('hidden')};function closeModal(){$('#modalBackdrop').classList.add('hidden')};function closeDrawer(){$('#taskDrawer').classList.add('hidden')}
+function openModal(html){if(UI.briefSource){UI.briefSource.closest('.archive-file')?.classList.remove('is-out');UI.briefSource=null}['#modalBackdrop','#modalBackdrop .modal','#modalContent'].forEach(s=>$(s)?.getAnimations?.().forEach(a=>a.cancel()));$('#modalContent').innerHTML=html;$('#modalBackdrop .modal')?.classList?.remove('is-wide','is-flown');$('#modalBackdrop').classList.remove('hidden')};function closeModal(){if(typeof foldBrief==='function'&&foldBrief())return;$('#modalBackdrop').classList.add('hidden')};function closeDrawer(){$('#taskDrawer').classList.add('hidden')}
 function newTask(projectId,initialDate){
   const admin=Boolean(S.user.admin),projects=manageableProjects().filter(p=>!isProjectHidden(p)),locked=typeof projectId==='string';
   const initial=projects.find(p=>p.id===projectId)?.id||projects[0]?.id;
@@ -1253,11 +1253,14 @@ function archiveBox(month,files,pick){
   const [year,mon]=month.split('-');
   return `<div class="drawer-stage" style="--n:${files.length}"><div class="open-drawer"><span class="od-ground"></span><span class="od-floor"></span><span class="od-side is-left"></span><span class="od-side is-right"></span><span class="od-back"></span>${files.map((f,i)=>archiveFile(f,i,f.date===pick)).join('')}<span class="od-front"><span class="od-label"><b>${Number(mon)} 月</b><small>${escapeHTML(year)} · ${files.length} 份</small></span><span class="od-pull"></span></span></div></div>`;
 }
-/* Ticks sit where their day falls in the month, so gaps in the record show. */
+/* Ticks sit where their day falls in the month, so gaps in the record show.
+   The pointer stands on the picked tick and carries its day. */
+const pointerText=date=>`${Number(date.slice(8,10))} ${WEEKDAY_SHORT[new Date(`${date}T12:00:00`).getDay()]}`;
 function archiveRuler(month,files,pick){
-  const [y,m]=month.split('-').map(Number),days=new Date(y,m,0).getDate();
-  const ticks=files.map(f=>{const day=Number(String(f.date).slice(8,10));return `<span class="ruler-tick${f.date===pick?' is-picked':''}" data-date="${escapeHTML(f.date)}" style="--at:${((day-1)/(days-1)*100).toFixed(2)}%"><b>${day}</b></span>`}).join('');
-  return `<div class="archive-ruler" role="slider" tabindex="0" aria-label="选择日期" aria-valuemin="1" aria-valuemax="${days}" aria-valuenow="${Number(String(pick||'').slice(8,10))||1}" aria-valuetext="${pick?archiveDay(pick):''}"><span class="ruler-end">1</span><div class="ruler-track">${ticks}</div><span class="ruler-end">${days}</span></div>`;
+  const [y,m]=month.split('-').map(Number),days=new Date(y,m,0).getDate(),at=date=>((Number(String(date).slice(8,10))-1)/(days-1)*100).toFixed(2);
+  const ticks=[...files].reverse().map((f,k)=>`<span class="ruler-tick${f.date===pick?' is-picked':''}" data-date="${escapeHTML(f.date)}" style="--at:${at(f.date)}%;--k:${k}"><b>${Number(String(f.date).slice(8,10))}</b></span>`).join('');
+  const pointer=pick?`<span class="ruler-pointer" style="--at:${at(pick)}%"><b>${pointerText(pick)}</b></span>`:'';
+  return `<div class="archive-ruler" role="slider" tabindex="0" aria-label="选择日期" aria-valuemin="1" aria-valuemax="${days}" aria-valuenow="${Number(String(pick||'').slice(8,10))||1}" aria-valuetext="${pick?archiveDay(pick):''}"><span class="ruler-end">1</span><div class="ruler-track">${ticks}${pointer}</div><span class="ruler-end">${days}</span></div>`;
 }
 const archiveStill=()=>matchMedia('(prefers-reduced-motion: reduce)').matches||!document.body.animate;
 function renderArchive(){
@@ -1277,16 +1280,25 @@ function renderArchive(){
   root.innerHTML=`<div class="archive-room"><header class="box-title"><strong>${escapeHTML(year)} 年 ${Number(mon)} 月</strong><small>${files.length} 份</small></header><div class="box-stage">${archiveBox(UI.archiveMonth,files,UI.archivePick)}<button class="box-step is-prev" data-step="1"${at<months.length-1?'':' disabled'} aria-label="上一个月">${icon('chevron-left')}</button><button class="box-step is-next" data-step="-1"${at>0?'':' disabled'} aria-label="下一个月">${icon('chevron-right')}</button></div><footer class="box-foot"><div class="drawer-caption"><div class="caption-body" aria-live="polite"></div><button class="secondary-btn caption-open">打开</button></div>${archiveRuler(UI.archiveMonth,files,UI.archivePick)}</footer></div>`;
   bindArchive();
   fitArchiveDrawer(root.querySelector('.drawer-stage'));
-  pickArchive(UI.archivePick);
+  pickArchive(UI.archivePick,true);
 }
-function pickArchive(date){
+/* The pointer glides to the picked tick unless it is being dragged, and its
+   label bumps when the day changes. */
+function pickArchive(date,force=false){
   const root=$('#archiveCabinet'),file=date&&root?.querySelector(`.archive-file[data-date="${date}"]`);if(!file)return;
+  const ruler=root.querySelector('.archive-ruler'),pointer=root.querySelector('.ruler-pointer'),tick=root.querySelector(`.ruler-tick[data-date="${date}"]`);
+  if(pointer&&tick&&!ruler.classList.contains('is-dragging'))pointer.style.setProperty('--at',tick.style.getPropertyValue('--at'));
+  if(!force&&file.classList.contains('is-picked'))return;
   UI.archivePick=date;
   root.querySelectorAll('.archive-file').forEach(b=>b.classList.toggle('is-picked',b===file));
-  root.querySelectorAll('.ruler-tick').forEach(t=>t.classList.toggle('is-picked',t.dataset.date===date));
-  const caption=root.querySelector('.caption-body'),ruler=root.querySelector('.archive-ruler');
+  root.querySelectorAll('.ruler-tick').forEach(t=>t.classList.toggle('is-picked',t===tick));
+  const caption=root.querySelector('.caption-body'),label=pointer?.querySelector('b');
   if(caption)caption.innerHTML=file.querySelector('.file-body').innerHTML;
   if(ruler){ruler.setAttribute('aria-valuenow',String(Number(date.slice(8,10))));ruler.setAttribute('aria-valuetext',archiveDay(date))}
+  if(label&&label.textContent!==pointerText(date)){
+    label.textContent=pointerText(date);
+    if(!archiveStill())label.animate([{transform:'translateX(-50%) scale(.82)'},{transform:'translateX(-50%) scale(1.06)',offset:.6},{transform:'translateX(-50%) scale(1)'}],{duration:240,easing:'ease-out'});
+  }
 }
 /* Folders run newest (front) to oldest (back), so +1 steps back in time. */
 function stepArchive(delta){
@@ -1303,26 +1315,41 @@ function switchArchiveMonth(step){
 function bindArchive(){
   const root=$('#archiveCabinet'),stage=root.querySelector('.drawer-stage'),ruler=root.querySelector('.archive-ruler');
   root.querySelectorAll('.box-step').forEach(b=>b.onclick=()=>switchArchiveMonth(Number(b.dataset.step)));
-  root.querySelector('.caption-open').onclick=()=>openBrief(UI.archivePick);
-  root.querySelectorAll('.archive-file').forEach(b=>b.onclick=()=>openBrief(UI.archivePick));
+  const openPicked=()=>openBrief(UI.archivePick,root.querySelector('.archive-file.is-picked'));
+  root.querySelector('.caption-open').onclick=openPicked;
+  root.querySelectorAll('.archive-file').forEach(b=>b.onclick=openPicked);
   /* Sliding across the box picks whichever folder is under the pointer, as the
      browser hit-tests it in 3D; the picked folder's lifted sheet counts as that
-     folder, so it stays up while the pointer is on it. */
+     folder, so it stays up while the pointer is on it. Off the folders nothing
+     changes, and a quick sweep (on the way to 打开, say) only picks where the
+     pointer comes to rest. */
+  let last=null,rest=0;
+  const under=(x,y)=>{const hit=document.elementFromPoint(x,y)?.closest('.archive-file');if(hit&&root.contains(hit))pickArchive(hit.dataset.date)};
   stage.onpointermove=e=>{
-    const hit=document.elementFromPoint(e.clientX,e.clientY)?.closest('.archive-file');
-    if(hit&&root.contains(hit))pickArchive(hit.dataset.date);
+    const speed=last?Math.hypot(e.clientX-last.x,e.clientY-last.y)/Math.max(1,e.timeStamp-last.t):0;
+    last={x:e.clientX,y:e.clientY,t:e.timeStamp};
+    clearTimeout(rest);
+    if(speed<.8)under(e.clientX,e.clientY);else rest=setTimeout(()=>under(e.clientX,e.clientY),90);
   };
+  stage.onpointerleave=()=>{clearTimeout(rest);last=null};
+  /* The wheel steps folders only while the pointer is over the box itself;
+     anywhere else it scrolls the page as usual. */
+  const overBox=(x,y)=>[...stage.querySelector('.open-drawer').children].some(el=>{const r=el.getBoundingClientRect();return x>=r.left-16&&x<=r.right+16&&y>=r.top-16&&y<=r.bottom+16});
   let wheel=0;
-  stage.onwheel=e=>{e.preventDefault();wheel+=e.deltaY;while(Math.abs(wheel)>=40){stepArchive(wheel>0?1:-1);wheel-=Math.sign(wheel)*40}};
-  /* The ruler picks the nearest tick, so a drag anywhere along it works. */
+  stage.onwheel=e=>{if(!overBox(e.clientX,e.clientY))return;e.preventDefault();wheel+=e.deltaY;while(Math.abs(wheel)>=40){stepArchive(wheel>0?1:-1);wheel-=Math.sign(wheel)*40}};
+  /* The ruler moves only on a press: the pointer follows the drag, picking the
+     nearest tick, and settles onto that tick when let go. */
+  const track=ruler.querySelector('.ruler-track'),pointer=ruler.querySelector('.ruler-pointer');
   const pickAt=x=>{let best=null,gap=Infinity;ruler.querySelectorAll('.ruler-tick').forEach(t=>{const r=t.getBoundingClientRect(),d=Math.abs(r.left+r.width/2-x);if(d<gap){gap=d;best=t}});if(best)pickArchive(best.dataset.date)};
-  ruler.onpointerdown=e=>{ruler.setPointerCapture?.(e.pointerId);pickAt(e.clientX)};
-  ruler.onpointermove=e=>pickAt(e.clientX);
+  const follow=x=>{const r=track.getBoundingClientRect();pointer?.style.setProperty('--at',`${Math.max(0,Math.min(100,(x-r.left)/r.width*100)).toFixed(2)}%`);pickAt(x)};
+  ruler.onpointerdown=e=>{ruler.setPointerCapture?.(e.pointerId);ruler.classList.add('is-dragging');follow(e.clientX)};
+  ruler.onpointermove=e=>{if(ruler.classList.contains('is-dragging'))follow(e.clientX)};
+  ruler.onpointerup=ruler.onpointercancel=ruler.onlostpointercapture=()=>{if(!ruler.classList.contains('is-dragging'))return;ruler.classList.remove('is-dragging');pickArchive(UI.archivePick)};
   ruler.onkeydown=e=>{
     const step={ArrowLeft:1,ArrowDown:1,ArrowRight:-1,ArrowUp:-1}[e.key];
     if(step){e.preventDefault();stepArchive(step)}
     else if(e.key==='Home'||e.key==='End'){e.preventDefault();stepArchive(e.key==='Home'?Infinity:-Infinity)}
-    else if(e.key==='Enter'||e.key===' '){e.preventDefault();openBrief(UI.archivePick)}
+    else if(e.key==='Enter'||e.key===' '){e.preventDefault();openPicked()}
   };
 }
 /* Long months make a long box: shrink it about its front until it and a lifted
@@ -1357,12 +1384,44 @@ function briefDocument(brief){
     +(c.members?.length?`<section class="brief-section"><h3>成员总结</h3>${c.members.map(m=>entry(m.name,`${m.completed}/${m.tasks} 完成 · ${hours(m.load)}h · ${m.source==='diary'?'本人日记':'系统统计'}`,briefFields(m.summary))).join('')}</section>`:'')
     +'</article>';
 }
-async function openBrief(date){
+/* Opened from the archive, the folder rises a little further while the brief
+   loads; the dialog then starts as that folder, in its place and at its tilt,
+   and turns towards you as it grows. Closing runs it back. From the inbox the
+   brief simply opens. */
+function briefFlight(face,modal){
+  const drawer=face.closest('.open-drawer'),style=getComputedStyle(drawer),fit=parseFloat(style.getPropertyValue('--fit'))||1;
+  const f=face.getBoundingClientRect(),m=modal.getBoundingClientRect();
+  const dx=Math.round(f.left+f.width/2-m.left-m.width/2),dy=Math.round(f.top+f.height/2-m.top-m.height/2);
+  const sx=(face.offsetWidth*fit/modal.offsetWidth).toFixed(3),sy=(face.offsetHeight*fit/modal.offsetHeight).toFixed(3);
+  return [{transform:`translate(-50%,-50%) translate(${dx}px,${dy}px) perspective(1400px) ${style.getPropertyValue('--view').trim()} scale(${sx},${sy})`,backgroundColor:'#FBF1EA',borderRadius:'6px',boxShadow:'none'},{transform:'translate(-50%,-50%) translate(0px,0px) perspective(1400px) rotateX(0deg) rotateY(0deg) scale(1,1)',backgroundColor:'#FFFDF9',borderRadius:'18px'}];
+}
+async function openBrief(date,folder=null){
+  folder?.classList.add('is-opening');
   let brief;
   try{brief=await api('/api/action',{action:'brief.get',data:{date}})}catch(e){toast(e.message);return}
+  finally{folder?.classList.remove('is-opening')}
   openModal(`${briefDocument(brief)}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">关闭</button></div>`);
-  $('#modalBackdrop .modal')?.classList.add('is-wide');
+  const modal=$('#modalBackdrop .modal');
+  modal?.classList.add('is-wide');
   $('#cancelAction').onclick=closeModal;
+  const face=folder?.querySelector('.file-face');
+  if(!modal||!face?.isConnected||archiveStill())return;
+  modal.classList.add('is-flown');folder.classList.add('is-out');UI.briefSource=face;
+  modal.animate(briefFlight(face,modal),{duration:560,easing:'cubic-bezier(.3,.7,.2,1)'});
+  $('#modalContent').animate([{opacity:0},{opacity:0,offset:.5},{opacity:1}],{duration:560});
+}
+/* Fold the brief back into its folder; true when that takes over closing. */
+function foldBrief(){
+  const face=UI.briefSource;if(!face)return false;
+  const back=$('#modalBackdrop'),modal=back?.querySelector('.modal');
+  UI.briefSource=null;
+  const folder=face?.closest('.archive-file');
+  if(!face?.isConnected||!modal?.classList.contains('is-flown')||back.classList.contains('hidden')){folder?.classList.remove('is-out');return false}
+  const parts=[modal,back,$('#modalContent')],done=()=>{back.classList.add('hidden');modal.classList.remove('is-flown');parts.forEach(el=>el.getAnimations().forEach(a=>a.cancel()));folder.classList.remove('is-out')};
+  modal.animate(briefFlight(face,modal).reverse(),{duration:380,easing:'cubic-bezier(.5,0,.75,0)',fill:'forwards'}).onfinish=done;
+  back.animate([{opacity:1},{opacity:0}],{duration:380,easing:'ease-in',fill:'forwards'});
+  $('#modalContent').animate([{opacity:1},{opacity:0,offset:.35},{opacity:0}],{duration:380,fill:'forwards'});
+  return true;
 }
 /* Inbox housekeeping: delete a notice from its card, or switch to 管理 to pick
    several. Invitations are answered rather than deleted, so they never take part. */

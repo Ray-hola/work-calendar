@@ -242,6 +242,8 @@ test('the archive files briefs into month boxes, newest first', () => {
   const ruler=a.run(`archiveRuler('2026-10',[{date:'2026-10-31'},{date:'2026-10-16'},{date:'2026-10-01'}],'2026-10-16')`);
   assert.ok(ruler.includes('--at:100.00%')&&ruler.includes('--at:50.00%')&&ruler.includes('--at:0.00%'));
   assert.ok(ruler.includes('aria-valuemax="31"')&&ruler.includes('aria-valuenow="16"')&&ruler.includes('ruler-tick is-picked" data-date="2026-10-16"'));
+  // The pointer stands on the picked tick and carries its day.
+  assert.ok(ruler.includes('class="ruler-pointer" style="--at:50.00%"><b>16 周五</b>'));
   const doc=a.run(`briefDocument({date:'2026-10-28',content:{totals:{completed:3,tasks:4,load:90,members:2,projects:1},risks:['<b>风险</b>'],projects:[],members:[{name:'王二',completed:3,tasks:4,load:90,source:'diary',summary:{done:'联调',next:'上线'}}]}})`);
   assert.ok(doc.includes('2026年10月28日 · 周三')&&doc.includes('本人日记')&&doc.includes('<dt>完成</dt><dd>联调</dd>'));
   assert.ok(!doc.includes('<b>风险</b>'), '档案内容要转义');
