@@ -4241,134 +4241,410 @@ select {
   }
 }
 
-/* 14c · Archive room · month drawers of a filing cabinet --------------------- */
+/* 14c · Archive room · a CSS 3D room of card-catalogue cabinets -------------- */
 
 .archive-cabinet {
-  display: grid;
-  gap: 16px;
-  max-width: 980px;
+  container-type: inline-size;
 }
 
-.cabinet-drawer {
-  overflow: hidden;
-  border: 1px solid var(--line-strong);
-  border-radius: 14px;
-  background: var(--surface);
-  box-shadow: 0 1px 0 rgba(31, 27, 21, .04), 0 14px 28px -22px rgba(31, 27, 21, .45);
-}
-
-.drawer-front {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 20px;
-  width: 100%;
-  padding: 16px 24px;
-  border: 0;
-  background: linear-gradient(180deg, var(--surface), var(--surface-sunk));
-  color: var(--ink);
-  text-align: left;
-  cursor: pointer;
-}
-
-.drawer-front:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -4px;
-}
-
-.drawer-plate {
-  display: inline-grid;
-  justify-items: center;
-  gap: 2px;
-  min-width: 88px;
-  padding: 7px 14px;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: var(--paper);
-  box-shadow: inset 0 1px 2px rgba(31, 27, 21, .1);
-}
-
-.drawer-plate small {
-  font: 600 10px/1 var(--font-sans);
-  letter-spacing: .16em;
-  color: var(--muted);
-}
-
-.drawer-plate strong {
-  font: 600 18px/1.25 var(--font-serif);
-}
-
-.drawer-count {
-  font-size: 12.5px;
-  color: var(--muted);
-}
-
-.drawer-pull {
-  width: 76px;
-  height: 12px;
-  border-radius: 999px;
-  background: var(--line-strong);
-  box-shadow: inset 0 2px 3px rgba(31, 27, 21, .28), 0 1px 0 rgba(255, 255, 255, .7);
-  transition: transform var(--t) var(--ease-out);
-}
-
-.drawer-front:hover .drawer-pull {
-  transform: translateY(1px) scaleX(1.05);
-}
-
-.drawer-body {
-  display: grid;
-  grid-template-rows: 0fr;
-  background: #E7E1D3;
-  transition: grid-template-rows .45s var(--ease-out);
-}
-
-.cabinet-drawer.is-open .drawer-body {
-  grid-template-rows: 1fr;
-}
-
-.drawer-inner {
-  min-height: 0;
-  overflow: hidden;
-}
-
-.cabinet-drawer.is-open .drawer-inner {
-  box-shadow: inset 0 10px 14px -12px rgba(31, 27, 21, .45);
-}
-
-/* Folders stand front to back: each button is the strip you can see, and its
-   folder hangs below it, covered by the ones in front. Pointing at a strip
-   pulls that folder up over the others. */
-.file-rack {
-  display: flex;
-  flex-direction: column;
-  padding: 84px 28px 132px;
-}
-
-.archive-file {
+/* Cabinet size (--cw/--ch/--cd), where the cabinets stand (--base), and the
+   drawer taken out: width, folder height, front, sides, folder spacing, lift. */
+.archive-room {
+  --cw: 300px;
+  --ch: 430px;
+  --cd: 240px;
+  --base: 86%;
+  --k: min(1, calc(2.4 / var(--years, 1)));
+  --dw: min(700px, 90cqw);
+  --fh: 186px;
+  --fp: 76px;
+  --sh: 104px;
+  --step: 22px;
+  --lift: 106px;
   position: relative;
-  display: block;
+  height: clamp(600px, calc(100vh - 270px), 800px);
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 18px;
+  background: #D9CFBD;
+  isolation: isolate;
+}
+
+.room-stage {
+  position: absolute;
+  inset: 0;
+  perspective: 1500px;
+  perspective-origin: 50% 6%;
+}
+
+/* The room is seen a little from the side, so the cabinets show their depth. */
+.room-space {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  transform: rotateY(14deg);
+  transition: transform .7s var(--ease-out);
+}
+
+.archive-room.is-open .room-space {
+  transform: translate3d(0, -3%, -340px) rotateY(14deg);
+}
+
+/* The wall and floor meet behind the cabinets; planks run towards you. */
+.room-wall {
+  position: absolute;
+  left: -100%;
+  right: -100%;
+  top: -80%;
+  bottom: calc(100% - var(--base));
+  transform: translateZ(calc(var(--cd) * -1 - 40px));
+  background:
+    linear-gradient(0deg, #5F4632 0 34px, #7D6248 34px 38px, transparent 38px),
+    repeating-linear-gradient(90deg, rgba(120, 95, 60, .05) 0 1px, transparent 1px 72px),
+    linear-gradient(180deg, #EAE3D5 0%, #E2D9C8 72%, #D3C7B1 100%);
+}
+
+.room-floor {
+  position: absolute;
+  left: -120%;
+  right: -120%;
+  top: var(--base);
+  height: 1100px;
+  transform-origin: 50% 0;
+  transform: translateZ(calc(var(--cd) * -1 - 40px)) rotateX(90deg);
+  background:
+    linear-gradient(180deg, rgba(40, 26, 14, .42), rgba(40, 26, 14, 0) 320px),
+    radial-gradient(ellipse 22% 34% at 50% 34%, rgba(255, 240, 205, .32), transparent 72%),
+    repeating-linear-gradient(90deg, #B39570 0 108px, #A3855F 108px 110px),
+    #B39570;
+}
+
+.cabinet-row {
+  position: absolute;
+  left: 50%;
+  top: var(--base);
+  display: flex;
+  align-items: flex-end;
+  gap: 72px;
+  transform-style: preserve-3d;
+  transform-origin: 50% 100%;
+  transform: translate(-50%, -100%) scale3d(var(--k), var(--k), var(--k));
+}
+
+.cabinet {
+  position: relative;
+  flex: none;
+  width: var(--cw);
+  height: var(--ch);
+  transform-style: preserve-3d;
+}
+
+.cabinet > span {
+  position: absolute;
+  box-shadow: inset 0 0 0 1px rgba(40, 22, 8, .4);
+}
+
+.cabinet-side {
+  top: 0;
+  width: var(--cd);
+  height: 100%;
+  background: linear-gradient(0deg, #48301C 0 26px, transparent 26px), linear-gradient(90deg, #7A5132, #61401F);
+}
+
+.cabinet-side.is-left {
+  left: 0;
+  transform-origin: 0 50%;
+  transform: rotateY(90deg);
+}
+
+.cabinet-side.is-right {
+  right: 0;
+  transform-origin: 100% 50%;
+  transform: rotateY(-90deg);
+  background: linear-gradient(0deg, #48301C 0 26px, transparent 26px), linear-gradient(270deg, #7A5132, #61401F);
+}
+
+.cabinet-top {
+  left: 0;
+  top: 0;
   width: 100%;
-  height: 46px;
+  height: var(--cd);
+  transform-origin: 50% 0;
+  transform: rotateX(-90deg);
+  background: linear-gradient(180deg, #C69A70, #A97C53);
+}
+
+.cabinet-front {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+  padding: 18px 16px 40px;
+  border-radius: 5px 5px 2px 2px;
+  background:
+    linear-gradient(0deg, #5C3C23 0 26px, transparent 26px),
+    repeating-linear-gradient(92deg, rgba(70, 40, 18, .06) 0 2px, transparent 2px 9px),
+    linear-gradient(180deg, #B4825A, #9A6943);
+  box-shadow: inset 0 0 0 1px rgba(56, 32, 14, .45), inset 0 2px 0 rgba(255, 232, 196, .28);
+  transform-style: preserve-3d;
+}
+
+/* Children sit a pixel proud of the face they are on, so the 3D sort never has
+   two parallel layers in the same plane to choose between. */
+.cabinet-plaque {
+  justify-self: center;
+  padding: 5px 18px 4px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #E8CF8E, #B99448);
+  box-shadow: inset 0 0 0 1px rgba(90, 62, 18, .55), inset 0 1px 0 rgba(255, 248, 220, .7), 0 1px 2px rgba(30, 16, 4, .45);
+  font: 600 15px/1.2 var(--font-serif);
+  letter-spacing: .24em;
+  color: #3B2810;
+  transform: translateZ(1px);
+}
+
+.cabinet-drawers {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+  transform-style: preserve-3d;
+}
+
+.cab-drawer {
+  position: relative;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #BC8B60, #A3724A);
+  box-shadow: inset 0 0 0 1px rgba(56, 32, 14, .5), inset 0 1px 0 rgba(255, 232, 196, .35), inset 0 -2px 0 rgba(56, 32, 14, .25);
+  color: #3B2810;
+  cursor: pointer;
+  transform: translateZ(1px);
+  transform-style: preserve-3d;
+  transition: transform .28s var(--ease-out);
+}
+
+/* The top of the drawer box: hidden inside the cabinet until the drawer slides
+   forward under the pointer. */
+.cab-drawer::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  top: 0;
+  height: 18px;
+  transform-origin: 50% 0;
+  transform: rotateX(-90deg);
+  background: linear-gradient(0deg, #6B4528, #A8784F);
+}
+
+.cab-drawer:not(:disabled):not(.is-out):hover,
+.cab-drawer:not(.is-out):focus-visible {
+  transform: translateZ(16px);
+}
+
+.cab-drawer:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.cab-drawer:disabled {
+  cursor: default;
+}
+
+.cab-drawer:disabled .cab-label {
+  opacity: .6;
+}
+
+/* A drawer that has been taken out leaves its dark slot behind. */
+.cab-drawer.is-out {
+  background: linear-gradient(180deg, #1B120B, #3A2617);
+  box-shadow: inset 0 7px 10px rgba(0, 0, 0, .6), inset 0 0 0 1px rgba(20, 10, 4, .8);
+}
+
+.cab-drawer.is-out > *,
+.cab-drawer.is-out::before {
+  visibility: hidden;
+}
+
+.cab-label {
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+  min-width: 58%;
+  padding: 4px 8px 3px;
+  border: 2px solid #C7A35A;
+  border-radius: 2px;
+  background: #F5EEDB;
+  box-shadow: 0 1px 1px rgba(40, 22, 8, .35), inset 0 0 0 1px rgba(150, 110, 40, .3);
+  transform: translateZ(1px);
+}
+
+.cab-label b {
+  font: 600 14px/1.2 var(--font-serif);
+  color: #2E2215;
+}
+
+.cab-label small {
+  font-size: 10px;
+  line-height: 1.2;
+  color: #7A6646;
+}
+
+.cab-pull {
+  width: 38%;
+  height: 9px;
+  border-radius: 1px 1px 9px 9px;
+  background: linear-gradient(180deg, #E2C27A, #9C7834);
+  box-shadow: 0 2px 2px rgba(30, 16, 4, .45), inset 0 1px 0 rgba(255, 246, 214, .6);
+  transform: translateZ(1px);
+}
+
+/* Pendant lamp and its light; the dim layer pushes the room back once a
+   drawer is out, and a click on it returns the drawer. */
+.room-lamp {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse 48% 62% at 50% 6%, rgba(255, 244, 214, .5), rgba(255, 244, 214, 0) 72%);
+}
+
+.room-lamp::before {
+  content: '';
+  position: absolute;
+  left: calc(50% - 1px);
+  top: 0;
+  width: 2px;
+  height: 40px;
+  background: #3B2E22;
+}
+
+.room-lamp::after {
+  content: '';
+  position: absolute;
+  left: calc(50% - 62px);
+  top: 40px;
+  width: 124px;
+  height: 34px;
+  border-radius: 62px 62px 6px 6px / 40px 40px 6px 6px;
+  background: linear-gradient(180deg, #4A3B2C, #2A2118);
+  box-shadow: 0 16px 26px -8px rgba(255, 236, 190, .95);
+}
+
+.room-dim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(36, 26, 16, .26), rgba(36, 26, 16, .5));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .45s var(--ease-out);
+}
+
+.archive-room.is-open .room-dim {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* The drawer taken out, seen from above with its folders standing front to
+   back. Only the folders and the front catch the pointer; anywhere else falls
+   through to the dim layer. */
+.drawer-slot,
+.drawer-stage {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.drawer-stage {
+  perspective: 1300px;
+  perspective-origin: 50% -20%;
+}
+
+.open-drawer {
+  --dd: max(220px, calc(var(--n) * var(--step) + 52px));
+  position: absolute;
+  left: calc(50% - var(--dw) / 2);
+  bottom: 7%;
+  width: var(--dw);
+  height: var(--fh);
+  transform-style: preserve-3d;
+  transform-origin: 50% 100%;
+  transform: rotateX(-28deg);
+}
+
+.open-drawer > span {
+  position: absolute;
+  bottom: 0;
+}
+
+.od-floor {
+  left: 0;
+  width: 100%;
+  height: var(--dd);
+  transform-origin: 50% 100%;
+  transform: rotateX(90deg);
+  background: linear-gradient(0deg, #5A3A22, #3B2515);
+}
+
+.od-side {
+  width: var(--dd);
+  height: var(--sh);
+  background: linear-gradient(90deg, #A0704A, #75502F);
+  box-shadow: inset 0 0 0 1px rgba(56, 32, 14, .45), inset 0 2px 0 rgba(255, 232, 196, .3);
+}
+
+.od-side.is-left {
+  left: 0;
+  transform-origin: 0 100%;
+  transform: rotateY(90deg);
+}
+
+.od-side.is-right {
+  right: 0;
+  transform-origin: 100% 100%;
+  transform: rotateY(-90deg);
+  background: linear-gradient(270deg, #A0704A, #75502F);
+}
+
+.od-back {
+  left: 0;
+  width: 100%;
+  height: var(--sh);
+  transform: translateZ(calc(var(--dd) * -1));
+  background: #6A472B;
+}
+
+/* Each folder is a still hit area; its sheet is what lifts, so the pointer
+   stays on the folder while it rises. */
+.archive-file {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 3px;
+  height: var(--fh);
   padding: 0;
   border: 0;
   background: none;
   text-align: left;
   cursor: pointer;
+  pointer-events: auto;
+  transform: translateZ(calc(-30px - var(--i, 0) * var(--step)));
 }
 
 .archive-file:focus-visible {
   outline: none;
 }
 
-.file-visual {
+.file-sheet {
   position: absolute;
-  z-index: 0;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 166px;
-  pointer-events: none;
+  inset: 0;
   transition: transform .34s var(--ease-out);
 }
 
@@ -4383,11 +4659,13 @@ select {
   width: 21%;
   height: 30px;
   padding: 6px 12px 0;
-  border: 1px solid #D3BF97;
+  overflow: hidden;
+  border: 1px solid #C9B288;
   border-bottom: 0;
-  border-radius: 9px 9px 0 0;
-  background: #EADCBC;
+  border-radius: 8px 8px 0 0;
+  background: #EEDFBD;
   font-size: 11.5px;
+  white-space: nowrap;
   color: #6B5A3A;
 }
 
@@ -4402,11 +4680,11 @@ select {
   top: 34px;
   left: 5%;
   right: 5%;
-  height: 70px;
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  background: repeating-linear-gradient(180deg, var(--surface) 0 13px, var(--line-soft) 13px 14px);
-  transition: transform .38s var(--ease-out);
+  height: 80px;
+  border: 1px solid #D9D2C3;
+  border-radius: 2px;
+  background: repeating-linear-gradient(180deg, #FBF8F1 0 13px, #E7E0D0 13px 14px);
+  transition: transform .4s var(--ease-out);
 }
 
 .file-body {
@@ -4419,11 +4697,11 @@ select {
   display: grid;
   align-content: start;
   gap: 4px;
-  padding: 58px 22px 14px;
-  border: 1px solid #D3BF97;
-  border-radius: 4px 12px 12px 12px;
-  background: linear-gradient(180deg, #EADCBC, #E2D0AC);
-  box-shadow: 0 -1px 0 rgba(255, 255, 255, .55) inset, 0 -6px 14px -10px rgba(31, 27, 21, .45);
+  padding: 16px 22px;
+  border: 1px solid #C9B288;
+  border-radius: 3px 10px 3px 3px;
+  background: linear-gradient(180deg, #EEDFBD, #E1CCA2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), 0 -7px 14px -10px rgba(31, 27, 21, .55);
   color: #5E4E31;
   font-size: 12.5px;
 }
@@ -4433,20 +4711,165 @@ select {
   color: var(--ink);
 }
 
-.archive-file:hover .file-visual,
-.archive-file:focus-visible .file-visual {
-  z-index: 3;
-  transform: translateY(-70px);
+/* Only the front folder shows its face; the others reveal theirs as they rise,
+   so the thin strips between tabs stay plain. */
+.file-body > * {
+  transition: opacity .25s var(--ease-out);
+}
+
+.archive-file ~ .archive-file:not(:hover):not(:focus-visible) .file-body > * {
+  opacity: 0;
+}
+
+.archive-file:hover .file-sheet,
+.archive-file:focus-visible .file-sheet {
+  transform: translateY(calc(var(--lift) * -1));
 }
 
 .archive-file:hover .file-paper,
 .archive-file:focus-visible .file-paper {
-  transform: translateY(-30px);
+  transform: translateY(-42px);
 }
 
 .archive-file:focus-visible .file-tab {
   box-shadow: 0 0 0 2px var(--accent);
 }
+
+.od-front {
+  position: absolute;
+  left: -8px;
+  right: -8px;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  height: var(--fp);
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background:
+    repeating-linear-gradient(92deg, rgba(70, 40, 18, .06) 0 2px, transparent 2px 9px),
+    linear-gradient(180deg, #BE8D62, #9E6D46);
+  box-shadow: inset 0 0 0 1px rgba(56, 32, 14, .5), inset 0 2px 0 rgba(255, 232, 196, .35);
+  cursor: pointer;
+  pointer-events: auto;
+  transform: translateZ(2px);
+  transform-style: preserve-3d;
+}
+
+/* The front board's top edge, so it reads as solid wood from above. */
+.od-front::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 16px;
+  transform-origin: 50% 0;
+  transform: rotateX(-90deg);
+  background: linear-gradient(0deg, #87593A, #C99A6E);
+}
+
+.od-front:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.od-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 4px 16px 3px;
+  border: 2px solid #C7A35A;
+  border-radius: 2px;
+  background: #F5EEDB;
+  box-shadow: 0 1px 1px rgba(40, 22, 8, .35), inset 0 0 0 1px rgba(150, 110, 40, .3);
+  color: #7A6646;
+  font-size: 11px;
+  transform: translateZ(1px);
+}
+
+.od-label b {
+  font: 600 16px/1.3 var(--font-serif);
+  color: #2E2215;
+}
+
+.od-pull {
+  width: 120px;
+  height: 12px;
+  border-radius: 1px 1px 12px 12px;
+  background: linear-gradient(180deg, #E2C27A, #9C7834);
+  box-shadow: 0 3px 3px rgba(30, 16, 4, .45), inset 0 1px 0 rgba(255, 246, 214, .6);
+  transform: translateZ(1px);
+}
+
+.drawer-return {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  pointer-events: auto;
+}
+
+@container (max-width: 760px) {
+  .archive-room {
+    --cw: 228px;
+    --ch: 330px;
+    --cd: 180px;
+    --k: min(1, calc(1.25 / var(--years, 1)));
+    --dw: 94cqw;
+    --fh: 152px;
+    --fp: 62px;
+    --sh: 86px;
+    --step: 15px;
+    --lift: 86px;
+    height: 560px;
+  }
+
+  .cabinet-front {
+    gap: 10px;
+    padding: 14px 12px 34px;
+  }
+
+  .cabinet-drawers {
+    gap: 7px;
+  }
+
+  .cab-label {
+    padding: 3px 5px 2px;
+  }
+
+  .cab-label b {
+    font-size: 12px;
+  }
+
+  .cab-label small {
+    font-size: 9px;
+  }
+
+  .file-tab {
+    gap: 4px;
+    width: 23%;
+    padding: 6px 7px 0;
+    font-size: 10px;
+  }
+
+  .file-body {
+    padding: 13px 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .room-space,
+  .room-dim,
+  .cab-drawer,
+  .file-sheet,
+  .file-paper {
+    transition: none;
+  }
+}
+
 
 /* The brief itself, opened from a folder or from the inbox. */
 .modal.is-wide {
@@ -4535,40 +4958,8 @@ select {
 }
 
 @media (max-width: 760px) {
-  .drawer-front {
-    gap: 14px;
-    padding: 14px 16px;
-  }
-
-  .drawer-pull {
-    width: 48px;
-  }
-
-  .file-rack {
-    padding: 80px 14px 128px;
-  }
-
-  .file-tab {
-    left: calc(3% + var(--tab) * 24%);
-    width: 23%;
-    padding: 6px 8px 0;
-    font-size: 10.5px;
-  }
-
-  .file-body {
-    padding: 58px 16px 12px;
-  }
-
   .brief-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .drawer-body,
-  .file-visual,
-  .file-paper {
-    transition: none;
   }
 }
 

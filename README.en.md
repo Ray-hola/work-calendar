@@ -32,7 +32,7 @@ Most collaboration tools want your tasks, daily notes and team data in someone e
 - Per-recipient inbox: delete a notice from its card, or switch to 管理 to delete several or clear the read ones. A chat area with shared rooms and one room per project, with @mentions.
 - Daily notes and statistics: at 23:30 each day, everyone's completed work and load are summarised.
 - Team brief: the next morning the superadmin receives one report for the day, covering members' summaries, project progress and what needs attention, instead of a notice per person.
-- Archive room: briefs are filed in month drawers. Open a drawer to see folders tabbed with their dates; hovering pulls a folder out for a preview, and a click opens the full brief (admins only).
+- Archive room: a 3D room with one cabinet per year and one drawer per month. Pull a drawer out to see folders tabbed with their dates; hovering lifts a folder out for a preview, and a click opens the full brief (admins only).
 - Desktop widget: an always-on-top picture-in-picture window with today's to-dos and a pomodoro timer (Chrome / Edge on desktop).
 - AI assistant (optional): admins configure an OpenAI-compatible endpoint; the key stays on the server.
 
