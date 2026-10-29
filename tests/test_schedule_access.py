@@ -400,6 +400,74 @@ class ScheduleAccessTests(unittest.TestCase):
         self.store.schedule(datetime.combine(date.fromisoformat(self.day), time(9), TZ))
         self.assertEqual(len(self.store.all('tasks')), before)
 
+    def test_multi_day_task_is_not_carried_inside_its_span(self):
+        day = date.fromisoformat(self.day)
+        task = self.store.put('tasks', {
+            'name': '跨三天', 'date': (day - timedelta(days=1)).isoformat(), 'deadline': (day + timedelta(days=1)).isoformat(),
+            'duration': 120, 'assignee': 'test002', 'projectId': None, 'priority': 'P1', 'status': 'doing',
+            'fixed': False, 'type': '通用',
+        })
+        self.store.db.commit()
+        self.store.schedule(datetime.combine(day, time(8), TZ))
+        self.assertEqual(self.store.get('tasks', task['id'])['status'], 'doing')
+        self.assertFalse(any(t.get('originId') == task['id'] for t in self.store.all('tasks')))
+        self.assertFalse(any(l['taskId'] == task['id'] and l['kind'] == 'defer' for l in self.store.all('logs')))
+
+    def test_overdue_multi_day_task_moves_once_to_the_day_after_its_span(self):
+        day = date.fromisoformat(self.day)
+        task = self.store.put('tasks', {
+            'name': '超期跨天', 'date': (day - timedelta(days=4)).isoformat(), 'deadline': (day - timedelta(days=2)).isoformat(),
+            'duration': 60, 'assignee': 'test002', 'projectId': None, 'priority': 'P1', 'status': 'todo',
+            'fixed': False, 'type': '通用',
+        })
+        self.store.db.commit()
+        self.store.schedule(datetime.combine(day, time(8), TZ))
+        chain = sorted((t for t in self.store.all('tasks') if t.get('originId') == task['id']), key=lambda t: t['date'])
+        # One hop to the day after the span, then the ordinary daily carry to today.
+        self.assertEqual([t['date'] for t in chain], [(day - timedelta(days=1)).isoformat(), self.day])
+        self.assertEqual(self.store.get('tasks', task['id'])['status'], 'deferred')
+
+    def test_carries_made_inside_a_span_are_folded_back(self):
+        day = date.fromisoformat(self.day)
+        source = self.store.put('tasks', {
+            'name': '旧递延', 'date': (day - timedelta(days=1)).isoformat(), 'deadline': (day + timedelta(days=1)).isoformat(),
+            'duration': 90, 'assignee': 'test002', 'projectId': None, 'priority': 'P1', 'status': 'deferred',
+            'fixed': False, 'type': '通用', 'supersededBy': 'old-copy',
+        })
+        self.store.put('tasks', {**source, 'id': 'old-copy', 'date': self.day, 'originId': source['id'], 'status': 'doing',
+                                 'supersededBy': None})
+        self.store.put('logs', {'taskId': source['id'], 'actor': 'system', 'kind': 'defer', 'nextTaskId': 'old-copy',
+                                'target': self.day, 'date': self.day, 'createdAt': now().isoformat()})
+        self.store.put('logs', {'taskId': 'old-copy', 'actor': 'system', 'kind': 'auto_start', 'date': self.day, 'createdAt': now().isoformat()})
+        self.store.db.commit()
+        self.store.schedule(datetime.combine(day, time(8), TZ))
+        restored = self.store.get('tasks', source['id'])
+        self.assertEqual((restored['status'], restored.get('supersededBy'), restored['date']), ('doing', None, source['date']))
+        self.assertFalse(any(t['id'] == 'old-copy' for t in self.store.all('tasks')))
+        kinds = [l['kind'] for l in self.store.all('logs') if l['taskId'] == source['id']]
+        self.assertEqual(kinds, ['auto_start'])
+        live = [t for t in self.store.snapshot(self.store.user('test002'))['tasks'] if t['name'] == '旧递延']
+        self.assertEqual([(t['id'], bool(t.get('superseded'))) for t in live], [(source['id'], False)])
+
+    def test_a_finished_in_span_copy_folds_back_as_finished_work(self):
+        day = date.fromisoformat(self.day)
+        source = self.store.put('tasks', {
+            'name': '已完成的跨天', 'date': (day - timedelta(days=1)).isoformat(), 'deadline': (day + timedelta(days=1)).isoformat(),
+            'duration': 90, 'assignee': 'test002', 'projectId': None, 'priority': 'P1', 'status': 'done',
+            'carriedCompletion': True, 'fixed': False, 'type': '通用', 'supersededBy': 'done-copy',
+        })
+        self.store.put('tasks', {**source, 'id': 'done-copy', 'date': self.day, 'originId': source['id'], 'status': 'done',
+                                 'carriedCompletion': None, 'supersededBy': None, 'completionSummary': '做完了'})
+        self.store.put('logs', {'taskId': source['id'], 'actor': 'system', 'kind': 'defer', 'nextTaskId': 'done-copy',
+                                'target': self.day, 'date': self.day, 'createdAt': now().isoformat()})
+        self.store.db.commit()
+        self.store.schedule(datetime.combine(day, time(8), TZ))
+        restored = self.store.get('tasks', source['id'])
+        self.assertEqual((restored['status'], restored['completionSummary']), ('done', '做完了'))
+        self.assertFalse(restored.get('carriedCompletion'))
+        # Its assignee can still correct the record, which a settled history row would refuse.
+        self.store.action(self.store.user('test002'), 'task.completion.update', {'id': source['id'], 'summary': '补充说明'})
+
     def test_task_auto_starts_when_scheduled_time_arrives(self):
         task = self.store.put('tasks', {
             'name': '到点自动开始', 'date': self.day, 'time': '00:01', 'duration': 30,
