@@ -182,17 +182,10 @@ test('daily work renders one parent card per project with nested clickable task 
   assert.ok(html.includes('data-id="p1a"'));
 });
 
-test('task approval statuses and reviewer controls are represented', () => {
+test('legacy approval statuses still read in people\'s words', () => {
   const a=app();
   assert.deepEqual(a.json("status({status:'pending_approval'})"), ['pending-approval','待审批']);
   assert.deepEqual(a.json("status({status:'rejected'})"), ['rejected','已驳回']);
-  a.run(`S.user={id:'test001',admin:0};S.projects=[{id:'p',owner:'test002',status:'active'}];`);
-  assert.equal(a.run("canReviewTask({id:'t',projectId:'p',assignee:'test001',status:'pending_approval'})"),false);
-  a.run("S.user={id:'test002',admin:0}");
-  assert.equal(a.run("canReviewTask({id:'t',projectId:'p',assignee:'test001',status:'pending_approval'})"),true);
-  assert.equal(a.run("canReviewTask({id:'t',projectId:'p',assignee:'test002',status:'pending_approval'})"),true);
-  a.run("S.user={id:'superadmin',admin:1}");
-  assert.equal(a.run("canReviewTask({id:'t',projectId:'p',assignee:'test001',status:'pending_approval'})"),false);
 });
 
 test('task edit requests render for assignees and pending approval details resolve by request id', () => {
@@ -207,16 +200,14 @@ test('task edit requests render for assignees and pending approval details resol
   assert.equal(a.run('taskEditPending(S.tasks[0])'),false);
 });
 
-test('inbox renders task completion approvals only for the project owner', () => {
+test('inbox offers no task approval now that finishing a task needs none', () => {
   const a=app();
   a.run(`S.user={id:'test002',admin:0};S.projects=[{id:'p',name:'项目',owner:'test002',status:'active'}];S.tasks=[{id:'t',projectId:'p',name:'任务',assignee:'test001',status:'pending_approval',date:'2026-09-12'}];S.notifications=[{id:'n',kind:'task_approval',title:'任务完成待审批',body:'请审批',reference:'t',createdAt:'2026-09-12',read:false}];S.requests=[];`);
   const els={}; const el=s=>els[s]||(els[s]={innerHTML:'',textContent:'',classList:{toggle(){}}});
   a.context.document={querySelector:el,querySelectorAll:()=>[]};
   const ownerHtml=a.run("(renderInbox(),document.querySelector('#inboxList').innerHTML)");
-  assert.ok(ownerHtml.includes('approve-task-request'));
-  a.run("S.user={id:'superadmin',admin:1}");
-  const adminHtml=a.run("(renderInbox(),document.querySelector('#inboxList').innerHTML)");
-  assert.ok(!adminHtml.includes('approve-task-request'));
+  assert.ok(ownerHtml.includes('任务完成待审批'), '旧通知仍然列出');
+  assert.ok(!ownerHtml.includes('approve-task-request')&&!ownerHtml.includes('reject-task-request'));
 });
 
 test('inbox renders edit approval action for the request approver, including superadmin', () => {
@@ -931,15 +922,30 @@ test('project tasks sort by priority, start, end, or the saved manual order', ()
   assert.equal(a.run("projectSortMode({id:'q'})"), 'priority');
 });
 
-/* 反馈 #5：Owner 自己的任务完成后直接结束。 */
-test('only tasks with someone else to sign them off ask for approval', () => {
+/* Finishing a task needs no sign-off. Afterwards its assignee can correct the
+   record, and the project Owner or an admin can send it back. */
+test('a finished task offers its assignee an edit and its Owner a send-back', () => {
   const a = app();
-  a.run(`S.projects=[{id:'p',owner:'test001'}];`);
-  assert.equal(a.run("taskNeedsApproval({assignee:'test001',projectId:'p'})"), false);
-  assert.equal(a.run("taskNeedsApproval({assignee:'test002',projectId:'p'})"), true);
-  assert.equal(a.run("taskNeedsApproval({assignee:'superadmin',projectId:'p'})"), false);
-  assert.equal(a.run("taskNeedsApproval({assignee:'test002',projectId:null})"), true);
-  // A temp task someone wrote for themselves has nobody else to sign it off.
-  assert.equal(a.run("taskNeedsApproval({assignee:'test002',creator:'test002',projectId:null,type:'临时'})"), false);
-  assert.equal(a.run("taskNeedsApproval({assignee:'test002',creator:'superadmin',projectId:null,type:'临时'})"), true);
+  const els = {'#drawerContent': {innerHTML: ''}, '#taskDrawer': {classList: {remove() {}}}};
+  a.context.document = {querySelector: s => els[s] || null, querySelectorAll: () => []};
+  a.run(`S.today='2026-09-12';S.logs=[];S.editRequests=[];S.users=[];
+         S.projects=[{id:'p',name:'项目',owner:'test002',status:'active',members:{test001:'accepted',test002:'accepted'}}];
+         S.tasks=[{id:'t',projectId:'p',name:'任务',assignee:'test001',priority:'P1',status:'done',date:'2026-09-12',duration:30,completionSummary:'做完了',completionActual:25}];`);
+  const drawer = who => { a.run(`S.user=${JSON.stringify(who)};openDrawer('t')`); return els['#drawerContent'].innerHTML; };
+  const mine = drawer({id: 'test001', admin: 0});
+  assert.ok(mine.includes('id="editCompletion"') && !mine.includes('id="reopenTask"'), '执行人可以修改完成记录');
+  assert.ok(mine.includes('实际 25 分钟'));
+  const owner = drawer({id: 'test002', admin: 0});
+  assert.ok(owner.includes('id="reopenTask"') && !owner.includes('id="editCompletion"'), 'Owner 可以打回');
+  assert.ok(drawer({id: 'superadmin', admin: 1}).includes('id="reopenTask"'), '管理员可以打回');
+  for (const html of [mine, owner]) assert.ok(!html.includes('approveTask'), '不再有审批按钮');
+  // Open work offers neither; a task that was sent back says why.
+  a.run("S.tasks[0].status='todo';S.tasks[0].reopen={by:'test002',reason:'缺验收截图'}");
+  const back = drawer({id: 'test001', admin: 0});
+  assert.ok(!back.includes('editCompletion') && !back.includes('reopenTask'));
+  assert.ok(back.includes('缺验收截图') && back.includes('记录完成'));
+  // A closed project freezes the record.
+  a.run("S.tasks[0].status='done';S.projects[0].status='done'");
+  const closed = drawer({id: 'test002', admin: 0});
+  assert.ok(!closed.includes('reopenTask'));
 });
