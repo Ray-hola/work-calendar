@@ -12,6 +12,10 @@ jobs:
   test:
     name: Python ${{ matrix.python }}
     runs-on: ubuntu-latest
+    # The team works in Asia/Shanghai and the front-end tests read clock times
+    # in local time, so the runner uses the same zone as the users' browsers.
+    env:
+      TZ: Asia/Shanghai
     strategy:
       fail-fast: false
       matrix:
