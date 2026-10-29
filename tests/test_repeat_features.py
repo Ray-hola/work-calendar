@@ -275,10 +275,13 @@ class RepeatFeatureTests(unittest.TestCase):
         first=self.store.schedule(at)
         second=self.store.schedule(at+timedelta(minutes=1))
         diaries=[d for d in self.store.all('diaries') if d.get('author')=='test001' and d.get('date')==day]
-        notices=[n for n in self.store.all('notifications') if n.get('kind')=='diary_digest' and n.get('reference')==f'diary:test001:{day}:2330']
+        notices=[n for n in self.store.all('notifications') if n.get('kind')=='diary_digest']
+        briefs=[n for n in self.store.all('notifications') if n.get('kind')=='brief' and n.get('reference')==f'brief:{day}']
         self.assertEqual(len(diaries),1)
         self.assertTrue(diaries[0].get('auto'))
-        self.assertEqual(len(notices),1)
+        # The digest feeds the team brief instead of landing as its own notice.
+        self.assertEqual(len(notices),0)
+        self.assertEqual(len(briefs),1)
         self.assertGreaterEqual(first['created'],1)
         self.assertEqual(second['created'],0)
 
