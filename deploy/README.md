@@ -1,6 +1,20 @@
 # Work Calendar 部署指南
 
-本目录提供 Cloudflare Tunnel、Caddy、systemd 与备份的模板。生产环境建议让 Python 服务只监听 `127.0.0.1:4173`，再由 Tunnel 或反向代理转发，不直接暴露应用端口。
+本目录提供 Docker Compose、Cloudflare Tunnel、Caddy、systemd 与备份的模板。生产环境建议让服务只监听本机回环地址，再由 Tunnel 或反向代理转发，不直接暴露应用端口。
+
+## Docker
+
+仓库根目录的 `Dockerfile` 只打包 `server.py`、`app.js`、`index.html`、`styles.css` 四个文件，数据写在容器的 `/app/data`。从仓库根目录启动：
+
+```bash
+docker compose -f deploy/docker-compose.example.yml up -d --build
+curl http://127.0.0.1:4173/api/health
+```
+
+- 数据库与 `initial-accounts.txt` 落在仓库的 `data/`（compose 把它挂到 `/app/data`），升级镜像不会丢数据。
+- 通过 https 对外服务时，在 compose 里填 `WORK_CALENDAR_ORIGINS` 并把 `WORK_CALENDAR_SECURE_COOKIE` 改为 `"1"`；文件末尾有注释掉的 Cloudflare Tunnel 服务，Tunnel 的 ingress 指向 `http://app:4173`。
+- 更新：拉取新代码后再次执行 `up -d --build`。改过前端文件时记得同步 `index.html` 里的 `?v=` 版本号。
+- 备份：容器运行时直接用 SQLite 在线备份，例如 `docker compose -f deploy/docker-compose.example.yml exec app python -c "import sqlite3; sqlite3.connect('/app/data/work-calendar.sqlite3').backup(sqlite3.connect('/app/data/backup.sqlite3'))"`，或参考下文的 `backup.sh.example`。
 
 ## 推荐：Cloudflare Tunnel
 
