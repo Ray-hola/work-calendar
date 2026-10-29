@@ -636,9 +636,13 @@ test('the selected conversation is the only one marked active', () => {
 });
 
 test('each row previews its newest line, and flags your own words', () => {
+  /* The list stamps against the real clock, so the two messages are dated
+     today and yesterday rather than on fixed days that go stale. */
+  const today = new Date(); today.setHours(9, 30, 0, 0);
+  const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1); yesterday.setHours(18, 0, 0, 0);
   const previews = {
-    general: {body: '看这个链接 https://example.com/a', author: 'wang00', createdAt: '2026-09-16T09:30:00+08:00'},
-    lounge: {body: '我说的话', author: 'superadmin', createdAt: '2026-09-15T18:00:00+08:00'},
+    general: {body: '看这个链接 https://example.com/a', author: 'wang00', createdAt: today.toISOString()},
+    lounge: {body: '我说的话', author: 'superadmin', createdAt: yesterday.toISOString()},
   };
   const el = chatSidebar(SIDE_PROJECTS, {}, previews, 'general');
   const html = el['#chatChannels'].innerHTML;
