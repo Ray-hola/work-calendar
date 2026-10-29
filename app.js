@@ -888,7 +888,7 @@ function deleteAccount(id){
   };
 }
 async function act(action,data){try{await api('/api/action',{action,data});await refresh();toast('操作已完成')}catch(e){toast(e.message);throw e}}
-function openModal(html){if(UI.briefSource){UI.briefSource.closest('.archive-file')?.classList.remove('is-out');UI.briefSource=null}['#modalBackdrop','#modalBackdrop .modal','#modalContent'].forEach(s=>$(s)?.getAnimations?.().forEach(a=>a.cancel()));$('#modalContent').innerHTML=html;$('#modalBackdrop .modal')?.classList?.remove('is-wide','is-flown');$('#modalBackdrop').classList.remove('hidden')};function closeModal(){if(typeof foldBrief==='function'&&foldBrief())return;$('#modalBackdrop').classList.add('hidden')};function closeDrawer(){$('#taskDrawer').classList.add('hidden')}
+function openModal(html){if(UI.briefSource){UI.briefSource.closest('.archive-file')?.classList.remove('is-out');UI.briefSource=null}UI.briefTyping?.finish();UI.briefTyping=null;document.querySelectorAll('.brief-folder').forEach(x=>x.remove());['#modalBackdrop','#modalBackdrop .modal','#modalContent'].forEach(s=>$(s)?.getAnimations?.().forEach(a=>a.cancel()));$('#modalContent').innerHTML=html;$('#modalBackdrop .modal')?.classList?.remove('is-wide','is-flown');$('#modalBackdrop').classList.remove('hidden')};function closeModal(){if(typeof foldBrief==='function'&&foldBrief())return;$('#modalBackdrop').classList.add('hidden')};function closeDrawer(){$('#taskDrawer').classList.add('hidden')}
 function newTask(projectId,initialDate){
   const admin=Boolean(S.user.admin),projects=manageableProjects().filter(p=>!isProjectHidden(p)),locked=typeof projectId==='string';
   const initial=projects.find(p=>p.id===projectId)?.id||projects[0]?.id;
@@ -1282,12 +1282,12 @@ function renderArchive(){
   fitArchiveDrawer(root.querySelector('.drawer-stage'));
   pickArchive(UI.archivePick,true);
 }
-/* The pointer glides to the picked tick unless it is being dragged, and its
+/* The pointer glides to the picked tick unless the hand is on the ruler, and its
    label bumps when the day changes. */
 function pickArchive(date,force=false){
   const root=$('#archiveCabinet'),file=date&&root?.querySelector(`.archive-file[data-date="${date}"]`);if(!file)return;
   const ruler=root.querySelector('.archive-ruler'),pointer=root.querySelector('.ruler-pointer'),tick=root.querySelector(`.ruler-tick[data-date="${date}"]`);
-  if(pointer&&tick&&!ruler.classList.contains('is-dragging'))pointer.style.setProperty('--at',tick.style.getPropertyValue('--at'));
+  if(pointer&&tick&&!ruler.classList.contains('is-tracking'))pointer.style.setProperty('--at',tick.style.getPropertyValue('--at'));
   if(!force&&file.classList.contains('is-picked'))return;
   UI.archivePick=date;
   root.querySelectorAll('.archive-file').forEach(b=>b.classList.toggle('is-picked',b===file));
@@ -1337,14 +1337,16 @@ function bindArchive(){
   const overBox=(x,y)=>[...stage.querySelector('.open-drawer').children].some(el=>{const r=el.getBoundingClientRect();return x>=r.left-16&&x<=r.right+16&&y>=r.top-16&&y<=r.bottom+16});
   let wheel=0;
   stage.onwheel=e=>{if(!overBox(e.clientX,e.clientY))return;e.preventDefault();wheel+=e.deltaY;while(Math.abs(wheel)>=40){stepArchive(wheel>0?1:-1);wheel-=Math.sign(wheel)*40}};
-  /* The ruler moves only on a press: the pointer follows the drag, picking the
-     nearest tick, and settles onto that tick when let go. */
+  /* The pointer on the ruler follows the mouse (or a finger) along it, picking
+     the nearest tick, and springs onto that tick once the hand leaves; a
+     click opens the picked brief. */
   const track=ruler.querySelector('.ruler-track'),pointer=ruler.querySelector('.ruler-pointer');
   const pickAt=x=>{let best=null,gap=Infinity;ruler.querySelectorAll('.ruler-tick').forEach(t=>{const r=t.getBoundingClientRect(),d=Math.abs(r.left+r.width/2-x);if(d<gap){gap=d;best=t}});if(best)pickArchive(best.dataset.date)};
-  const follow=x=>{const r=track.getBoundingClientRect();pointer?.style.setProperty('--at',`${Math.max(0,Math.min(100,(x-r.left)/r.width*100)).toFixed(2)}%`);pickAt(x)};
-  ruler.onpointerdown=e=>{ruler.setPointerCapture?.(e.pointerId);ruler.classList.add('is-dragging');follow(e.clientX)};
-  ruler.onpointermove=e=>{if(ruler.classList.contains('is-dragging'))follow(e.clientX)};
-  ruler.onpointerup=ruler.onpointercancel=ruler.onlostpointercapture=()=>{if(!ruler.classList.contains('is-dragging'))return;ruler.classList.remove('is-dragging');pickArchive(UI.archivePick)};
+  const follow=x=>{const r=track.getBoundingClientRect();ruler.classList.add('is-tracking');pointer?.style.setProperty('--at',`${Math.max(0,Math.min(100,(x-r.left)/r.width*100)).toFixed(2)}%`);pickAt(x)};
+  ruler.onpointermove=e=>follow(e.clientX);
+  ruler.onpointerdown=e=>{if(e.pointerType!=='mouse')ruler.setPointerCapture?.(e.pointerId);follow(e.clientX)};
+  ruler.onpointerleave=()=>{ruler.classList.remove('is-tracking');pickArchive(UI.archivePick)};
+  ruler.onclick=openPicked;
   ruler.onkeydown=e=>{
     const step={ArrowLeft:1,ArrowDown:1,ArrowRight:-1,ArrowUp:-1}[e.key];
     if(step){e.preventDefault();stepArchive(step)}
@@ -1385,15 +1387,62 @@ function briefDocument(brief){
     +'</article>';
 }
 /* Opened from the archive, the folder rises a little further while the brief
-   loads; the dialog then starts as that folder, in its place and at its tilt,
-   and turns towards you as it grows. Closing runs it back. From the inbox the
-   brief simply opens. */
-function briefFlight(face,modal){
-  const drawer=face.closest('.open-drawer'),style=getComputedStyle(drawer),fit=parseFloat(style.getPropertyValue('--fit'))||1;
-  const f=face.getBoundingClientRect(),m=modal.getBoundingClientRect();
-  const dx=Math.round(f.left+f.width/2-m.left-m.width/2),dy=Math.round(f.top+f.height/2-m.top-m.height/2);
-  const sx=(face.offsetWidth*fit/modal.offsetWidth).toFixed(3),sy=(face.offsetHeight*fit/modal.offsetHeight).toFixed(3);
-  return [{transform:`translate(-50%,-50%) translate(${dx}px,${dy}px) perspective(1400px) ${style.getPropertyValue('--view').trim()} scale(${sx},${sy})`,backgroundColor:'#FBF1EA',borderRadius:'6px',boxShadow:'none'},{transform:'translate(-50%,-50%) translate(0px,0px) perspective(1400px) rotateX(0deg) rotateY(0deg) scale(1,1)',backgroundColor:'#FFFDF9',borderRadius:'18px'}];
+   loads. A copy of it then leaves the box keeping its shape, turns to face
+   you and grows evenly; the brief slides up out of it like a sheet of paper,
+   the folder drops away and the text types itself out. Closing plays the
+   same motion backwards. From the inbox the brief simply opens. */
+const BRIEF_MS=950;
+function briefFolder(folder,face){
+  const el=document.createElement('div');
+  el.className='brief-folder';el.setAttribute('aria-hidden','true');
+  el.style.setProperty('--tab',folder.style.getPropertyValue('--tab'));
+  el.style.width=`${face.offsetWidth}px`;el.style.height=`${face.offsetHeight}px`;
+  el.innerHTML=`${folder.querySelector('.file-tab').outerHTML}<span class="file-face"></span>`;
+  document.body.appendChild(el);
+  return el;
+}
+function briefMotion(face,modal,clone){
+  const style=getComputedStyle(face.closest('.open-drawer')),fit=parseFloat(style.getPropertyValue('--fit'))||1,view=style.getPropertyValue('--view').trim();
+  const w=face.offsetWidth,h=face.offsetHeight,f=face.getBoundingClientRect(),p=modal.getBoundingClientRect();
+  /* Grown evenly to just wider than the brief, its top edge across the brief's
+     middle: the brief is pulled up out of it from there. */
+  const k=Math.min(p.width+40,innerWidth-24)/w,fh=h*k,top=Math.round(Math.min(p.top+p.height*.5,innerHeight-fh-16)),cx=innerWidth/2,cy=top+fh/2;
+  clone.style.left=`${Math.round(cx-w/2)}px`;clone.style.top=`${Math.round(cy-h/2)}px`;
+  const flat=s=>`perspective(1400px) rotateX(0deg) rotateY(0deg) scale(${s})`;
+  const folder=[
+    {offset:0,transform:`translate(${Math.round(f.left+f.width/2-cx)}px,${Math.round(f.top+f.height/2-cy)}px) perspective(1400px) ${view} scale(${fit})`,opacity:1,easing:'cubic-bezier(.25,.8,.25,1)'},
+    {offset:.42,transform:`translate(0px,0px) ${flat(k)}`,opacity:1},
+    {offset:.7,transform:`translate(0px,0px) ${flat(k)}`,opacity:1,easing:'cubic-bezier(.55,0,.8,.4)'},
+    {offset:1,transform:`translate(0px,${Math.round(fh*.6+60)}px) ${flat(k)}`,opacity:0}];
+  /* The brief waits behind the folder, then rises; whatever is still below the
+     folder's top edge stays clipped, as if inside it. */
+  const rise=Math.round(top+12-p.top),inside=Math.round(p.bottom-top),hidden=`inset(-60px -60px ${Math.round(p.height+12)}px -60px)`;
+  const paper=[
+    {offset:0,transform:`translate(-50%,-50%) translateY(${rise}px)`,clipPath:hidden},
+    {offset:.4,transform:`translate(-50%,-50%) translateY(${rise}px)`,clipPath:hidden,easing:'cubic-bezier(.3,.6,.2,1)'},
+    {offset:.74,transform:'translate(-50%,-50%) translateY(0px)',clipPath:`inset(-60px -60px ${Math.max(0,inside)}px -60px)`,easing:'cubic-bezier(.55,0,.8,.4)'},
+    {offset:1,transform:'translate(-50%,-50%) translateY(0px)',clipPath:'inset(-60px -60px -60px -60px)'}];
+  return {folder,paper};
+}
+/* Typewriter: every text node is split into what has been typed and the rest,
+   which stays in place but invisible, so the layout never jumps. A tap
+   anywhere on the brief finishes it at once. */
+function typeOut(root,budget=1200){
+  const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),parts=[];
+  for(let n=walker.nextNode();n;n=walker.nextNode())if(n.nodeValue.trim())parts.push({n,text:n.nodeValue});
+  for(const part of parts){part.rest=document.createElement('span');part.rest.className='type-rest';part.rest.textContent=part.text;part.n.nodeValue='';part.n.after(part.rest)}
+  const total=parts.reduce((s,x)=>s+x.text.length,0),span=Math.min(budget,total*24),caret=document.createElement('span');
+  caret.className='type-caret';
+  let frame=0,start=0;
+  const show=count=>{
+    let left=count,at=null;
+    for(const part of parts){const take=Math.max(0,Math.min(part.text.length,left));left-=take;part.n.nodeValue=part.text.slice(0,take);part.rest.textContent=part.text.slice(take);if(!at&&take<part.text.length)at=part}
+    if(at)at.n.after(caret);else caret.remove();
+  };
+  const step=now=>{start||=now;const count=Math.ceil(Math.min(1,(now-start)/span)*total);show(count);if(count<total)frame=requestAnimationFrame(step);else finish()};
+  const finish=()=>{cancelAnimationFrame(frame);caret.remove();for(const part of parts){part.n.nodeValue=part.text;part.rest.remove()}};
+  root.addEventListener('pointerdown',finish,{once:true});
+  return {start:delay=>setTimeout(()=>{frame=requestAnimationFrame(step)},delay),finish};
 }
 async function openBrief(date,folder=null){
   folder?.classList.add('is-opening');
@@ -1407,22 +1456,26 @@ async function openBrief(date,folder=null){
   const face=folder?.querySelector('.file-face');
   if(!modal||!face?.isConnected||archiveStill())return;
   modal.classList.add('is-flown');folder.classList.add('is-out');UI.briefSource=face;
-  modal.animate(briefFlight(face,modal),{duration:560,easing:'cubic-bezier(.3,.7,.2,1)'});
-  $('#modalContent').animate([{opacity:0},{opacity:0,offset:.5},{opacity:1}],{duration:560});
+  const clone=briefFolder(folder,face),motion=briefMotion(face,modal,clone);
+  clone.animate(motion.folder,{duration:BRIEF_MS,fill:'forwards'}).onfinish=()=>clone.remove();
+  modal.animate(motion.paper,{duration:BRIEF_MS});
+  UI.briefTyping=typeOut($('#modalContent'));
+  UI.briefTyping.start(BRIEF_MS*.5);
 }
 /* Fold the brief back into its folder; true when that takes over closing. */
 function foldBrief(){
   const face=UI.briefSource;if(!face)return false;
-  const back=$('#modalBackdrop'),modal=back?.querySelector('.modal');
-  UI.briefSource=null;
-  const folder=face?.closest('.archive-file');
-  if(!face?.isConnected||!modal?.classList.contains('is-flown')||back.classList.contains('hidden')){folder?.classList.remove('is-out');return false}
-  const parts=[modal,back,$('#modalContent')],done=()=>{back.classList.add('hidden');modal.classList.remove('is-flown');parts.forEach(el=>el.getAnimations().forEach(a=>a.cancel()));folder.classList.remove('is-out')};
-  modal.animate(briefFlight(face,modal).reverse(),{duration:380,easing:'cubic-bezier(.5,0,.75,0)',fill:'forwards'}).onfinish=done;
-  back.animate([{opacity:1},{opacity:0}],{duration:380,easing:'ease-in',fill:'forwards'});
-  $('#modalContent').animate([{opacity:1},{opacity:0,offset:.35},{opacity:0}],{duration:380,fill:'forwards'});
+  const back=$('#modalBackdrop'),modal=back?.querySelector('.modal'),folder=face.closest('.archive-file');
+  UI.briefSource=null;UI.briefTyping?.finish();UI.briefTyping=null;
+  if(!face.isConnected||!modal?.classList.contains('is-flown')||back.classList.contains('hidden')){folder?.classList.remove('is-out');return false}
+  const clone=briefFolder(folder,face),motion=briefMotion(face,modal,clone),reverse={duration:BRIEF_MS*.85,direction:'reverse',fill:'forwards'};
+  const done=()=>{back.classList.add('hidden');modal.classList.remove('is-flown');[modal,back].forEach(el=>el.getAnimations().forEach(a=>a.cancel()));clone.remove();folder.classList.remove('is-out')};
+  modal.animate(motion.paper,reverse);
+  clone.animate(motion.folder,reverse).onfinish=done;
+  back.animate([{opacity:1},{opacity:1,offset:.45},{opacity:0}],{duration:BRIEF_MS*.85,fill:'forwards'});
   return true;
 }
+
 /* Inbox housekeeping: delete a notice from its card, or switch to 管理 to pick
    several. Invitations are answered rather than deleted, so they never take part. */
 async function deleteNotices(ids,read=false){
