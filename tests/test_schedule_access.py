@@ -368,6 +368,37 @@ class ScheduleAccessTests(unittest.TestCase):
         self.assertEqual(len(live), 1)
         self.assertEqual(live[0]['date'], self.day)
 
+    def test_unfinished_fixed_task_carries_to_the_next_day(self):
+        yesterday = (date.fromisoformat(self.day) - timedelta(days=1)).isoformat()
+        rule = self.store.action(self.admin, 'repeat.create', {
+            'name': '日报', 'assignees': ['test002'], 'frequency': 'daily', 'start': yesterday,
+        })
+        occurrence = self.store.put('tasks', {
+            'id': f'repeat:{rule["id"]}:test002:{yesterday}', 'repeatId': rule['id'], 'name': '日报',
+            'date': yesterday, 'time': '09:00', 'duration': 30, 'assignee': 'test002', 'projectId': None,
+            'priority': 'P1', 'status': 'todo', 'fixed': True, 'type': '固定安排',
+        })
+        self.store.db.commit()
+        self.store.schedule(datetime.combine(date.fromisoformat(self.day), time(8), TZ))
+        source = self.store.get('tasks', occurrence['id'])
+        self.assertEqual(source['status'], 'deferred')
+        carried = self.store.get('tasks', source['supersededBy'])
+        self.assertEqual((carried['date'], carried['status'], carried['originId']), (self.day, 'todo', occurrence['id']))
+        self.assertTrue(carried['fixed'])
+        # Today's own occurrence is separate work, and the old day drops out of the member's board.
+        member_tasks = self.store.snapshot(self.store.user('test002'))['tasks']
+        live = [t for t in member_tasks if t.get('repeatId') == rule['id'] and not t.get('superseded') and t['date'] <= self.day]
+        self.assertEqual([t['date'] for t in live], [self.day, self.day])
+        self.assertTrue(next(t for t in member_tasks if t['id'] == occurrence['id'])['superseded'])
+        # Skipping today's occurrence leaves the carried one alone.
+        self.store.action(self.admin, 'repeat.skip', {'id': rule['id'], 'date': self.day})
+        self.assertIn(self.store.get('tasks', carried['id'])['status'], ('todo', 'doing'))
+        self.assertEqual(self.store.get('tasks', f'repeat:{rule["id"]}:test002:{self.day}')['status'], 'skipped')
+        # A second scheduler run the same day carries nothing more.
+        before = len(self.store.all('tasks'))
+        self.store.schedule(datetime.combine(date.fromisoformat(self.day), time(9), TZ))
+        self.assertEqual(len(self.store.all('tasks')), before)
+
     def test_task_auto_starts_when_scheduled_time_arrives(self):
         task = self.store.put('tasks', {
             'name': '到点自动开始', 'date': self.day, 'time': '00:01', 'duration': 30,

@@ -1021,8 +1021,9 @@ class Store:
             carried_deadline = target_day
         # Preserve an in-progress task across automatic day rollover; manual
         # defer creates a fresh todo occurrence in the action handler below.
+        # A carried fixed-task occurrence stays fixed, so it can still be skipped.
         copy = {**task, 'id': uid(), 'date': target_day,
-                'originId': task.get('originId') or task['id'], 'fixed': False,
+                'originId': task.get('originId') or task['id'], 'fixed': bool(task.get('fixed')),
                 'deadline': carried_deadline, 'createdAt': timestamp(),
                 'supersededBy': None, 'supersededAt': None}
         self.put('tasks', copy)
@@ -2280,7 +2281,8 @@ class Store:
             else: dates.discard(day)
             r['skipDates']=sorted(dates);self.put('repeats',r)
             for task in self.all('tasks'):
-                if task.get('repeatId')==r['id'] and task.get('date')==day and task.get('status') in ('todo','doing'):
+                # Only that day's own occurrence; work carried in from an earlier day stays.
+                if task.get('repeatId')==r['id'] and task.get('date')==day and not task.get('originId') and task.get('status') in ('todo','doing'):
                     task['status']='skipped' if skip else 'todo';task['skipReason']='superadmin 临时跳过本次' if skip else ''
                     self.put('tasks',task);self.put('logs',{'taskId':task['id'],'actor':user['id'],'kind':'skip' if skip else 'restore','reason':'superadmin 临时跳过本次' if skip else '恢复固定安排','createdAt':timestamp(),'date':day})
             for a in r['assignees']:self.notify(a,'固定安排临时调整',f'「{r["name"]}」{day} 已'+('挖空，本次无需执行。' if skip else '恢复。'),'repeat',r['id'])
@@ -2527,8 +2529,10 @@ class Store:
             # Roll unfinished work forward at the first scheduler run of a new day.
             # Pending approvals are copied with their pending status; approval of any
             # copy resolves the whole chain. Ordinary unfinished work is copied as todo.
+            # Fixed-task occurrences carry too: the day's own occurrence of the
+            # rule is separate work and does not replace yesterday's.
             for task in list(self.all('tasks')):
-                if task.get('date','') >= at.date().isoformat() or task.get('fixed'):
+                if task.get('date','') >= at.date().isoformat():
                     continue
                 if task.get('status') not in ('todo','doing','pending_approval'):
                     continue
