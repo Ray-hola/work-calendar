@@ -642,11 +642,16 @@ class Store:
         if key:
             headers['Authorization'] = f'Bearer {key}'
 
+        # Cloudflare drops a request after 100 s and the browser then gets an
+        # HTML error page instead of JSON, so the whole call, retry included,
+        # has to finish well inside that.
+        deadline = _time.monotonic() + 85
+
         def send_once():
             body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
             request = urllib.request.Request(endpoint, data=body, method='POST', headers=headers)
             try:
-                with urllib.request.urlopen(request, timeout=45) as response:
+                with urllib.request.urlopen(request, timeout=max(5, min(45, deadline - _time.monotonic()))) as response:
                     raw = response.read(1_000_000)
                 return json.loads(raw.decode('utf-8'))
             except urllib.error.HTTPError as exc:
@@ -680,6 +685,8 @@ class Store:
             if str(content).strip():
                 break
             if attempt == 1:
+                if deadline - _time.monotonic() < 20:
+                    break
                 _time.sleep(0.6)
         if not str(content).strip():
             usage = result.get('usage') or {}
@@ -892,7 +899,7 @@ class Store:
         successor (via originId or reworkOf) is the record that must finish;
         otherwise an old deferred row would permanently block project closeout.
         """
-        tasks=[t for t in self.all('tasks') if t.get('projectId')==project_id]
+        tasks=[t for t in self.all('tasks') if t.get('projectId')==project_id and not t.get('repeatId')]
         if not tasks:
             return False
         leaves=self._lineage_leaves(tasks)
@@ -921,7 +928,9 @@ class Store:
             return None
         pid = task.get('projectId')
         if not pid:
-            return 'superadmin'
+            # A one-off task somebody wrote for themselves has nobody else to
+            # sign it off; one an admin handed over goes back to superadmin.
+            return None if task.get('creator') and task.get('creator') == task.get('assignee') else 'superadmin'
         project = self.get('projects', pid)
         # Every project task is approved by that project's Owner. Project
         # closure itself is the separate superadmin approval boundary. The
@@ -939,7 +948,7 @@ class Store:
             return None
         pid = task.get('projectId')
         if not pid:
-            return 'superadmin'
+            return None if task.get('creator') and task.get('creator') == task.get('assignee') else 'superadmin'
         project = self.get('projects', pid)
         return 'superadmin' if task.get('assignee') == project.get('owner') else project.get('owner')
 
@@ -1033,6 +1042,35 @@ class Store:
                 if not existing:
                     self.notify(member, '项目协作邀请', f'请确认加入「{project["name"]}」。接受后项目任务才进入你的日程。', 'request', project['id'])
 
+    def repeat_project(self, pid, assignees):
+        """Check that a fixed task may live under project `pid`."""
+        p=self.get('projects',pid)
+        if p['status']!='active':raise Problem(409,'固定任务只能挂到进行中的项目')
+        for a in assignees:
+            blocked=self.member_gate(p,a)
+            if blocked:raise Problem(400,blocked)
+        return p
+
+    def trim_project_repeats(self, p, reason):
+        """Skip fixed-task occurrences the project no longer covers.
+
+        Once the project is closed every occurrence from today on is dropped
+        and its rules stop; while it runs only those outside its dates go, and
+        come back if the dates move back over them.
+        """
+        today=now().date().isoformat();closed=p.get('status') in ('done','archived')
+        if closed:
+            for r in self.all('repeats'):
+                if r.get('projectId')==p['id'] and r.get('active'):
+                    r['active']=False;self.put('repeats',r)
+        for t in self.all('tasks'):
+            if not t.get('repeatId') or t.get('projectId')!=p['id']:continue
+            outside=bool((p.get('end') and t['date']>p['end']) or (p.get('start') and t['date']<p['start']))
+            if t.get('status')=='todo' and ((closed and t['date']>=today) or outside):
+                t['status']='skipped';t['skipReason']=reason;self.put('tasks',t)
+            elif not closed and not outside and t.get('status')=='skipped' and t.get('skipReason')=='项目周期已调整':
+                t['status']='todo';t['skipReason']='';self.put('tasks',t)
+
     def member_gate(self, project, member):
         """Explain why `member` cannot take work here, phrased as a next step.
 
@@ -1075,7 +1113,11 @@ class Store:
         name=required(data,'name'); day=valid_date(data.get('date',now().date().isoformat()))
         assignee=data.get('assignee',user['id']); self.user(assignee)
         pid=data.get('projectId') or None
-        if not pid:raise Problem(400,'任务必须归属项目，请先选择项目')
+        if not pid:
+            # A one-off task outside any project: anyone may put one on their
+            # own list, and only an admin may hand one to somebody else.
+            if assignee!=user['id'] and not user['admin']:raise Problem(403,'临时任务只能建给自己；指派给他人请放进项目')
+            if self.user(assignee)['admin']:raise Problem(400,'管理员账号不执行任务，临时任务请指派给成员')
         if pid:
             p=self.get('projects',pid);self.project_owner(user,p)
             if p['status']!='active':raise Problem(409,'项目「%s」还不是进行中状态，先用 project.review（data:{"id":"%s","accept":true}）审批通过，再安排任务'%(p['name'],p['id']))
@@ -1084,7 +1126,7 @@ class Store:
             if blocked:raise Problem(400,blocked)
         priority=data.get('priority','P1')
         if priority not in ('P0','P1','P2'):raise Problem(400,'优先级无效')
-        task={'name':name,'desc':str(data.get('desc','')),'priority':priority,'projectId':pid,'duration':duration(data.get('duration',30)), 'date':day,'time':str(data.get('time','09:00')),'deadline':data.get('deadline') or None,'assignee':assignee,'status':'todo','fixed':False,'type':data.get('type','通用'),'createdAt':timestamp()}
+        task={'name':name,'desc':str(data.get('desc','')),'priority':priority,'projectId':pid,'duration':duration(data.get('duration',30)), 'date':day,'time':str(data.get('time','09:00')),'deadline':data.get('deadline') or None,'assignee':assignee,'creator':user['id'],'status':'todo','fixed':False,'type':data.get('type') or ('临时' if not pid else '通用'),'createdAt':timestamp()}
         self.put('tasks',task)
         if assignee!=user['id']:self.notify(assignee,'收到任务指派',f'{user["id"]} 指派「{name}」，安排日期 {day}。','task',task['id'])
         return task
@@ -1166,7 +1208,7 @@ class Store:
             diaries=[d for d in self.all('diaries') if user['admin'] or d.get('author')==user['id']]
             edit_requests=[r for r in self.all('edit_requests') if user['admin'] or r.get('requester')==user['id'] or r.get('approver')==user['id']]
             automation=next((x.get('value',{}) for x in self.all('settings') if x.get('id')=='automation'),{})
-            return {'user':user,'users':self.users(),'today':now().date().isoformat(),'projects':projects,'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees']],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':[n for n in self.all('notifications') if n['to']==user['id'] and '12:00 初稿' not in str(n.get('title',''))], 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or self.get('projects',s['projectId'])['owner']==user['id'])], 'chat':self.chat_summary(user),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.all('audit')[-60:] if user['admin'] else []}
+            return {'user':user,'users':self.users(),'today':now().date().isoformat(),'projects':projects,'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees'] or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':[n for n in self.all('notifications') if n['to']==user['id'] and '12:00 初稿' not in str(n.get('title',''))], 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or self.get('projects',s['projectId'])['owner']==user['id'])], 'chat':self.chat_summary(user),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.all('audit')[-60:] if user['admin'] else []}
 
     def diary_statistics(self, viewer, start=None, end=None):
         """Return daily completion/load summaries for the diary dashboard.
@@ -1786,6 +1828,9 @@ class Store:
                 for notice in self.all('notifications'):
                     if notice.get('reference')==p['id'] or notice.get('reference') in task_ids:
                         self.db.execute('DELETE FROM notifications WHERE id=?',(notice['id'],))
+                for r in self.all('repeats'):
+                    if r.get('projectId')==p['id']:
+                        self.db.execute('DELETE FROM repeats WHERE id=?',(r['id'],))
                 self.db.execute('DELETE FROM projects WHERE id=?',(p['id'],))
             self.audit(user['id'],'project.delete',{'project':p['name'],'projectId':p['id'],**counts})
             for member,status in (p.get('members') or {}).items():
@@ -1813,6 +1858,7 @@ class Store:
             if p['status']!='pending_completion':raise Problem(409,'该项目没有待审批的完成申请')
             if d.get('accept'):
                 p['status']='done';p['completedBy']=user['id'];p['completedAt']=timestamp()
+                self.trim_project_repeats(p,'项目已结束')
             else:
                 p['status']='active';p['completionRejection']=required(d,'reason')
             self.put('projects',p);self.notify(p['owner'],'项目完成审批结果',f'「{p["name"]}」'+('已完成' if d.get('accept') else '完成申请被驳回：'+p['completionRejection']),'project_completion',p['id']);return p
@@ -1866,13 +1912,20 @@ class Store:
         if action=='project.member_loads':
             p=self.get('projects',d['id']);self.project_owner(user,p)
             if p['status']!='active':raise Problem(409,'只能查看进行中项目的成员负载')
-            start=p.get('start') or '0000-01-01';end=p.get('end') or '9999-12-31'
+            # A task being planned asks about its own dates; the invite dialog
+            # asks about the whole project period.
+            start=valid_date(d['start']) if d.get('start') else (p.get('start') or '0000-01-01')
+            end=valid_date(d['end']) if d.get('end') else (p.get('end') or '9999-12-31')
+            if end<start:raise Problem(400,'结束日期不能早于开始日期')
             active={u['id'] for u in self.users() if u.get('active') and not u.get('admin')}
             counts={member:0 for member in active if member!=p.get('owner')}
+            minutes={member:0 for member in active}
             for task in self.all('tasks'):
-                member=task.get('assignee')
-                if member in counts and start<=task.get('date','')<=end:counts[member]+=1
-            return {'projectId':p['id'],'counts':counts}
+                member=task.get('assignee');day=task.get('date','')
+                if member in counts and start<=day<=end:counts[member]+=1
+                if member not in minutes or task.get('status') in ('skipped','deferred') or task.get('supersededBy'):continue
+                if day<=end and (task.get('deadline') or day)>=start:minutes[member]+=int(task.get('duration',0) or 0)
+            return {'projectId':p['id'],'counts':counts,'minutes':minutes,'start':start,'end':end}
         if action=='project.reorder':
             # The manual order is stored per task lineage (its oldest record),
             # so a deferral that copies a task to the next day keeps its place.
@@ -1884,20 +1937,38 @@ class Store:
             self.put('projects',p)
             return p
         if action=='project.update':
-            p=self.get('projects',d['id']);self.project_owner(user,p)
+            p=self.get('projects',d['id']);self.project_owner(user,p);old=dict(p)
             if d.get('status')=='done' and not user['admin']:
                 raise Problem(403,'项目完成需由 superadmin 审批')
-            if 'owner' in d:
-                self.admin(user);self.user(d['owner']);p['owner']=d['owner'];p['members'][d['owner']]='accepted'
-            for k in ('desc','priority','priorityLocked','status','start','end'):
+            if d.get('owner') and d['owner']!=p['owner']:
+                self.admin(user)
+                if self.user(d['owner'])['admin']:raise Problem(400,'管理员账号不担任项目 Owner')
+                p['owner']=d['owner'];p['members'][d['owner']]='accepted'
+            for k in ('name','desc','priority','priorityLocked','status','start','end','cycle'):
                 if k in d:p[k]=d[k]
+            p['name']=required(p,'name')
             if p['status'] not in ('active','paused','done','archived'):raise Problem(400,'不能绕过审批更改项目状态')
             if p['priority'] not in ('P0','P1','P2'):raise Problem(400,'优先级无效')
             p['start']=valid_date(p.get('start') or now().date().isoformat());p['end']=valid_date(p['end']) if p.get('end') else None
             if p['end'] and p['end']<p['start']:raise Problem(400,'结束日期不能早于开始日期')
             if p.get('cycle') not in ('infinite','range','deadline'):raise Problem(400,'项目周期无效')
             if p['cycle']!='infinite' and not p['end']:raise Problem(400,'有截止日期的项目必须填写结束日期')
-            self.put('projects',p);return p
+            if (p['start'],p['end'])!=(old.get('start'),old.get('end')):
+                # Moving the dates must not strand open work outside the project.
+                stranded=[t for t in self.all('tasks') if t.get('projectId')==p['id'] and not t.get('repeatId') and t.get('status') in ('todo','doing') and (t['date']<p['start'] or (p['end'] and (t.get('deadline') or t['date'])>p['end']))]
+                if stranded:raise Problem(400,f'还有 {len(stranded)} 项未完成任务落在新周期外（如「{stranded[0]["name"]}」），请先调整这些任务的日期')
+            self.put('projects',p)
+            if p['status'] in ('done','archived') or (p['start'],p['end'])!=(old.get('start'),old.get('end')):
+                self.trim_project_repeats(p,'项目已结束' if p['status'] in ('done','archived') else '项目周期已调整')
+                if p['status']=='active':self.materialize(now().date(), CALENDAR_END)
+            if p['owner']!=old['owner']:
+                self.notify(p['owner'],'项目 Owner 指派',f'{user["id"]} 将「{p["name"]}」交给你负责，可在项目下创建和分配任务。','project',p['id'])
+                self.notify(old['owner'],'项目 Owner 变更',f'{user["id"]} 已将「{p["name"]}」的 Owner 改为 {p["owner"]}，你仍是项目协作者。','project',p['id'])
+            elif p['name']!=old['name'] or (p['start'],p['end'])!=(old.get('start'),old.get('end')):
+                for member,state in (p.get('members') or {}).items():
+                    if state=='accepted' and member!=user['id']:
+                        self.notify(member,'项目信息调整',f'{user["id"]} 调整了「{p["name"]}」：周期 {p["start"]} → {p["end"] or "长期"}。','project',p['id'])
+            return p
         if action=='request.respond':
             r=self.get('requests',d['id'])
             if r['to']!=user['id']:raise Problem(403,'只能处理自己的协作邀请')
@@ -1937,7 +2008,7 @@ class Store:
                 raise Problem(409, '当前任务状态不允许申请修改')
             approver=self.task_edit_approver(t)
             if not approver:
-                raise Problem(400, 'superadmin 的任务无需申请修改，可直接调整')
+                raise Problem(400, '这项任务无需申请修改，可直接调整')
             if any(r.get('taskId')==t['id'] and r.get('status')=='pending' for r in self.all('edit_requests')):
                 raise Problem(409, '该任务已有待审批的修改申请')
             changes=self._task_edit_changes(t, d)
@@ -2003,6 +2074,7 @@ class Store:
                 if project['status']!='active':raise Problem(409,'只能调整进行中项目的任务')
             elif not user['admin']:
                 if t['assignee']!=user['id'] or d.get('assignee',t['assignee'])!=t['assignee']:raise Problem(403,'不能修改他人安排')
+                if t.get('creator') not in (None,user['id']):raise Problem(403,'管理员指派的临时任务请提交修改申请')
             if t['status'] in ('done','deferred','skipped','pending_approval','rejected'):raise Problem(409,'已归档任务不可调整')
             for k in ('name','desc','date','time','duration','assignee','priority','deadline','status'):
                 if k in d:t[k]=d[k]
@@ -2109,6 +2181,8 @@ class Store:
             self.admin(user);assignees=d.get('assignees',[])
             if not assignees:raise Problem(400,'请选择接收固定安排的成员')
             for a in assignees:self.user(a)
+            pid=d.get('projectId') or None
+            if pid:self.repeat_project(pid,assignees)
             start=valid_date(d.get('start'));end=valid_date(d['end']) if d.get('end') else None
             if end and end<start:raise Problem(400,'结束日期不能早于开始日期')
             frequency=d.get('frequency','weekly')
@@ -2136,7 +2210,7 @@ class Store:
             if not isinstance(skip_dates,list): skip_dates=[skip_dates]
             skip_dates=sorted(set(valid_date(x) for x in skip_dates))
             if frequency in ('dates','specific') and not specific: raise Problem(400,'指定日期周期至少需要一个日期')
-            r=self.put('repeats',{'name':required(d,'name'),'desc':d.get('desc',''),'assignees':assignees,'priority':d.get('priority','P1'),'duration':duration(d.get('duration',30)),'start':start,'end':end,'time':valid_clock(d.get('time','09:00')),'frequency':frequency,'every':every,'weekdays':weekdays,'monthDay':month_day,'span':span,'specificDates':specific,'skipDates':skip_dates,'active':True,'createdAt':timestamp()})
+            r=self.put('repeats',{'name':required(d,'name'),'desc':d.get('desc',''),'assignees':assignees,'priority':d.get('priority','P1'),'duration':duration(d.get('duration',30)),'start':start,'end':end,'time':valid_clock(d.get('time','09:00')),'frequency':frequency,'every':every,'weekdays':weekdays,'monthDay':month_day,'span':span,'specificDates':specific,'skipDates':skip_dates,'projectId':pid,'active':True,'createdAt':timestamp()})
             self.materialize(now().date(), CALENDAR_END)
             for a in assignees:self.notify(a,'固定安排已发布',f'superadmin 发布「{r["name"]}」，周期 {frequency}，自 {start} 起。','repeat',r['id'])
             return r
@@ -2177,6 +2251,13 @@ class Store:
                 if 'start' in d:r['start']=valid_date(d['start'])
                 if 'end' in d:r['end']=valid_date(d['end']) if d.get('end') else None
                 if r.get('end') and r['end']<r.get('start',''):raise Problem(400,'结束日期不能早于开始日期')
+                if 'projectId' in d:
+                    r['projectId']=d['projectId'] or None
+                    if r['projectId']:self.repeat_project(r['projectId'],r['assignees'])
+                    today=now().date().isoformat()
+                    for task in self.all('tasks'):
+                        if task.get('repeatId')==r['id'] and task.get('status')=='todo' and task['date']>=today:
+                            task['projectId']=r['projectId'];self.put('tasks',task)
                 self.put('repeats',r);self.materialize(now().date(), CALENDAR_END);return r
             day=valid_date(d.get('date') or d.get('day'))
             skip=bool(d.get('skip',True));dates=set(r.get('skipDates',[]))
@@ -2347,8 +2428,15 @@ class Store:
         existing={t['id'] for t in self.all('tasks')}
         for r in self.all('repeats'):
             if not r['active']:continue
+            project=None
+            if r.get('projectId'):
+                project=next((x for x in self.all('projects') if x['id']==r['projectId']),None)
+                if not project or project.get('status')!='active':continue
             base=date.fromisoformat(r['start']);last=date.fromisoformat(r['end']) if r['end'] else end
             day=max(base,start)
+            if project:
+                if project.get('end'):last=min(last,date.fromisoformat(project['end']))
+                if project.get('start'):day=max(day,date.fromisoformat(project['start']))
             while day<=min(last,end):
                 delta=(day-base).days;freq=r['frequency'];weekdays=r.get('weekdays') or []
                 specific=set(r.get('specificDates',r.get('dates',[])) or [])
@@ -2367,8 +2455,9 @@ class Store:
                     deadline=(day+timedelta(days=span-1)).isoformat() if span>1 else None
                     for user in r['assignees']:
                         id=f'repeat:{r["id"]}:{user}:{day.isoformat()}'
+                        if project and self.member_gate(project,user):continue
                         if id not in existing:
-                            self.put('tasks',{'id':id,'repeatId':r['id'],'name':r['name'],'desc':r['desc'],'priority':r['priority'],'duration':r['duration'],'date':day.isoformat(),'time':r['time'],'deadline':deadline,'span':span,'projectId':None,'assignee':user,'status':'todo','fixed':True,'type':'固定安排','createdAt':timestamp()});existing.add(id)
+                            self.put('tasks',{'id':id,'repeatId':r['id'],'name':r['name'],'desc':r['desc'],'priority':r['priority'],'duration':r['duration'],'date':day.isoformat(),'time':r['time'],'deadline':deadline,'span':span,'projectId':r.get('projectId'),'assignee':user,'status':'todo','fixed':True,'type':'固定安排','createdAt':timestamp()});existing.add(id)
                 day+=timedelta(days=1)
 
     def aggregate(self, p, day, cutoff):

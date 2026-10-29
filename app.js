@@ -37,7 +37,8 @@ const ICON_PATHS={
   'square':'<rect x="6" y="6" width="12" height="12" rx="2"/>',
   'dot':'<circle cx="12" cy="12" r="3"/>',
   'chat':'<path d="M20 13.5a2 2 0 0 1-2 2H8.5L4 19V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2Z"/>',
-  'mic':'<rect x="9" y="3" width="6" height="10" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v3"/>'
+  'mic':'<rect x="9" y="3" width="6" height="10" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v3"/>',
+  'pip':'<rect x="2.5" y="4.5" width="19" height="15" rx="2"/><rect x="12" y="11" width="7" height="6" rx="1"/>'
 };
 function icon(name,extra=''){
   const body=ICON_PATHS[name]||ICON_PATHS['diamond'];
@@ -52,10 +53,15 @@ function hydrateIcons(root=document){
   });
 }
 let S={user:null,users:[],tasks:[],projects:[],achievements:[],logs:[],reports:[],diaries:[],diaryStats:[],notifications:[],requests:[],editRequests:[],suggestions:[],profiles:[],today:''};
-const api=(path,body)=>fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Work-Calendar':'1'},credentials:'same-origin',body:JSON.stringify(body)}).then(async r=>{const x=await r.json();if(!r.ok)throw new Error(x.error||'操作未完成');return x});
+/* The server always answers in JSON, but the tunnel in front of it does not:
+   a request that runs past its time limit comes back as an HTML error page.
+   Safari reports parsing that as "The string did not match the expected
+   pattern", so anything that is not JSON becomes a readable message here. */
+const readJSON=async r=>{const text=await r.text();try{return text?JSON.parse(text):{}}catch(_){throw new Error([504,524].includes(r.status)?'服务响应超时，请稍后再试；给 AI 助手的需求可以拆短一点':`服务暂时不可用（HTTP ${r.status}），请稍后再试`)}};
+const api=(path,body)=>fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Work-Calendar':'1'},credentials:'same-origin',body:JSON.stringify(body)}).then(async r=>{const x=await readJSON(r);if(!r.ok)throw new Error(x.error||'操作未完成');return x});
 /* Raw-body sibling of api() for uploads: audio is sent as-is, not as JSON. */
 const apiBlob=(path,blob)=>fetch(path,{method:'POST',headers:{'Content-Type':blob.type||'application/octet-stream','X-Work-Calendar':'1'},credentials:'same-origin',body:blob}).then(async r=>{const x=await r.json().catch(()=>({}));if(!r.ok)throw new Error(x.error||'请求未完成');return x});
-const getState=()=>fetch('/api/state',{credentials:'same-origin'}).then(async r=>{const x=await r.json();if(!r.ok)throw new Error(x.error||'请登录');return x});
+const getState=()=>fetch('/api/state',{credentials:'same-origin'}).then(async r=>{const x=await readJSON(r);if(!r.ok)throw new Error(x.error||'请登录');return x});
 const fmt=iso=>{const d=new Date(`${iso}T12:00:00`);return `${d.getMonth()+1}月${d.getDate()}日`};
 const wd=iso=>['周日','周一','周二','周三','周四','周五','周六'][new Date(`${iso}T12:00:00`).getDay()];
 const add=(iso,n)=>{const d=new Date(`${iso}T12:00:00`);d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)};
@@ -77,13 +83,18 @@ const status=t=>{
 const projectName=t=>(S.projects.find(p=>p.id===t.projectId)||{}).name||'个人';
 function toast(msg){const e=$('#toast');e.textContent=msg;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200)}
 function showAuth(){document.body.classList.add('auth-locked');let e=$('#authScreen');if(!e){e=document.createElement('section');e.id='authScreen';document.body.prepend(e)}const local=location.protocol==='file:';e.innerHTML=`<div class="auth-card"><div class="brand"><span class="brand-mark">战</span><span>战略小组<br><strong>台账</strong></span></div><h1>登录工作台</h1><form id="loginForm"><label>账户<input id="loginUser" autocomplete="username" value="superadmin" required></label><label>密码<input id="loginPass" type="password" autocomplete="current-password" required></label><button class="primary-btn" type="submit" ${local?'disabled':''}>${local?'请先启动本地服务':'进入工作台'}</button><div id="loginError" class="login-error">${local?'请在工作区运行 ./run.sh，然后访问 http://127.0.0.1:4173/':''}</div></form></div>`;$('#loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/login',{username:$('#loginUser').value,password:$('#loginPass').value});document.body.classList.remove('auth-locked');e.target.closest('#authScreen').remove();await refresh();switchView('calendar')}catch(err){$('#loginError').textContent=err.message}}}
+/* Accounts that have signed in on this browser, newest first. The switcher
+   offers only these, so it never lists the whole team to everyone. */
+const KNOWN_ACCOUNTS_KEY='wc-accounts';
+function knownAccounts(){try{const v=JSON.parse(localStorage.getItem(KNOWN_ACCOUNTS_KEY)||'[]');return Array.isArray(v)?v.filter(x=>typeof x==='string'):[]}catch(_){return []}}
+function rememberAccount(id){if(!id)return;try{localStorage.setItem(KNOWN_ACCOUNTS_KEY,JSON.stringify([id,...knownAccounts().filter(x=>x!==id)].slice(0,8)))}catch(_){}}
 async function refresh(){
   let next;
   try{next=await getState()}catch(e){showAuth();return}
   if(S.user?.id!==next.user.id){Object.assign(UI,{view:'calendar',member:'all',filter:'all',selectedWeek:0,detailDate:null,timelineScroll:null,dayOffset:0})}
   /* updateChatDot is defined further down the file than the unit-test sandbox
      loads, so guard the call rather than assume it is in scope. */
-  S=next;renderAll();if(typeof updateChatDot==='function')updateChatDot();
+  S=next;rememberAccount(S.user.id);renderAll();renderPip();if(typeof updateChatDot==='function')updateChatDot();
 }
 let inboxRefreshPromise=null;
 async function refreshInboxState(){
@@ -101,7 +112,7 @@ async function refreshInboxState(){
   return inboxRefreshPromise;
 }
 function switchView(view){
-  if(view==='achievements'&&!S.user?.admin){view='calendar'}
+  if((view==='achievements'||view==='accounts')&&!S.user?.admin){view='calendar'}
   const changed=UI.view!==view;
   UI.view=view;
   /* Returning to the week rail should show the current week, not whichever
@@ -180,7 +191,7 @@ function dailyTaskGroups(tasks){
     groups.get(key).tasks.push(task);
   }
   return [...groups.values()].map(({project,tasks})=>{
-    const unattached=!project, title=project?.name||(tasks.every(t=>t.fixed)?'固定安排':'其他安排'), sub=project?`Owner · ${nameOf(project.owner)} · ${projectStatus(project)}`:tasks.every(t=>t.fixed)?'按周期自动生成':'历史记录', done=tasks.filter(t=>t.status==='done').length;
+    const unattached=!project, title=project?.name||(tasks.every(t=>t.fixed)?'固定安排':tasks.every(t=>t.type==='临时')?'临时任务':'其他安排'), sub=project?`Owner · ${nameOf(project.owner)} · ${projectStatus(project)}`:tasks.every(t=>t.fixed)?'按周期自动生成':tasks.every(t=>t.type==='临时')?'不属于任何项目':'历史记录', done=tasks.filter(t=>t.status==='done').length;
     return `<section class="daily-project-card ${unattached?'unattached-project':''}" data-project="${escapeHTML(project?.id||'')}"><div class="daily-project-heading"><div><span class="daily-project-kicker">${unattached?'安排':'项目'}</span><h3>${escapeHTML(title)}</h3></div><span class="daily-project-meta">${escapeHTML(sub)} · ${done}/${tasks.length} 已完成</span></div><div class="daily-project-tasks">${tasks.map(taskCard).join('')}</div></section>`;
   }).join('');
 }
@@ -259,7 +270,7 @@ function openDrawer(id){
   const t=S.tasks.find(x=>x.id===id);if(!t)return;
   const [c,l]=status(t),p=S.projects.find(p=>p.id===t.projectId),archived=['done','deferred','skipped'].includes(t.status),pendingApproval=['pending_approval','awaiting_approval','submitted'].includes(t.status),rejected=['rejected','returned'].includes(t.status),lineageIds=taskLineageIds(t);
   const manage=canManageProject(p)&&p.status==='active'&&!archived&&!pendingApproval&&!rejected,perform=!S.user.admin&&!archived&&t.assignee===S.user.id;
-  const editPending=taskEditPending(t),editRequest=taskEditRequest(t),canRequestEdit=perform&&!S.user.admin&&!editPending&&!['done','deferred','skipped','pending_approval','awaiting_approval','submitted'].includes(t.status)&&(!p||p.status==='active');
+  const editPending=taskEditPending(t),editRequest=taskEditRequest(t),ownTemp=!t.projectId&&t.creator===S.user.id&&t.assignee===S.user.id,canRequestEdit=perform&&!S.user.admin&&!ownTemp&&!editPending&&!['done','deferred','skipped','pending_approval','awaiting_approval','submitted'].includes(t.status)&&(!p||p.status==='active');
   const reviewer=canReviewTask(t),editReviewer=editRequest?.approver===S.user.id, reviewActions=pendingApproval&&reviewer?`<div class="drawer-actions approval-actions"><button class="primary-btn" id="approveTask">${icon('check')}审批通过</button><button class="secondary-btn" id="rejectTask">驳回并给建议</button></div>`:'';
   const editReviewActions=editPending&&editReviewer?`<div class="drawer-actions approval-actions"><button class="primary-btn" id="approveEditRequest">${icon('check')}同意修改</button><button class="secondary-btn" id="rejectEditRequest">驳回修改申请</button></div>`:'';
   const completionLogs=S.logs.filter(x=>x.taskId===t.id&&['complete','complete_pending'].includes(x.kind)),latestCompletion=completionLogs[completionLogs.length-1],completionSummary=t.completionSummary||latestCompletion?.summary||t.approval?.summary;
@@ -267,7 +278,7 @@ function openDrawer(id){
   const actionCopy=pendingApproval?`<p class="muted approval-pending-note">等待 ${escapeHTML(nameOf(t.approval?.approver||p?.owner||'superadmin'))} 审批</p>`:editPending?`<p class="muted approval-pending-note">修改申请待 ${escapeHTML(nameOf(t.assignee===p?.owner?'superadmin':p?.owner||'superadmin'))} 审批</p>`:rejected?`<p class="rejection-note">任务已驳回${rejection?`：${escapeHTML(rejection)}`:''}</p>`:archived?`<p class="muted">${isSuperseded(t)?'已由后续任务接替':`${l} · 已归档`}</p>`:perform?`<div class="drawer-actions">${t.status==='todo'?`<button class="secondary-btn" id="startTask">${icon('play')}开始任务</button>`:''}<button class="primary-btn complete-btn" id="completeTask">${icon('check')}${taskNeedsApproval(t)?'提交完成审批':'记录完成'}</button><button class="defer-btn" id="deferTask">${icon('arrow-up-right')}未完成，递延</button></div>`:'';
   const editSummary=editPending?renderEditRequestSummary(t):'';
   const canDelete=S.user.admin&&!t.fixed&&!t.repeatId&&!pendingApproval&&!rejected;
-  $('#drawerContent').innerHTML=`<div class="drawer-kicker">${escapeHTML(projectName(t))} · ${escapeHTML(t.priority)}</div><h2 class="drawer-title">${escapeHTML(t.name)}</h2><p class="drawer-description">${escapeHTML(t.desc||'暂无描述')}</p>${completionSummary?`<div class="completion-summary"><span>最新完成总结</span><p>${escapeHTML(completionSummary)}${latestCompletion?.actual?` · 实际 ${latestCompletion.actual} 分钟`:''}</p></div>`:''}${editSummary}<div class="detail-grid"><div><span>状态</span><strong><i class="status-dot ${c}"></i>${l}</strong></div><div><span>预计时长</span><strong>${t.duration} 分钟</strong></div><div><span>${isMultiDay(t)?`任务周期 · ${spanDays(t)} 天`:'安排日期'}</span><strong>${escapeHTML(t.date)}${isMultiDay(t)?` → ${escapeHTML(taskEnd(t))}`:''}</strong></div><div><span>DDL</span><strong class="${t.status==='done'?'':daysCount(S.today,taskEnd(t))<0?'overdue-text':''}">${escapeHTML(ddlText(t))}</strong></div><div><span>负责人</span><strong>${escapeHTML(nameOf(t.assignee))}</strong></div></div>${canRequestEdit?'<button class="secondary-btn edit-task-request-btn" id="requestTaskEdit">申请修改任务</button>':''}${S.user.admin&&!editPending&&!['done','deferred','skipped','pending_approval','awaiting_approval','submitted','rejected'].includes(t.status)&&(!p||p.status==='active')?'<button class="secondary-btn edit-task-request-btn" id="directTaskEdit">直接调整任务</button>':''}${manage?'<button class="secondary-btn" id="adjustTaskAssignment">调整任务指派</button>':''}${canDelete?'<button class="secondary-btn danger-btn" id="deleteTask">删除此任务</button>':''}<div class="history"><h3>任务记录</h3>${S.logs.filter(x=>lineageIds.has(x.taskId)).map(x=>`<div class="history-item"><i></i><span>${escapeHTML(logLine(x))}</span><small>${escapeHTML([nameOf(x.actor),logTime(x.createdAt)].filter(Boolean).join(' · '))}</small></div>`).join('')||'<div class="history-item"><i></i><span>暂无记录</span></div>'}</div>${actionCopy}${reviewActions}${editReviewActions}`;
+  $('#drawerContent').innerHTML=`<div class="drawer-kicker">${escapeHTML(projectName(t))} · ${escapeHTML(t.priority)}</div><h2 class="drawer-title">${escapeHTML(t.name)}</h2><p class="drawer-description">${escapeHTML(t.desc||'暂无描述')}</p>${completionSummary?`<div class="completion-summary"><span>最新完成总结</span><p>${escapeHTML(completionSummary)}${latestCompletion?.actual?` · 实际 ${latestCompletion.actual} 分钟`:''}</p></div>`:''}${editSummary}<div class="detail-grid"><div><span>状态</span><strong><i class="status-dot ${c}"></i>${l}</strong></div><div><span>预计时长</span><strong>${t.duration} 分钟</strong></div><div><span>${isMultiDay(t)?`任务周期 · ${spanDays(t)} 天`:'安排日期'}</span><strong>${escapeHTML(t.date)}${isMultiDay(t)?` → ${escapeHTML(taskEnd(t))}`:''}</strong></div><div><span>DDL</span><strong class="${t.status==='done'?'':daysCount(S.today,taskEnd(t))<0?'overdue-text':''}">${escapeHTML(ddlText(t))}</strong></div><div><span>负责人</span><strong>${escapeHTML(nameOf(t.assignee))}</strong></div></div>${canRequestEdit?'<button class="secondary-btn edit-task-request-btn" id="requestTaskEdit">申请修改任务</button>':''}${(S.user.admin||(perform&&ownTemp))&&!editPending&&!['done','deferred','skipped','pending_approval','awaiting_approval','submitted','rejected'].includes(t.status)&&(!p||p.status==='active')?'<button class="secondary-btn edit-task-request-btn" id="directTaskEdit">直接调整任务</button>':''}${manage?'<button class="secondary-btn" id="adjustTaskAssignment">调整任务指派</button>':''}${canDelete?'<button class="secondary-btn danger-btn" id="deleteTask">删除此任务</button>':''}<div class="history"><h3>任务记录</h3>${S.logs.filter(x=>lineageIds.has(x.taskId)).map(x=>`<div class="history-item"><i></i><span>${escapeHTML(logLine(x))}</span><small>${escapeHTML([nameOf(x.actor),logTime(x.createdAt)].filter(Boolean).join(' · '))}</small></div>`).join('')||'<div class="history-item"><i></i><span>暂无记录</span></div>'}</div>${actionCopy}${reviewActions}${editReviewActions}`;
   $('#taskDrawer').classList.remove('hidden');$('#startTask')?.addEventListener('click',()=>act('task.start',{id:t.id}).then(()=>closeDrawer()).catch(()=>{}));$('#completeTask')?.addEventListener('click',()=>complete(t));$('#deferTask')?.addEventListener('click',()=>defer(t));$('#requestTaskEdit')?.addEventListener('click',()=>editTaskRequest(id));$('#directTaskEdit')?.addEventListener('click',()=>editTaskRequest(id,true));$('#adjustTaskAssignment')?.addEventListener('click',()=>editTaskAssignment(id));$('#deleteTask')?.addEventListener('click',async()=>{if(!confirm(`确认删除「${t.name}」？删除后将从日历移除。`))return;try{await act('task.delete',{id:t.id});closeDrawer()}catch(e){}});$('#approveTask')?.addEventListener('click',()=>reviewTask(t.id,true));$('#rejectTask')?.addEventListener('click',()=>reviewTask(t.id,false));$('#approveEditRequest')?.addEventListener('click',()=>reviewTaskEdit(t.id,true));$('#rejectEditRequest')?.addEventListener('click',()=>reviewTaskEdit(t.id,false));
 }
 function taskEditRequest(t){
@@ -288,12 +299,13 @@ function canReviewTask(t){
 function taskNeedsApproval(t){
   if(!t||t.assignee==='superadmin')return false;
   const p=t.projectId&&S.projects.find(x=>x.id===t.projectId);
-  return !p||p.owner!==t.assignee;
+  if(!p)return !(t.creator&&t.creator===t.assignee);
+  return p.owner!==t.assignee;
 }
 function complete(t){const review=taskNeedsApproval(t);openModal(`<div class="eyebrow">完成记录 · ${escapeHTML(t.name)}</div><h2>${review?'提交完成审批':'记录完成'}</h2><label class="form-field">完成总结<textarea id="doneText" ></textarea></label><label class="form-field">实际耗时（分钟）<input id="actualMins" type="number" value="${t.duration}"></label><label class="form-field">工作感受<select id="feeling"><option>顺利</option><option>一般</option><option>困难</option><option>阻塞</option></select></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmComplete">${review?'提交审批':'确认完成'}</button></div>`);$('#cancelAction').onclick=closeModal;$('#confirmComplete').onclick=async()=>{try{await api('/api/action',{action:'task.complete',data:{id:t.id,summary:$('#doneText').value||'完成任务',actual:Number($('#actualMins').value),feeling:$('#feeling').value}});closeModal();closeDrawer();await refresh();toast(review?'完成总结已提交，等待审批':'任务已完成')}catch(e){toast(e.message)}}}
 function editTaskRequest(id,direct=false){
   const t=S.tasks.find(x=>x.id===id),p=S.projects.find(x=>x.id===t?.projectId);if(!t)return;
-  const pool=p?projectAssignees(p):S.users.filter(u=>u.active&&!u.admin);
+  const pool=p?projectAssignees(p):S.user.admin?S.users.filter(u=>u.active&&!u.admin):S.users.filter(u=>u.id===S.user.id);
   // Keep the current assignee selectable so saving other fields never silently reassigns the task.
   const users=pool.some(u=>u.id===t.assignee)?pool:[...S.users.filter(u=>u.id===t.assignee),...pool];
   const minDate=p?.start||S.today,maxDate=p?.end? (p.end<DATE_HORIZON?p.end:DATE_HORIZON):DATE_HORIZON;
@@ -383,7 +395,7 @@ function projectAssignees(p){return S.users.filter(u=>u.active&&p?.members?.[u.i
 function manageableProjects(){return S.projects.filter(p=>p.status==='active'&&canManageProject(p))}
 function projectTasksComplete(p){
   if(!p||p.status!=='active')return false;
-  const tasks=S.tasks.filter(t=>t.projectId===p.id);
+  const tasks=S.tasks.filter(t=>t.projectId===p.id&&!t.repeatId);
   if(!tasks.length)return false;
   const byId=new Map(tasks.map(t=>[t.id,t]));
   const groups=new Map();
@@ -447,12 +459,13 @@ function renderProjects(){
   $('#projectsView .eyebrow').textContent=`${admin?'团队项目管理':'我的项目'} · ${projects.length} 个项目`;
   $('#projectsView h1').textContent=admin?'项目与任务管理':'我的项目与任务';
   $('#projectGrid').innerHTML=projects.map(p=>{
-    const mode=projectSortMode(p),tasks=sortProjectTasks(p,S.tasks.filter(t=>t.projectId===p.id&&!isSuperseded(t)),mode),done=tasks.filter(t=>t.status==='done').length;
+    const mode=projectSortMode(p),tasks=sortProjectTasks(p,S.tasks.filter(t=>t.projectId===p.id&&!t.repeatId&&!isSuperseded(t)),mode),done=tasks.filter(t=>t.status==='done').length;
+    const fixed=(S.repeats||[]).filter(r=>r.projectId===p.id&&r.active!==false);
     const accepted=Object.entries(p.members||{}).filter(([,v])=>v==='accepted').map(([id])=>id),pending=Object.entries(p.members||{}).filter(([,v])=>v==='pending').map(([id])=>id);
     const manage=canManageProject(p)&&p.status==='active',hasSlot=S.users.some(u=>u.active&&!u.admin&&u.id!==p.owner&&!accepted.includes(u.id)&&(admin||!pending.includes(u.id)));
     const drag=manage&&mode==='manual'&&tasks.length>1,byId=new Map(S.tasks.map(t=>[t.id,t]));
     const sorter=tasks.length>1?`<select class="project-task-sort" data-project="${escapeHTML(p.id)}" aria-label="任务排序">${Object.entries(PROJECT_SORTS).map(([k,v])=>`<option value="${k}" ${k===mode?'selected':''}>${v}</option>`).join('')}</select>`:'';
-    return `<article class="project-card project-node"><div class="project-node-heading"><div><div class="project-title"><h3>${escapeHTML(p.name)}</h3><span class="project-status">${projectStatus(p)}</span></div><p>${escapeHTML(p.desc||'暂无描述')}</p></div><div class="project-node-actions">${manage?`<button class="primary-btn add-project-task" data-project="${escapeHTML(p.id)}">${icon('plus')}新建并指派任务</button>`:''}${manage&&hasSlot?`<button class="secondary-btn invite-members" data-id="${escapeHTML(p.id)}">${admin?'直接添加协作者':'邀请协作者'}</button>`:''}${p.status==='active'&&!manage&&(p.members||{})[S.user.id]==='accepted'?`<button class="ghost-btn leave-project" data-id="${escapeHTML(p.id)}">退出项目</button>`:''}${p.status==='pending'&&admin?`<button class="secondary-btn approve-project" data-id="${escapeHTML(p.id)}">审批项目</button>`:''}${p.status==='active'&&manage&&!admin&&projectTasksComplete(p)?`<button class="secondary-btn request-project-completion" data-id="${escapeHTML(p.id)}">申请项目结项</button>`:''}${p.status==='active'&&manage&&!admin&&!projectTasksComplete(p)?``:''}${p.status==='pending_completion'&&admin?`<button class="secondary-btn approve-project-completion" data-id="${escapeHTML(p.id)}">审批项目完成</button>`:''}${canManageProject(p)?`<button class="ghost-btn delete-project" data-id="${escapeHTML(p.id)}">删除项目</button>`:''}</div></div><div class="project-members"><span>Owner · ${escapeHTML(nameOf(p.owner))}　协作者：${accepted.filter(id=>id!==p.owner).map(id=>escapeHTML(nameOf(id))).join('、')||'暂无'}${pending.length?`　待确认：${pending.map(id=>escapeHTML(nameOf(id))).join('、')}`:''}</span><span>${canManageProject(p)?'项目':'我的任务'} ${done}/${tasks.length} 已完成 · 截止 ${escapeHTML(p.end||'未设置')}</span></div><div class="project-task-tree" data-project="${escapeHTML(p.id)}"><div class="project-tree-label">${canManageProject(p)?'项目任务':'分配给我的任务'} <span>${tasks.length}</span>${sorter}</div>${tasks.map(t=>`<div class="project-child-row"${drag?` draggable="true" data-root="${escapeHTML(taskRootId(t,byId))}"`:''}>${drag?'<span class="drag-handle" aria-hidden="true">⋮⋮</span>':''}<button class="project-task-open" data-id="${escapeHTML(t.id)}"><span class="priority ${escapeHTML(t.priority)}">${escapeHTML(t.priority)}</span><strong>${escapeHTML(t.name)}</strong><span class="child-assignee" title="${escapeHTML(t.assignee)}">${escapeHTML(nameOf(t.assignee))}</span><span class="child-date">${escapeHTML(fmt(t.date))}</span><span>${status(t)[1]}</span><span aria-hidden="true">${icon('chevron-right')}</span></button>${manage&&['todo','doing'].includes(t.status)?`<button class="ghost-btn assign-project-task" data-id="${escapeHTML(t.id)}">调整指派</button>`:''}</div>`).join('')||`<p class="project-task-empty">${p.status==='pending'?'待审批':'暂无任务'}</p>`}</div></article>`;
+    return `<article class="project-card project-node"><div class="project-node-heading"><div><div class="project-title"><h3>${escapeHTML(p.name)}</h3><span class="project-status">${projectStatus(p)}</span></div><p>${escapeHTML(p.desc||'暂无描述')}</p></div><div class="project-node-actions">${manage?`<button class="primary-btn add-project-task" data-project="${escapeHTML(p.id)}">${icon('plus')}新建并指派任务</button><button class="secondary-btn project-settings" data-id="${escapeHTML(p.id)}">项目设置</button>`:''}${manage&&hasSlot?`<button class="secondary-btn invite-members" data-id="${escapeHTML(p.id)}">${admin?'直接添加协作者':'邀请协作者'}</button>`:''}${p.status==='active'&&!manage&&(p.members||{})[S.user.id]==='accepted'?`<button class="ghost-btn leave-project" data-id="${escapeHTML(p.id)}">退出项目</button>`:''}${p.status==='pending'&&admin?`<button class="secondary-btn approve-project" data-id="${escapeHTML(p.id)}">审批项目</button>`:''}${p.status==='active'&&manage&&!admin&&projectTasksComplete(p)?`<button class="secondary-btn request-project-completion" data-id="${escapeHTML(p.id)}">申请项目结项</button>`:''}${p.status==='active'&&manage&&!admin&&!projectTasksComplete(p)?``:''}${p.status==='pending_completion'&&admin?`<button class="secondary-btn approve-project-completion" data-id="${escapeHTML(p.id)}">审批项目完成</button>`:''}${canManageProject(p)?`<button class="ghost-btn delete-project" data-id="${escapeHTML(p.id)}">删除项目</button>`:''}</div></div><div class="project-members"><span>Owner · ${escapeHTML(nameOf(p.owner))}　协作者：${accepted.filter(id=>id!==p.owner).map(id=>escapeHTML(nameOf(id))).join('、')||'暂无'}${pending.length?`　待确认：${pending.map(id=>escapeHTML(nameOf(id))).join('、')}`:''}</span><span>${canManageProject(p)?'项目':'我的任务'} ${done}/${tasks.length} 已完成 · 截止 ${escapeHTML(p.end||'未设置')}</span></div><div class="project-task-tree" data-project="${escapeHTML(p.id)}"><div class="project-tree-label">${canManageProject(p)?'项目任务':'分配给我的任务'} <span>${tasks.length}</span>${sorter}</div>${tasks.map(t=>`<div class="project-child-row"${drag?` draggable="true" data-root="${escapeHTML(taskRootId(t,byId))}"`:''}>${drag?'<span class="drag-handle" aria-hidden="true">⋮⋮</span>':''}<button class="project-task-open" data-id="${escapeHTML(t.id)}"><span class="priority ${escapeHTML(t.priority)}">${escapeHTML(t.priority)}</span><strong>${escapeHTML(t.name)}</strong><span class="child-assignee" title="${escapeHTML(t.assignee)}">${escapeHTML(nameOf(t.assignee))}</span><span class="child-date">${escapeHTML(fmt(t.date))}</span><span>${status(t)[1]}</span><span aria-hidden="true">${icon('chevron-right')}</span></button>${manage&&['todo','doing'].includes(t.status)?`<button class="ghost-btn assign-project-task" data-id="${escapeHTML(t.id)}">调整指派</button>`:''}</div>`).join('')||`<p class="project-task-empty">${p.status==='pending'?'待审批':'暂无任务'}</p>`}${fixed.length?`<div class="project-tree-label">固定任务 <span>${fixed.length}</span></div>${fixed.map(r=>`<div class="project-fixed-row"><strong>${escapeHTML(r.name)}</strong><small>${escapeHTML(repeatPattern(r))} · ${escapeHTML(r.time||'09:00')} · ${escapeHTML((r.assignees||[]).map(nameOf).join('、'))}${r.end?` · 至 ${escapeHTML(r.end)}`:''}</small></div>`).join('')}`:''}</div></article>`;
   }).join('')||'<div class="empty-state">暂无项目</div>';
   $$('.add-project-task').forEach(b=>b.onclick=()=>newTask(b.dataset.project));
   $$('.project-task-open').forEach(b=>b.onclick=()=>openDrawer(b.dataset.id));
@@ -463,8 +476,29 @@ function renderProjects(){
   $$('.request-project-completion').forEach(b=>b.onclick=()=>requestProjectCompletion(b.dataset.id));
   $$('.approve-project-completion').forEach(b=>b.onclick=()=>{const n=S.notifications.find(n=>n.kind==='project_completion'&&n.reference===b.dataset.id);if(n)openNotification(n.id)});
   $$('.invite-members').forEach(b=>b.onclick=()=>inviteCollaborators(b.dataset.id));
+  $$('.project-settings').forEach(b=>b.onclick=()=>projectSettings(b.dataset.id));
   $$('.leave-project').forEach(b=>b.onclick=()=>leaveProject(b.dataset.id));
   $$('.delete-project').forEach(b=>b.onclick=()=>deleteProject(b.dataset.id));
+}
+/* Name, dates and Owner of a running project. Collaborators keep their own
+   dialog, reached from here, because adding and removing people notifies them. */
+function projectSettings(projectId){
+  const p=S.projects.find(x=>x.id===projectId),admin=Boolean(S.user?.admin);
+  if(!canManageProject(p)||p.status!=='active'){toast('只有项目 Owner 或 superadmin 可设置进行中的项目');return}
+  const owners=S.users.filter(u=>u.active&&!u.admin||u.id===p.owner);
+  const accepted=Object.entries(p.members||{}).filter(([id,v])=>v==='accepted'&&id!==p.owner).map(([id])=>nameOf(id));
+  openModal(`<div class="eyebrow">${escapeHTML(p.name)} · 项目设置</div><h2>项目设置</h2><label class="form-field">项目名称<input id="settingsName" maxlength="120" value="${escapeHTML(p.name)}"></label><label class="form-field">项目描述<textarea id="settingsDesc">${escapeHTML(p.desc||'')}</textarea></label><div class="project-date-fields"><label class="form-field">开始日期<input id="settingsStart" type="date" max="${DATE_HORIZON}" value="${escapeHTML(p.start||S.today)}"></label><label class="form-field">截止日期（可留空）<input id="settingsEnd" type="date" min="${escapeHTML(p.start||S.today)}" max="${DATE_HORIZON}" value="${escapeHTML(p.end||'')}"></label></div>${admin?`<label class="form-field">项目 Owner<select id="settingsOwner">${owners.map(u=>`<option value="${escapeHTML(u.id)}" ${u.id===p.owner?'selected':''}>${escapeHTML(u.id)}</option>`).join('')}</select></label>`:`<p class="muted">Owner · ${escapeHTML(nameOf(p.owner))}（更换 Owner 需联系管理员）</p>`}<div class="form-field">协作者<p class="muted">${escapeHTML(accepted.join('、')||'暂无')}</p><button type="button" class="secondary-btn" id="settingsMembers">管理协作者</button></div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmSettings">保存设置</button></div>`);
+  $('#cancelAction').onclick=closeModal;
+  $('#settingsStart').onchange=()=>$('#settingsEnd').min=$('#settingsStart').value;
+  $('#settingsMembers').onclick=()=>inviteCollaborators(p.id);
+  $('#confirmSettings').onclick=async()=>{
+    const name=$('#settingsName').value.trim(),start=$('#settingsStart').value,end=$('#settingsEnd').value;
+    if(!name||!start){toast('请填写项目名称和开始日期');return}
+    if(end&&end<start){toast('截止日期不能早于开始日期');return}
+    const data={id:p.id,name,desc:$('#settingsDesc').value,start,end:end||null,cycle:end?'range':'infinite'};
+    if(admin)data.owner=$('#settingsOwner').value;
+    try{await act('project.update',data);closeModal();toast('项目设置已保存')}catch(e){}
+  };
 }
 function deleteProject(projectId){
   const p=S.projects.find(x=>x.id===projectId);
@@ -590,26 +624,28 @@ async function reviewProject(id,accept,notificationId){
   if(accept){try{closeModal();await act('project.review',{id,accept:true});if(notificationId)await act('inbox.read',{id:notificationId})}catch(e){}}
   else{openModal(`<div class="eyebrow">项目审批</div><h2>驳回项目申请</h2><label class="form-field">驳回原因<textarea id="projectRejectReason" ></textarea></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmReject">确认驳回</button></div>`);$('#cancelAction').onclick=closeModal;$('#confirmReject').onclick=async()=>{try{await act('project.review',{id,accept:false,reason:$('#projectRejectReason').value||'申请信息需要补充'});if(notificationId)await act('inbox.read',{id:notificationId});closeModal()}catch(e){}}}
 }
+const REPEAT_DAY_NAMES=['周一','周二','周三','周四','周五','周六','周日'];
+function repeatPattern(r){
+  const dayNames=REPEAT_DAY_NAMES,weekdayName=iso=>dayNames[(new Date(`${iso}T12:00:00`).getDay()+6)%7];
+  const days=(r.weekdays||[]).map(i=>dayNames[i]).join('、');
+  const every=Math.max(1,Number(r.every||1));
+  if(r.frequency==='daily')return '每天';
+  if(r.frequency==='workdays')return '工作日';
+  if(r.frequency==='monthly')return `每月 ${Math.min(31,Math.max(1,Number(r.monthDay||1)))} 号`;
+  if(r.frequency==='dates'||r.frequency==='specific')return '指定日期';
+  const base=days||(r.start?`同起始日（${weekdayName(r.start)}）`:'每周');
+  return every>1?`每 ${every} 周 · ${base}`:`每周 · ${base}`;
+}
 function renderRepeats(){
   const list=$('#repeatList');if(!list)return;const repeats=S.repeats||[];
-  const dayNames=['周一','周二','周三','周四','周五','周六','周日'];
-  const weekdayName=iso=>dayNames[(new Date(`${iso}T12:00:00`).getDay()+6)%7];
-  const patternOf=r=>{
-    const days=(r.weekdays||[]).map(i=>dayNames[i]).join('、');
-    const every=Math.max(1,Number(r.every||1));
-    if(r.frequency==='daily')return '每天';
-    if(r.frequency==='workdays')return '工作日';
-    if(r.frequency==='monthly')return `每月 ${Math.min(31,Math.max(1,Number(r.monthDay||1)))} 号`;
-    if(r.frequency==='dates'||r.frequency==='specific')return '指定日期';
-    const base=days||(r.start?`同起始日（${weekdayName(r.start)}）`:'每周');
-    return every>1?`每 ${every} 周 · ${base}`:`每周 · ${base}`;
-  };
+  const patternOf=repeatPattern;
   list.innerHTML=repeats.map(r=>{
     const span=Math.max(1,Number(r.span||1));
     const state=r.active===false?'已暂停':'启用中';
     const spanText=span>1?` · 持续 ${span} 天`:'';
     const untilText=r.end?` · 至 ${escapeHTML(r.end)}`:'';
-    return `<article class="repeat-admin-item"><div><strong>${escapeHTML(r.name)}</strong><span>${escapeHTML(patternOf(r))} · ${escapeHTML(r.time||'09:00')} · ${escapeHTML((r.assignees||[]).join('、'))}</span><small>${state}${spanText}${untilText}${r.skipDates?.length?` · 已挖空 ${r.skipDates.length} 天`:''}</small></div><button class="ghost-btn skip-repeat" data-id="${escapeHTML(r.id)}">挖空本次</button></article>`}).join('')||'<p class="muted">还没有固定任务规则。</p>';
+    const project=r.projectId&&S.projects.find(x=>x.id===r.projectId),projectText=r.projectId?` · 项目 ${escapeHTML(project?.name||'已结束')}`:'';
+    return `<article class="repeat-admin-item"><div><strong>${escapeHTML(r.name)}</strong><span>${escapeHTML(patternOf(r))} · ${escapeHTML(r.time||'09:00')} · ${escapeHTML((r.assignees||[]).join('、'))}</span><small>${state}${projectText}${spanText}${untilText}${r.skipDates?.length?` · 已挖空 ${r.skipDates.length} 天`:''}</small></div><button class="ghost-btn skip-repeat" data-id="${escapeHTML(r.id)}">挖空本次</button></article>`}).join('')||'<p class="muted">还没有固定任务规则。</p>';
   $$('.skip-repeat').forEach(b=>b.onclick=()=>{const date=prompt('请输入本次不执行的日期（YYYY-MM-DD）',S.today);if(!date)return;act('repeat.skip',{id:b.dataset.id,date,skip:true}).catch(()=>{})});
 }
 function accountProjectRoles(id){const owned=S.projects.filter(p=>p.owner===id).map(p=>p.name),joined=S.projects.filter(p=>p.owner!==id&&(p.members||{})[id]==='accepted').map(p=>p.name);return {owned,joined}}
@@ -766,11 +802,11 @@ function renderAccounts(){
 function renderAccountMenu(){
   const menu=$('#accountMenu');if(!menu)return;
   const me=userById(S.user.id)||{};
-  const others=(S.users||[]).filter(u=>u.id!==S.user.id&&u.active);
+  const others=knownAccounts().filter(id=>id!==S.user.id).map(userById).filter(u=>u?.active);
   const head=`<div class="account-menu-head">${avatarHTML(S.user.id,'large')}<div class="account-menu-identity"><strong>${escapeHTML(me.displayName||S.user.id)}</strong>${me.nickname?`<span class="name-tag nick">${escapeHTML(me.nickname)}</span>`:''}<small>${escapeHTML(accountRoleLabel(S.user))}</small></div></div>`;
   const row=(action,label,hint)=>`<button class="account-menu-item" data-action="${action}" role="menuitem">${escapeHTML(label)}${hint?`<small>${escapeHTML(hint)}</small>`:''}</button>`;
   const mine=`<div class="account-menu-group">${row('profile','我的资料','昵称 / 头像')}${row('password','修改密码')}${S.user?.admin?row('accounts','账户管理'):''}</div>`;
-  const switchGroup=others.length?`<div class="account-menu-group"><span class="account-menu-label">切换账户</span>${others.slice(0,8).map(u=>`<button class="account-menu-item switch" data-user="${escapeHTML(u.id)}" role="menuitem">${avatarHTML(u.id)}<span>${escapeHTML(u.displayName||u.id)}${u.nickname?`<small>${escapeHTML(u.nickname)}</small>`:''}</span></button>`).join('')}</div>`:'';
+  const switchGroup=`<div class="account-menu-group"><span class="account-menu-label">切换账户</span>${others.map(u=>`<button class="account-menu-item switch" data-user="${escapeHTML(u.id)}" role="menuitem">${avatarHTML(u.id)}<span>${escapeHTML(u.displayName||u.id)}${u.nickname?`<small>${escapeHTML(u.nickname)}</small>`:''}</span></button>`).join('')}<button class="account-menu-item switch" data-user="" role="menuitem">登录其他账户</button></div>`;
   const foot=`<div class="account-menu-group"><button class="account-menu-item danger" data-action="logout" role="menuitem">退出登录</button></div>`;
   menu.innerHTML=head+mine+switchGroup+foot;
   menu.querySelectorAll('.account-menu-item[data-action]').forEach(b=>b.onclick=()=>accountMenuAction(b.dataset.action));
@@ -825,13 +861,43 @@ function deleteAccount(id){
 async function act(action,data){try{await api('/api/action',{action,data});await refresh();toast('操作已完成')}catch(e){toast(e.message);throw e}}
 function openModal(html){$('#modalContent').innerHTML=html;$('#modalBackdrop').classList.remove('hidden')};function closeModal(){$('#modalBackdrop').classList.add('hidden')};function closeDrawer(){$('#taskDrawer').classList.add('hidden')}
 function newTask(projectId,initialDate){
-  const projects=manageableProjects().filter(p=>!isProjectHidden(p)),locked=typeof projectId==='string',initial=projects.find(p=>p.id===projectId)?.id||projects[0]?.id;
-  if(!projects.length){toast('请先创建项目并等待审批，项目 Owner 或管理员可分配任务');switchView('projects');return}
-  openModal(`<div class="eyebrow">${S.user.admin?'管理员':'项目 Owner'} · ${S.user.admin?'项目任务 / 固定任务':'项目子任务'}</div><h2>新建并指派任务</h2>${S.user.admin?'<div class="task-kind-switch"><button type="button" class="task-kind-btn active">项目任务</button><button type="button" class="task-kind-btn" id="kindFixedTask">固定任务</button></div>':''}<label class="form-field">所属项目<select id="taskProject" ${locked?'disabled':''}>${projects.map(p=>`<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('')}</select></label><label class="form-field">任务名称<input id="taskName" maxlength="120"></label><label class="form-field">任务描述<textarea id="taskDesc"></textarea></label><label class="form-field">指派给<select id="taskAssignee"></select><div id="taskAssigneeLoad" class="assignee-load-hint"></div></label><div class="task-form-grid"><label class="form-field">安排日期<input id="taskDate" type="date" max="${DATE_HORIZON}" value="${initialDate||(UI.view==='dayDetail'?UI.detailDate:displayDay())}"></label><label class="form-field">结束日期<input id="taskDeadline" type="date" max="${DATE_HORIZON}"></label><label class="form-field">时间<input id="taskTime" type="time" value="09:00"></label><label class="form-field">预计时长<input id="taskDuration" type="number" min="1" max="1440" value="30"></label><label class="form-field">优先级<select id="taskPriority"><option>P0</option><option selected>P1</option><option>P2</option></select></label></div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmTask">创建并指派</button></div>`);
-  const updateUsers=()=>{const p=projects.find(p=>p.id===$('#taskProject').value),users=projectAssignees(p),start=p?.start||S.today,end=p?.end||'9999-12-31';$('#taskAssignee').innerHTML=users.map(u=>{const ts=S.tasks.filter(t=>t.assignee===u.id&&t.date>=start&&t.date<=end&&t.status!=='skipped'&&!isSuperseded(t)),done=ts.filter(t=>t.status==='done').length,mins=ts.reduce((n,t)=>n+Number(t.duration||0),0);return `<option value="${escapeHTML(u.id)}">${escapeHTML(nameOf(u.id))}${u.id===p.owner?' · Owner':''} · ${ts.length} 项 / ${Math.round(mins/60*10)/10}h</option>`}).join('');$('#taskAssigneeLoad').innerHTML=users.length?`项目周期 ${escapeHTML(start)} 至 ${p?.end?escapeHTML(p.end):'未设截止'} · 已完成 ${users.map(u=>{const ts=S.tasks.filter(t=>t.assignee===u.id&&t.date>=start&&t.date<=end&&t.status!=='skipped'&&!isSuperseded(t));return `${escapeHTML(nameOf(u.id))} ${ts.filter(t=>t.status==='done').length}/${ts.length}`}).join('、')}`:'项目暂无成员';$('#confirmTask').disabled=!users.length};
+  const admin=Boolean(S.user.admin),projects=manageableProjects().filter(p=>!isProjectHidden(p)),locked=typeof projectId==='string';
+  const initial=projects.find(p=>p.id===projectId)?.id||projects[0]?.id;
+  /* 临时任务 belongs to no project: a member writes one for themselves, an
+     admin can hand one to any member. */
+  let kind=projects.length?'project':'adhoc',serverMinutes=null,ask=0;
+  const kinds=locked?'':`<div class="task-kind-switch">${projects.length?'<button type="button" class="task-kind-btn" data-kind="project">项目任务</button>':''}<button type="button" class="task-kind-btn" data-kind="adhoc">临时任务</button>${admin?'<button type="button" class="task-kind-btn" id="kindFixedTask">固定任务</button>':''}</div>`;
+  openModal(`<div class="eyebrow">${admin?'管理员':projects.length?'项目 Owner':'我的任务'}</div><h2>新建任务</h2>${kinds}<label class="form-field" id="taskProjectField">所属项目<select id="taskProject" ${locked?'disabled':''}>${projects.map(p=>`<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('')}</select></label><label class="form-field">任务名称<input id="taskName" maxlength="120"></label><label class="form-field">任务描述<textarea id="taskDesc"></textarea></label><label class="form-field">指派给<select id="taskAssignee"></select><div id="taskAssigneeLoad" class="assignee-load-hint"></div></label><div class="task-form-grid"><label class="form-field">安排日期<input id="taskDate" type="date" max="${DATE_HORIZON}" value="${initialDate||(UI.view==='dayDetail'?UI.detailDate:displayDay())}"></label><label class="form-field">结束日期<input id="taskDeadline" type="date" max="${DATE_HORIZON}"></label><label class="form-field">时间<input id="taskTime" type="time" value="09:00"></label><label class="form-field">预计时长<input id="taskDuration" type="number" min="1" max="1440" value="30"></label><label class="form-field">优先级<select id="taskPriority"><option>P0</option><option selected>P1</option><option>P2</option></select></label></div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmTask">创建任务</button></div>`);
+  const project=()=>kind==='project'?projects.find(p=>p.id===$('#taskProject').value):null;
+  const candidates=()=>kind==='adhoc'?S.users.filter(u=>u.active&&(admin?!u.admin:u.id===S.user.id)):projectAssignees(project());
+  /* The load beside each name is what that person already has inside this
+     task's own dates, across every project, not their whole backlog. */
+  const span=()=>{const start=$('#taskDate').value||S.today,end=$('#taskDeadline').value;return [start,end&&end>start?end:start]};
+  const hours=mins=>Math.round(mins/60*10)/10;
+  const load=(id,[start,end])=>{const ts=S.tasks.filter(t=>t.assignee===id&&!['skipped','deferred'].includes(t.status)&&!isSuperseded(t)&&t.date<=end&&taskEnd(t)>=start);return {count:ts.length,mins:serverMinutes&&id in serverMinutes?serverMinutes[id]:ts.reduce((n,t)=>n+Number(t.duration||0),0)}};
+  const render=()=>{
+    const users=candidates(),p=project(),picked=$('#taskAssignee').value,period=span();
+    $('#taskAssignee').innerHTML=users.map(u=>`<option value="${escapeHTML(u.id)}">${escapeHTML(nameOf(u.id))}${p&&u.id===p.owner?' · Owner':''} · ${hours(load(u.id,period).mins)}h</option>`).join('');
+    if(users.some(u=>u.id===picked))$('#taskAssignee').value=picked;
+    const who=$('#taskAssignee').value,mine=who?load(who,period):null,[start,end]=period;
+    $('#taskAssigneeLoad').textContent=users.length?`${fmt(start)}${end!==start?' – '+fmt(end):''} 已安排 ${hours(mine.mins)}h · ${mine.count} 项`:'项目暂无成员';
+    $('#confirmTask').disabled=!users.length;
+  };
+  /* An Owner only sees their own projects' tasks, so their numbers come from
+     the server; an admin already holds every task. */
+  const recount=()=>{
+    serverMinutes=null;render();const p=project();if(admin||!p)return;
+    const [start,end]=span(),mine=++ask;
+    api('/api/action',{action:'project.member_loads',data:{id:p.id,start,end}}).then(r=>{if(mine!==ask||$('#modalBackdrop').classList.contains('hidden'))return;serverMinutes=r.minutes||null;render()}).catch(()=>{});
+  };
+  const setKind=k=>{kind=k;$$('.task-kind-btn[data-kind]').forEach(b=>b.classList.toggle('active',b.dataset.kind===k));$('#taskProjectField').classList.toggle('hidden',k!=='project');recount()};
+  $$('.task-kind-btn[data-kind]').forEach(b=>b.onclick=()=>setKind(b.dataset.kind));
   $('#kindFixedTask')?.addEventListener('click',fixedTask);
-  $('#taskProject').value=initial;$('#taskProject').onchange=updateUsers;updateUsers();const _sd=$('#taskDate'),_dl=$('#taskDeadline');const _syncDl=()=>{_dl.min=_sd.value||S.today;if(_dl.value&&_dl.value<_dl.min)_dl.value=''};_sd.onchange=_syncDl;_syncDl();$('#cancelAction').onclick=closeModal;
-  $('#confirmTask').onclick=async()=>{if(!$('#taskName').value.trim()){toast('请填写任务名称');return}const _start=$('#taskDate').value,_end=$('#taskDeadline').value;if(_end&&_end<_start){toast('结束日期不能早于安排日期');return}const data={name:$('#taskName').value,desc:$('#taskDesc').value,projectId:$('#taskProject').value,assignee:$('#taskAssignee').value,date:$('#taskDate').value,deadline:$('#taskDeadline').value||null,time:$('#taskTime').value,duration:Number($('#taskDuration').value),priority:$('#taskPriority').value};try{await act('task.create',data);closeModal()}catch(e){}};
+  if(initial)$('#taskProject').value=initial;
+  const _sd=$('#taskDate'),_dl=$('#taskDeadline');const _syncDl=()=>{_dl.min=_sd.value||S.today;if(_dl.value&&_dl.value<_dl.min)_dl.value=''};
+  _sd.onchange=()=>{_syncDl();recount()};_dl.onchange=recount;$('#taskProject').onchange=recount;$('#taskAssignee').onchange=render;_syncDl();
+  setKind(kind);$('#cancelAction').onclick=closeModal;
+  $('#confirmTask').onclick=async()=>{if(!$('#taskName').value.trim()){toast('请填写任务名称');return}const _start=$('#taskDate').value,_end=$('#taskDeadline').value;if(_end&&_end<_start){toast('结束日期不能早于安排日期');return}const data={name:$('#taskName').value,desc:$('#taskDesc').value,projectId:kind==='project'?$('#taskProject').value:null,assignee:$('#taskAssignee').value,date:$('#taskDate').value,deadline:$('#taskDeadline').value||null,time:$('#taskTime').value,duration:Number($('#taskDuration').value),priority:$('#taskPriority').value};try{await act('task.create',data);closeModal()}catch(e){}};
 }
 function editTaskAssignment(id){
   const t=S.tasks.find(t=>t.id===id),p=S.projects.find(p=>p.id===t?.projectId);
@@ -846,6 +912,9 @@ function newProject(){
   const collaborators=admin?`<fieldset class="member-checkboxes"><legend>协作者（直接加入项目）</legend>${ownerOptions.map(u=>`<label><input type="checkbox" name="projectMember" value="${escapeHTML(u.id)}"> <strong>${escapeHTML(u.id)}</strong></label>`).join('')}</fieldset>`:'';
   openModal(`<div class="eyebrow">项目空间 · ${admin?'superadmin 创建':'成员申请'}</div><h2>${admin?'创建项目':'申请创建项目'}</h2><label class="form-field">项目名称<input id="projectName" maxlength="120"></label><label class="form-field">项目描述<textarea id="projectDesc"></textarea></label>${owner}<div class="project-date-fields"><label class="form-field">开始日期<input id="projectStart" type="date" max="${DATE_HORIZON}" value="${S.today}"></label><label class="form-field">截止日期（可留空）<input id="projectEnd" type="date" min="${S.today}" max="${DATE_HORIZON}"></label></div>${collaborators}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmProject">${admin?'创建项目':'提交审批'}</button></div>`);
   $('#cancelAction').onclick=closeModal;$('#projectStart').onchange=()=>$('#projectEnd').min=$('#projectStart').value;
+  /* The Owner is on the project by definition, so they are never offered as a collaborator. */
+  const syncOwner=()=>{const owner=$('#projectOwner')?.value;$$('input[name="projectMember"]').forEach(x=>{const own=x.value===owner;if(own)x.checked=false;x.closest('label').classList.toggle('hidden',own)})};
+  if(admin){$('#projectOwner').onchange=syncOwner;syncOwner()}
   $('#confirmProject').onclick=async()=>{const start=$('#projectStart').value,end=$('#projectEnd').value;if(!$('#projectName').value.trim()||!start){toast('请填写项目名称和开始日期');return}if(end&&end<start){toast('截止日期不能早于开始日期');return}const data={name:$('#projectName').value,desc:$('#projectDesc').value,start,end,cycle:end?'range':'infinite'};if(admin){data.owner=$('#projectOwner').value;data.members=$$('input[name="projectMember"]:checked').map(x=>x.value)}try{await act('project.create',data);closeModal()}catch(e){}};
 }
 function fixedTask(){
@@ -853,6 +922,7 @@ function fixedTask(){
   const monthOptions=Array.from({length:31},(_,i)=>i+1).map(n=>`<option value="${n}" ${n===1?'selected':''}>${n} 号</option>`).join('');
   openModal(`<div class="eyebrow">Super Admin · 固定任务</div><h2>发布固定安排</h2>
     <label class="form-field">任务名称<input id="repeatName" maxlength="120" required></label>
+    <label class="form-field">所属项目（可选）<select id="repeatProject"><option value="">不挂项目</option>${S.projects.filter(p=>p.status==='active').map(p=>`<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('')}</select></label>
     <fieldset class="member-checkboxes" id="repeatUsers"><legend>安排给（可多选）</legend>${users.map(u=>`<label><input type="checkbox" name="repeatUser" value="${escapeHTML(u.id)}"> ${escapeHTML(u.id)}</label>`).join('')}</fieldset>
     <label class="form-field">周期<select id="repeatFreq"><option value="daily">每天</option><option value="weekly" selected>每周</option><option value="monthly">每月</option><option value="workdays">工作日</option><option value="dates">指定日期</option></select></label>
     <label class="form-field" id="repeatEveryField">间隔<select id="repeatEvery"><option value="1">每 1 周</option><option value="2">每 2 周（双周）</option><option value="3">每 3 周</option><option value="4">每 4 周</option></select></label>
@@ -875,6 +945,9 @@ function fixedTask(){
   };
   $('#repeatFreq').onchange=sync;sync();
   $('#repeatStart').onchange=()=>$('#repeatEnd').min=$('#repeatStart').value;
+  /* Under a project only its members can take the task, and it ends with the project. */
+  const syncProject=()=>{const p=S.projects.find(x=>x.id===$('#repeatProject').value);$$('input[name="repeatUser"]').forEach(x=>{const out=Boolean(p)&&(p.members||{})[x.value]!=='accepted';if(out)x.checked=false;x.closest('label').classList.toggle('hidden',out)});$('#repeatEnd').max=p?.end&&p.end<DATE_HORIZON?p.end:DATE_HORIZON;if(p?.end&&$('#repeatEnd').value>p.end)$('#repeatEnd').value=p.end};
+  $('#repeatProject').onchange=syncProject;
   $('#cancelAction').onclick=closeModal;
   $('#confirmRepeat').onclick=async()=>{
     const freq=$('#repeatFreq').value;
@@ -893,7 +966,7 @@ function fixedTask(){
       weekdays,monthDay:Number($('#repeatMonthDay').value||1),
       span:Math.max(1,Number($('#repeatSpan').value||1)),
       dates,start,end,time:$('#repeatTime').value,
-      duration:Number($('#repeatDuration').value),priority:'P1',skipDates});closeModal()}catch(e){}};
+      duration:Number($('#repeatDuration').value),priority:'P1',skipDates,projectId:$('#repeatProject').value||null});closeModal()}catch(e){}};
 }
 function collectionSettings(){
   const cfg=S.automation||{},mode=cfg.mode||'daily',days=['周一','周二','周三','周四','周五','周六','周日'],selected=cfg.weekdays||[0,1,2,3,4];
@@ -904,12 +977,11 @@ function collectionSettings(){
   $('#saveCollection').onclick=async()=>{const m=$('#collectionMode').value,weekdays=$$('input[name="collectionWeekday"]:checked').map(x=>Number(x.value)),dates=$('#collectionDates').value.split(/[,，\s]+/).map(x=>x.trim()).filter(Boolean);if(m==='weekly'&&!weekdays.length){toast('请选择每周收集日');return}if(m==='dates'&&!dates.length){toast('请填写指定收集日期');return}try{await act('automation.update',{mode:m,time:$('#collectionTime').value,weekdays,dates});closeModal()}catch(e){}};
 }
 function renderAll(){
-  $('[data-view="achievements"]')?.classList.toggle('hidden',!S.user?.admin);
+  $$('.admin-only-nav').forEach(n=>n.classList.toggle('hidden',!S.user?.admin));
   const projectLabel=(S.user.admin?'创建项目':'申请项目');
   ['#addProjectBtn','#addProjectTopBtn','#timelineAddProjectBtn'].forEach(id=>$(id).innerHTML=icon('plus')+projectLabel);
   const canAssign=Boolean(S.user.admin||manageableProjects().length);
-  $('#addTaskBtn').innerHTML=icon('plus')+'指派项目任务';$('#addTaskBtn').classList.toggle('hidden',!canAssign);
-  $('#emptyAddBtn').classList.toggle('hidden',!canAssign);
+  $('#addTaskBtn').innerHTML=icon('plus')+(canAssign?'指派任务':'新建任务');
   $('#createFixedBtn')?.classList.toggle('hidden',!S.user.admin);
   $('#repeatAdminPanel')?.classList.toggle('hidden',!S.user.admin);
   renderRepeats();
@@ -1037,6 +1109,94 @@ function renderTimeline(){
   updateRange();
 }
 
+/* ---------------------------------------------------------------------------
+   桌面小组件 · today's to-dos and a pomodoro in an always-on-top window. It uses
+   Document Picture-in-Picture (Chrome / Edge 116+ on desktop); browsers without
+   it never see the button. The timer lives in localStorage, so closing the
+   window or reloading the page does not lose a running pomodoro.
+   ------------------------------------------------------------------------- */
+const POMO_KEY='wc-pomodoro',POMO_SECONDS={focus:25*60,rest:5*60};
+const PIP_CSS=`:root{color-scheme:light;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;color:#1F1B15;background:#FFFDF9}
+body{margin:0;padding:14px 14px 10px;font-size:13px;line-height:1.45}
+header{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:10px}
+header strong{font-size:15px}
+small{color:#7C7466;font-size:11.5px}
+.pomo{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:6px 12px;padding:10px 12px;border:1px solid #E2DDD0;border-radius:10px;background:#F7F4ED;margin-bottom:10px;transition:background .3s,border-color .3s}
+.pomo b{font:600 28px/1 ui-monospace,Consolas,monospace;grid-row:span 2}
+.pomo span{color:#7C7466;font-size:12px}
+.pomo div{display:flex;gap:6px;flex-wrap:wrap}
+button{font:inherit;font-size:12px;border:1px solid #D2CBBB;background:#FFFDF9;color:inherit;border-radius:7px;padding:3px 9px;cursor:pointer}
+button.primary{background:#D97757;border-color:#C05F41;color:#fff}
+body.pomo-ring .pomo{border-color:#D97757;background:#FBF1EA}
+ul{list-style:none;margin:0;padding:0}
+li{padding:7px 2px;border-top:1px solid #EDE9DE}
+li label{display:flex;gap:8px;align-items:flex-start;cursor:pointer}
+li input{margin:2px 0 0;accent-color:#D97757}
+li small{display:block;padding-left:22px}
+li.closed span{color:#9E9688;text-decoration:line-through}
+li.empty{color:#7C7466;text-align:center;padding:18px 0}
+#pipNote{min-height:16px;margin:8px 0 0;color:#C05F41;font-size:12px}`;
+let pipWindow=null,pipTimers=[];
+const pipSupported=()=>typeof window!=='undefined'&&'documentPictureInPicture' in window;
+function pomoRead(){try{const v=JSON.parse(localStorage.getItem(POMO_KEY)||'null');if(v&&POMO_SECONDS[v.mode])return v}catch(_){}return {mode:'focus',left:POMO_SECONDS.focus,endsAt:null}}
+function pomoWrite(v){try{localStorage.setItem(POMO_KEY,JSON.stringify(v))}catch(_){}}
+const pomoLeft=v=>v.endsAt?Math.max(0,Math.ceil((v.endsAt-Date.now())/1000)):Number(v.left)||0;
+const pomoFresh=mode=>({mode,left:POMO_SECONDS[mode],endsAt:null});
+function pomoAction(kind){
+  let v=pomoRead();
+  if(kind==='toggle')v=v.endsAt?{...v,left:pomoLeft(v),endsAt:null}:{...v,endsAt:Date.now()+pomoLeft(v)*1000};
+  if(kind==='reset')v=pomoFresh(v.mode);
+  if(kind==='switch')v=pomoFresh(v.mode==='focus'?'rest':'focus');
+  pomoWrite(v);renderPomo();
+}
+function renderPomo(){
+  const doc=pipWindow?.document;if(!doc?.querySelector('#pipClock'))return;
+  let v=pomoRead();
+  if(v.endsAt&&pomoLeft(v)===0){
+    // A finished round flips to the other mode and waits to be started.
+    v=pomoFresh(v.mode==='focus'?'rest':'focus');pomoWrite(v);
+    doc.body.classList.add('pomo-ring');setTimeout(()=>doc.body.classList.remove('pomo-ring'),6000);
+    pipNote(v.mode==='rest'?'专注结束，休息一下':'休息结束，开始下一轮专注');
+  }
+  const left=pomoLeft(v);
+  doc.querySelector('#pipClock').textContent=`${String(Math.floor(left/60)).padStart(2,'0')}:${String(left%60).padStart(2,'0')}`;
+  doc.querySelector('#pipMode').textContent=v.mode==='focus'?'专注 25 分钟':'休息 5 分钟';
+  doc.querySelector('[data-pomo="toggle"]').textContent=v.endsAt?'暂停':'开始';
+  doc.querySelector('[data-pomo="switch"]').textContent=v.mode==='focus'?'切到休息':'切到专注';
+}
+function pipNote(text){const note=pipWindow?.document.querySelector('#pipNote');if(!note)return;note.textContent=text;clearTimeout(note._t);note._t=setTimeout(()=>{note.textContent=''},4000)}
+function renderPip(){
+  const doc=pipWindow?.document;if(!doc?.querySelector('#pipList')||!S.user)return;
+  const open=t=>['todo','doing'].includes(t.status);
+  const tasks=sortTasks(scheduleTasks().filter(t=>taskActiveOn(t,S.today)&&!isArchivedTask(t))).sort((a,b)=>open(b)-open(a));
+  const tickable=t=>!S.user.admin&&t.assignee===S.user.id&&open(t);
+  doc.querySelector('#pipSummary').textContent=`${fmt(S.today)} · 还剩 ${tasks.filter(open).length} 项`;
+  doc.querySelector('#pipList').innerHTML=tasks.map(t=>`<li class="${open(t)?'':'closed'}"><label><input type="checkbox" data-id="${escapeHTML(t.id)}" ${open(t)?'':'checked'} ${tickable(t)?'':'disabled'}><span>${escapeHTML(t.name)}</span></label><small>${escapeHTML([t.time,S.user.admin?nameOf(t.assignee):'',projectName(t),open(t)?'':status(t)[1]].filter(Boolean).join(' · '))}</small></li>`).join('')||'<li class="empty">今天没有待办</li>';
+  doc.querySelectorAll('#pipList input[data-id]:not([disabled])').forEach(box=>box.onchange=()=>pipComplete(box));
+}
+async function pipComplete(box){
+  const t=S.tasks.find(x=>x.id===box.dataset.id);if(!t)return;
+  box.disabled=true;
+  const review=taskNeedsApproval(t);
+  try{
+    await api('/api/action',{action:'task.complete',data:{id:t.id,summary:'完成任务',actual:Number(t.duration)||30,feeling:'顺利'}});
+    await refresh();pipNote(review?`「${t.name}」已提交完成审批`:`「${t.name}」已完成`);
+  }catch(e){box.checked=false;box.disabled=false;pipNote(e.message)}
+}
+async function openPip(){
+  if(!pipSupported())return;
+  if(pipWindow){pipWindow.focus();return}
+  try{pipWindow=await documentPictureInPicture.requestWindow({width:320,height:460})}catch(e){toast(`无法打开桌面小组件：${e.message}`);return}
+  const doc=pipWindow.document;
+  doc.title='今日待办';
+  const style=doc.createElement('style');style.textContent=PIP_CSS;doc.head.append(style);
+  doc.body.innerHTML='<header><strong>今日待办</strong><small id="pipSummary"></small></header><section class="pomo"><b id="pipClock">25:00</b><span id="pipMode"></span><div><button class="primary" data-pomo="toggle">开始</button><button data-pomo="reset">重置</button><button data-pomo="switch">切到休息</button></div></section><ul id="pipList"></ul><p id="pipNote"></p>';
+  doc.querySelectorAll('[data-pomo]').forEach(b=>b.onclick=()=>pomoAction(b.dataset.pomo));
+  renderPip();renderPomo();
+  // The widget stays current while the main tab sits in the background.
+  pipTimers=[setInterval(renderPomo,1000),setInterval(()=>refresh(),60000)];
+  pipWindow.addEventListener('pagehide',()=>{pipTimers.forEach(clearInterval);pipTimers=[];pipWindow=null});
+}
 function openSearch(){openModal(`<div class="eyebrow">工作台搜索</div><h2>搜索任务与项目</h2><label class="form-field">关键词<input id="searchQuery" placeholder="搜索"></label><div id="searchResults" class="search-results"><span class="muted">输入关键词开始搜索</span></div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">关闭</button></div>`);$('#cancelAction').onclick=closeModal;const input=$('#searchQuery'),results=$('#searchResults');input.oninput=()=>{const q=input.value.trim().toLowerCase();if(!q){results.innerHTML='<span class="muted">输入关键词开始搜索</span>';return}const ts=(S.user?.admin?S.tasks.filter(t=>!isSuperseded(t)):scheduleTasks()).filter(t=>[t.name,t.assignee,projectName(t)].some(v=>String(v||'').toLowerCase().includes(q)));const ps=S.projects.filter(p=>[p.name,p.owner,p.desc].some(v=>String(v||'').toLowerCase().includes(q)));results.innerHTML=ts.map(t=>`<button class="search-result" data-task="${escapeHTML(t.id)}"><strong>${escapeHTML(t.name)}</strong><small>${escapeHTML(t.assignee)} · ${escapeHTML(projectName(t))}</small></button>`).join('')+ps.map(p=>`<button class="search-result" data-project="${escapeHTML(p.id)}"><strong>${escapeHTML(p.name)}</strong><small>Owner · ${escapeHTML(p.owner)} · ${projectStatus(p)}</small></button>`).join('')||'<span class="muted">没有找到匹配项</span>';$$('.search-result').forEach(b=>b.onclick=()=>{if(b.dataset.task)openDrawer(b.dataset.task);else{closeModal();switchView('projects')}})};input.focus()}
 $$('.nav-item').forEach(b=>b.onclick=()=>switchView(b.dataset.view));
 $('#workspaceSwitcher')?.addEventListener('click',()=>toggleAccountMenu());
@@ -1049,6 +1209,7 @@ document.addEventListener('click',e=>{
 document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleAccountMenu(false)});$$('.filter-link').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;switchView('today')});$$('.quick-tab').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;renderToday()});$('#prevDay').onclick=()=>{UI.dayOffset=(UI.dayOffset||0)-1;renderToday()};$('#nextDay').onclick=()=>{if(displayDay()>=DATE_HORIZON){toast(`日期范围目前只支持到 ${DATE_HORIZON}`);return}UI.dayOffset=(UI.dayOffset||0)+1;renderToday()};$('#inboxBtn').onclick=()=>switchView('inbox');document.querySelector('.icon-btn[title="搜索"]').onclick=openSearch;$('#closeDrawer').onclick=closeDrawer;$('#closeModal').onclick=closeModal;$('#modalBackdrop').onclick=e=>{if(e.target.id==='modalBackdrop')closeModal()};$('#taskDrawer').onclick=e=>{if(e.target.id==='taskDrawer')closeDrawer()};$('#backWeekBtn').onclick=()=>switchView('calendar');$('#backTodayBtn').onclick=()=>{if(UI.selectedWeek)UI.weekDir=UI.selectedWeek>0?'prev':'next';UI.selectedWeek=0;UI.dayOffset=0;switchView('calendar');renderCalendar()};$('#prevWeekBtn').onclick=()=>turnWeek(-1);$('#nextWeekBtn').onclick=()=>turnWeek(1);document.addEventListener('keydown',e=>{if(UI.view!=='calendar'||e.altKey||e.ctrlKey||e.metaKey||e.target.closest('input,textarea,select,[contenteditable]')||!$('#modalBackdrop').classList.contains('hidden')||!$('#taskDrawer').classList.contains('hidden'))return;if(e.key==='ArrowLeft'){e.preventDefault();turnWeek(-1)}else if(e.key==='ArrowRight'){e.preventDefault();turnWeek(1)}});$('#addProjectBtn').onclick=newProject;$('#addProjectTopBtn').onclick=newProject;$('#addTaskBtn').onclick=newTask;$('#emptyAddBtn').onclick=newTask;$('#timelineAddProjectBtn').onclick=newProject;$('#createFixedBtn').onclick=fixedTask;$('#collectionSettingsBtn').onclick=collectionSettings;$('#forceAssignBtn').onclick=()=>switchView('projects');$('#runAutomationBtn').onclick=()=>act('scheduler.run',{});$('#markAllReadBtn').onclick=()=>act('inbox.read',{all:true});$('#generateSummaryBtn').onclick=openTodayDiary;
 window.addEventListener('focus',()=>{if(UI.view==='inbox')refreshInboxState()});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&UI.view==='inbox')refreshInboxState()});
+$('#pipBtn').classList.toggle('hidden',!pipSupported());$('#pipBtn').onclick=openPip;
 hydrateIcons();
 if(location.protocol==='file:'){showAuth()}else{refresh()}
 
@@ -2032,6 +2193,12 @@ async function openChannelArchive(projectId,projectName){
     +`<div class="modal-footer"><button class="secondary-btn" id="cancelAction">关闭</button></div>`);
   $('#cancelAction').onclick=closeModal;
 }
+/* The Enter that confirms an IME candidate (pinyin, or letters typed while a
+   Chinese IME is on) must never send. Safari reports that Enter after
+   compositionend with isComposing false, hence keyCode 229 and the short
+   grace period set on compositionend. */
+let imeUntil=0;
+const imeEnter=e=>Boolean(e.isComposing||e.keyCode===229||Date.now()<imeUntil);
 function initChatUI(){
   $('#chatEntryBtn')?.addEventListener('click',()=>switchView('chat'));
   $('#chatForm')?.addEventListener('submit',e=>{e.preventDefault();chatSend()});
@@ -2050,12 +2217,12 @@ function initChatUI(){
       const list=chatMentionCandidates(chatMentionQuery||'');
       if(e.key==='ArrowDown'&&list.length){e.preventDefault();chatMentionIndex=(chatMentionIndex+1)%list.length;renderChatMentionMenu();return}
       if(e.key==='ArrowUp'&&list.length){e.preventDefault();chatMentionIndex=(chatMentionIndex-1+list.length)%list.length;renderChatMentionMenu();return}
-      if((e.key==='Enter'||e.key==='Tab')&&list.length){e.preventDefault();chatApplyMention(list[chatMentionIndex].id);return}
+      if((e.key==='Enter'||e.key==='Tab')&&list.length&&!imeEnter(e)){e.preventDefault();chatApplyMention(list[chatMentionIndex].id);return}
       if(e.key==='Escape'){e.preventDefault();chatMentionQuery=null;renderChatMentionMenu();return}
     }
     /* isComposing keeps the Enter that confirms a Chinese IME candidate from
        sending a half-finished message. */
-    if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();chatSend()}
+    if(e.key==='Enter'&&!e.shiftKey&&!imeEnter(e)){e.preventDefault();chatSend()}
   });
   input?.addEventListener('blur',()=>setTimeout(()=>{chatMentionQuery=null;renderChatMentionMenu()},150));
   /* Delegated, so it keeps working across inbox re-renders. */
@@ -2095,7 +2262,8 @@ function initAgentUI(){
     renderAgentAsrConfig();agentInitVoice();toast('已停用语音转写，语音输入回退到浏览器识别');
   });
     $('#agentForm')?.addEventListener('submit',e=>{e.preventDefault();agentSubmit()});
-  $('#agentInput')?.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();agentSubmit()}});
+  document.addEventListener('compositionend',()=>{imeUntil=Date.now()+80},true);
+  $('#agentInput')?.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!imeEnter(e)){e.preventDefault();agentSubmit()}});
   $('#agentInput')?.addEventListener('input',()=>agentSyncPlanButton());
   $('#agentMicBtn')?.addEventListener('click',()=>agentToggleVoice());
   renderAgentCapability();

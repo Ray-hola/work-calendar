@@ -66,12 +66,12 @@ test('invitation workload count is aggregate and limited to the project period',
 test('API refresh preserves same-user scope; switching accounts resets it', async () => {
   const a = app();
   a.run("S.user={id:'superadmin',admin:1};UI.member='test003';UI.view='timeline';UI.selectedWeek=1;renderAll=()=>{};");
-  a.context.fetch = async () => ({ok:true,json:async()=>({user:{id:'superadmin',admin:1}})});
+  a.context.fetch = async () => ({ok:true,text:async()=>JSON.stringify({user:{id:'superadmin',admin:1}})});
   await a.run('refresh()');
   assert.equal(a.run('UI.member'), 'test003');
   assert.equal(a.run('UI.view'), 'timeline');
   assert.equal(a.run('UI.selectedWeek'), 1);
-  a.context.fetch = async () => ({ok:true,json:async()=>({user:{id:'test001',admin:0}})});
+  a.context.fetch = async () => ({ok:true,text:async()=>JSON.stringify({user:{id:'test001',admin:0}})});
   await a.run('refresh()');
   assert.equal(a.run('UI.member'), 'all');
   assert.equal(a.run('UI.view'), 'calendar');
@@ -236,6 +236,9 @@ test('project completion is available to owner only after every child task is do
   assert.equal(a.run('projectTasksComplete(S.projects[0])'),false);
   a.run("S.tasks=[]");
   assert.equal(a.run('projectTasksComplete(S.projects[0])'),false);
+  // Fixed-task occurrences recur until the project ends, so they never hold up closeout.
+  a.run("S.tasks=[{id:'t1',projectId:'p',name:'已完成',assignee:'test001',status:'done'},{id:'repeat:r:test001:2026-12-01',repeatId:'r',projectId:'p',name:'周会',assignee:'test001',status:'todo',fixed:true}]");
+  assert.equal(a.run('projectTasksComplete(S.projects[0])'),true);
 });
 
 test('project completion ignores deferred history when the carried task is done', () => {
@@ -340,8 +343,11 @@ test('workspace account menu lists the right entries per role and escapes names'
   const elements = {};
   const stub = () => ({innerHTML:'', classList:{contains:()=>false, toggle(){}}, setAttribute(){}, querySelectorAll:()=>[], addEventListener(){}});
   a.context.document = {querySelector:s=>elements[s]||(elements[s]=stub()), querySelectorAll:()=>[]};
+  // Only accounts that signed in on this browser are offered for switching.
+  const stored = {'wc-accounts': JSON.stringify(['boss','m1','m2'])};
+  a.context.localStorage = {getItem:k=>stored[k]??null, setItem:(k,v)=>{stored[k]=String(v)}};
 
-  a.run("S.user={id:'boss',admin:1,role:'superadmin',active:1};S.users=[{id:'boss',admin:1,role:'superadmin',active:1,displayName:'老板'},{id:'m1',admin:0,role:'member',active:1,displayName:'<img src=x>'},{id:'m2',admin:0,role:'member',active:0,displayName:'已停用'}]");
+  a.run("S.user={id:'boss',admin:1,role:'superadmin',active:1};S.users=[{id:'boss',admin:1,role:'superadmin',active:1,displayName:'老板'},{id:'m1',admin:0,role:'member',active:1,displayName:'<img src=x>'},{id:'m2',admin:0,role:'member',active:0,displayName:'已停用'},{id:'m3',admin:0,role:'member',active:1,displayName:'别处登录'}]");
   a.run('renderAccountMenu()');
   const admin = elements['#accountMenu'].innerHTML;
   assert.ok(admin.includes('账户管理'), 'superadmin 应看到账户管理入口');
@@ -352,6 +358,13 @@ test('workspace account menu lists the right entries per role and escapes names'
   assert.ok(admin.includes('&lt;img src=x&gt;'), '中文名称必须被转义');
   assert.ok(!admin.includes('<img'), '不得注入标签');
   assert.ok(!admin.includes('已停用'), '停用账户不出现在切换列表');
+  assert.ok(!admin.includes('别处登录'), '没在本浏览器登录过的账户不出现在切换列表');
+  assert.ok(admin.includes('登录其他账户'), '可以登录列表外的账户');
+
+  a.run("rememberAccount('m3')");
+  assert.deepEqual(JSON.parse(stored['wc-accounts']).slice(0, 2), ['m3', 'boss']);
+  a.run('renderAccountMenu()');
+  assert.ok(elements['#accountMenu'].innerHTML.includes('别处登录'), '登录过后就能切换回来');
 
   a.run("S.user={id:'m1',admin:0,role:'member',active:1};renderAccountMenu()");
   const member = elements['#accountMenu'].innerHTML;
@@ -922,4 +935,7 @@ test('only tasks with someone else to sign them off ask for approval', () => {
   assert.equal(a.run("taskNeedsApproval({assignee:'test002',projectId:'p'})"), true);
   assert.equal(a.run("taskNeedsApproval({assignee:'superadmin',projectId:'p'})"), false);
   assert.equal(a.run("taskNeedsApproval({assignee:'test002',projectId:null})"), true);
+  // A temp task someone wrote for themselves has nobody else to sign it off.
+  assert.equal(a.run("taskNeedsApproval({assignee:'test002',creator:'test002',projectId:null,type:'临时'})"), false);
+  assert.equal(a.run("taskNeedsApproval({assignee:'test002',creator:'superadmin',projectId:null,type:'临时'})"), true);
 });
