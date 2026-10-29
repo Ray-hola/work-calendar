@@ -1305,15 +1305,12 @@ function bindArchive(){
   root.querySelectorAll('.box-step').forEach(b=>b.onclick=()=>switchArchiveMonth(Number(b.dataset.step)));
   root.querySelector('.caption-open').onclick=()=>openBrief(UI.archivePick);
   root.querySelectorAll('.archive-file').forEach(b=>b.onclick=()=>openBrief(UI.archivePick));
-  /* Sliding across the box riffles the folders: the pointer is projected onto
-     the line from the front folder to the back one, so it never has to land
-     on a thin tab. */
+  /* Sliding across the box picks whichever folder is under the pointer, as the
+     browser hit-tests it in 3D; the picked folder's lifted sheet counts as that
+     folder, so it stays up while the pointer is on it. */
   stage.onpointermove=e=>{
-    const files=root.querySelectorAll('.archive-file');if(files.length<2)return;
-    const mid=b=>{const r=b.getBoundingClientRect();return [r.left+r.width/2,r.top+r.height/2]};
-    const [ax,ay]=mid(files[0]),[bx,by]=mid(files[files.length-1]),dx=bx-ax,dy=by-ay;
-    const t=((e.clientX-ax)*dx+(e.clientY-ay)*dy)/(dx*dx+dy*dy||1);
-    pickArchive(files[Math.max(0,Math.min(files.length-1,Math.round(t*(files.length-1))))].dataset.date);
+    const hit=document.elementFromPoint(e.clientX,e.clientY)?.closest('.archive-file');
+    if(hit&&root.contains(hit))pickArchive(hit.dataset.date);
   };
   let wheel=0;
   stage.onwheel=e=>{e.preventDefault();wheel+=e.deltaY;while(Math.abs(wheel)>=40){stepArchive(wheel>0?1:-1);wheel-=Math.sign(wheel)*40}};
