@@ -721,6 +721,11 @@ select {
   cursor: not-allowed;
 }
 
+.primary-btn:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
 .role-select {
   border: 1px solid var(--line);
   background: var(--surface);
@@ -1855,6 +1860,12 @@ select {
 .repeat-admin-item small {
   font-size: 12px;
   color: var(--muted);
+}
+
+.repeat-admin-item .repeat-admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .edit-request-summary {

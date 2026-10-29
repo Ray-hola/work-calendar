@@ -772,6 +772,52 @@ class TaskApprovalTests(unittest.TestCase):
         self.store.action(self.admin, 'project.delete', {'id': project['id'], 'confirm': 'with routine'})
         self.assertFalse(any(r['id'] == rule['id'] for r in self.store.all('repeats')))
 
+    def test_fixed_task_rule_can_be_attached_moved_and_detached(self):
+        self.store.create_user('test003', 'test-only-password')
+        today = now().date()
+        start, short_end = (today + timedelta(days=1)).isoformat(), (today + timedelta(days=5)).isoformat()
+        first = self.store.action(self.admin, 'project.create', {
+            'name': 'first', 'owner': 'test001', 'members': ['test002'], 'start': self.day, 'end': short_end, 'cycle': 'range',
+        })
+        second = self.store.action(self.admin, 'project.create', {
+            'name': 'second', 'owner': 'test001', 'members': ['test002'], 'start': self.day, 'cycle': 'infinite',
+        })
+        outsider = self.store.action(self.admin, 'project.create', {
+            'name': 'outsider', 'owner': 'test003', 'start': self.day, 'cycle': 'infinite',
+        })
+        rule = self.store.action(self.admin, 'repeat.create', {
+            'name': 'standup', 'assignees': ['test002'], 'frequency': 'daily', 'start': start,
+            'end': (today + timedelta(days=10)).isoformat(),
+        })
+        occurrences = lambda: [t for t in self.store.all('tasks') if t.get('repeatId') == rule['id']]
+        self.assertEqual(len(occurrences()), 10)
+        # A project whose members do not include the assignee is refused.
+        with self.assertRaises(Problem):
+            self.store.action(self.admin, 'repeat.update', {'id': rule['id'], 'projectId': outsider['id']})
+        # Attaching keeps the rule inside the project's dates.
+        self.store.action(self.admin, 'repeat.update', {'id': rule['id'], 'projectId': first['id']})
+        inside = [t for t in occurrences() if t['status'] == 'todo']
+        self.assertTrue(all(t['projectId'] == first['id'] and t['date'] <= short_end for t in inside))
+        self.assertEqual(len(inside), 5)
+        self.assertTrue(any(n['to'] == 'test002' and n['title'] == '固定安排调整' for n in self.store.all('notifications')))
+        # Moving to an open-ended project brings the trimmed days back.
+        self.store.action(self.admin, 'repeat.update', {'id': rule['id'], 'projectId': second['id']})
+        self.assertEqual({(t['projectId'], t['status']) for t in occurrences()}, {(second['id'], 'todo')})
+        self.assertEqual(len(occurrences()), 10)
+        # A rule stopped by its project closing comes back when taken out of it.
+        self.store.put('tasks', {
+            'name': 'deliver', 'date': self.day, 'duration': 30, 'assignee': 'test002', 'projectId': second['id'],
+            'priority': 'P1', 'status': 'done', 'fixed': False, 'type': '通用',
+        })
+        self.store.db.commit()
+        self.store.action(self.store.user('test001'), 'project.complete_request', {'id': second['id'], 'report': 'done'})
+        self.store.action(self.admin, 'project.complete_review', {'id': second['id'], 'accept': True})
+        self.assertFalse(self.store.get('repeats', rule['id'])['active'])
+        self.store.action(self.admin, 'repeat.update', {'id': rule['id'], 'projectId': None})
+        self.assertTrue(self.store.get('repeats', rule['id'])['active'])
+        self.assertIsNone(self.store.get('repeats', rule['id'])['projectId'])
+        self.assertEqual({(t['projectId'], t['status']) for t in occurrences()}, {(None, 'todo')})
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -636,6 +636,25 @@ function repeatPattern(r){
   const base=days||(r.start?`同起始日（${weekdayName(r.start)}）`:'每周');
   return every>1?`每 ${every} 周 · ${base}`:`每周 · ${base}`;
 }
+/* Attach a fixed-task rule to a project, move it to another, or take it out.
+   Only the project's members can carry it, so the dialog says who is missing
+   instead of letting the save fail. */
+function repeatProjectDialog(repeatId){
+  const r=(S.repeats||[]).find(x=>x.id===repeatId);if(!r)return;
+  const current=r.projectId&&S.projects.find(x=>x.id===r.projectId);
+  const choices=S.projects.filter(p=>p.status==='active'&&p.id!==r.projectId);
+  openModal(`<div class="eyebrow">固定任务 · 所属项目</div><h2>${r.projectId?'调整所属项目':'挂载到项目'}</h2><p>${escapeHTML(r.name)} · ${escapeHTML(repeatPattern(r))} · ${escapeHTML((r.assignees||[]).map(nameOf).join('、'))}</p><p class="muted">当前：${r.projectId?escapeHTML(current?.name||'项目已结束'):'不属于任何项目'}</p>${choices.length?`<label class="form-field">${r.projectId?'改挂到':'挂载到'}<select id="repeatTarget">${choices.map(p=>`<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}${p.end?` · 截止 ${escapeHTML(p.end)}`:''}</option>`).join('')}</select></label><p class="muted" id="repeatTargetHint"></p>`:'<p class="muted">没有其他进行中的项目可以挂载。</p>'}<div class="modal-footer">${r.projectId?'<button class="secondary-btn" id="repeatDetach">移出项目</button>':''}<button class="secondary-btn" id="cancelAction">取消</button>${choices.length?`<button class="primary-btn" id="repeatAttach">${r.projectId?'保存调整':'挂载'}</button>`:''}</div>`);
+  $('#cancelAction').onclick=closeModal;
+  const save=async projectId=>{try{await act('repeat.update',{id:r.id,projectId});closeModal();toast(projectId?'已挂到项目，从今天起生效':'已移出项目')}catch(e){}};
+  const sync=()=>{
+    const p=S.projects.find(x=>x.id===$('#repeatTarget')?.value);if(!p)return;
+    const missing=(r.assignees||[]).filter(a=>(p.members||{})[a]!=='accepted');
+    $('#repeatTargetHint').textContent=missing.length?`${missing.map(nameOf).join('、')} 不是该项目成员，请先把他们加入项目`:`从今天起的安排归入该项目${p.end?`，${p.end} 之后不再生成`:''}；已发生的记录保持不变。`;
+    $('#repeatAttach').disabled=missing.length>0;
+  };
+  if(choices.length){$('#repeatTarget').onchange=sync;sync();$('#repeatAttach').onclick=()=>save($('#repeatTarget').value)}
+  $('#repeatDetach')?.addEventListener('click',()=>save(null));
+}
 function renderRepeats(){
   const list=$('#repeatList');if(!list)return;const repeats=S.repeats||[];
   const patternOf=repeatPattern;
@@ -645,7 +664,8 @@ function renderRepeats(){
     const spanText=span>1?` · 持续 ${span} 天`:'';
     const untilText=r.end?` · 至 ${escapeHTML(r.end)}`:'';
     const project=r.projectId&&S.projects.find(x=>x.id===r.projectId),projectText=r.projectId?` · 项目 ${escapeHTML(project?.name||'已结束')}`:'';
-    return `<article class="repeat-admin-item"><div><strong>${escapeHTML(r.name)}</strong><span>${escapeHTML(patternOf(r))} · ${escapeHTML(r.time||'09:00')} · ${escapeHTML((r.assignees||[]).join('、'))}</span><small>${state}${projectText}${spanText}${untilText}${r.skipDates?.length?` · 已挖空 ${r.skipDates.length} 天`:''}</small></div><button class="ghost-btn skip-repeat" data-id="${escapeHTML(r.id)}">挖空本次</button></article>`}).join('')||'<p class="muted">还没有固定任务规则。</p>';
+    return `<article class="repeat-admin-item"><div><strong>${escapeHTML(r.name)}</strong><span>${escapeHTML(patternOf(r))} · ${escapeHTML(r.time||'09:00')} · ${escapeHTML((r.assignees||[]).join('、'))}</span><small>${state}${projectText}${spanText}${untilText}${r.skipDates?.length?` · 已挖空 ${r.skipDates.length} 天`:''}</small></div><div class="repeat-admin-actions"><button class="ghost-btn repeat-project" data-id="${escapeHTML(r.id)}">${r.projectId?'调整项目':'挂载到项目'}</button><button class="ghost-btn skip-repeat" data-id="${escapeHTML(r.id)}">挖空本次</button></div></article>`}).join('')||'<p class="muted">还没有固定任务规则。</p>';
+  $$('.repeat-project').forEach(b=>b.onclick=()=>repeatProjectDialog(b.dataset.id));
   $$('.skip-repeat').forEach(b=>b.onclick=()=>{const date=prompt('请输入本次不执行的日期（YYYY-MM-DD）',S.today);if(!date)return;act('repeat.skip',{id:b.dataset.id,date,skip:true}).catch(()=>{})});
 }
 function accountProjectRoles(id){const owned=S.projects.filter(p=>p.owner===id).map(p=>p.name),joined=S.projects.filter(p=>p.owner!==id&&(p.members||{})[id]==='accepted').map(p=>p.name);return {owned,joined}}
