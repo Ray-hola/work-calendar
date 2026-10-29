@@ -503,8 +503,66 @@ class ScheduleAccessTests(unittest.TestCase):
         midnight = datetime.combine(date.fromisoformat(self.day) + timedelta(days=1), time(0, 1), TZ)
         self.store.schedule(midnight)
         notices = [n for n in self.store.all('notifications') if n['to'] == 'superadmin']
-        self.assertTrue(any(n['title'].startswith('自动项目日报') for n in notices))
-        self.assertTrue(any(n['title'].startswith('成员当日总结') for n in notices))
+        # The superadmin gets one team brief for the day instead of a notice per report.
+        self.assertEqual([n['title'] for n in notices], [f'团队日报 · {self.day}'])
+        brief = self.store.get('reports', f'brief:{self.day}')
+        project_entry = next(p for p in brief['content']['projects'] if p['id'] == project['id'])
+        self.assertEqual(project_entry['source'], 'auto')
+        self.assertIn('test002', project_entry['content']['collaborators'])
+        self.assertTrue(any('Owner 未提交' in r for r in brief['content']['risks']))
+        # The automatic project report is still filed for the record.
+        self.assertTrue(any(r.get('kind') == 'automatic' and r['projectId'] == project['id'] for r in self.store.all('reports')))
+        # Owners still hear from their collaborators directly.
+        self.assertTrue(any(n['to'] == 'test001' and n['title'].startswith('协作者进度') for n in self.store.all('notifications')))
+
+    def test_brief_is_announced_once_and_kept_current(self):
+        day = date.fromisoformat(self.day)
+        yesterday, older = (day - timedelta(days=1)).isoformat(), (day - timedelta(days=3)).isoformat()
+        for name, when, status in (('昨天完成', yesterday, 'done'), ('昨天没做完', yesterday, 'doing'), ('三天前', older, 'done')):
+            self.store.put('tasks', {'name': name, 'date': when, 'duration': 30, 'assignee': 'test002', 'projectId': None,
+                                     'priority': 'P1', 'status': status, 'fixed': False, 'type': '通用'})
+        self.store.db.commit()
+        self.store.schedule(datetime.combine(day, time(0, 5), TZ))
+        self.store.schedule(datetime.combine(day, time(0, 6), TZ))
+        briefs = [n for n in self.store.all('notifications') if n['kind'] == 'brief']
+        # Older days are filed quietly; the day just finished is announced once.
+        self.assertEqual([n['title'] for n in briefs], [f'团队日报 · {yesterday}'])
+        self.assertTrue(self.store.get('reports', f'brief:{older}'))
+        member = next(m for m in self.store.get('reports', f'brief:{yesterday}')['content']['members'] if m['id'] == 'test002')
+        self.assertEqual((member['completed'], member['tasks'], member['source']), (1, 2, 'auto'))
+        # People with nothing that day are left out, even though the digest wrote them an automatic diary.
+        self.assertEqual([m['id'] for m in self.store.get('reports', f'brief:{yesterday}')['content']['members']], ['test002'])
+        self.assertFalse(any(n['to'] == 'superadmin' and n['kind'] in ('diary', 'diary_digest') for n in self.store.all('notifications')))
+        # A diary written late updates the filed brief without a second notice.
+        self.store.action(self.store.user('test002'), 'diary.save', {'date': yesterday, 'content': {'done': '补记：联调完成', 'risks': '无', 'next': '上线'}})
+        member = next(m for m in self.store.get('reports', f'brief:{yesterday}')['content']['members'] if m['id'] == 'test002')
+        self.assertEqual((member['source'], member['summary']['done']), ('diary', '补记：联调完成'))
+        self.assertEqual(len([n for n in self.store.all('notifications') if n['kind'] == 'brief']), 1)
+        # Admins get an index card in the snapshot and the full brief on request; members get neither.
+        cards = [r for r in self.store.snapshot(self.admin)['reports'] if r['kind'] == 'brief']
+        self.assertEqual(sorted(c['date'] for c in cards), [older, yesterday])
+        self.assertNotIn('content', cards[0])
+        self.assertEqual(self.store.action(self.admin, 'brief.get', {'date': yesterday})['date'], yesterday)
+        with self.assertRaises(Problem):
+            self.store.action(self.store.user('test002'), 'brief.get', {'date': yesterday})
+        self.assertFalse(any(r['kind'] == 'brief' for r in self.store.snapshot(self.store.user('test002'))['reports']))
+
+    def test_inbox_notices_can_be_deleted_one_by_one_or_in_bulk(self):
+        member, other = self.store.user('test002'), self.store.user('test003')
+        notes = [self.store.notify('test002', f'通知 {i}', '内容', 'task') for i in range(4)]
+        theirs = self.store.notify('test003', '别人的', '内容', 'task')
+        self.store.action(member, 'inbox.read', {'id': notes[0]['id']})
+        self.assertEqual(self.store.action(member, 'inbox.delete', {'ids': [notes[1]['id'], notes[2]['id']]})['deleted'], 2)
+        with self.assertRaises(Problem):
+            self.store.action(member, 'inbox.delete', {'ids': [theirs['id']]})
+        with self.assertRaises(Problem):
+            self.store.action(member, 'inbox.delete', {'ids': []})
+        # Clearing the read ones leaves unread notices and other people's alone.
+        self.assertEqual(self.store.action(member, 'inbox.delete', {'read': True})['deleted'], 1)
+        left = {n['id'] for n in self.store.all('notifications')}
+        self.assertEqual(left & {n['id'] for n in notes}, {notes[3]['id']})
+        self.assertIn(theirs['id'], left)
+        self.store.action(other, 'inbox.delete', {'ids': [theirs['id']]})
 
     def test_scheduler_catches_up_multiple_missed_days(self):
         start = date.fromisoformat(self.day) - timedelta(days=3)

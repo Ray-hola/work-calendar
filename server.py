@@ -1185,6 +1185,8 @@ class Store:
                 tasks.append({**task,'superseded':True,'supersededBy':superseded[task['id']]} if task['id'] in superseded else task)
             ids={t['id'] for t in tasks}; pids={p['id'] for p in projects}
             reports=[r for r in self.all('reports') if r['author']==user['id'] or user['admin'] or (r.get('projectId') and self.get('projects',r['projectId'])['owner']==user['id'])]
+            # Briefs travel as index cards; the archive room fetches a full one when it is opened.
+            reports=[self.brief_card(r) if r.get('kind')=='brief' else r for r in reports]
             # Personal diaries are private to their author; superadmin can browse
             # every member notebook from the diary dashboard.
             diaries=[d for d in self.all('diaries') if user['admin'] or d.get('author')==user['id']]
@@ -1433,7 +1435,9 @@ class Store:
             if channel not in visible:
                 continue
             at = str(m.get('createdAt', ''))
-            if channel in previews and previews[channel]['createdAt'] >= at:
+            # Rows come in insertion order, so on a timestamp tie (the Windows
+            # clock ticks every ~16 ms) the later message is the newer one.
+            if channel in previews and previews[channel]['createdAt'] > at:
                 continue
             previews[channel] = {'body': str(m.get('body', ''))[:60],
                                  'author': m.get('author', ''), 'createdAt': at}
@@ -2310,8 +2314,9 @@ class Store:
             # not flood either inbox.
             projects=[p for p in self.all('projects') if p.get('status')=='active' and
                       (p.get('owner')==user['id'] or p.get('members',{}).get(user['id'])=='accepted')]
-            recipients={'superadmin'}
-            recipients.update(p['owner'] for p in projects if p.get('owner') and p['owner']!=user['id'])
+            # Owners still hear from their collaborators; the superadmin reads
+            # every diary in the next team brief instead of one notice each.
+            recipients={p['owner'] for p in projects if p.get('owner') and p['owner']!=user['id']}
             text=json.dumps(content,ensure_ascii=False) if isinstance(content,dict) else str(content)
             for recipient in recipients:
                 ref=f'diary:{user["id"]}:{day}:2330' if recipient=='superadmin' else f'diary:{user["id"]}:{day}:{recipient}'
@@ -2320,6 +2325,7 @@ class Store:
                          'title':f'成员日记 · {user["id"]} · {day}',
                          'body':text,'kind':'diary','reference':ref,'read':False,'createdAt':timestamp()}
                 self.put('notifications',payload)
+            self.refresh_brief(day)
             return entry
         if action=='diary.get':
             day=valid_date(d.get('date') or d.get('day'))
@@ -2340,12 +2346,10 @@ class Store:
             fields=('done','progress','collaborators','risks','next') if kind=='owner' else ('done','risks','next')
             if any(not str(content.get(k,'')).strip() for k in fields):raise Problem(400,'请完整填写报告；没有风险时可填写“无”')
             report=self.put('reports',{'id':f'{kind}:{pid}:{user["id"]}:{day}','kind':kind,'projectId':pid,'author':user['id'],'date':day,'content':content,'confirmed':True,'createdAt':timestamp()})
-            if kind=='owner':
-                self.notify('superadmin',f'Owner 项目进度汇报 · {day}',f'{user["id"]} / {p["name"]}\n'+ '\n'.join(f'{k}：{v}' for k,v in content.items()),'report',report['id'])
-            elif kind=='collaborator':
+            if kind=='collaborator':
                 body=f'{user["id"]} / {p["name"]}\n'+ '\n'.join(f'{k}：{v}' for k,v in content.items())
                 self.notify(p['owner'],f'协作者进度 · {day}',body,'report',report['id'])
-                self.notify('superadmin',f'成员当日总结 · {user["id"]} · {day}',body,'report',report['id'])
+            self.refresh_brief(day)
             return report
         if action=='inbox.read':
             records=self.all('notifications') if d.get('all') else [self.get('notifications',d['id'])]
@@ -2358,6 +2362,24 @@ class Store:
                 for r in self.all('requests'):
                     if r['to']==user['id'] and r.get('status')=='pending':r['read']=True;self.put('requests',r)
             return
+        if action=='brief.get':
+            self.admin(user)
+            brief=self.get('reports',f'brief:{valid_date(d.get("date"))}')
+            if brief.get('kind')!='brief':raise Problem(404,'档案不存在')
+            return brief
+        if action=='inbox.delete':
+            # Only the recipient's own notices. Invitations are answered, not
+            # deleted, so they are not touched here.
+            if d.get('read'):
+                targets=[n for n in self.all('notifications') if n['to']==user['id'] and n.get('read')]
+            else:
+                ids=d.get('ids')
+                if not isinstance(ids,list) or not ids or len(ids)>2000:raise Problem(400,'请选择要删除的通知')
+                wanted={str(x) for x in ids}
+                targets=[n for n in self.all('notifications') if n['id'] in wanted]
+                if any(n['to']!=user['id'] for n in targets):raise Problem(403,'只能删除自己的通知')
+            for n in targets:self.db.execute('DELETE FROM notifications WHERE id=?',(n['id'],))
+            return {'deleted':len(targets)}
         if action=='profile.correct':
             return self.put('corrections',{'user':user['id'],'text':required(d,'text'),'createdAt':timestamp()})
         if action in ('assignment.propose','assignment.manual'):
@@ -2491,6 +2513,83 @@ class Store:
                 'loadTotal':sum(int(t.get('duration',0) or 0) for t in tasks),
                 'content':content}
 
+    def build_brief(self, day, at=None):
+        """Assemble one team report for a day: every member's work and summary,
+        every project's progress, and what needs attention. Returns None for a
+        day on which nothing happened."""
+        at=at or now()
+        # The 23:30 digest writes an automatic diary for everyone; only one a
+        # person wrote counts as their summary or as a submitted progress note.
+        diaries={x.get('author'):x for x in self.all('diaries') if x.get('date')==day and not x.get('auto')}
+        reports=[r for r in self.all('reports') if r.get('date')==day and r.get('kind') in ('owner','collaborator')]
+        members=[]
+        for u in self.users():
+            if not u['active'] or u['admin']:continue
+            digest=self.diary_digest(u['id'],day)
+            diary=diaries.get(u['id'])
+            if not digest['tasks'] and not diary and not any(r.get('author')==u['id'] for r in reports):continue
+            members.append({'id':u['id'],'name':u.get('displayName') or u['id'],'tasks':digest['tasks'],
+                            'completed':digest['completed'],'load':digest['load'],'loadTotal':digest['loadTotal'],
+                            'summary':digest['content'],'source':'diary' if diary else 'auto'})
+        projects=[]
+        for p in self.all('projects'):
+            if p.get('status') in ('pending','rejected') or (p.get('start') or '')>day or (p.get('end') and p['end']<day):continue
+            owner_report=next((r for r in reports if r.get('projectId')==p['id'] and r.get('kind')=='owner'),None)
+            day_tasks=[t for t in self.all('tasks') if t.get('projectId')==p['id'] and t.get('date')==day and not t.get('repeatId')]
+            if not owner_report and not day_tasks and not any(r.get('projectId')==p['id'] for r in reports):continue
+            content,_=self.aggregate(p,day,at)
+            expected=[m for m,v in (p.get('members') or {}).items() if v=='accepted' and m!=p.get('owner')]
+            own=[r for r in reports if r.get('projectId')==p['id'] and r.get('kind')=='collaborator']
+            missing=[m for m in expected if m not in diaries and not any(r.get('author')==m for r in own)]
+            if not owner_report:
+                # The automatic summary names collaborators by account and dumps
+                # raw JSON; the brief is read by a person, so spell it out.
+                lines=[f'{self.display_name(r["author"])}：{self.brief_text(r.get("content"))}' for r in own]
+                lines+=[f'{self.display_name(m)}（日记）：{self.brief_text(diaries[m].get("content"))}' for m in expected
+                        if m in diaries and not any(r.get('author')==m for r in own)]
+                content['collaborators']='\n'.join(lines) or '暂无已提交的协作进度'
+            projects.append({'id':p['id'],'name':p['name'],'owner':p.get('owner'),'ownerName':self.display_name(p.get('owner')),
+                             'source':'owner' if owner_report else 'auto','content':owner_report['content'] if owner_report else content,
+                             'missing':[self.display_name(m) for m in missing],'tasks':len(day_tasks),
+                             'completed':sum(t.get('status')=='done' for t in day_tasks)})
+        if not members and not projects:
+            return None
+        risks=[]
+        for p in projects:
+            if p['source']=='auto':risks.append(f'「{p["name"]}」Owner 未提交当日汇报，已按任务记录自动汇总')
+            if p['missing']:risks.append(f'「{p["name"]}」' + '、'.join(p['missing']) + ' 未提交协作进度')
+        for m in members:
+            if m['tasks']>m['completed']:risks.append(f'{m["name"]} 有 {m["tasks"]-m["completed"]} 项任务当天未完成')
+        totals={'members':len(members),'tasks':sum(m['tasks'] for m in members),'completed':sum(m['completed'] for m in members),
+                'load':sum(m['load'] for m in members),'loadTotal':sum(m['loadTotal'] for m in members),'projects':len(projects)}
+        existing=self.db.execute('SELECT data FROM reports WHERE id=?',(f'brief:{day}',)).fetchone()
+        created=json.loads(existing['data']).get('createdAt') if existing else at.isoformat()
+        return self.put('reports',{'id':f'brief:{day}','kind':'brief','projectId':None,'author':'system','date':day,
+                                   'content':{'totals':totals,'members':members,'projects':projects,'risks':risks},
+                                   'confirmed':True,'createdAt':created,'updatedAt':at.isoformat()})
+
+    def brief_card(self, brief):
+        content=brief.get('content') or {}
+        return {'id':brief['id'],'kind':'brief','projectId':None,'author':'system','date':brief['date'],
+                'totals':content.get('totals') or {},'riskCount':len(content.get('risks') or []),
+                'createdAt':brief.get('createdAt'),'updatedAt':brief.get('updatedAt')}
+
+    def refresh_brief(self, day):
+        """Keep a filed brief current when a diary or report for its day arrives late."""
+        if self.db.execute('SELECT 1 FROM reports WHERE id=?',(f'brief:{day}',)).fetchone():
+            self.build_brief(day)
+
+    def brief_text(self, content):
+        labels={'done':'完成','progress':'进度','risks':'风险','next':'下一步','summary':'总结'}
+        if isinstance(content,dict):
+            return '；'.join(f'{labels.get(k,k)} {str(v).strip()}' for k,v in content.items() if str(v or '').strip())
+        return str(content or '').strip()
+
+    def brief_summary(self, brief):
+        t=brief['content']['totals']
+        return (f'{t["members"]} 位成员 · 完成 {t["completed"]}/{t["tasks"]} 项任务 · 投入 {t["load"]/60:.1f}h\n'
+                f'{t["projects"]} 个项目有进展 · {len(brief["content"]["risks"])} 条需要关注')
+
     def collection_enabled(self, day):
         """Whether the configured automatic collection runs for a report day."""
         cfg=next((x.get('value',{}) for x in self.all('settings') if x.get('id')=='automation'),{})
@@ -2576,14 +2675,6 @@ class Store:
                     if not manual:
                         self.put('diaries',{'id':f'diary:{member}:{digest_day}','author':member,'date':digest_day,
                                            'content':digest['content'],'auto':True,'updatedAt':at.isoformat()})
-                    body=(f"{member} · {digest_day}\n完成任务：{digest['completed']}/{digest['tasks']} · "
-                          f"投入 {digest['load']} 分钟\n"+json.dumps(digest['content'],ensure_ascii=False))
-                    ref=f'diary:{member}:{digest_day}:2330'
-                    notice=next((n for n in self.all('notifications') if n.get('kind') in ('diary','diary_digest') and n.get('reference')==ref),None)
-                    if notice:
-                        notice.update(title=f'成员日记统计 · {member} · {digest_day}',body=body,kind='diary_digest',read=False,createdAt=at.isoformat());self.put('notifications',notice)
-                    else:
-                        self.notify('superadmin',f'成员日记统计 · {member} · {digest_day}',body,'diary_digest',ref)
                     count+=1
                     self.db.execute('INSERT INTO jobs VALUES (?,?)',(key,at.isoformat()))
             for p in self.all('projects'):
@@ -2614,10 +2705,20 @@ class Store:
                             # not duplicated as a noon draft or a second inbox card.
                             if not owner_report:
                                 content['ownerMissing']=True
-                                report=self.put('reports',{'id':key,'kind':'automatic','stage':'final','projectId':p['id'],'author':'system','date':daystr,'content':content,'confirmed':False,'createdAt':at.isoformat(),'cutoff':due.isoformat()})
-                                self.notify('superadmin',f'自动项目日报 · {p["name"]} · {daystr}',f'Owner 未提交项目进度汇报，系统按当日完成任务自动汇总。\n'+json.dumps(content,ensure_ascii=False),'report',report['id']);count+=1
+                                self.put('reports',{'id':key,'kind':'automatic','stage':'final','projectId':p['id'],'author':'system','date':daystr,'content':content,'confirmed':False,'createdAt':at.isoformat(),'cutoff':due.isoformat()});count+=1
                         self.db.execute('INSERT INTO jobs VALUES (?,?)',(key,at.isoformat()))
                     day+=timedelta(days=1)
+            # One team brief per finished day goes to the superadmin and into
+            # the archive room. Days missed while the service was down are
+            # filed quietly; only the latest one is announced.
+            for brief_day in sorted(x for x in candidate_days if x and x < at.date().isoformat()):
+                key=f'brief:{brief_day}'
+                due=datetime.combine(date.fromisoformat(brief_day)+timedelta(days=1),self.collection_time(),TZ)
+                if at<due or self.db.execute('SELECT 1 FROM jobs WHERE id=?',(key,)).fetchone():continue
+                brief=self.build_brief(brief_day,at)
+                if brief and brief_day>=(at.date()-timedelta(days=1)).isoformat():
+                    self.notify('superadmin',f'团队日报 · {brief_day}',self.brief_summary(brief),'brief',brief['id']);count+=1
+                self.db.execute('INSERT INTO jobs VALUES (?,?)',(key,at.isoformat()))
             if count:self.audit('scheduler','scheduled_reports',{'at':at.isoformat(),'sent':count})
         return {'created':count}
 

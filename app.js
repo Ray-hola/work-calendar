@@ -112,7 +112,7 @@ async function refreshInboxState(){
   return inboxRefreshPromise;
 }
 function switchView(view){
-  if((view==='achievements'||view==='accounts')&&!S.user?.admin){view='calendar'}
+  if((view==='achievements'||view==='accounts'||view==='archive')&&!S.user?.admin){view='calendar'}
   const changed=UI.view!==view;
   UI.view=view;
   /* Returning to the week rail should show the current week, not whichever
@@ -120,7 +120,7 @@ function switchView(view){
   if(view==='calendar'&&changed)UI.selectedWeek=0;
   $$('.view').forEach(v=>v.classList.toggle('active-view',v.id===`${view}View`));
   $$('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.view===view));
-  const labels={today:'今日任务',calendar:'周视图',summary:'日记',projects:'项目空间',timeline:'项目时间轴',achievements:'成果库',inbox:'收件箱',accounts:'账户管理',dayDetail:'日期详情',chat:'沟通区'};
+  const labels={today:'今日任务',calendar:'周视图',summary:'日记',projects:'项目空间',timeline:'项目时间轴',achievements:'成果库',archive:'档案室',inbox:'收件箱',accounts:'账户管理',dayDetail:'日期详情',chat:'沟通区'};
   $('#crumbCurrent').textContent=`/ ${labels[view]||view}`;
   renderScheduleScope();
   if(view==='calendar')renderCalendar();
@@ -130,6 +130,7 @@ function switchView(view){
   if(view==='projects')renderProjects();
   if(view==='timeline')renderTimeline();
   if(view==='achievements')renderAchievements();
+  if(view==='archive')renderArchive();
   if(view==='inbox'){renderInbox();refreshInboxState();}
   if(view==='accounts')renderAccounts();
   if(view==='chat'){renderChatChannels();loadChat(true);refreshChatPresence();startChatPolling()}else{stopChatPolling()}
@@ -599,10 +600,13 @@ function renderInbox(){
   const unreadRequests=requests.filter(r=>!r.read).length;
   const unreadNotifications=notifications.filter(x=>!x.read).length;
   const unreadCount=unreadRequests+unreadNotifications;$('#inboxCount').textContent=unreadCount;$('.notification-dot').classList.toggle('hidden',unreadCount===0);$('#inboxView .eyebrow').textContent=`通知中心 · ${unreadCount} 条未读`;
-  const cards=[...requests.map(r=>{const p=S.projects.find(x=>x.id===r.projectId);const unread=!r.read;return {priority:2,time:r.createdAt,html:`<article class="inbox-item request-inbox-item ${unread?'unread':''}" data-request="${escapeHTML(r.id)}"><div class="inbox-icon">${icon('folder')}</div><div class="inbox-copy"><strong>项目协作邀请</strong>${unread?'<i class="unread-dot"></i>':''}<p>「${escapeHTML(p?.name||'项目')}」</p><small title="${escapeHTML(r.createdAt)}">${escapeHTML(relTime(r.createdAt))}</small><div class="inbox-actions"><button class="primary-btn accept-request" data-id="${escapeHTML(r.id)}">接受</button><button class="secondary-btn reject-request" data-id="${escapeHTML(r.id)}">拒绝</button></div></div></article>`}}),...notifications.map(x=>{const {project,task,projectPending,projectCompletionPending,editPending,chatMention,pending}=approvalInfo(x);const unread=!x.read||pending;const actions=chatMention?`<div class="inbox-actions"><button class="primary-btn open-chat-from-mention" data-channel="${escapeHTML(x.channel||'')}">去沟通区</button></div>`:projectPending?`<div class="inbox-actions"><button class="primary-btn approve-project-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意创建</button><button class="secondary-btn reject-project-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:projectCompletionPending?`<div class="inbox-actions"><button class="primary-btn approve-project-completion-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意完成</button><button class="secondary-btn reject-project-completion-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:editPending?`<div class="inbox-actions"><button class="primary-btn approve-edit-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意修改</button><button class="secondary-btn reject-edit-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:'';return {priority:pending?2:unread?1:0,time:x.createdAt,html:`<article class="inbox-item ${unread?'unread':''} ${pending?'approval-pending':''}" data-id="${escapeHTML(x.id)}"><div class="inbox-icon">${editPending?icon('edit'):projectCompletionPending?icon('diamond'):x.kind==='report'?icon('clock'):x.kind==='approval'?icon('folder'):x.kind==='request'?icon('mail'):icon('trend')}</div><div class="inbox-copy"><strong>${escapeHTML(x.title)}</strong>${unread?'<i class="unread-dot"></i>':''}<p>${escapeHTML(noticeText(x.body))}</p><small title="${escapeHTML(x.createdAt)}">${escapeHTML(relTime(x.createdAt))}</small>${actions}</div><span class="task-arrow">${icon('chevron-right')}</span></article>`}})].sort((a,b)=>(b.priority-a.priority)||String(b.time).localeCompare(String(a.time)));
+  const cards=[...requests.map(r=>{const p=S.projects.find(x=>x.id===r.projectId);const unread=!r.read;return {priority:2,time:r.createdAt,html:`<article class="inbox-item request-inbox-item ${unread?'unread':''}" data-request="${escapeHTML(r.id)}"><div class="inbox-icon">${icon('folder')}</div><div class="inbox-copy"><strong>项目协作邀请</strong>${unread?'<i class="unread-dot"></i>':''}<p>「${escapeHTML(p?.name||'项目')}」</p><small title="${escapeHTML(r.createdAt)}">${escapeHTML(relTime(r.createdAt))}</small><div class="inbox-actions"><button class="primary-btn accept-request" data-id="${escapeHTML(r.id)}">接受</button><button class="secondary-btn reject-request" data-id="${escapeHTML(r.id)}">拒绝</button></div></div></article>`}}),...notifications.map(x=>{const {project,task,projectPending,projectCompletionPending,editPending,chatMention,pending}=approvalInfo(x);const unread=!x.read||pending;const actions=chatMention?`<div class="inbox-actions"><button class="primary-btn open-chat-from-mention" data-channel="${escapeHTML(x.channel||'')}">去沟通区</button></div>`:projectPending?`<div class="inbox-actions"><button class="primary-btn approve-project-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意创建</button><button class="secondary-btn reject-project-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:projectCompletionPending?`<div class="inbox-actions"><button class="primary-btn approve-project-completion-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意完成</button><button class="secondary-btn reject-project-completion-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:editPending?`<div class="inbox-actions"><button class="primary-btn approve-edit-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意修改</button><button class="secondary-btn reject-edit-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:'';return {priority:pending?2:unread?1:0,time:x.createdAt,html:`<article class="inbox-item ${unread?'unread':''} ${pending?'approval-pending':''} ${UI.inboxManage?'is-managing':''} ${UI.inboxPicked?.has(x.id)?'is-picked':''}" data-id="${escapeHTML(x.id)}">${UI.inboxManage?`<label class="inbox-pick"><input type="checkbox" tabindex="-1" ${UI.inboxPicked?.has(x.id)?'checked':''} aria-label="选择这条通知"></label>`:''}<div class="inbox-icon${UI.inboxManage?' hidden':''}">${editPending?icon('edit'):projectCompletionPending?icon('diamond'):x.kind==='brief'?icon('archive'):x.kind==='report'?icon('clock'):x.kind==='approval'?icon('folder'):x.kind==='request'?icon('mail'):icon('trend')}</div><div class="inbox-copy"><strong>${escapeHTML(x.title)}</strong>${unread?'<i class="unread-dot"></i>':''}<p>${escapeHTML(noticeText(x.body))}</p><small title="${escapeHTML(x.createdAt)}">${escapeHTML(relTime(x.createdAt))}</small>${actions}</div><span class="task-arrow">${icon('chevron-right')}</span>${UI.inboxManage?'':`<button class="inbox-delete" data-delete="${escapeHTML(x.id)}" title="删除这条通知" aria-label="删除这条通知">${icon('x')}</button>`}</article>`}})].sort((a,b)=>(b.priority-a.priority)||String(b.time).localeCompare(String(a.time)));
   $('#inboxList').innerHTML=cards.map(x=>x.html).join('')||'<div class="empty-state">收件箱很安静</div>';
-  $$('#inboxList .inbox-item').forEach(e=>{e.tabIndex=0;e.onkeydown=ev=>{if(ev.key==='Enter'&&!ev.target.closest('.inbox-actions')){if(e.dataset.id)openNotification(e.dataset.id);else openRequest(e.dataset.request)}}});
-  $$('#inboxList .inbox-item[data-id]').forEach(e=>e.onclick=ev=>{if(ev.target.closest('.inbox-actions'))return;openNotification(e.dataset.id)});
+  const pick=id=>{UI.inboxPicked=UI.inboxPicked||new Set();if(UI.inboxPicked.has(id))UI.inboxPicked.delete(id);else UI.inboxPicked.add(id);renderInbox()};
+  $$('#inboxList .inbox-item').forEach(e=>{e.tabIndex=0;e.onkeydown=ev=>{if(ev.key==='Enter'&&!ev.target.closest('.inbox-actions,.inbox-delete')){if(e.dataset.id)UI.inboxManage?pick(e.dataset.id):openNotification(e.dataset.id);else openRequest(e.dataset.request)}}});
+  $$('#inboxList .inbox-item[data-id]').forEach(e=>e.onclick=ev=>{if(ev.target.closest('.inbox-actions,.inbox-delete'))return;if(UI.inboxManage){pick(e.dataset.id);return}openNotification(e.dataset.id)});
+  $$('#inboxList .inbox-delete').forEach(b=>b.onclick=ev=>{ev.stopPropagation();deleteNotices([b.dataset.delete])});
+  renderInboxToolbar();
   $$('#inboxList .inbox-item[data-request]').forEach(e=>e.onclick=ev=>{if(ev.target.closest('.inbox-actions'))return;openRequest(e.dataset.request)});
   $$('.accept-request').forEach(b=>b.onclick=ev=>{ev.stopPropagation();act('request.respond',{id:b.dataset.id,accept:true})});$$('.reject-request').forEach(b=>b.onclick=ev=>{ev.stopPropagation();act('request.respond',{id:b.dataset.id,accept:false})});
   $$('.approve-project-request').forEach(b=>b.onclick=ev=>{ev.stopPropagation();reviewProject(b.dataset.id,true,b.dataset.notification)});$$('.reject-project-request').forEach(b=>b.onclick=ev=>{ev.stopPropagation();reviewProject(b.dataset.id,false,b.dataset.notification)});
@@ -612,6 +616,7 @@ function renderInbox(){
 function openRequest(id){const r=S.requests.find(x=>x.id===id);if(!r)return;const p=S.projects.find(x=>x.id===r.projectId);openModal(`<div class="eyebrow">收件箱详情 · 项目邀请</div><h2>加入「${escapeHTML(p?.name||'项目')}」</h2><div class="detail-grid"><div><span>Owner</span><strong>${escapeHTML(p?.owner||'—')}</strong></div><div><span>项目状态</span><strong>${p?projectStatus(p):'—'}</strong></div></div><div class="modal-footer"><button class="secondary-btn" id="detailRejectRequest">拒绝</button><button class="primary-btn" id="detailAcceptRequest">接受邀请</button></div>`);$('#detailAcceptRequest').onclick=()=>{closeModal();act('request.respond',{id,accept:true})};$('#detailRejectRequest').onclick=()=>{closeModal();act('request.respond',{id,accept:false})};api('/api/action',{action:'request.read',data:{id}}).then(refresh).catch(()=>{})}
 function openNotification(id){
   const n=S.notifications.find(x=>x.id===id); if(!n)return;
+  if(n.kind==='brief'){if(!n.read)api('/api/action',{action:'inbox.read',data:{id}}).then(refresh).catch(()=>{});openBrief(String(n.reference||'').replace(/^brief:/,''));return}
   const editReq=(S.editRequests||[]).find(r=>r.id===n.reference),p=n.reference&&S.projects.find(x=>x.id===n.reference),t=n.reference&&S.tasks.find(x=>x.id===n.reference)||S.tasks.find(x=>x.id===editReq?.taskId),projectPending=Boolean(S.user?.admin&&n.kind==='approval'&&p?.status==='pending'),projectCompletionPending=Boolean(S.user?.admin&&n.kind==='project_completion'&&p?.status==='pending_completion'),editPending=Boolean(n.kind==='task_edit_approval'&&editReq&&editReq.status==='pending'&&editReq.approver===S.user?.id&&t);
   const action=projectPending?`<div class="modal-footer"><button class="secondary-btn" id="detailRejectProject">驳回申请</button><button class="primary-btn" id="detailApproveProject">同意创建</button></div>`:projectCompletionPending?`<div class="modal-footer"><button class="secondary-btn" id="detailRejectProjectCompletion">驳回申请</button><button class="primary-btn" id="detailApproveProjectCompletion">同意完成</button></div>`:editPending?`<div class="modal-footer"><button class="secondary-btn" id="detailRejectEdit">驳回申请</button><button class="primary-btn" id="detailApproveEdit">同意修改</button></div>`:'<div class="modal-footer"><button class="secondary-btn" id="cancelAction">关闭</button></div>';
   openModal(`<div class="eyebrow">收件箱详情 · ${escapeHTML(n.kind||'通知')}</div><h2>${escapeHTML(n.title)}</h2>${noticeDetail(n.body)}${t?`<div class="detail-grid"><div><span>任务</span><strong>${escapeHTML(t.name)}</strong></div><div><span>负责人</span><strong>${escapeHTML(nameOf(t.assignee))}</strong></div><div><span>状态</span><strong>${status(t)[1]}</strong></div><div><span>项目</span><strong>${escapeHTML(projectName(t))}</strong></div></div>${t.completionSummary?`<div class="completion-summary"><span>提交的完成总结</span><p>${escapeHTML(t.completionSummary)}</p></div>`:''}${editReq?renderEditRequestSummary(t):''}`:p?`<div class="detail-grid"><div><span>关联项目</span><strong>${escapeHTML(p.name)}</strong></div><div><span>项目 Owner</span><strong>${escapeHTML(nameOf(p.owner))}</strong></div><div><span>项目状态</span><strong>${projectStatus(p)}</strong></div></div>${p.completionReport?`<div class="completion-summary"><span>结项报告</span><p>${escapeHTML(p.completionReport)}</p></div>`:''}`:''}<div class="detail-grid"><div><span>通知时间</span><strong title="${escapeHTML(n.createdAt)}">${escapeHTML(relTime(n.createdAt))}</strong></div></div>${action}`);
@@ -883,7 +888,7 @@ function deleteAccount(id){
   };
 }
 async function act(action,data){try{await api('/api/action',{action,data});await refresh();toast('操作已完成')}catch(e){toast(e.message);throw e}}
-function openModal(html){$('#modalContent').innerHTML=html;$('#modalBackdrop').classList.remove('hidden')};function closeModal(){$('#modalBackdrop').classList.add('hidden')};function closeDrawer(){$('#taskDrawer').classList.add('hidden')}
+function openModal(html){$('#modalContent').innerHTML=html;$('#modalBackdrop .modal')?.classList?.remove('is-wide');$('#modalBackdrop').classList.remove('hidden')};function closeModal(){$('#modalBackdrop').classList.add('hidden')};function closeDrawer(){$('#taskDrawer').classList.add('hidden')}
 function newTask(projectId,initialDate){
   const admin=Boolean(S.user.admin),projects=manageableProjects().filter(p=>!isProjectHidden(p)),locked=typeof projectId==='string';
   const initial=projects.find(p=>p.id===projectId)?.id||projects[0]?.id;
@@ -1220,6 +1225,88 @@ async function openPip(){
   pipTimers=[setInterval(renderPomo,1000),setInterval(()=>refresh(),60000)];
   pipWindow.addEventListener('pagehide',()=>{pipTimers.forEach(clearInterval);pipTimers=[];pipWindow=null});
 }
+/* ---------------------------------------------------------------------------
+   档案室 · every finished day's team brief, filed in month drawers. Opening a
+   drawer shows its folders, newest at the back; hovering or focusing one pulls
+   it out with the day at a glance, and a click opens the whole brief. The
+   snapshot only carries index cards; the full brief is fetched on open.
+   ------------------------------------------------------------------------- */
+const WEEKDAY_SHORT=['周日','周一','周二','周三','周四','周五','周六'];
+const briefCards=()=>(S.reports||[]).filter(r=>r.kind==='brief');
+function archiveDrawers(cards){
+  const months=new Map();
+  for(const card of [...cards].sort((a,b)=>String(b.date).localeCompare(String(a.date)))){
+    const key=String(card.date).slice(0,7);
+    if(!months.has(key))months.set(key,[]);
+    months.get(key).push(card);
+  }
+  return [...months].map(([month,files])=>({month,files}));
+}
+const hours=minutes=>(Number(minutes||0)/60).toFixed(1);
+function archiveFile(card,index){
+  const d=new Date(`${card.date}T12:00:00`),t=card.totals||{};
+  return `<button class="archive-file" data-date="${escapeHTML(card.date)}" style="--tab:${index%4}" aria-label="${escapeHTML(card.date)} 团队日报"><span class="file-visual" aria-hidden="true"><span class="file-tab"><b>${d.getDate()}</b>${WEEKDAY_SHORT[d.getDay()]}</span><span class="file-paper"></span><span class="file-body"><strong>团队日报 · ${d.getMonth()+1}月${d.getDate()}日</strong><span>完成 ${t.completed||0}/${t.tasks||0} 项 · ${hours(t.load)}h</span><span>${t.members||0} 位成员 · ${t.projects||0} 个项目${card.riskCount?` · ${card.riskCount} 条关注`:''}</span></span></span></button>`;
+}
+function renderArchive(){
+  const root=$('#archiveCabinet');if(!root)return;
+  const cards=briefCards(),drawers=archiveDrawers(cards);
+  if(!UI.archiveOpen)UI.archiveOpen=new Set(drawers.slice(0,1).map(x=>x.month));
+  $('#archiveEyebrow').textContent=`团队日报 · ${cards.length} 份`;
+  root.innerHTML=drawers.map(({month,files})=>{
+    const [year,mon]=month.split('-'),open=UI.archiveOpen.has(month);
+    return `<section class="cabinet-drawer${open?' is-open':''}" data-month="${escapeHTML(month)}"><button class="drawer-front" aria-expanded="${open}"><span class="drawer-plate"><small>${escapeHTML(year)}</small><strong>${Number(mon)} 月</strong></span><span class="drawer-count">${files.length} 份</span><span class="drawer-pull" aria-hidden="true"></span></button><div class="drawer-body"><div class="drawer-inner"><div class="file-rack">${files.map(archiveFile).join('')}</div></div></div></section>`;
+  }).join('')||`<div class="empty-state"><div class="empty-icon">${icon('archive')}</div><h3>档案室还是空的</h3></div>`;
+  $$('#archiveCabinet .drawer-front').forEach(b=>b.onclick=()=>{
+    const drawer=b.closest('.cabinet-drawer'),month=drawer.dataset.month,open=!UI.archiveOpen.has(month);
+    if(open)UI.archiveOpen.add(month);else UI.archiveOpen.delete(month);
+    drawer.classList.toggle('is-open',open);b.setAttribute('aria-expanded',String(open));
+  });
+  $$('#archiveCabinet .archive-file').forEach(b=>b.onclick=()=>openBrief(b.dataset.date));
+}
+function briefFields(content){
+  if(!content)return '';
+  if(typeof content!=='object')return `<p class="brief-text">${escapeHTML(content)}</p>`;
+  const rows=Object.entries(content).filter(([k,v])=>NOTICE_LABELS[k]&&String(v??'').trim());
+  return rows.length?`<dl class="notice-fields">${rows.map(([k,v])=>`<div><dt>${NOTICE_LABELS[k]}</dt><dd>${escapeHTML(v)}</dd></div>`).join('')}</dl>`:'';
+}
+function briefDocument(brief){
+  const c=brief.content||{},t=c.totals||{},d=new Date(`${brief.date}T12:00:00`);
+  const entry=(title,meta,body)=>`<div class="brief-entry"><div class="brief-entry-head"><strong>${escapeHTML(title)}</strong><span>${escapeHTML(meta)}</span></div>${body}</div>`;
+  return `<article class="brief-doc"><header class="brief-head"><div class="eyebrow">档案室 · 团队日报</div><h2>${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日 · ${WEEKDAY_SHORT[d.getDay()]}</h2><div class="brief-stats"><div><b>${t.completed||0}/${t.tasks||0}</b><span>完成任务</span></div><div><b>${hours(t.load)}h</b><span>完成工时</span></div><div><b>${t.members||0}</b><span>位成员</span></div><div><b>${t.projects||0}</b><span>个项目</span></div></div></header>`
+    +(c.risks?.length?`<section class="brief-section"><h3>需要关注</h3><ul class="brief-risks">${c.risks.map(r=>`<li>${escapeHTML(r)}</li>`).join('')}</ul></section>`:'')
+    +(c.projects?.length?`<section class="brief-section"><h3>项目进展</h3>${c.projects.map(p=>entry(p.name,`Owner · ${p.ownerName||p.owner||''} · ${p.source==='owner'?'Owner 汇报':'系统汇总'} · ${p.completed}/${p.tasks} 完成`,briefFields(p.content))).join('')}</section>`:'')
+    +(c.members?.length?`<section class="brief-section"><h3>成员总结</h3>${c.members.map(m=>entry(m.name,`${m.completed}/${m.tasks} 完成 · ${hours(m.load)}h · ${m.source==='diary'?'本人日记':'系统统计'}`,briefFields(m.summary))).join('')}</section>`:'')
+    +'</article>';
+}
+async function openBrief(date){
+  let brief;
+  try{brief=await api('/api/action',{action:'brief.get',data:{date}})}catch(e){toast(e.message);return}
+  openModal(`${briefDocument(brief)}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">关闭</button></div>`);
+  $('#modalBackdrop .modal')?.classList.add('is-wide');
+  $('#cancelAction').onclick=closeModal;
+}
+/* Inbox housekeeping: delete a notice from its card, or switch to 管理 to pick
+   several. Invitations are answered rather than deleted, so they never take part. */
+async function deleteNotices(ids,read=false){
+  try{
+    const r=await api('/api/action',{action:'inbox.delete',data:read?{read:true}:{ids}});
+    (ids||[]).forEach(id=>UI.inboxPicked?.delete(id));
+    await refresh();toast(r.deleted?`已删除 ${r.deleted} 条通知`:'没有可删除的通知');
+  }catch(e){toast(e.message)}
+}
+function renderInboxToolbar(){
+  const bar=$('#inboxToolbar');if(!bar)return;
+  const manage=Boolean(UI.inboxManage),ids=(S.notifications||[]).map(n=>n.id);
+  UI.inboxPicked=new Set([...(UI.inboxPicked||[])].filter(id=>ids.includes(id)));
+  const picked=UI.inboxPicked.size;
+  $('#manageInboxBtn').textContent=manage?'完成':'管理';
+  bar.classList.toggle('hidden',!manage);
+  if(!manage)return;
+  bar.innerHTML=`<label class="inbox-pick-all"><input type="checkbox" id="inboxPickAll" ${ids.length&&picked===ids.length?'checked':''} ${ids.length?'':'disabled'}>全选</label><span class="inbox-picked">已选 ${picked} 条</span><button class="secondary-btn" id="inboxDeletePicked" ${picked?'':'disabled'}>删除所选</button><button class="secondary-btn" id="inboxDeleteRead" ${(S.notifications||[]).some(n=>n.read)?'':'disabled'}>清除已读</button>`;
+  $('#inboxPickAll').onchange=e=>{UI.inboxPicked=new Set(e.target.checked?ids:[]);renderInbox()};
+  $('#inboxDeletePicked').onclick=()=>deleteNotices([...UI.inboxPicked]);
+  $('#inboxDeleteRead').onclick=()=>deleteNotices(null,true);
+}
 function openSearch(){openModal(`<div class="eyebrow">工作台搜索</div><h2>搜索任务与项目</h2><label class="form-field">关键词<input id="searchQuery" placeholder="搜索"></label><div id="searchResults" class="search-results"><span class="muted">输入关键词开始搜索</span></div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">关闭</button></div>`);$('#cancelAction').onclick=closeModal;const input=$('#searchQuery'),results=$('#searchResults');input.oninput=()=>{const q=input.value.trim().toLowerCase();if(!q){results.innerHTML='<span class="muted">输入关键词开始搜索</span>';return}const ts=(S.user?.admin?S.tasks.filter(t=>!isSuperseded(t)):scheduleTasks()).filter(t=>[t.name,t.assignee,projectName(t)].some(v=>String(v||'').toLowerCase().includes(q)));const ps=S.projects.filter(p=>[p.name,p.owner,p.desc].some(v=>String(v||'').toLowerCase().includes(q)));results.innerHTML=ts.map(t=>`<button class="search-result" data-task="${escapeHTML(t.id)}"><strong>${escapeHTML(t.name)}</strong><small>${escapeHTML(t.assignee)} · ${escapeHTML(projectName(t))}</small></button>`).join('')+ps.map(p=>`<button class="search-result" data-project="${escapeHTML(p.id)}"><strong>${escapeHTML(p.name)}</strong><small>Owner · ${escapeHTML(p.owner)} · ${projectStatus(p)}</small></button>`).join('')||'<span class="muted">没有找到匹配项</span>';$$('.search-result').forEach(b=>b.onclick=()=>{if(b.dataset.task)openDrawer(b.dataset.task);else{closeModal();switchView('projects')}})};input.focus()}
 $$('.nav-item').forEach(b=>b.onclick=()=>switchView(b.dataset.view));
 $('#workspaceSwitcher')?.addEventListener('click',()=>toggleAccountMenu());
@@ -1229,7 +1316,7 @@ document.addEventListener('click',e=>{
   if(e.target.closest('#accountMenu')||e.target.closest('#workspaceSwitcher'))return;
   toggleAccountMenu(false);
 });
-document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleAccountMenu(false)});$$('.filter-link').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;switchView('today')});$$('.quick-tab').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;renderToday()});$('#prevDay').onclick=()=>{UI.dayOffset=(UI.dayOffset||0)-1;renderToday()};$('#nextDay').onclick=()=>{if(displayDay()>=DATE_HORIZON){toast(`日期范围目前只支持到 ${DATE_HORIZON}`);return}UI.dayOffset=(UI.dayOffset||0)+1;renderToday()};$('#inboxBtn').onclick=()=>switchView('inbox');document.querySelector('.icon-btn[title="搜索"]').onclick=openSearch;$('#closeDrawer').onclick=closeDrawer;$('#closeModal').onclick=closeModal;$('#modalBackdrop').onclick=e=>{if(e.target.id==='modalBackdrop')closeModal()};$('#taskDrawer').onclick=e=>{if(e.target.id==='taskDrawer')closeDrawer()};$('#backWeekBtn').onclick=()=>switchView('calendar');$('#backTodayBtn').onclick=()=>{if(UI.selectedWeek)UI.weekDir=UI.selectedWeek>0?'prev':'next';UI.selectedWeek=0;UI.dayOffset=0;switchView('calendar');renderCalendar()};$('#prevWeekBtn').onclick=()=>turnWeek(-1);$('#nextWeekBtn').onclick=()=>turnWeek(1);document.addEventListener('keydown',e=>{if(UI.view!=='calendar'||e.altKey||e.ctrlKey||e.metaKey||e.target.closest('input,textarea,select,[contenteditable]')||!$('#modalBackdrop').classList.contains('hidden')||!$('#taskDrawer').classList.contains('hidden'))return;if(e.key==='ArrowLeft'){e.preventDefault();turnWeek(-1)}else if(e.key==='ArrowRight'){e.preventDefault();turnWeek(1)}});$('#addProjectBtn').onclick=newProject;$('#addProjectTopBtn').onclick=newProject;$('#addTaskBtn').onclick=newTask;$('#emptyAddBtn').onclick=newTask;$('#timelineAddProjectBtn').onclick=newProject;$('#createFixedBtn').onclick=fixedTask;$('#collectionSettingsBtn').onclick=collectionSettings;$('#forceAssignBtn').onclick=()=>switchView('projects');$('#runAutomationBtn').onclick=()=>act('scheduler.run',{});$('#markAllReadBtn').onclick=()=>act('inbox.read',{all:true});$('#generateSummaryBtn').onclick=openTodayDiary;
+document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleAccountMenu(false)});$$('.filter-link').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;switchView('today')});$$('.quick-tab').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;renderToday()});$('#prevDay').onclick=()=>{UI.dayOffset=(UI.dayOffset||0)-1;renderToday()};$('#nextDay').onclick=()=>{if(displayDay()>=DATE_HORIZON){toast(`日期范围目前只支持到 ${DATE_HORIZON}`);return}UI.dayOffset=(UI.dayOffset||0)+1;renderToday()};$('#inboxBtn').onclick=()=>switchView('inbox');document.querySelector('.icon-btn[title="搜索"]').onclick=openSearch;$('#closeDrawer').onclick=closeDrawer;$('#closeModal').onclick=closeModal;$('#modalBackdrop').onclick=e=>{if(e.target.id==='modalBackdrop')closeModal()};$('#taskDrawer').onclick=e=>{if(e.target.id==='taskDrawer')closeDrawer()};$('#backWeekBtn').onclick=()=>switchView('calendar');$('#backTodayBtn').onclick=()=>{if(UI.selectedWeek)UI.weekDir=UI.selectedWeek>0?'prev':'next';UI.selectedWeek=0;UI.dayOffset=0;switchView('calendar');renderCalendar()};$('#prevWeekBtn').onclick=()=>turnWeek(-1);$('#nextWeekBtn').onclick=()=>turnWeek(1);document.addEventListener('keydown',e=>{if(UI.view!=='calendar'||e.altKey||e.ctrlKey||e.metaKey||e.target.closest('input,textarea,select,[contenteditable]')||!$('#modalBackdrop').classList.contains('hidden')||!$('#taskDrawer').classList.contains('hidden'))return;if(e.key==='ArrowLeft'){e.preventDefault();turnWeek(-1)}else if(e.key==='ArrowRight'){e.preventDefault();turnWeek(1)}});$('#addProjectBtn').onclick=newProject;$('#addProjectTopBtn').onclick=newProject;$('#addTaskBtn').onclick=newTask;$('#emptyAddBtn').onclick=newTask;$('#timelineAddProjectBtn').onclick=newProject;$('#createFixedBtn').onclick=fixedTask;$('#collectionSettingsBtn').onclick=collectionSettings;$('#forceAssignBtn').onclick=()=>switchView('projects');$('#runAutomationBtn').onclick=()=>act('scheduler.run',{});$('#markAllReadBtn').onclick=()=>act('inbox.read',{all:true});$('#manageInboxBtn').onclick=()=>{UI.inboxManage=!UI.inboxManage;UI.inboxPicked=new Set();renderInbox()};$('#generateSummaryBtn').onclick=openTodayDiary;
 window.addEventListener('focus',()=>{if(UI.view==='inbox')refreshInboxState()});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&UI.view==='inbox')refreshInboxState()});
 $('#pipBtn').classList.toggle('hidden',!pipSupported());$('#pipBtn').onclick=openPip;

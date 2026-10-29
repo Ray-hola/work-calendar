@@ -210,6 +210,34 @@ test('inbox offers no task approval now that finishing a task needs none', () =>
   assert.ok(!ownerHtml.includes('approve-task-request')&&!ownerHtml.includes('reject-task-request'));
 });
 
+test('notices can be deleted from the inbox, invitations cannot', () => {
+  const a=app();
+  a.run(`S.user={id:'test002',admin:0};S.projects=[{id:'p',name:'项目',owner:'test001',status:'active'}];S.tasks=[];
+         S.notifications=[{id:'n1',kind:'task',title:'任务被调整',body:'改期',createdAt:'2026-09-12',read:true},{id:'n2',kind:'brief',title:'团队日报',body:'摘要',reference:'brief:2026-09-11',createdAt:'2026-09-12',read:false}];
+         S.requests=[{id:'r1',projectId:'p',status:'pending',read:false,createdAt:'2026-09-12'}];`);
+  const els={}; const el=s=>els[s]||(els[s]={innerHTML:'',textContent:'',classList:{toggle(){}}});
+  a.context.document={querySelector:el,querySelectorAll:()=>[]};
+  const html=a.run("(renderInbox(),document.querySelector('#inboxList').innerHTML)");
+  assert.ok(html.includes('data-delete="n1"')&&html.includes('data-delete="n2"'), '每条通知都能删');
+  assert.equal((html.match(/data-delete=/g)||[]).length, 2, '协作邀请没有删除按钮');
+  // In 管理 mode the cards carry a checkbox instead, and the toolbar counts what is picked.
+  const managed=a.run("(UI.inboxManage=true,UI.inboxPicked=new Set(['n2']),renderInbox(),document.querySelector('#inboxList').innerHTML)");
+  assert.equal((managed.match(/class="inbox-pick"/g)||[]).length, 2);
+  assert.ok(!managed.includes('data-delete='));
+  assert.ok(els['#inboxToolbar'].innerHTML.includes('已选 1 条'));
+});
+
+test('the archive files briefs into month drawers, newest first', () => {
+  const a=app();
+  const drawers=a.json(`archiveDrawers([{date:'2026-09-30'},{date:'2026-10-02'},{date:'2026-10-28'},{date:'2026-09-01'}]).map(d=>[d.month,d.files.map(f=>f.date)])`);
+  assert.deepEqual(drawers, [['2026-10',['2026-10-28','2026-10-02']],['2026-09',['2026-09-30','2026-09-01']]]);
+  const folder=a.run(`archiveFile({date:'2026-10-28',totals:{completed:3,tasks:4,load:90,members:2,projects:1},riskCount:2},5)`);
+  assert.ok(folder.includes('--tab:1')&&folder.includes('<b>28</b>周三')&&folder.includes('完成 3/4 项 · 1.5h')&&folder.includes('2 条关注'));
+  const doc=a.run(`briefDocument({date:'2026-10-28',content:{totals:{completed:3,tasks:4,load:90,members:2,projects:1},risks:['<b>风险</b>'],projects:[],members:[{name:'王二',completed:3,tasks:4,load:90,source:'diary',summary:{done:'联调',next:'上线'}}]}})`);
+  assert.ok(doc.includes('2026年10月28日 · 周三')&&doc.includes('本人日记')&&doc.includes('<dt>完成</dt><dd>联调</dd>'));
+  assert.ok(!doc.includes('<b>风险</b>'), '档案内容要转义');
+});
+
 test('inbox renders edit approval action for the request approver, including superadmin', () => {
   const a=app();
   a.run(`S.user={id:'superadmin',admin:1};S.projects=[{id:'p',name:'项目',owner:'test001',status:'active'}];S.tasks=[{id:'t',projectId:'p',name:'任务',assignee:'test001',status:'todo',date:'2026-09-12'}];S.editRequests=[{id:'er',taskId:'t',requester:'test001',approver:'superadmin',status:'pending',reason:'延期',changes:{deadline:'2026-09-15'}}];S.notifications=[{id:'n',kind:'task_edit_approval',title:'任务修改待审批',body:'延期',reference:'er',createdAt:'2026-09-12',read:false}];S.requests=[];`);
