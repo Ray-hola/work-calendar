@@ -6214,6 +6214,221 @@ select {
   margin: 0;
 }
 
+/* 账户管理: drag by the grip (superadmin), 管理 mode picks several at once. */
+.page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.account-rows .account-empty {
+  padding: 4px 8px 10px;
+  margin: 0;
+}
+
+.account-rows:has(.account-item) .account-empty {
+  display: none;
+}
+
+.account-group-heading .group-manage {
+  height: 28px;
+  margin-left: auto;
+  padding: 0 11px;
+  font-size: 12px;
+}
+
+.group-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
+  animation: wcFadeIn var(--t) var(--ease-out) both;
+}
+
+.group-tools .ghost-btn,
+.group-tools .primary-btn {
+  height: 28px;
+  padding: 0 11px;
+  font-size: 12px;
+}
+
+.group-tools .ghost-btn.is-danger:not(:disabled) {
+  color: var(--danger);
+}
+
+.group-tools button:disabled {
+  opacity: .4;
+  cursor: default;
+}
+
+.account-group-heading {
+  flex-wrap: wrap;
+}
+
+.account-group-heading strong {
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .group-tools {
+    flex-basis: 100%;
+    justify-content: flex-start;
+    margin-left: 0;
+  }
+}
+
+.group-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.account-group-heading .group-picked {
+  background: none;
+  padding: 0 4px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.account-group.is-managing .account-item {
+  cursor: pointer;
+}
+
+.account-group.is-managing .account-item.is-picked {
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent-line);
+}
+
+.account-pick {
+  width: 16px;
+  height: 16px;
+  margin: 0 2px 0 0;
+  accent-color: var(--accent);
+  animation: wcFadeIn var(--t) var(--ease-out) both;
+}
+
+.account-item.is-off .avatar,
+.account-item.is-off .account-copy {
+  opacity: .55;
+}
+
+.name-tag.self {
+  color: var(--ink-2);
+  background: var(--surface-sunk);
+  border: 1px solid var(--line);
+}
+
+.name-tag.off {
+  color: var(--danger-ink);
+  background: var(--c-coral-soft);
+  border: 1px solid var(--danger-line);
+}
+
+.account-grip {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 30px;
+  margin: 0 -4px 0 -2px;
+  border-radius: 6px;
+  color: var(--faint);
+  cursor: grab;
+  touch-action: none;
+  opacity: .5;
+  transition: opacity var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+
+.account-grip svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 3;
+}
+
+.account-item:hover .account-grip {
+  opacity: 1;
+}
+
+.account-grip:hover {
+  background: var(--surface-sunk);
+  color: var(--ink-2);
+}
+
+/* The row being dragged leaves a dashed slot; a lifted copy follows the pointer. */
+.account-list .account-item.is-placeholder {
+  background: var(--surface-sunk);
+  box-shadow: inset 0 0 0 1.5px var(--line-strong);
+}
+
+.account-item.is-placeholder > * {
+  visibility: hidden;
+}
+
+.account-ghost {
+  position: fixed;
+  z-index: 40;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 12px 8px;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-md), 0 0 0 1px var(--accent-line);
+  pointer-events: none;
+  transform: scale(1.02);
+  transform-origin: 20% 50%;
+}
+
+.account-ghost .account-grip {
+  opacity: 1;
+  cursor: grabbing;
+}
+
+body.is-dragging-account,
+body.is-dragging-account * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+.account-group:has(.is-placeholder) {
+  border-color: var(--accent-line);
+}
+
+.account-name-list {
+  display: grid;
+  gap: 8px;
+  max-height: 52vh;
+  margin: 6px 0 4px;
+  overflow-y: auto;
+}
+
+.account-name-row {
+  display: grid;
+  grid-template-columns: auto 90px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.account-name-row input {
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.account-name-row input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 /* 17 · Team chat --------------------------------------------------------------- */
 
 /* Unread count per room. */

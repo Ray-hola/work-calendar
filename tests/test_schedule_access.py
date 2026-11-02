@@ -753,8 +753,8 @@ class CreationPolicyTests(unittest.TestCase):
             self.assertEqual(error.exception.status, 403)
 
 
-class SignatureTests(unittest.TestCase):
-    """个性签名 is a single short line the account holder writes about themselves."""
+class AccountPageTests(unittest.TestCase):
+    """个性签名, and the account order superadmin drags on the account page."""
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -765,6 +765,22 @@ class SignatureTests(unittest.TestCase):
     def tearDown(self):
         self.store.close()
         self.temp.cleanup()
+
+    def test_superadmin_sets_the_account_order_and_cannot_move_itself(self):
+        admin = self.store.user('superadmin')
+        self.store.create_user('test002', 'test-only-password')
+        saved = self.store.action(admin, 'account.order', {'order': ['test002', 'ghost', 'test001', 'test002', 'superadmin']})
+        self.assertEqual(saved['order'], ['test002', 'test001', 'superadmin'])
+        self.assertEqual(self.store.snapshot(admin)['accountOrder'], ['test002', 'test001', 'superadmin'])
+        self.assertEqual(self.store.snapshot(self.store.user('test001'))['accountOrder'], [])
+        with self.assertRaises(Problem) as error:
+            self.store.action(self.store.user('test001'), 'account.order', {'order': ['test001']})
+        self.assertEqual(error.exception.status, 403)
+        # Dragging your own row into another 权限组 is refused; others move freely.
+        with self.assertRaises(Problem):
+            self.store.action(admin, 'account.role', {'id': 'superadmin', 'role': 'admin'})
+        self.store.action(admin, 'account.role', {'id': 'test001', 'role': 'admin'})
+        self.assertEqual(self.store.user('test001')['role'], 'admin')
 
     def test_signature_is_one_trimmed_line_and_survives_an_older_page(self):
         me = self.store.user('test001')

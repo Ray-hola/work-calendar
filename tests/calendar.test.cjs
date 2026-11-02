@@ -395,19 +395,25 @@ test('achievement archive is superadmin-only and sorts latest completed first', 
   assert.deepEqual(a.json(`completedProjects()`), []);
 });
 
-test('account management groups superadmins and labels members by project role', () => {
+test('identity is only the 权限组, rows keep the dragged order and carry no per-row actions', () => {
   const a = app();
   a.run(`S.projects=[
-    {id:'p1',name:'项目甲',owner:'test001',members:{test001:'accepted',test002:'accepted'}},
-    {id:'p2',name:'项目乙',owner:'test003',members:{test003:'accepted'}}
-  ];S.user={id:'superadmin',admin:1};S.users=[
-    {id:'superadmin',admin:1,active:1},{id:'test001',admin:0,active:1},{id:'test002',admin:0,active:1}
-  ];`);
-  assert.equal(a.run("accountRoleLabel({id:'superadmin',admin:1,role:'superadmin',active:1})"), '', '权限组本身已写明角色，不再附加权限说明');
-  assert.equal(a.run("accountRoleLabel({id:'boss',admin:1,role:'admin',active:1})"), '');
-  assert.equal(a.run("accountRoleLabel({id:'test001',admin:0,active:1})"), 'Owner：项目甲');
-  assert.equal(a.run("accountRoleLabel({id:'test002',admin:0,active:1})"), '协作者：项目甲');
-  assert.equal(a.run("accountRoleLabel({id:'promoted',admin:0,active:1})"), '暂无项目归属');
+    {id:'p1',name:'项目甲',owner:'test001',members:{test001:'accepted',test002:'accepted'}}
+  ];S.user={id:'superadmin',admin:1,role:'superadmin'};S.users=[
+    {id:'superadmin',admin:1,role:'superadmin',active:1},{id:'test001',admin:0,role:'member',active:1},{id:'test002',admin:0,role:'member',active:0},{id:'test003',admin:0,role:'member',active:1}
+  ];S.accountOrder=['test003','test001'];`);
+  assert.equal(a.run("accountRoleLabel(S.users[0])"), 'superadmin');
+  assert.equal(a.run("accountRoleLabel({id:'boss',admin:1,role:'admin',active:1})"), 'admin');
+  assert.equal(a.run("accountRoleLabel(S.users[1])"), '普通用户', '做项目 Owner 不是身份');
+  assert.deepEqual(a.json("sortedAccounts(S.users.filter(u=>u.role==='member')).map(u=>u.id)"), ['test003', 'test001', 'test002'],
+    '按拖出来的顺序，没排过的接在后面');
+  const row = a.run("renderAccountItem(S.users[2],true,false)");
+  assert.ok(/account-grip/.test(row), 'superadmin 有拖动把手');
+  assert.ok(/已停用/.test(row));
+  assert.ok(!/Owner|协作者|切换|重置密码|删除/.test(row), '行里不再有项目身份和逐个操作的按钮');
+  const picking = a.run("UI.accountPicked=new Set(['test001']);renderAccountItem(S.users[1],true,true)");
+  assert.ok(/account-pick/.test(picking) && /checked/.test(picking) && !/account-grip/.test(picking), '管理模式下改成勾选');
+  assert.ok(!/account-grip/.test(a.run("renderAccountItem(S.users[1],false,false)")), '不是 superadmin 不能拖');
 });
 
 test('agent action envelopes are parsed and removed from the reply text', () => {

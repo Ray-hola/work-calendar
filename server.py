@@ -1293,7 +1293,7 @@ class Store:
             owned={p['id'] for p in projects if p['owner']==user['id']}
             task_requests=[r for r in self.all('task_requests') if user['admin'] or r.get('requester')==user['id'] or r.get('projectId') in owned]
             automation=next((x.get('value',{}) for x in self.all('settings') if x.get('id')=='automation'),{})
-            return {'user':user,'users':self.users(),'today':now().date().isoformat(),'projects':projects,'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees'] or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':[n for n in self.all('notifications') if n['to']==user['id'] and '12:00 初稿' not in str(n.get('title',''))], 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'taskRequests':task_requests, 'creationRules':self.creation_rules(user), 'creationPolicy':self.creation_policy() if user.get('role')=='superadmin' else None, 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or self.get('projects',s['projectId'])['owner']==user['id'])], 'chat':self.chat_summary(user),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.all('audit')[-60:] if user['admin'] else []}
+            return {'user':user,'users':self.users(),'today':now().date().isoformat(),'projects':projects,'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees'] or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':[n for n in self.all('notifications') if n['to']==user['id'] and '12:00 初稿' not in str(n.get('title',''))], 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'taskRequests':task_requests, 'creationRules':self.creation_rules(user), 'creationPolicy':self.creation_policy() if user.get('role')=='superadmin' else None, 'accountOrder':next((x.get('value') or [] for x in self.all('settings') if x.get('id')=='account_order'),[]) if user['admin'] else [], 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or self.get('projects',s['projectId'])['owner']==user['id'])], 'chat':self.chat_summary(user),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.all('audit')[-60:] if user['admin'] else []}
 
     def diary_statistics(self, viewer, start=None, end=None):
         """Return daily completion/load summaries for the diary dashboard.
@@ -1805,6 +1805,18 @@ class Store:
             self.db.execute('UPDATE users SET active=? WHERE id=?',(active,d['id']))
             self.audit(user['id'],'account.toggle',{'target':d['id'],'active':bool(active)})
             return
+        if action=='account.order':
+            # The order accounts are listed in on the account page; superadmin
+            # sets it by dragging.  Unknown ids are dropped.
+            self.superadmin(user)
+            order=d.get('order')
+            if not isinstance(order,list) or len(order)>1000:raise Problem(400,'顺序无效')
+            known={u['id'] for u in self.users()};clean=[]
+            for item in order:
+                item=str(item)
+                if item in known and item not in clean:clean.append(item)
+            self.put('settings',{'id':'account_order','value':clean,'updatedAt':timestamp()})
+            return {'order':clean}
         if action=='account.role':
             # superadmin-only: move an account between the superadmin, admin and
             # member groups without touching its data or password.
@@ -1813,6 +1825,8 @@ class Store:
             role=str(d.get('role') or '').strip()
             if role not in ('superadmin','admin','member'):
                 raise Problem(400,'角色无效')
+            if target==user['id'] and role!=user.get('role'):
+                raise Problem(400,'不能修改自己的权限组')
             row=self.db.execute('SELECT role,active FROM users WHERE id=?',(target,)).fetchone()
             if not row:raise Problem(404,'账户不存在')
             if row['role']=='superadmin' and role!='superadmin':

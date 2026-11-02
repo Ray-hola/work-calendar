@@ -40,7 +40,7 @@ Most collaboration tools want your tasks, daily notes and team data in someone e
 
 **Layout and access**
 - Desktop, tablet and phone layouts.
-- superadmin, admin, project Owner and collaborator roles, enforced on the server. Account management is visible to admins only, and account switching lists only accounts that signed in on that browser.
+- Identity is one of three roles: superadmin, admin or member. Being a project's Owner or a collaborator only decides what one can do inside that project. The server refuses anything beyond these rights. Account management is visible to admins only: superadmin drags accounts to reorder them or move them to another role, or presses 管理 (manage) on a role to tick several accounts and disable / enable, delete, reset the password to 123456 or set the Chinese name. Account switching in the avatar menu lists only accounts that signed in on that browser.
 
 <p align="center">
   <img src="assets/readme/projects.png" alt="Projects: each card lists its tasks, collaborators and the fixed tasks attached to it" width="74%">

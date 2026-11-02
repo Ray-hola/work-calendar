@@ -38,6 +38,7 @@ const ICON_PATHS={
   'dot':'<circle cx="12" cy="12" r="3"/>',
   'chat':'<path d="M20 13.5a2 2 0 0 1-2 2H8.5L4 19V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2Z"/>',
   'mic':'<rect x="9" y="3" width="6" height="10" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v3"/>',
+  'grip':'<path d="M9 6h.01"/><path d="M15 6h.01"/><path d="M9 12h.01"/><path d="M15 12h.01"/><path d="M9 18h.01"/><path d="M15 18h.01"/>',
   'pip':'<rect x="2.5" y="4.5" width="19" height="15" rx="2"/><rect x="12" y="11" width="7" height="6" rx="1"/>'
 };
 function icon(name,extra=''){
@@ -714,16 +715,10 @@ function renderRepeats(){
   $$('.repeat-project').forEach(b=>b.onclick=()=>repeatProjectDialog(b.dataset.id));
   $$('.skip-repeat').forEach(b=>b.onclick=()=>{const date=prompt('请输入本次不执行的日期（YYYY-MM-DD）',S.today);if(!date)return;act('repeat.skip',{id:b.dataset.id,date,skip:true}).catch(()=>{})});
 }
-function accountProjectRoles(id){const owned=S.projects.filter(p=>p.owner===id).map(p=>p.name),joined=S.projects.filter(p=>p.owner!==id&&(p.members||{})[id]==='accepted').map(p=>p.name);return {owned,joined}}
-function accountRoleLabel(x){
-  const role=roleOf(x);
-  if(role==='superadmin'||role==='admin')return '';
-  const {owned,joined}=accountProjectRoles(x.id);const parts=[];
-  if(owned.length)parts.push('Owner：'+owned.join('、'));
-  if(joined.length)parts.push('协作者：'+joined.join('、'));
-  if(!x.active)parts.push('账户已停用');
-  return parts.join('　')||'暂无项目归属';
-}
+/* Identity is only the 权限组: superadmin, admin or 普通用户. Owning or joining
+   a project is not an identity. */
+const ROLE_LABELS={superadmin:'superadmin',admin:'admin',member:'普通用户'};
+function accountRoleLabel(x){return ROLE_LABELS[roleOf(x)]||'普通用户'}
 function roleOf(x){return x&&(x.role||(x.admin?'superadmin':'member'))}
 function userById(id){return (S.users||[]).find(u=>u.id===id)}
 /* 中文名称 is the formal ledger name; 昵称 is what the holder calls themselves.
@@ -827,7 +822,6 @@ function editProfile(id,initialMode){
     }
   };
 }
-function roleText(x){const role=roleOf(x);return role==='superadmin'?'Super Admin':role==='admin'?'Admin':(accountProjectRoles(x.id).owned.length?'项目 Owner':'普通用户')}
 /* Rule groups (规则组) for 普通用户: what each group may start and how far its
    AI assistant goes. They sit apart from the superadmin / admin / 普通用户
    roles, which still decide who is an administrator. Only superadmin sees them,
@@ -852,8 +846,8 @@ function renderCreationPolicy(){
   box.classList.toggle('hidden',!show);if(!show)return;
   const inGroup=gid=>S.users.filter(u=>roleOf(u)==='member'&&groupOf(u)===gid);
   const tag=(label,value,labels)=>`<span class="rule-tag is-${escapeHTML(value)}"><small>${label}</small>${labels[value]||''}</span>`;
-  const row=g=>{const list=inGroup(g.id);return `<div class="rule-row" data-group="${escapeHTML(g.id)}" role="button" tabindex="0" aria-label="编辑「${escapeHTML(g.name)}」"><div class="rule-row-name"><strong>${escapeHTML(g.name)}</strong>${g.id==='default'?'<small>未分组的成员</small>':''}</div><div class="rule-row-tags">${CREATION_KINDS.map(k=>tag(KIND_LABELS[k],g[k],RULE_LABELS)).join('')}${tag('AI 助手',g.agent||'read',AGENT_ACCESS_LABELS)}</div><div class="rule-row-people" title="${escapeHTML(list.map(u=>nameOf(u.id)).join('、'))}">${list.slice(0,4).map(u=>avatarHTML(u.id)).join('')}<span>${list.length} 人</span></div><span class="task-arrow">${icon('chevron-right')}</span></div>`};
-  box.innerHTML=`<div class="creation-head"><div><span class="eyebrow">普通用户的创建与 AI 规则 · 不影响 superadmin / admin</span><h2>规则组</h2></div><button class="secondary-btn" id="addCreationGroup">${icon('plus')}新建规则组</button></div><div class="rule-list">${policy.groups.map(row).join('')}</div>`;
+  const row=g=>{const list=inGroup(g.id);return `<div class="rule-row" data-group="${escapeHTML(g.id)}" role="button" tabindex="0" aria-label="编辑「${escapeHTML(g.name)}」"><div class="rule-row-name"><strong>${escapeHTML(g.name)}</strong></div><div class="rule-row-tags">${CREATION_KINDS.map(k=>tag(KIND_LABELS[k],g[k],RULE_LABELS)).join('')}${tag('AI 助手',g.agent||'read',AGENT_ACCESS_LABELS)}</div><div class="rule-row-people" title="${escapeHTML(list.map(u=>nameOf(u.id)).join('、'))}">${list.slice(0,4).map(u=>avatarHTML(u.id)).join('')}<span>${list.length} 人</span></div><span class="task-arrow">${icon('chevron-right')}</span></div>`};
+  box.innerHTML=`<div class="creation-head"><h2>规则组</h2><button class="secondary-btn" id="addCreationGroup">${icon('plus')}新建规则组</button></div><div class="rule-list">${policy.groups.map(row).join('')}</div>`;
   $$('#creationPolicy .rule-row').forEach(r=>{r.onclick=()=>editRuleGroup(r.dataset.group);r.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();editRuleGroup(r.dataset.group)}}});
   $('#addCreationGroup').onclick=()=>editRuleGroup(null);
 }
@@ -873,7 +867,7 @@ function editRuleGroup(gid){
   const seg=(key,labels,label)=>`<div class="rule-line"><span>${label}</span><div class="rule-seg" role="radiogroup" aria-label="${label}">${Object.entries(labels).map(([v,l])=>`<button type="button" class="rule-opt${draft[key]===v?' is-on':''}" role="radio" aria-checked="${draft[key]===v}" data-key="${key}" data-value="${v}">${l}</button>`).join('')}</div></div>`;
   const person=u=>{const cur=groupOf(u),from=!picked.has(u.id)&&cur!=='default'?`<small>${escapeHTML(groupName(cur))}</small>`:'';return `<button type="button" class="rule-person${picked.has(u.id)?' is-on':''}" data-user="${escapeHTML(u.id)}" aria-pressed="${picked.has(u.id)}"${isDefault?' disabled':''}>${avatarHTML(u.id)}<span>${escapeHTML(nameOf(u.id))}${from}</span></button>`};
   const tools=isDefault?'':'<span><button type="button" class="ghost-btn" id="rulePickAll">全选</button> <button type="button" class="ghost-btn" id="rulePickNone">全不选</button></span>';
-  openModal(`<div class="eyebrow">系统设置 · ${isNew?'新建规则组':'规则组'}</div><div class="rule-card is-editing"><header class="rule-card-head"><input class="rule-name" id="ruleGroupName" value="${escapeHTML(draft.name)}" maxlength="20" aria-label="规则组名称">${isDefault?'<span class="rule-badge">未分组的成员</span>':''}</header><div class="rule-lines">${CREATION_KINDS.map(k=>seg(k,RULE_LABELS,KIND_LABELS[k])).join('')}${seg('agent',AGENT_ACCESS_LABELS,'AI 助手')}</div><div class="rule-members"><div class="rule-members-head"><span>${isDefault?'不在其他规则组的普通用户都按这里的规则':'成员 · 点选加入，可多选'}</span>${tools}</div><div class="rule-people">${members.map(person).join('')||'<span class="muted">还没有普通用户。</span>'}</div></div></div><div class="modal-footer">${isNew||isDefault?'':'<button class="ghost-btn rule-delete" id="deleteRuleGroup">删除</button>'}<button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="saveRuleGroup">${isNew?'创建':'保存'}</button></div>`);
+  openModal(`<div class="rule-card is-editing"><header class="rule-card-head"><input class="rule-name" id="ruleGroupName" value="${escapeHTML(draft.name)}" maxlength="20" aria-label="规则组名称"></header><div class="rule-lines">${CREATION_KINDS.map(k=>seg(k,RULE_LABELS,KIND_LABELS[k])).join('')}${seg('agent',AGENT_ACCESS_LABELS,'AI 助手')}</div><div class="rule-members"><div class="rule-members-head"><span>成员</span>${tools}</div><div class="rule-people">${members.map(person).join('')||'<span class="muted">还没有普通用户。</span>'}</div></div></div><div class="modal-footer">${isNew||isDefault?'':'<button class="ghost-btn rule-delete" id="deleteRuleGroup">删除</button>'}<button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="saveRuleGroup">${isNew?'创建':'保存'}</button></div>`);
   const sync=()=>$$('#modalContent .rule-person').forEach(b=>{const on=picked.has(b.dataset.user);b.classList.toggle('is-on',on);b.setAttribute('aria-pressed',String(on))});
   $$('#modalContent .rule-opt').forEach(b=>b.onclick=()=>{draft[b.dataset.key]=b.dataset.value;b.parentElement.querySelectorAll('.rule-opt').forEach(x=>{x.classList.toggle('is-on',x===b);x.setAttribute('aria-checked',String(x===b))})});
   if(!isDefault){
@@ -891,41 +885,127 @@ function editRuleGroup(gid){
     try{await saveCreationPolicy({groups,assign});closeModal();toast(isNew?`已创建「${label}」`:`「${label}」已保存`)}catch(e){toast(e.message)}
   };
 }
-function renderAccountItem(x,owner,admin){
-  const self=x.id===S.user.id,role=roleOf(x);
-  const nameBtn=owner?`<button class="ghost-btn edit-profile" data-user="${x.id}" data-mode="name">中文名</button>`:'';
-  const selfBtn=self?`<button class="ghost-btn edit-profile" data-user="${x.id}" data-mode="self">昵称 / 头像 / 签名</button>`:'';
-  const actions=self?`<span class="permission-pill">当前身份</span> ${selfBtn} <button class="ghost-btn change-password" data-user="${x.id}">修改密码</button>`
-    :owner?`<select class="role-select" data-user="${x.id}" title="权限组"><option value="superadmin"${role==='superadmin'?' selected':''}>superadmin</option><option value="admin"${role==='admin'?' selected':''}>admin</option><option value="member"${role==='member'?' selected':''}>普通用户</option></select> <button class="ghost-btn reset-password" data-user="${x.id}">重置密码</button> ${nameBtn} <button class="ghost-btn toggle-account" data-user="${x.id}" data-active="${x.active?1:0}">${x.active?'停用':'启用'}</button> ${x.id!=='superadmin'?`<button class="ghost-btn delete-account" data-user="${x.id}">删除</button>`:''} `
-    :(self?nameBtn:'');
-  const tail=self?'':(x.active?`<button class="ghost-btn switch-login" data-user="${x.id}">切换</button>`:'<span class="muted">不可用</span>');
-  const nickTag=x.nickname?`<span class="name-tag nick">${escapeHTML(x.nickname)}</span>`:'';
-  const codeTag=x.displayName?`<span class="name-tag code">${escapeHTML(x.id)}</span>`:'';
-  const sign=x.signature?`<em class="signature">${escapeHTML(x.signature)}</em>`:'';
-  return `<article class="account-item ${self?'current-account':''}">${avatarHTML(x.id)}<div class="account-copy"><div class="account-name"><strong>${escapeHTML(x.displayName||x.id)}</strong>${nickTag}${codeTag}</div>${sign}<span>${escapeHTML(roleText(x))}</span><small>${escapeHTML(accountRoleLabel(x))}</small></div>${actions||tail?`<div class="account-actions">${actions}${tail}</div>`:''}</article>`;
+/* 账户管理 lists accounts by 权限组 and nothing else. superadmin drags a row to
+   reorder it or to move it into another 权限组, and works on several accounts
+   at once from a group's 管理 mode; everyone else only sees the list. */
+const RESET_PASSWORD='123456';
+const ACCOUNT_GROUPS=[['superadmin','superadmin 权限组'],['admin','admin 权限组'],['member','普通用户']];
+function sortedAccounts(list){const order=S.accountOrder||[],at=(u,i)=>{const k=order.indexOf(u.id);return k<0?order.length+i:k};return list.map((u,i)=>[at(u,i),u]).sort((a,b)=>a[0]-b[0]).map(x=>x[1])}
+function renderAccountItem(x,owner,picking){
+  const self=x.id===S.user.id,on=Boolean(UI.accountPicked?.has(x.id));
+  const grip=owner&&!picking?`<span class="account-grip" title="拖动调整顺序或权限组">${icon('grip')}</span>`:'';
+  const pick=picking?`<input type="checkbox" class="account-pick" value="${escapeHTML(x.id)}"${on?' checked':''}${self?' disabled':''} aria-label="选择 ${escapeHTML(x.displayName||x.id)}">`:'';
+  const tags=(x.nickname?`<span class="name-tag nick">${escapeHTML(x.nickname)}</span>`:'')+(x.displayName?`<span class="name-tag code">${escapeHTML(x.id)}</span>`:'')+(self?'<span class="name-tag self">我</span>':'')+(x.active?'':'<span class="name-tag off">已停用</span>');
+  return `<article class="account-item${self?' current-account':''}${on?' is-picked':''}${x.active?'':' is-off'}" data-user="${escapeHTML(x.id)}">${grip}${pick}${avatarHTML(x.id)}<div class="account-copy"><div class="account-name"><strong>${escapeHTML(x.displayName||x.id)}</strong>${tags}</div>${x.signature?`<em class="signature">${escapeHTML(x.signature)}</em>`:''}</div></article>`;
 }
 function renderAccounts(){
-  const u=S.users,admin=Boolean(S.user?.admin),owner=S.user?.role==='superadmin';
-  const ownerProjects=S.projects.filter(p=>p.owner===S.user.id);
-  $('#currentRoleLabel').textContent=owner?'Super Admin':admin?'Admin':ownerProjects.length?'项目 Owner':'协作者';
-  const me=userById(S.user.id)||{};
-  applyAvatar($('.account-banner .avatar'),S.user.id);
-  $('.account-banner strong').innerHTML=escapeHTML(me.displayName||S.user.id)+(me.nickname?` <span class="name-tag nick">${escapeHTML(me.nickname)}</span>`:'');
-  $('.account-banner span').textContent=owner?'Super Admin':admin?'Admin':'';
-  $('.account-banner em.signature')?.remove();
-  if(me.signature)$('.account-banner strong').insertAdjacentHTML('afterend',`<em class="signature">${escapeHTML(me.signature)}</em>`);
-  $('.account-banner .permission-pill')?.remove();
+  /* A refresh mid-drag would rebuild the rows under the pointer. */
+  if(UI.accountDrag)return;
+  const owner=S.user?.role==='superadmin',admin=Boolean(S.user?.admin);
   $('#forceAssignBtn').classList.toggle('hidden',!admin);
-  const superadmins=u.filter(x=>roleOf(x)==='superadmin'),admins=u.filter(x=>roleOf(x)==='admin'),members=u.filter(x=>roleOf(x)==='member');
-  const section=(title,hint,list)=>`<div class="account-group"><div class="account-group-heading"><strong>${title}</strong><span>${list.length}</span></div>${list.map(x=>renderAccountItem(x,owner,admin)).join('')||'<p class="muted">暂无账户。</p>'}</div>`;
-  $('#accountList').innerHTML=section('superadmin 权限组','',superadmins)+section('admin 权限组','',admins)+section('普通用户','',members);
-  $$('.switch-login').forEach(b=>b.onclick=async()=>{try{await api('/api/logout',{});showAuth();$('#loginUser').value=b.dataset.user;$('#loginPass').focus()}catch(e){toast(e.message)}});
-  $$('.toggle-account').forEach(b=>b.onclick=async()=>{try{await act('account.toggle',{id:b.dataset.user,active:b.dataset.active==='0'});toast(b.dataset.active==='0'?'账户已启用':'账户已停用')}catch(e){}});
-  $$('.role-select').forEach(sel=>sel.onchange=async()=>{const next=sel.value;try{await api('/api/action',{action:'account.role',data:{id:sel.dataset.user,role:next}});await refresh();toast(`${sel.dataset.user} 已设为 ${next==='member'?'普通用户':next}`)}catch(e){toast(e.message||'操作失败');await refresh()}});
-  $$('.change-password').forEach(b=>b.onclick=async()=>{const current=prompt('请输入当前密码');if(current===null)return;const pw=prompt('请输入新密码（至少6位）');if(!pw)return;try{await api('/api/password',{id:b.dataset.user,current,password:pw});toast('密码已更新')}catch(e){toast(e.message)}});
-  $$('.reset-password').forEach(b=>b.onclick=async()=>{const pw=prompt(`为 ${b.dataset.user} 设置新密码（至少6位）`);if(!pw)return;try{await api('/api/password',{id:b.dataset.user,password:pw});toast('密码已重置，该账户需重新登录')}catch(e){toast(e.message)}});
-  $$('.edit-profile').forEach(b=>b.onclick=()=>editProfile(b.dataset.user,b.dataset.mode));
-  $$('.delete-account').forEach(b=>b.onclick=()=>deleteAccount(b.dataset.user));
+  if(!owner)UI.accountManage=null;
+  if(!UI.accountPicked)UI.accountPicked=new Set();
+  const section=([role,title])=>{
+    const list=sortedAccounts(S.users.filter(x=>roleOf(x)===role)),picking=UI.accountManage===role;
+    const choosable=list.filter(u=>u.id!==S.user.id),picked=choosable.filter(u=>UI.accountPicked.has(u.id));
+    const btn=(kind,label,ok,cls='ghost-btn')=>`<button class="${cls}" data-batch="${kind}"${ok?'':' disabled'}>${label}</button>`;
+    const tools=picking?`<div class="group-tools"><label class="group-all"><input type="checkbox" class="account-pick-all"${choosable.length&&picked.length===choosable.length?' checked':''}>全选</label><span class="group-picked">已选 ${picked.length}</span>${btn('off','停用',picked.some(u=>u.active))}${btn('on','启用',picked.some(u=>!u.active))}${btn('password','重置密码',picked.length)}${btn('name','设置中文名',picked.length)}${btn('delete','删除',picked.length,'ghost-btn is-danger')}${btn('done','完成',true,'primary-btn')}</div>`:owner&&choosable.length?`<button class="ghost-btn group-manage" data-role="${role}">管理</button>`:'';
+    return `<div class="account-group${picking?' is-managing':''}" data-role="${role}"><div class="account-group-heading"><strong>${title}</strong><span>${list.length}</span>${tools}</div><div class="account-rows">${list.map(x=>renderAccountItem(x,owner,picking)).join('')}<p class="muted account-empty">暂无账户</p></div></div>`;
+  };
+  const box=$('#accountList');
+  box.innerHTML=ACCOUNT_GROUPS.map(section).join('');
+  box.classList.toggle('can-drag',owner&&!UI.accountManage);
+  const pick=(id,on)=>{if(id===S.user.id)return;if(on)UI.accountPicked.add(id);else UI.accountPicked.delete(id);renderAccounts()};
+  $$('#accountList .group-manage').forEach(b=>b.onclick=()=>{UI.accountManage=b.dataset.role;UI.accountPicked=new Set();renderAccounts()});
+  $$('#accountList .is-managing .account-item').forEach(r=>r.onclick=e=>{if(e.target.closest('.account-pick'))return;pick(r.dataset.user,!UI.accountPicked.has(r.dataset.user))});
+  $$('#accountList .account-pick').forEach(c=>c.onchange=()=>pick(c.value,c.checked));
+  $$('#accountList .account-pick-all').forEach(c=>c.onchange=()=>{const role=c.closest('.account-group').dataset.role;S.users.filter(u=>roleOf(u)===role&&u.id!==S.user.id).forEach(u=>c.checked?UI.accountPicked.add(u.id):UI.accountPicked.delete(u.id));renderAccounts()});
+  $$('#accountList [data-batch]').forEach(b=>b.onclick=()=>batchAccountAction(b.dataset.batch));
+  $$('#accountList .account-grip').forEach(g=>g.onpointerdown=e=>startAccountDrag(e,g.closest('.account-item')));
+}
+async function runAccountBatch(ids,label,run){
+  const fails=[];
+  for(const id of ids){try{await run(id)}catch(e){fails.push(`${nameOf(id)}：${e?.message||'失败'}`)}}
+  try{await refresh()}catch(_){}
+  /* The same people often need a second action, so the picks stay. */
+  UI.accountPicked=new Set([...(UI.accountPicked||[])].filter(id=>userById(id)));
+  renderAccounts();
+  toast(fails.length?`${label} ${ids.length-fails.length} 个，${fails.length} 个没成功：${fails.join('；')}`:`已${label} ${ids.length} 个账户`);
+}
+async function batchAccountAction(kind){
+  if(kind==='done'){UI.accountManage=null;UI.accountPicked=new Set();renderAccounts();return}
+  const ids=[...(UI.accountPicked||[])].filter(id=>userById(id)&&id!==S.user.id);if(!ids.length)return;
+  if(kind==='name')return accountNamesDialog(ids);
+  if(kind==='delete')return deleteAccounts(ids);
+  if(kind==='password'){
+    if(!confirm(`把 ${ids.length} 个账户的密码重置为 ${RESET_PASSWORD}？`))return;
+    return runAccountBatch(ids,'重置密码',id=>api('/api/password',{id,password:RESET_PASSWORD}));
+  }
+  const active=kind==='on';
+  return runAccountBatch(ids.filter(id=>Boolean(userById(id).active)!==active),active?'启用':'停用',id=>api('/api/action',{action:'account.toggle',data:{id,active}}));
+}
+function accountNamesDialog(ids){
+  openModal(`<h2>设置中文名</h2><div class="account-name-list">${ids.map(id=>{const u=userById(id);return `<label class="account-name-row">${avatarHTML(id)}<span>${escapeHTML(id)}</span><input data-user="${escapeHTML(id)}" maxlength="12" value="${escapeHTML(u?.displayName||'')}" placeholder="中文名"></label>`}).join('')}</div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmNames">保存</button></div>`);
+  $('#modalContent .account-name-row input')?.focus();
+  $('#cancelAction').onclick=closeModal;
+  $('#confirmNames').onclick=async()=>{
+    const changed=$$('#modalContent .account-name-row input').filter(i=>i.value.trim()!==(userById(i.dataset.user)?.displayName||'')).map(i=>[i.dataset.user,i.value.trim()]);
+    closeModal();if(!changed.length)return;
+    const names=Object.fromEntries(changed);
+    await runAccountBatch(Object.keys(names),'设置中文名',id=>api('/api/action',{action:'account.profile',data:{id,displayName:names[id]}}));
+  };
+}
+/* One account keeps the typed-name check; several are confirmed together. */
+function deleteAccounts(ids){
+  if(ids.length===1){UI.accountPicked=new Set();return deleteAccount(ids[0])}
+  openModal(`<div class="eyebrow danger-eyebrow">不可撤销</div><h2>删除 ${ids.length} 个账户</h2><div class="danger-panel"><ul class="danger-impact">${ids.map(id=>`<li><strong>${escapeHTML(nameOf(id))}</strong> ${escapeHTML(id)}</li>`).join('')}</ul></div><label class="danger-confirm">输入 <code>删除</code> 以继续<input id="deleteAccountsConfirm" autocomplete="off" spellcheck="false"></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="danger-btn" id="confirmDeleteAccounts" disabled>永久删除</button></div>`);
+  const text=$('#deleteAccountsConfirm'),btn=$('#confirmDeleteAccounts');
+  text.oninput=()=>{btn.disabled=text.value.trim()!=='删除'};
+  $('#cancelAction').onclick=closeModal;
+  btn.onclick=async()=>{if(btn.disabled)return;closeModal();await runAccountBatch(ids,'删除',id=>api('/api/action',{action:'account.delete',data:{id,confirm:id}}))};
+}
+/* Drag by the grip: the row lifts into a floating copy, the others slide out
+   of the way, and dropping it in another 权限组 changes that account's group.
+   Pointer events keep it working with a mouse, a pen or a finger. */
+function startAccountDrag(e,row){
+  if(!row||e.button>0||UI.accountManage||S.user?.role!=='superadmin')return;
+  e.preventDefault();
+  const id=row.dataset.user,from=row.closest('.account-group').dataset.role,self=id===S.user.id;
+  const start=[...$$('#accountList .account-item')].map(r=>r.dataset.user).join();
+  const rect=row.getBoundingClientRect(),offX=e.clientX-rect.left,offY=e.clientY-rect.top;
+  const ghost=row.cloneNode(true);ghost.classList.add('account-ghost');
+  Object.assign(ghost.style,{width:rect.width+'px',left:rect.left+'px',top:rect.top+'px'});
+  document.body.appendChild(ghost);row.classList.add('is-placeholder');document.body.classList.add('is-dragging-account');
+  UI.accountDrag={id};
+  const rows=()=>[...$$('#accountList .account-item')];
+  const flip=change=>{const before=new Map(rows().map(r=>[r,r.getBoundingClientRect().top]));change();rows().forEach(r=>{if(r===row)return;const d=before.get(r)-r.getBoundingClientRect().top;if(d)r.animate([{transform:`translateY(${d}px)`},{transform:'none'}],{duration:200,easing:'cubic-bezier(.2,.8,.2,1)'})})};
+  let scroll=0;
+  const move=ev=>{
+    ghost.style.left=(ev.clientX-offX)+'px';ghost.style.top=(ev.clientY-offY)+'px';
+    scroll=ev.clientY<70?-10:ev.clientY>innerHeight-70?10:0;
+    const group=document.elementFromPoint(ev.clientX,ev.clientY)?.closest('#accountList .account-group');
+    if(!group||(self&&group.dataset.role!==from))return;
+    const list=group.querySelector('.account-rows'),others=[...list.querySelectorAll('.account-item')].filter(r=>r!==row);
+    const before=others.find(r=>{const b=r.getBoundingClientRect();return ev.clientY<b.top+b.height/2})||list.querySelector('.account-empty');
+    if(row.parentElement===list&&row.nextElementSibling===before)return;
+    flip(()=>list.insertBefore(row,before));
+  };
+  const tick=setInterval(()=>{if(scroll)scrollBy(0,scroll)},16);
+  const drop=async()=>{
+    removeEventListener('pointermove',move);removeEventListener('pointerup',drop);removeEventListener('pointercancel',drop);clearInterval(tick);
+    const to=row.closest('.account-group').dataset.role,end=row.getBoundingClientRect(),now=ghost.getBoundingClientRect();
+    ghost.animate([{transform:'scale(1.02)'},{transform:`translate(${end.left-now.left}px,${end.top-now.top}px)`}],{duration:170,easing:'cubic-bezier(.2,.8,.2,1)'}).onfinish=()=>{ghost.remove();row.classList.remove('is-placeholder');document.body.classList.remove('is-dragging-account')};
+    const order=rows().map(r=>r.dataset.user);
+    UI.accountDrag=null;
+    if(to===from&&order.join()===start)return;
+    try{
+      if(to!==from)await api('/api/action',{action:'account.role',data:{id,role:to}});
+      await api('/api/action',{action:'account.order',data:{order}});
+      if(to!==from)toast(`${nameOf(id)} 已移到 ${ACCOUNT_GROUPS.find(g=>g[0]===to)[1]}`);
+    }catch(err){toast(err?.message||'调整失败')}
+    try{await refresh()}catch(_){}
+  };
+  addEventListener('pointermove',move);addEventListener('pointerup',drop);addEventListener('pointercancel',drop);
 }
 /* The workspace chip opens a menu: who you are, your own settings, a fast
    account switch and sign-out. Switching accounts only signs out and carries
@@ -1002,7 +1082,7 @@ function newTask(projectId,initialDate){
      the dialog turns into a request. */
   let kind=projects.length?'project':'adhoc',serverMinutes=null,ask=0;
   const kinds=locked?'':`<div class="task-kind-switch">${projects.length?'<button type="button" class="task-kind-btn" data-kind="project">项目任务</button>':''}${temp!=='none'?'<button type="button" class="task-kind-btn" data-kind="adhoc">临时任务</button>':''}${admin?'<button type="button" class="task-kind-btn" id="kindFixedTask">固定任务</button>':''}</div>`;
-  openModal(`<div class="eyebrow">${admin?'管理员':manageableProjects().length?'项目 Owner':'我的任务'}</div><h2 id="taskDialogTitle">新任务</h2>${kinds}<label class="form-field" id="taskProjectField">所属项目<select id="taskProject" ${locked?'disabled':''}>${projects.map(p=>`<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('')}</select></label><label class="form-field">任务名称<input id="taskName" maxlength="120"></label><label class="form-field">任务描述<textarea id="taskDesc"></textarea></label><label class="form-field">指派给<select id="taskAssignee"></select><div id="taskAssigneeLoad" class="assignee-load-hint"></div></label><div class="task-form-grid"><label class="form-field">安排日期<input id="taskDate" type="date" max="${DATE_HORIZON}" value="${initialDate||(UI.view==='dayDetail'?UI.detailDate:displayDay())}"></label><label class="form-field">结束日期<input id="taskDeadline" type="date" max="${DATE_HORIZON}"></label><label class="form-field">时间<input id="taskTime" type="time" value="09:00"></label><label class="form-field">预计时长<input id="taskDuration" type="number" min="1" max="1440" value="30"></label><label class="form-field">优先级<select id="taskPriority"><option>P0</option><option selected>P1</option><option>P2</option></select></label></div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmTask">创建任务</button></div>`);
+  openModal(`<h2 id="taskDialogTitle">新任务</h2>${kinds}<label class="form-field" id="taskProjectField">所属项目<select id="taskProject" ${locked?'disabled':''}>${projects.map(p=>`<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('')}</select></label><label class="form-field">任务名称<input id="taskName" maxlength="120"></label><label class="form-field">任务描述<textarea id="taskDesc"></textarea></label><label class="form-field">指派给<select id="taskAssignee"></select><div id="taskAssigneeLoad" class="assignee-load-hint"></div></label><div class="task-form-grid"><label class="form-field">安排日期<input id="taskDate" type="date" max="${DATE_HORIZON}" value="${initialDate||(UI.view==='dayDetail'?UI.detailDate:displayDay())}"></label><label class="form-field">结束日期<input id="taskDeadline" type="date" max="${DATE_HORIZON}"></label><label class="form-field">时间<input id="taskTime" type="time" value="09:00"></label><label class="form-field">预计时长<input id="taskDuration" type="number" min="1" max="1440" value="30"></label><label class="form-field">优先级<select id="taskPriority"><option>P0</option><option selected>P1</option><option>P2</option></select></label></div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmTask">创建任务</button></div>`);
   const project=()=>kind==='project'?projects.find(p=>p.id===$('#taskProject').value):null;
   const mode=()=>kind==='project'?paths.find(x=>x.p.id===$('#taskProject').value)?.mode:temp;
   const candidates=()=>kind==='adhoc'?S.users.filter(u=>u.active&&(admin?!u.admin:u.id===S.user.id)):projectAssignees(project());
@@ -1041,7 +1121,7 @@ function editTaskAssignment(id){
   const t=S.tasks.find(t=>t.id===id),p=S.projects.find(p=>p.id===t?.projectId);
   if(!canManageProject(p)||p.status!=='active'||!['todo','doing'].includes(t.status)){toast('当前任务不可调整');return}
   const users=projectAssignees(p);
-  openModal(`<div class="eyebrow">${escapeHTML(p.name)} · ${S.user.admin?'管理员':'项目 Owner'}</div><h2>调整任务指派</h2><p>${escapeHTML(t.name)}<br>当前负责人：${escapeHTML(t.assignee)}。调整后将通知原负责人及新负责人。</p><label class="form-field">指派给<select id="assignmentUser">${users.map(u=>`<option value="${escapeHTML(u.id)}">${escapeHTML(u.id)}${u.id===p.owner?' · Owner':''}</option>`).join('')}</select></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmAssignment" ${users.length?'':'disabled'}>保存指派并通知</button></div>`);
+  openModal(`<div class="eyebrow">${escapeHTML(p.name)}</div><h2>调整任务指派</h2><p>${escapeHTML(t.name)}<br>当前负责人：${escapeHTML(t.assignee)}。调整后将通知原负责人及新负责人。</p><label class="form-field">指派给<select id="assignmentUser">${users.map(u=>`<option value="${escapeHTML(u.id)}">${escapeHTML(u.id)}${u.id===p.owner?' · Owner':''}</option>`).join('')}</select></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmAssignment" ${users.length?'':'disabled'}>保存指派并通知</button></div>`);
   if(users.some(u=>u.id===t.assignee))$('#assignmentUser').value=t.assignee;
   $('#cancelAction').onclick=closeModal;$('#confirmAssignment').onclick=async()=>{const assignee=$('#assignmentUser').value;if(assignee===t.assignee){toast('负责人未变更');return}try{await act('task.update',{id,assignee});closeModal();if(!$('#taskDrawer').classList.contains('hidden'))openDrawer(id)}catch(e){}};
 }
@@ -2314,18 +2394,18 @@ const PLAN_STATE={direct:'创建',approval:'提交申请',wait:'稍后再建',no
 function planCardsHTML(board){
   const admin=Boolean(S.user?.admin),people=S.users.filter(u=>u.active&&!u.admin),pm=projectMode();
   const opt=(v,l,cur)=>`<option value="${escapeHTML(v)}"${v===cur?' selected':''}>${escapeHTML(l)}</option>`;
-  const chip=mode=>`<span class="plan-state is-${mode}">${PLAN_STATE[mode]}</span>`;
-  const top=(kind,label,mode,extra='')=>`<div class="plan-card-top"><span class="plan-kind">${icon(kind)}${label}</span>${extra}${chip(mode)}<button type="button" class="plan-remove" title="不要这张卡" aria-label="删除这张卡">${icon('x')}</button></div>`;
+  const chip=(mode,why='')=>`<span class="plan-state is-${mode}"${why?` title="${escapeHTML(why)}"`:''}>${PLAN_STATE[mode]}</span>`;
+  const top=(kind,label,mode,extra='',why='')=>`<div class="plan-card-top"><span class="plan-kind">${icon(kind)}${label}</span>${extra}${chip(mode,why)}<button type="button" class="plan-remove" title="不要这张卡" aria-label="删除这张卡">${icon('x')}</button></div>`;
   const done=x=>`<article class="plan-card is-done">${icon('check')}<span>${escapeHTML(x.result)}</span><strong>${escapeHTML(x.name)}</strong></article>`;
   const note=(text,cls='plan-note')=>text?`<p class="${cls}">${escapeHTML(text)}</p>`:'';
-  const projectCard=p=>p.state==='done'?done(p):`<article class="plan-card is-project is-${pm}" data-ref="${escapeHTML(p.ref)}">${top('folder','新项目',pm)}<input class="plan-title" data-f="name" value="${escapeHTML(p.name)}" maxlength="120" placeholder="项目名称" aria-label="项目名称"><textarea class="plan-desc" data-f="desc" rows="2" placeholder="项目描述（可选）" aria-label="项目描述">${escapeHTML(p.desc)}</textarea><div class="plan-grid">${admin?`<label class="is-wide">Owner<select data-f="owner">${people.map(u=>opt(u.id,nameOf(u.id),p.owner)).join('')}</select></label>`:''}<label>开始<input type="date" data-f="start" value="${escapeHTML(p.start)}" min="${S.today}" max="${DATE_HORIZON}"></label><label>截止（可空）<input type="date" data-f="end" value="${escapeHTML(p.end)}" min="${escapeHTML(p.start)}" max="${DATE_HORIZON}"></label></div><div class="plan-people"><span>${admin?'协作者':'邀请协作者'}</span>${people.filter(u=>u.id!==p.owner).map(u=>`<button type="button" class="plan-person${p.members.includes(u.id)?' is-on':''}" data-user="${escapeHTML(u.id)}" aria-pressed="${p.members.includes(u.id)}">${escapeHTML(nameOf(u.id))}</button>`).join('')||'<span class="muted">没有其他成员</span>'}</div>${note(pm==='none'?'你的规则组不能新建项目':pm==='approval'?'提交后由管理员审批':'')}${note(p.error,'plan-error')}</article>`;
+  const projectCard=p=>p.state==='done'?done(p):`<article class="plan-card is-project is-${pm}" data-ref="${escapeHTML(p.ref)}">${top('folder','新项目',pm,'',pm==='none'?'你的规则组不能新建项目':pm==='approval'?'提交后由管理员审批':'')}<input class="plan-title" data-f="name" value="${escapeHTML(p.name)}" maxlength="120" placeholder="项目名称" aria-label="项目名称"><textarea class="plan-desc" data-f="desc" rows="2" placeholder="项目描述（可选）" aria-label="项目描述">${escapeHTML(p.desc)}</textarea><div class="plan-grid">${admin?`<label class="is-wide">Owner<select data-f="owner">${people.map(u=>opt(u.id,nameOf(u.id),p.owner)).join('')}</select></label>`:''}<label>开始<input type="date" data-f="start" value="${escapeHTML(p.start)}" min="${S.today}" max="${DATE_HORIZON}"></label><label>截止（可空）<input type="date" data-f="end" value="${escapeHTML(p.end)}" min="${escapeHTML(p.start)}" max="${DATE_HORIZON}"></label></div><div class="plan-people"><span>${admin?'协作者':'邀请协作者'}</span>${people.filter(u=>u.id!==p.owner).map(u=>`<button type="button" class="plan-person${p.members.includes(u.id)?' is-on':''}" data-user="${escapeHTML(u.id)}" aria-pressed="${p.members.includes(u.id)}">${escapeHTML(nameOf(u.id))}</button>`).join('')||'<span class="muted">没有其他成员</span>'}</div>${note(p.error,'plan-error')}</article>`;
   const taskCard=t=>{
     if(t.state==='done')return done(t);
     const path=planTaskPath(board,t);if(!path.assignees.includes(t.assignee))t.assignee=path.assignees[0]||'';
     const open=taskProjects(),projects=[opt('','临时任务（不挂项目）',t.project),...board.projects.filter(p=>p.state!=='done').map(p=>opt('ref:'+p.ref,'新项目 · '+(p.name||'未命名'),t.project)),...open.map(x=>opt('id:'+x.p.id,x.p.name,t.project))];
     if(t.project.startsWith('id:')&&!open.some(x=>'id:'+x.p.id===t.project))projects.push(opt(t.project,S.projects.find(x=>'id:'+x.id===t.project)?.name||'已不存在的项目',t.project));
     const prio=`<span class="plan-prio" role="radiogroup" aria-label="优先级">${['P0','P1','P2'].map(v=>`<button type="button" class="priority ${v}${t.priority===v?' is-on':''}" data-prio="${v}" aria-checked="${t.priority===v}" role="radio">${v}</button>`).join('')}</span>`;
-    return `<article class="plan-card is-${path.mode}" data-key="${escapeHTML(t.key)}">${top('calendar-check','任务',path.mode,prio)}<input class="plan-title" data-f="name" value="${escapeHTML(t.name)}" maxlength="120" placeholder="任务名称" aria-label="任务名称"><div class="plan-grid"><label class="is-wide">放在<select data-f="project">${projects.join('')}</select></label><label>负责人<select data-f="assignee"${path.assignees.length>1?'':' disabled'}>${path.assignees.map(id=>opt(id,nameOf(id),t.assignee)).join('')||opt('','—','')}</select></label><label>日期<input type="date" data-f="date" value="${escapeHTML(t.date)}" min="${S.today}" max="${DATE_HORIZON}"></label><label>时间<input type="time" data-f="time" value="${escapeHTML(t.time)}"></label><label>时长（分钟）<input type="number" data-f="duration" min="1" max="1440" value="${Number(t.duration)||60}"></label></div><textarea class="plan-desc" data-f="desc" rows="1" placeholder="补充说明（可选）" aria-label="任务说明">${escapeHTML(t.desc)}</textarea>${note(path.note)}${note(t.error,'plan-error')}</article>`;
+    return `<article class="plan-card is-${path.mode}" data-key="${escapeHTML(t.key)}">${top('calendar-check','任务',path.mode,prio,path.note)}<input class="plan-title" data-f="name" value="${escapeHTML(t.name)}" maxlength="120" placeholder="任务名称" aria-label="任务名称"><div class="plan-grid"><label class="is-wide">放在<select data-f="project">${projects.join('')}</select></label><label>负责人<select data-f="assignee"${path.assignees.length>1?'':' disabled'}>${path.assignees.map(id=>opt(id,nameOf(id),t.assignee)).join('')||opt('','—','')}</select></label><label>日期<input type="date" data-f="date" value="${escapeHTML(t.date)}" min="${S.today}" max="${DATE_HORIZON}"></label><label>时间<input type="time" data-f="time" value="${escapeHTML(t.time)}"></label><label>时长（分钟）<input type="number" data-f="duration" min="1" max="1440" value="${Number(t.duration)||60}"></label></div><textarea class="plan-desc" data-f="desc" rows="1" placeholder="补充说明（可选）" aria-label="任务说明">${escapeHTML(t.desc)}</textarea>${note(t.error,'plan-error')}</article>`;
   };
   return board.projects.map(projectCard).join('')+board.tasks.map(taskCard).join('');
 }
@@ -2356,13 +2436,13 @@ function agentPlanBoard(raw){
 function planRender(board,entering=false){
   const el=board.el;
   $('#agentPanel')?.classList.toggle('is-planning',Boolean(agentState.planBoard&&!agentState.planBoard.closed));
-  const head=`<div class="plan-board-head">${icon('sparkles')}<strong>起草了${board.projects.length?` ${board.projects.length} 个项目、`:' '}${board.tasks.length} 个任务</strong>${board.note?`<span>${escapeHTML(board.note)}</span>`:''}</div>`;
+  const head=`<div class="plan-board-head">${icon('sparkles')}<strong>起草了${board.projects.length?` ${board.projects.length} 个项目、`:' '}${board.tasks.length} 个任务</strong></div>`;
   if(board.closed){
     el.innerHTML=head+`<div class="plan-foot is-closed"><span class="plan-sum">${escapeHTML(board.closedNote||'草稿已收起，没有创建任何内容')}</span><button type="button" class="ghost-btn plan-reopen">重新打开</button></div>`;
   }else{
     const n=planTally(board),left=board.projects.concat(board.tasks).some(x=>x.state!=='done');
     const sum=[n.wait?`${n.wait} 项要等审批`:'',n.none?`${n.none} 项不能创建`:''].filter(Boolean).join(' · ');
-    el.innerHTML=head+`<p class="plan-hint">卡片都已填好。逐张看一眼，哪里不对直接改；按确认之前什么都不会写入。</p><div class="plan-cards${entering?' is-entering':''}">${planCardsHTML(board)}</div><div class="plan-foot"><button type="button" class="ghost-btn plan-add">${icon('plus')}加一个任务</button><span class="plan-sum">${sum}</span><button type="button" class="ghost-btn plan-cancel">${left?'先不建了':'收起'}</button><button type="button" class="primary-btn plan-confirm"${n.direct+n.approval&&!board.busy?'':' disabled'}>${board.busy?'正在创建…':planConfirmLabel(n)}</button></div>`;
+    el.innerHTML=head+`<div class="plan-cards${entering?' is-entering':''}">${planCardsHTML(board)}</div><div class="plan-foot"><button type="button" class="ghost-btn plan-add">${icon('plus')}加一个任务</button><span class="plan-sum">${sum}</span><button type="button" class="ghost-btn plan-cancel">${left?'先不建了':'收起'}</button><button type="button" class="primary-btn plan-confirm"${n.direct+n.approval&&!board.busy?'':' disabled'}>${board.busy?'正在创建…':planConfirmLabel(n)}</button></div>`;
     if(entering)el.querySelectorAll('.plan-card').forEach((c,i)=>c.style.setProperty('--i',String(i)));
   }
   planBind(board);
