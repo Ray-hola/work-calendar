@@ -112,7 +112,7 @@ async function refreshInboxState(){
   return inboxRefreshPromise;
 }
 function switchView(view){
-  if((view==='achievements'||view==='accounts'||view==='archive')&&!S.user?.admin){view='calendar'}
+  if((view==='achievements'||view==='accounts'||view==='archive'||view==='settings')&&!S.user?.admin){view='calendar'}
   const changed=UI.view!==view;
   UI.view=view;
   /* Returning to the week rail should show the current week, not whichever
@@ -120,7 +120,7 @@ function switchView(view){
   if(view==='calendar'&&changed)UI.selectedWeek=0;
   $$('.view').forEach(v=>v.classList.toggle('active-view',v.id===`${view}View`));
   $$('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.view===view));
-  const labels={today:'今日任务',calendar:'周视图',summary:'日记',projects:'项目空间',timeline:'项目时间轴',achievements:'成果库',archive:'档案室',inbox:'收件箱',accounts:'账户管理',dayDetail:'日期详情',chat:'沟通区'};
+  const labels={today:'今日任务',calendar:'周视图',summary:'日记',projects:'项目空间',timeline:'项目时间轴',achievements:'成果库',archive:'档案室',inbox:'收件箱',accounts:'账户管理',settings:'系统设置',dayDetail:'日期详情',chat:'沟通区'};
   $('#crumbCurrent').textContent=`/ ${labels[view]||view}`;
   renderScheduleScope();
   if(view==='calendar')renderCalendar();
@@ -133,6 +133,7 @@ function switchView(view){
   if(view==='archive')renderArchive();
   if(view==='inbox'){renderInbox();refreshInboxState();}
   if(view==='accounts')renderAccounts();
+  if(view==='settings')renderSettings();
   if(view==='chat'){renderChatChannels();loadChat(true);refreshChatPresence();startChatPolling()}else{stopChatPolling()}
   /* The badge hides while you are in the room; leaving it should reveal what is
      still unread there, without waiting for the next poll. updateChatDot is
@@ -829,40 +830,66 @@ function editProfile(id,initialMode){
 function roleText(x){const role=roleOf(x);return role==='superadmin'?'Super Admin':role==='admin'?'Admin':(accountProjectRoles(x.id).owned.length?'项目 Owner':'普通用户')}
 /* Rule groups (规则组) for 普通用户: what each group may start and how far its
    AI assistant goes. They sit apart from the superadmin / admin / 普通用户
-   roles, which still decide who is an administrator. Only superadmin sees them. */
+   roles, which still decide who is an administrator. Only superadmin sees them,
+   in 系统设置. */
 const CREATION_KINDS=['project','tempTask','projectTask'],KIND_LABELS={project:'新项目',tempTask:'临时任务',projectTask:'项目任务'};
 const AGENT_ACCESS_LABELS={off:'关闭',read:'查询与规划',operate:'可代为操作'};
 function groupOf(x){const policy=S.creationPolicy,gid=policy?.assign?.[x.id];return policy?.groups?.some(g=>g.id===gid)?gid:'default'}
 async function saveCreationPolicy(patch={}){const p=S.creationPolicy;await api('/api/action',{action:'creation.update',data:{groups:patch.groups||p.groups,assign:patch.assign||p.assign}});await refresh()}
+/* 系统设置 holds what used to sit under 账户管理: the rule groups (superadmin)
+   and the diary automation (admins). */
+function renderSettings(){
+  const admin=Boolean(S.user?.admin);
+  $('#settingsView .automation-card')?.classList.toggle('hidden',!admin);
+  $('#runAutomationBtn')?.classList.toggle('hidden',!admin);
+  renderCreationPolicy();
+}
+/* Groups that exist read as a list, one row each; a group is made or changed
+   on a card (editRuleGroup). */
 function renderCreationPolicy(){
   const box=$('#creationPolicy');if(!box)return;
   const policy=S.creationPolicy,show=Boolean(S.user?.role==='superadmin'&&policy);
   box.classList.toggle('hidden',!show);if(!show)return;
-  const members=S.users.filter(u=>roleOf(u)==='member'),inGroup=gid=>members.filter(u=>groupOf(u)===gid);
-  const seg=(g,key,labels,label)=>`<div class="rule-line"><span>${label}</span><div class="rule-seg" role="radiogroup" aria-label="${escapeHTML(g.name)} · ${label}">${Object.entries(labels).map(([v,l])=>`<button type="button" class="rule-opt${(g[key]||'read')===v?' is-on':''}" role="radio" aria-checked="${(g[key]||'read')===v}" data-group="${escapeHTML(g.id)}" data-key="${key}" data-value="${v}">${l}</button>`).join('')}</div></div>`;
-  const chip=(u,g)=>`<span class="rule-chip">${avatarHTML(u.id)}<span>${escapeHTML(nameOf(u.id))}</span>${g.id==='default'?'':`<button type="button" class="rule-chip-out" data-user="${escapeHTML(u.id)}" title="移回「${escapeHTML(policy.groups.find(x=>x.id==='default')?.name||'默认规则')}」" aria-label="移出 ${escapeHTML(nameOf(u.id))}">${icon('x')}</button>`}</span>`;
-  const card=g=>{const list=inGroup(g.id);return `<article class="rule-card${g.id==='default'?' is-default':''}" data-group="${escapeHTML(g.id)}"><header class="rule-card-head"><input class="rule-name" data-group="${escapeHTML(g.id)}" value="${escapeHTML(g.name)}" maxlength="20" aria-label="规则组名称">${g.id==='default'?'<span class="rule-badge">未分组的成员</span>':`<button type="button" class="ghost-btn rule-delete" data-group="${escapeHTML(g.id)}">删除</button>`}</header><div class="rule-lines">${CREATION_KINDS.map(k=>seg(g,k,RULE_LABELS,KIND_LABELS[k])).join('')}${seg(g,'agent',AGENT_ACCESS_LABELS,'AI 助手')}</div><div class="rule-members"><div class="rule-members-head"><span>成员 · ${list.length}</span>${g.id==='default'?'':`<button type="button" class="ghost-btn rule-pick" data-group="${escapeHTML(g.id)}">${icon('plus')}选择成员</button>`}</div><div class="rule-chips">${list.map(u=>chip(u,g)).join('')||'<span class="muted">还没有成员</span>'}</div></div></article>`};
-  box.innerHTML=`<div class="creation-head"><div><span class="eyebrow">普通用户的创建与 AI 规则 · 不影响 superadmin / admin</span><h2>规则组</h2></div><button class="secondary-btn" id="addCreationGroup">${icon('plus')}新建规则组</button></div><div class="rule-cards">${policy.groups.map(card).join('')}</div>`;
-  const save=async patch=>{try{await saveCreationPolicy(patch);toast('规则组已保存')}catch(e){toast(e.message);await refresh()}};
-  const edit=(gid,change)=>policy.groups.map(g=>g.id===gid?{...g,...change}:g);
-  $$('#creationPolicy .rule-opt').forEach(b=>b.onclick=()=>{if(b.classList.contains('is-on'))return;b.parentElement.querySelectorAll('.rule-opt').forEach(x=>{x.classList.toggle('is-on',x===b);x.setAttribute('aria-checked',String(x===b))});save({groups:edit(b.dataset.group,{[b.dataset.key]:b.dataset.value})})});
-  $$('#creationPolicy .rule-name').forEach(i=>i.onchange=()=>{const name=i.value.trim();if(!name){i.value=policy.groups.find(g=>g.id===i.dataset.group)?.name||'';return}save({groups:edit(i.dataset.group,{name})})});
-  $$('#creationPolicy .rule-chip-out').forEach(b=>b.onclick=()=>{const assign={...policy.assign};delete assign[b.dataset.user];save({assign})});
-  $$('#creationPolicy .rule-pick').forEach(b=>b.onclick=()=>pickRuleMembers(b.dataset.group));
-  $('#addCreationGroup').onclick=()=>{const names=new Set(policy.groups.map(g=>g.name));let n=1,name='新规则组';while(names.has(name))name=`新规则组 ${++n}`;save({groups:[...policy.groups,{id:'g-'+Math.random().toString(36).slice(2,8),name,project:'approval',tempTask:'direct',projectTask:'none',agent:'read'}]})};
-  $$('#creationPolicy .rule-delete').forEach(b=>b.onclick=()=>{const g=policy.groups.find(x=>x.id===b.dataset.group),fallback=policy.groups.find(x=>x.id==='default')?.name||'默认规则';if(!g||!confirm(`删除「${g.name}」？组里的 ${inGroup(g.id).length} 人会回到「${fallback}」。`))return;save({groups:policy.groups.filter(x=>x.id!==g.id),assign:Object.fromEntries(Object.entries(policy.assign||{}).filter(([,gid])=>gid!==g.id))})});
+  const inGroup=gid=>S.users.filter(u=>roleOf(u)==='member'&&groupOf(u)===gid);
+  const tag=(label,value,labels)=>`<span class="rule-tag is-${escapeHTML(value)}"><small>${label}</small>${labels[value]||''}</span>`;
+  const row=g=>{const list=inGroup(g.id);return `<div class="rule-row" data-group="${escapeHTML(g.id)}" role="button" tabindex="0" aria-label="编辑「${escapeHTML(g.name)}」"><div class="rule-row-name"><strong>${escapeHTML(g.name)}</strong>${g.id==='default'?'<small>未分组的成员</small>':''}</div><div class="rule-row-tags">${CREATION_KINDS.map(k=>tag(KIND_LABELS[k],g[k],RULE_LABELS)).join('')}${tag('AI 助手',g.agent||'read',AGENT_ACCESS_LABELS)}</div><div class="rule-row-people" title="${escapeHTML(list.map(u=>nameOf(u.id)).join('、'))}">${list.slice(0,4).map(u=>avatarHTML(u.id)).join('')}<span>${list.length} 人</span></div><span class="task-arrow">${icon('chevron-right')}</span></div>`};
+  box.innerHTML=`<div class="creation-head"><div><span class="eyebrow">普通用户的创建与 AI 规则 · 不影响 superadmin / admin</span><h2>规则组</h2></div><button class="secondary-btn" id="addCreationGroup">${icon('plus')}新建规则组</button></div><div class="rule-list">${policy.groups.map(row).join('')}</div>`;
+  $$('#creationPolicy .rule-row').forEach(r=>{r.onclick=()=>editRuleGroup(r.dataset.group);r.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();editRuleGroup(r.dataset.group)}}});
+  $('#addCreationGroup').onclick=()=>editRuleGroup(null);
 }
-/* Tick everyone who belongs in a group at once; unticking sends a member back
-   to the default rules. */
-function pickRuleMembers(gid){
-  const policy=S.creationPolicy,g=policy?.groups.find(x=>x.id===gid);if(!g)return;
-  const members=S.users.filter(u=>roleOf(u)==='member'),groupName=id=>policy.groups.find(x=>x.id===id)?.name||'';
-  openModal(`<div class="eyebrow">规则组 · 选择成员</div><h2>${escapeHTML(g.name)}</h2><div class="rule-pick-tools"><button type="button" class="ghost-btn" id="rulePickAll">全选</button><button type="button" class="ghost-btn" id="rulePickNone">全不选</button></div><div class="rule-pick-list">${members.map(u=>{const cur=groupOf(u);return `<label class="rule-pick-item"><input type="checkbox" name="rulePick" value="${escapeHTML(u.id)}"${cur===gid?' checked':''}>${avatarHTML(u.id)}<span><strong>${escapeHTML(nameOf(u.id))}</strong><small>${cur===gid?'已在本组':'现在：'+escapeHTML(groupName(cur))}</small></span></label>`}).join('')||'<p class="muted">还没有普通用户。</p>'}</div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmRulePick">保存</button></div>`);
-  const boxes=()=>$$('input[name="rulePick"]');
-  $('#rulePickAll').onclick=()=>boxes().forEach(x=>x.checked=true);
-  $('#rulePickNone').onclick=()=>boxes().forEach(x=>x.checked=false);
+/* One card both makes a group and changes it: each rule is one click and the
+   members are ticked on the card itself, several at once. Nothing is saved
+   until 创建 / 保存. Who is left in no group follows 默认规则, so that card
+   shows its members without letting them be picked. */
+function editRuleGroup(gid){
+  const policy=S.creationPolicy;if(!policy)return;
+  const isNew=!gid,current=policy.groups.find(g=>g.id===gid),fallback=policy.groups.find(g=>g.id==='default')?.name||'默认规则';
+  if(!isNew&&!current)return;
+  const names=new Set(policy.groups.map(g=>g.name));let n=1,name='新规则组';while(names.has(name))name=`新规则组 ${++n}`;
+  const draft=isNew?{id:'g-'+Math.random().toString(36).slice(2,8),name,project:'approval',tempTask:'direct',projectTask:'none',agent:'read'}:{agent:'read',...current};
+  const isDefault=draft.id==='default',members=S.users.filter(u=>roleOf(u)==='member');
+  const picked=new Set(isNew?[]:members.filter(u=>groupOf(u)===draft.id).map(u=>u.id));
+  const groupName=id=>policy.groups.find(x=>x.id===id)?.name||fallback;
+  const seg=(key,labels,label)=>`<div class="rule-line"><span>${label}</span><div class="rule-seg" role="radiogroup" aria-label="${label}">${Object.entries(labels).map(([v,l])=>`<button type="button" class="rule-opt${draft[key]===v?' is-on':''}" role="radio" aria-checked="${draft[key]===v}" data-key="${key}" data-value="${v}">${l}</button>`).join('')}</div></div>`;
+  const person=u=>{const cur=groupOf(u),from=!picked.has(u.id)&&cur!=='default'?`<small>${escapeHTML(groupName(cur))}</small>`:'';return `<button type="button" class="rule-person${picked.has(u.id)?' is-on':''}" data-user="${escapeHTML(u.id)}" aria-pressed="${picked.has(u.id)}"${isDefault?' disabled':''}>${avatarHTML(u.id)}<span>${escapeHTML(nameOf(u.id))}${from}</span></button>`};
+  const tools=isDefault?'':'<span><button type="button" class="ghost-btn" id="rulePickAll">全选</button> <button type="button" class="ghost-btn" id="rulePickNone">全不选</button></span>';
+  openModal(`<div class="eyebrow">系统设置 · ${isNew?'新建规则组':'规则组'}</div><div class="rule-card is-editing"><header class="rule-card-head"><input class="rule-name" id="ruleGroupName" value="${escapeHTML(draft.name)}" maxlength="20" aria-label="规则组名称">${isDefault?'<span class="rule-badge">未分组的成员</span>':''}</header><div class="rule-lines">${CREATION_KINDS.map(k=>seg(k,RULE_LABELS,KIND_LABELS[k])).join('')}${seg('agent',AGENT_ACCESS_LABELS,'AI 助手')}</div><div class="rule-members"><div class="rule-members-head"><span>${isDefault?'不在其他规则组的普通用户都按这里的规则':'成员 · 点选加入，可多选'}</span>${tools}</div><div class="rule-people">${members.map(person).join('')||'<span class="muted">还没有普通用户。</span>'}</div></div></div><div class="modal-footer">${isNew||isDefault?'':'<button class="ghost-btn rule-delete" id="deleteRuleGroup">删除</button>'}<button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="saveRuleGroup">${isNew?'创建':'保存'}</button></div>`);
+  const sync=()=>$$('#modalContent .rule-person').forEach(b=>{const on=picked.has(b.dataset.user);b.classList.toggle('is-on',on);b.setAttribute('aria-pressed',String(on))});
+  $$('#modalContent .rule-opt').forEach(b=>b.onclick=()=>{draft[b.dataset.key]=b.dataset.value;b.parentElement.querySelectorAll('.rule-opt').forEach(x=>{x.classList.toggle('is-on',x===b);x.setAttribute('aria-checked',String(x===b))})});
+  if(!isDefault){
+    $$('#modalContent .rule-person').forEach(b=>b.onclick=()=>{const id=b.dataset.user;if(picked.has(id))picked.delete(id);else picked.add(id);sync()});
+    $('#rulePickAll').onclick=()=>{members.forEach(u=>picked.add(u.id));sync()};
+    $('#rulePickNone').onclick=()=>{picked.clear();sync()};
+  }
   $('#cancelAction').onclick=closeModal;
-  $('#confirmRulePick').onclick=async()=>{const assign={...policy.assign};boxes().forEach(x=>{if(x.checked)assign[x.value]=gid;else if(assign[x.value]===gid)delete assign[x.value]});try{await saveCreationPolicy({assign});closeModal();toast(`「${g.name}」的成员已更新`)}catch(e){toast(e.message)}};
+  $('#deleteRuleGroup')?.addEventListener('click',async()=>{const count=members.filter(u=>groupOf(u)===draft.id).length;if(!confirm(`删除「${current.name}」？组里的 ${count} 人会回到「${fallback}」。`))return;try{await saveCreationPolicy({groups:policy.groups.filter(x=>x.id!==draft.id),assign:Object.fromEntries(Object.entries(policy.assign||{}).filter(([,g])=>g!==draft.id))});closeModal();toast('规则组已删除')}catch(e){toast(e.message)}});
+  $('#saveRuleGroup').onclick=async()=>{
+    const label=$('#ruleGroupName').value.trim();if(!label){toast('请填写规则组名称');return}
+    const group={...draft,name:label},groups=isNew?[...policy.groups,group]:policy.groups.map(g=>g.id===group.id?group:g);
+    const assign={...policy.assign};
+    if(!isDefault){Object.keys(assign).forEach(id=>{if(assign[id]===group.id&&!picked.has(id))delete assign[id]});picked.forEach(id=>{assign[id]=group.id})}
+    try{await saveCreationPolicy({groups,assign});closeModal();toast(isNew?`已创建「${label}」`:`「${label}」已保存`)}catch(e){toast(e.message)}
+  };
 }
 function renderAccountItem(x,owner,admin){
   const self=x.id===S.user.id,role=roleOf(x);
@@ -889,12 +916,9 @@ function renderAccounts(){
   if(me.signature)$('.account-banner strong').insertAdjacentHTML('afterend',`<em class="signature">${escapeHTML(me.signature)}</em>`);
   $('.account-banner .permission-pill')?.remove();
   $('#forceAssignBtn').classList.toggle('hidden',!admin);
-  $('#runAutomationBtn').classList.toggle('hidden',!admin);
-  $('#accountsView .automation-card').classList.toggle('hidden',!admin);
   const superadmins=u.filter(x=>roleOf(x)==='superadmin'),admins=u.filter(x=>roleOf(x)==='admin'),members=u.filter(x=>roleOf(x)==='member');
   const section=(title,hint,list)=>`<div class="account-group"><div class="account-group-heading"><strong>${title}</strong><span>${list.length}</span></div>${list.map(x=>renderAccountItem(x,owner,admin)).join('')||'<p class="muted">暂无账户。</p>'}</div>`;
   $('#accountList').innerHTML=section('superadmin 权限组','',superadmins)+section('admin 权限组','',admins)+section('普通用户','',members);
-  renderCreationPolicy();
   $$('.switch-login').forEach(b=>b.onclick=async()=>{try{await api('/api/logout',{});showAuth();$('#loginUser').value=b.dataset.user;$('#loginPass').focus()}catch(e){toast(e.message)}});
   $$('.toggle-account').forEach(b=>b.onclick=async()=>{try{await act('account.toggle',{id:b.dataset.user,active:b.dataset.active==='0'});toast(b.dataset.active==='0'?'账户已启用':'账户已停用')}catch(e){}});
   $$('.role-select').forEach(sel=>sel.onchange=async()=>{const next=sel.value;try{await api('/api/action',{action:'account.role',data:{id:sel.dataset.user,role:next}});await refresh();toast(`${sel.dataset.user} 已设为 ${next==='member'?'普通用户':next}`)}catch(e){toast(e.message||'操作失败');await refresh()}});
@@ -912,7 +936,7 @@ function renderAccountMenu(){
   const others=knownAccounts().filter(id=>id!==S.user.id).map(userById).filter(u=>u?.active);
   const head=`<div class="account-menu-head">${avatarHTML(S.user.id,'large')}<div class="account-menu-identity"><strong>${escapeHTML(me.displayName||S.user.id)}</strong>${me.nickname?`<span class="name-tag nick">${escapeHTML(me.nickname)}</span>`:''}<small>${escapeHTML(accountRoleLabel(S.user))}</small></div>${me.signature?`<em class="signature">${escapeHTML(me.signature)}</em>`:''}</div>`;
   const row=(action,label,hint)=>`<button class="account-menu-item" data-action="${action}" role="menuitem">${escapeHTML(label)}${hint?`<small>${escapeHTML(hint)}</small>`:''}</button>`;
-  const mine=`<div class="account-menu-group">${row('profile','我的资料','昵称 / 头像 / 签名')}${row('password','修改密码')}${S.user?.admin?row('accounts','账户管理'):''}</div>`;
+  const mine=`<div class="account-menu-group">${row('profile','我的资料','昵称 / 头像 / 签名')}${row('password','修改密码')}${S.user?.admin?row('accounts','账户管理')+row('settings','系统设置'):''}</div>`;
   const switchGroup=`<div class="account-menu-group"><span class="account-menu-label">切换账户</span>${others.map(u=>`<button class="account-menu-item switch" data-user="${escapeHTML(u.id)}" role="menuitem">${avatarHTML(u.id)}<span>${escapeHTML(u.displayName||u.id)}${u.nickname?`<small>${escapeHTML(u.nickname)}</small>`:''}</span></button>`).join('')}<button class="account-menu-item switch" data-user="" role="menuitem">登录其他账户</button></div>`;
   const foot=`<div class="account-menu-group"><button class="account-menu-item danger" data-action="logout" role="menuitem">退出登录</button></div>`;
   menu.innerHTML=head+mine+switchGroup+foot;
@@ -924,6 +948,7 @@ function accountMenuAction(action){
   if(action==='profile')editProfile(S.user.id,'self');
   else if(action==='password')changeOwnPassword();
   else if(action==='accounts')switchView('accounts');
+  else if(action==='settings')switchView('settings');
   else if(action==='logout')signOutTo('');
 }
 function changeOwnPassword(){
@@ -1120,7 +1145,7 @@ function renderAll(){
   $('#agentBtn')?.classList.toggle('hidden',agentOff);
   if(agentOff)$('#agentPanel')?.classList.add('hidden');
   $('.focus-card > span').textContent=S.user.admin?'成员今日安排':'今日安排';
-  renderStats();renderInbox();renderAccounts();switchView(UI.view);
+  renderStats();renderInbox();renderAccounts();renderSettings();switchView(UI.view);
 }
 
 function scheduleTasks(includeHistory){

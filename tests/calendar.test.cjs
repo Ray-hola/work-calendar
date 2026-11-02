@@ -165,13 +165,18 @@ test('entry points follow the rule group: new, request, or not offered', () => {
   assert.equal(a.run('taskEntryMode()'),'direct');
 });
 
-test('rule groups are cards of one-click rules and member chips, apart from the roles', () => {
-  const policy = liftFunction('renderCreationPolicy'), item = liftFunction('renderAccountItem');
-  assert.ok(/class="rule-opt/.test(policy) && /AGENT_ACCESS_LABELS/.test(policy), '每条规则是一排可点的选项，含 AI 助手');
-  assert.ok(/rule-chip-out/.test(policy) && /pickRuleMembers/.test(policy), '成员直接在卡片上增减，可批量勾选');
-  assert.ok(!/<select/.test(policy), '规则组卡片里不再用下拉框');
+test('rule groups live in 系统设置: a list of groups, each made or changed on a card', () => {
+  const list = liftFunction('renderCreationPolicy'), card = liftFunction('editRuleGroup'), item = liftFunction('renderAccountItem');
+  assert.ok(/class="rule-row"/.test(list) && /editRuleGroup\(null\)/.test(list), '已有的规则组是列表，新建打开卡片');
+  assert.ok(/class="rule-opt/.test(card) && /AGENT_ACCESS_LABELS/.test(card), '卡片上每条规则一键选择，含 AI 助手');
+  assert.ok(/class="rule-person/.test(card) && /rulePickAll/.test(card), '成员直接在卡片上点选，可以全选');
+  assert.ok(!/<select/.test(list + card), '规则组不用下拉框');
   assert.ok(!/group:/.test(item), '账户行的权限组下拉只剩 superadmin / admin / 普通用户');
-  assert.ok(/<h2>规则组<\/h2>/.test(policy), '叫「规则组」，不和权限组混淆');
+  assert.ok(/<h2>规则组<\/h2>/.test(list), '叫「规则组」，不和权限组混淆');
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const accounts = html.match(/<section id="accountsView"[\s\S]*?<\/section>/)[0], settings = html.match(/<section id="settingsView"[\s\S]*?<\/section>/)[0];
+  assert.ok(!/creationPolicy|automation-card/.test(accounts), '账户管理只留账户本身');
+  assert.ok(/creationPolicy/.test(settings) && /automation-card/.test(settings), '规则组和日记自动化都在系统设置');
 });
 
 test('every drafted card says what will happen to it before anything is sent', () => {
