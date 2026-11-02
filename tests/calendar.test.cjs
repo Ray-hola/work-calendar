@@ -309,6 +309,34 @@ test('the archive files briefs into month boxes, newest first', () => {
   assert.ok(!doc.includes('<b>风险</b>'), '档案内容要转义');
 });
 
+test('日记 and 档案室 are one 档案室: members file their own days, admins the team briefs', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  assert.ok(!/data-view="summary"|id="summaryView"/.test(html), '日记栏没有了');
+  assert.ok(/<button class="nav-item" data-view="archive">/.test(html), '档案室人人都有');
+  const a = app();
+  a.run(`S.today='2026-11-02';S.user={id:'test002',admin:0};S.users=[{id:'test002',active:1}];S.projects=[];
+    S.tasks=[{id:'a',name:'联调',assignee:'test002',date:'2026-11-02',status:'done',duration:60},{id:'b',name:'写文档',assignee:'test002',date:'2026-11-02',status:'todo',duration:30},{id:'c',name:'上线',assignee:'test002',date:'2026-11-03',status:'todo',duration:30}];
+    S.diaries=[{author:'test002',date:'2026-10-30',content:{done:'自己写的'}},{author:'test002',date:'2026-10-31',auto:true,content:{done:'系统'}},{author:'other',date:'2026-10-29',content:{}}];
+    S.diaryStats=[];S.reports=[{kind:'brief',date:'2026-11-01'}];`);
+  const cards = a.json('archiveCards().map(c=>[c.date,c.kind,c.source])').sort();
+  assert.deepEqual(cards, [['2026-10-30','diary','manual'],['2026-10-31','diary','auto'],['2026-11-02','diary','draft']], '只有自己的，今天总在');
+  assert.deepEqual(a.json("diaryContent('test002','2026-11-02')"), {done:'✓ 联调', risks:'写文档（未完成）', next:'上线'}, '没写过的一天按当天工作套好模板');
+  assert.ok(/今天 · 11月2日/.test(a.run("archiveFile(archiveCards().find(c=>c.date==='2026-11-02'),0)")));
+  a.run("S.user={id:'superadmin',admin:1}");
+  assert.deepEqual(a.json('archiveCards().map(c=>c.date)'), ['2026-11-01'], '管理员的档案是团队日报');
+  const brief = {date:'2026-11-01',content:{totals:{completed:1,tasks:2,load:60,members:1,projects:1},risks:['要定版'],projects:[{id:'p',name:'官网',owner:'test001',source:'auto',completed:1,tasks:2,content:{done:'首页'}}],members:[{id:'test002',name:'王二',completed:1,tasks:2,load:60,source:'auto',summary:{done:'联调'},edited:true}]}};
+  const editable = a.run(`briefDocument(${JSON.stringify(brief)},true)`);
+  assert.ok(/class="doc-edit" contenteditable="plaintext-only"[^>]*data-scope="risks"/.test(editable), '需要关注可以直接改');
+  assert.ok(/data-scope="members" data-id="test002" data-field="done">联调/.test(editable) && /data-scope="projects" data-id="p" data-field="progress">/.test(editable), '每一块都能改，空的也能补');
+  assert.ok(/已改/.test(editable));
+  assert.ok(!/contenteditable/.test(a.run(`briefDocument(${JSON.stringify(brief)})`)), '导出和只读时是原样');
+  const week = a.run(`weekArchiveHTML({start:'2026-10-31',end:'2026-11-06',briefs:[${JSON.stringify(brief)},${JSON.stringify({...brief,date:'2026-11-02'})}]})`);
+  assert.ok(week.startsWith('<!doctype html>') && /周档案/.test(week), '导出的是一份独立的网页');
+  assert.ok(/<b>2\/4<\/b><span>完成任务<\/span>/.test(week) && /<b>2.0h<\/b>/.test(week), '封面把一周加起来');
+  assert.equal((week.match(/<article class="brief-doc">/g) || []).length, 3, '封面加每天一份日报');
+  assert.ok(/11月1日 · 周日　要定版/.test(week), '本周需要关注带上日期');
+});
+
 test('inbox renders edit approval action for the request approver, including superadmin', () => {
   const a=app();
   a.run(`S.user={id:'superadmin',admin:1};S.projects=[{id:'p',name:'项目',owner:'test001',status:'active'}];S.tasks=[{id:'t',projectId:'p',name:'任务',assignee:'test001',status:'todo',date:'2026-09-12'}];S.editRequests=[{id:'er',taskId:'t',requester:'test001',approver:'superadmin',status:'pending',reason:'延期',changes:{deadline:'2026-09-15'}}];S.notifications=[{id:'n',kind:'task_edit_approval',title:'任务修改待审批',body:'延期',reference:'er',createdAt:'2026-09-12',read:false}];S.requests=[];`);

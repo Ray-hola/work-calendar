@@ -113,7 +113,8 @@ async function refreshInboxState(){
   return inboxRefreshPromise;
 }
 function switchView(view){
-  if((view==='achievements'||view==='accounts'||view==='archive'||view==='settings')&&!S.user?.admin){view='calendar'}
+  if(view==='summary')view='archive';
+  if((view==='achievements'||view==='accounts'||view==='settings')&&!S.user?.admin){view='calendar'}
   const changed=UI.view!==view;
   UI.view=view;
   /* Returning to the week rail should show the current week, not whichever
@@ -121,13 +122,12 @@ function switchView(view){
   if(view==='calendar'&&changed)UI.selectedWeek=0;
   $$('.view').forEach(v=>v.classList.toggle('active-view',v.id===`${view}View`));
   $$('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.view===view));
-  const labels={today:'今日任务',calendar:'周视图',summary:'日记',projects:'项目空间',timeline:'项目时间轴',achievements:'成果库',archive:'档案室',inbox:'收件箱',accounts:'账户管理',settings:'系统设置',dayDetail:'日期详情',chat:'沟通区'};
+  const labels={today:'今日任务',calendar:'周视图',projects:'项目空间',timeline:'项目时间轴',achievements:'成果库',archive:'档案室',inbox:'收件箱',accounts:'账户管理',settings:'系统设置',dayDetail:'日期详情',chat:'沟通区'};
   $('#crumbCurrent').textContent=`/ ${labels[view]||view}`;
   renderScheduleScope();
   if(view==='calendar')renderCalendar();
   if(view==='today')renderToday();
   if(view==='dayDetail')renderDayContent();
-  if(view==='summary')renderSummary();
   if(view==='projects')renderProjects();
   if(view==='timeline')renderTimeline();
   if(view==='achievements')renderAchievements();
@@ -332,73 +332,35 @@ function reviewTaskEdit(id,accept,notificationId){
 }
 function defer(t){openModal(`<div class="eyebrow">未完成 · 递延预览</div><h2>先说说卡在哪里</h2><label class="form-field">原因<select id="deferReason"><option>时间不足</option><option>等待他人</option><option>需求变化</option><option>遇到阻塞</option><option>其他</option></select></label><label class="form-field">剩余工作<textarea id="remainText"></textarea></label><label class="form-field">递延到<input id="deferDate" type="date" max="${DATE_HORIZON}" value="${add(t.date,1)}"></label><label class="form-field">剩余时长<input id="remainMins" type="number" value="${Math.max(15,Math.round(t.duration/2))}"></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">返回修改</button><button class="primary-btn" id="confirmDefer">确认递延</button></div>`);$('#cancelAction').onclick=closeModal;$('#confirmDefer').onclick=async()=>{try{await api('/api/action',{action:'task.defer',data:{id:t.id,reason:$('#deferReason').value,remaining:$('#remainText').value||'继续完成原任务',date:$('#deferDate').value,duration:Number($('#remainMins').value)}});closeModal();closeDrawer();await refresh();toast('任务已递延')}catch(e){toast(e.message)}}}
 function diaryReport(author,day){
-  return (S.diaries||[]).find(r=>r.author===author&&r.date===day)||(S.reports||[]).filter(r=>r.author===author&&r.date===day).sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')))[0];
+  return (S.diaries||[]).find(r=>r.author===author&&r.date===day)||(S.reports||[]).filter(r=>r.author===author&&r.date===day&&r.kind!=='brief').sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')))[0];
 }
-function diaryWeekDays(){return week(UI.diaryWeek||0)}
 function diaryDayStats(author,day){
   const saved=(S.diaryStats||[]).find(r=>r.userId===author&&r.date===day);if(saved)return saved;
   const tasks=S.tasks.filter(t=>t.assignee===author&&taskActiveOn(t,day)&&t.status!=='skipped'&&!isSuperseded(t)),done=tasks.filter(t=>t.status==='done');
   return {completed:done.length,total:tasks.length,load:done.reduce((n,t)=>n+(Number(t.duration)||0),0),loadRatio:tasks.length?done.length/tasks.length:0};
 }
+/* A day's own archive starts filled in from that day's work: what was done,
+   what is still open, and what is lined up for the next day. The holder edits
+   on top of it, and once saved it keeps their text. */
 function diaryContent(author,day){
-  const draft=UI.diaryDrafts?.[`${author}:${day}`];if(draft)return draft;
   const r=diaryReport(author,day);if(r)return typeof r.content==='string'?{done:r.content,risks:'',next:''}:r.content||{};
-  const tasks=S.tasks.filter(t=>t.assignee===author&&taskActiveOn(t,day)&&t.status!=='skipped'&&!isSuperseded(t));
-  return {done:tasks.filter(t=>t.status==='done').map(t=>'✓ '+t.name).join('\n'),risks:'',next:''};
+  const on=d=>S.tasks.filter(t=>t.assignee===author&&taskActiveOn(t,d)&&t.status!=='skipped'&&!isSuperseded(t)),tasks=on(day);
+  return {done:tasks.filter(t=>t.status==='done').map(t=>'✓ '+t.name).join('\n'),risks:tasks.filter(t=>t.status!=='done').map(t=>t.name+'（未完成）').join('\n'),next:on(add(day,1)).filter(t=>t.status!=='done').map(t=>t.name).join('\n')};
 }
-function diaryDayCard(day,author){
-  const r=diaryReport(author,day),c=diaryContent(author,day),stats=diaryDayStats(author,day),draft=UI.diaryDrafts?.[`${author}:${day}`];
-  return `<button class="diary-day-card ${day===S.today?'today':''}" data-diary-date="${day}"><span class="diary-day-top"><b>${wd(day)}</b><strong>${fmt(day)}</strong></span><span class="diary-day-status">${draft?'有未保存编辑':r?(r.auto?'系统已统计':'已记录'):'待记录'} · ${stats.completed}/${stats.total} 项完成</span><span class="diary-day-preview">${escapeHTML(c.done??'')||'点击打开这一天的笔记本'}</span></button>`;
+/* What was actually finished on a day, newest first; for one person or the team. */
+function workLogEntries(day,who=null){
+  const rows=Array.isArray(S.workCompletions)?S.workCompletions.filter(l=>String(l.completedAt||'').slice(0,10)===day).map(l=>({label:`${l.kind==='project'?'项目':'任务'}完成 · ${l.name}`,user:l.assignee||l.owner,at:l.completedAt,project:l.projectName,taskId:l.taskId,projectId:l.projectId,kind:l.kind})):S.tasks.filter(t=>t.status==='done'&&String(t.completedAt||t.date||'').slice(0,10)===day).map(t=>({label:`任务完成 · ${t.name}`,user:t.assignee,at:t.completedAt||t.date,project:projectName(t),taskId:t.id,projectId:t.projectId,kind:'task'}));
+  return (who?rows.filter(l=>l.user===who):rows).sort((a,b)=>String(b.at||'').localeCompare(String(a.at||'')));
 }
-function diaryNotebook(author,day,admin=false){
-  const r=diaryReport(author,day),c=diaryContent(author,day),stats=diaryDayStats(author,day),draft=UI.diaryDrafts?.[`${author}:${day}`],readonly=admin?' readonly':'';
-  return `<div class="diary-notebook"><div class="notebook-toolbar"><button class="secondary-btn diary-back">← 返回${admin?'成员日记':''}周视图</button><div><span class="eyebrow">${escapeHTML(author)} · 日记本${admin?' · 只读':''}</span><h2>${wd(day)} · ${fmt(day)}</h2></div><span class="notebook-state">${draft?'未保存':r?(r.auto?'系统统计 · 可编辑':'已保存'):'未记录'}</span></div><div class="diary-date-nav"><button class="secondary-btn diary-prev-date">← 前一天</button><span>${escapeHTML(day)}</span><button class="secondary-btn diary-next-date">后一天 →</button></div><div class="notebook-paper"><div class="notebook-date">${fmt(day)}　${wd(day)}</div><label>今日完成<textarea id="diaryDone"${readonly} placeholder="${admin?'这一天尚未记录':'今天完成了什么？'}">${escapeHTML(c.done??'')}</textarea></label><label>未完成与阻塞<textarea id="diaryRisks"${readonly} placeholder="${admin?'暂无记录':'哪些事情被递延？原因是什么？'}">${escapeHTML(c.risks??'')}</textarea></label><label>明日计划<textarea id="diaryNext"${readonly} placeholder="${admin?'暂无记录':'明天最重要的工作'}">${escapeHTML(c.next??'')}</textarea></label><div class="notebook-footer"><span class="muted">${stats.completed}/${stats.total} 项任务完成 · 已完成任务预计 ${(stats.load/60).toFixed(1)}h</span>${admin?'':'<button class="primary-btn" id="saveDiaryBtn">保存日记</button>'}</div></div></div>`;
-}
-function renderDiaryAdmin(){
-  const members=S.users.filter(u=>u.active&&!u.admin),day=UI.diaryLogDate||S.today;
-  const logs=Array.isArray(S.workCompletions)?S.workCompletions.filter(l=>String(l.completedAt||'').slice(0,10)===day).map(l=>({label:`${l.kind==='project'?'项目':'任务'}完成 · ${l.name}`,user:l.assignee||l.owner,at:l.completedAt,project:l.projectName,taskId:l.taskId,projectId:l.projectId,kind:l.kind})):S.tasks.filter(t=>t.status==='done'&&String(t.completedAt||t.date||'').slice(0,10)===day).map(t=>({label:`任务完成 · ${t.name}`,user:t.assignee,at:t.completedAt||t.date,project:projectName(t),taskId:t.id,projectId:t.projectId,kind:'task'}));
+/* Under an admin's 档案室: the picked day's work log and everyone's load. */
+function renderArchiveLedger(day){
+  const box=$('#archiveLedger');if(!box)return;
+  const show=Boolean(S.user?.admin&&day);box.classList.toggle('hidden',!show);if(!show)return;
+  const members=S.users.filter(u=>u.active&&!u.admin),logs=workLogEntries(day);
   const rows=members.map(u=>{const stats=diaryDayStats(u.id,day),pct=stats.total?Math.round(stats.completed/stats.total*100):0;return `<div class="diary-load-row"><strong title="${escapeHTML(u.id)}">${escapeHTML(nameOf(u.id))}</strong><span>${stats.completed}/${stats.total} 项完成</span><div class="progress"><i style="width:${pct}%"></i></div><b>${pct}%</b></div>`}).join('');
   const projectRows=visibleProjects().filter(p=>p.status==='active').map(p=>{const ts=S.tasks.filter(t=>t.projectId===p.id&&t.status!=='skipped'&&!isSuperseded(t)),done=ts.filter(t=>t.status==='done').length,pct=ts.length?Math.round(done/ts.length*100):0;return `<div class="diary-project-progress"><strong>${escapeHTML(p.name)}</strong><span>${done}/${ts.length} 完成 · ${pct}%</span></div>`}).join('');
-  $('#diaryWorkspace').innerHTML=`<div class="diary-admin"><div class="notebook-shelf-heading"><div><span class="eyebrow">SUPERADMIN · 成员笔记本</span><h2>笔记本展示柜</h2></div></div><div class="notebook-shelf">${members.map(u=>{const r=diaryReport(u.id,S.today);return `<button class="member-notebook" data-member="${escapeHTML(u.id)}"><span class="notebook-cover">${escapeHTML(String(nameOf(u.id)).slice(0,1))}</span><strong>${escapeHTML(nameOf(u.id))}</strong><small>${r?(r.auto?'今日系统已统计':'今日已记录'):'等待今日记录'}</small></button>`}).join('')||'<p class="muted">暂无成员笔记本。</p>'}</div><div class="diary-log-toolbar"><label>查看工作日期<input id="diaryLogDate" type="date" max="${DATE_HORIZON}" value="${escapeHTML(day)}"></label><button class="secondary-btn" id="diaryLogToday">返回今天</button></div><div class="diary-admin-grid"><div class="diary-log-panel"><div class="panel-heading"><div><h2>工作日志 · ${fmt(day)}</h2></div></div><div class="diary-log-list">${logs.length?logs.sort((a,b)=>String(b.at||'').localeCompare(String(a.at||''))).map(l=>`<button class="diary-log-item diary-log-button" data-task-id="${escapeHTML(l.taskId||'')}" data-project-id="${escapeHTML(l.projectId||'')}" data-log-kind="${escapeHTML(l.kind||'')}"><i></i><span>${escapeHTML(l.label)}${l.project?`<small class="diary-log-project">${escapeHTML(l.project)}</small>`:''}</span><small>${escapeHTML(l.user?nameOf(l.user):'')}　${icon('chevron-right')}</small></button>`).join(''):'<p class="muted">当日暂无已完成任务或项目。</p>'}</div><div class="diary-projects"><h3>项目当前进度</h3>${projectRows||'<p class="muted">暂无进行中的项目。</p>'}</div></div><div class="diary-load-panel"><div class="panel-heading"><div><h2>成员负载</h2></div></div>${rows||'<p class="muted">暂无成员数据。</p>'}</div></div></div>`;
-  $$('.member-notebook').forEach(b=>b.onclick=()=>{UI.diaryAuthor=b.dataset.member;UI.diaryWeek=0;UI.diaryDate=null;renderSummary()});
-  $('#diaryLogDate').onchange=e=>{if(e.target.value){UI.diaryLogDate=e.target.value;renderSummary()}};
-  $('#diaryLogToday').onclick=()=>{UI.diaryLogDate=S.today;renderSummary()};
-  $$('.diary-log-button').forEach(b=>b.onclick=()=>openWorkLogDetail(b.dataset.taskId,b.dataset.projectId,b.dataset.logKind));
-}
-function openWorkLogDetail(taskId,projectId,kind){
-  if(kind==='task'&&taskId){openDrawer(taskId);return}
-  const p=S.projects.find(x=>x.id===projectId)||((S.achievements||[]).find(x=>x.id===projectId));if(!p){toast('找不到对应项目详情');return}
-  const tasks=Array.isArray(p.tasks)?p.tasks:S.tasks.filter(t=>t.projectId===p.id),done=tasks.filter(t=>t.status==='done').length;
-  openModal(`<div class="eyebrow">项目完成记录</div><h2>${escapeHTML(p.name)}</h2><div class="detail-grid"><div><span>Owner</span><strong>${escapeHTML(p.owner)}</strong></div><div><span>状态</span><strong>${escapeHTML(projectStatus(p))}</strong></div><div><span>任务进度</span><strong>${done}/${tasks.length} 已完成</strong></div><div><span>完成时间</span><strong>${escapeHTML(p.completedAt||'')}</strong></div></div>${p.completionReport?`<div class="completion-summary"><span>结项报告</span><p>${escapeHTML(p.completionReport)}</p></div>`:''}<div class="history"><h3>项目子任务</h3>${tasks.map(t=>`<div class="history-item"><i></i><span>${escapeHTML(t.name)} · ${escapeHTML(status(t)[1])} · ${escapeHTML(t.assignee)}</span></div>`).join('')||'<div class="history-item"><i></i><span>暂无子任务</span></div>'}</div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">返回日志</button></div>`);
-  $('#cancelAction').onclick=closeModal;
-}
-function openTodayDiary(){
-  if(!S.user||S.user.admin)return;
-  UI.diaryAuthor=S.user.id;UI.diaryDate=S.today;UI.diaryWeek=0;renderSummary();
-}
-function renderSummary(){
-  const me=S.user;if(!me)return;
-  if(UI.diaryViewer!==me.id){Object.assign(UI,{diaryViewer:me.id,diaryAuthor:me.admin?null:me.id,diaryWeek:0,diaryDate:null,diaryDrafts:{},diaryLogDate:S.today})}
-  const todayButton=$('#generateSummaryBtn');todayButton.hidden=Boolean(me.admin);todayButton.onclick=openTodayDiary;
-  if(me.admin&&!S.users.some(u=>u.id===UI.diaryAuthor&&u.active&&!u.admin)){UI.diaryAuthor=null;UI.diaryDate=null;renderDiaryAdmin();return}
-  const author=me.admin?UI.diaryAuthor:me.id,days=diaryWeekDays().filter(d=>d<=DATE_HORIZON),day=UI.diaryDate;
-  if(day){
-    $('#diaryWorkspace').innerHTML=diaryNotebook(author,day,me.admin);
-    $('#diaryWorkspace .diary-back').onclick=()=>{UI.diaryDate=null;renderSummary()};
-    const changeDay=offset=>{const next=add(day,offset);if(next>DATE_HORIZON){toast(`日期范围目前只支持到 ${DATE_HORIZON}`);return}UI.diaryDate=next;UI.diaryWeek=Math.round((new Date(`${weekStart(UI.diaryDate)}T12:00:00`)-new Date(`${weekStart(S.today)}T12:00:00`))/604800000);renderSummary()};
-    $('.diary-prev-date').onclick=()=>changeDay(-1);$('.diary-next-date').onclick=()=>changeDay(1);
-    if(!me.admin){
-      const key=`${author}:${day}`,readContent=()=>({done:$('#diaryDone').value,risks:$('#diaryRisks').value,next:$('#diaryNext').value});
-      $$('#diaryWorkspace textarea').forEach(input=>input.oninput=()=>{UI.diaryDrafts[key]=readContent();$('.notebook-state').textContent='未保存'});
-      $('#saveDiaryBtn').onclick=async()=>{const content=readContent(),button=$('#saveDiaryBtn');button.disabled=true;try{await act('diary.save',{date:day,content});delete UI.diaryDrafts[key];renderSummary();toast('日记已保存')}catch(e){button.disabled=false}};
-    }
-    return;
-  }
-  const stats=diaryDayStats(author,S.today);
-  $('#diaryWorkspace').innerHTML=`<div class="diary-week">${me.admin?'<div><button class="secondary-btn diary-shelf-back">← 返回笔记本展示柜</button></div>':''}<div class="diary-week-toolbar"><div><span class="eyebrow">${escapeHTML(author)} · ${fmt(days[0])} — ${fmt(days.at(-1))}</span><h2>${me.admin?escapeHTML(author)+' 的日记':'我的日记'}周视图</h2></div><div class="diary-week-actions"><button class="secondary-btn diary-prev-week">← 上周</button><button class="secondary-btn diary-current-week">返回本周</button><button class="secondary-btn diary-next-week">下周 →</button></div></div><div class="diary-week-track">${days.map(d=>diaryDayCard(d,author)).join('')}</div><div class="diary-stat-strip"><span>今日完成 <b>${stats.completed}/${stats.total}</b></span><span>已完成任务预计时长 <b>${(stats.load/60).toFixed(1)}h</b></span><span>今日完成比例 <b>${Math.round((stats.loadRatio||0)*100)}%</b></span></div></div>`;
-  $('.diary-prev-week').onclick=()=>{UI.diaryWeek=(UI.diaryWeek||0)-1;renderSummary()};$('.diary-next-week').onclick=()=>{if((UI.diaryWeek||0)>=weekOffsetFor(DATE_HORIZON)){toast(`日期范围目前只支持到 ${DATE_HORIZON}`);return}UI.diaryWeek=(UI.diaryWeek||0)+1;renderSummary()};$('.diary-current-week').onclick=()=>{UI.diaryWeek=0;renderSummary()};
-  if(me.admin)$('.diary-shelf-back').onclick=()=>{UI.diaryAuthor=null;UI.diaryDate=null;renderSummary()};
-  $$('.diary-day-card').forEach(b=>b.onclick=()=>{UI.diaryDate=b.dataset.diaryDate;renderSummary()});
+  box.innerHTML=`<div class="diary-admin-grid"><div class="diary-log-panel"><div class="panel-heading"><h2>工作日志 · ${fmt(day)}</h2></div><div class="diary-log-list">${logs.map(l=>`<button class="diary-log-item diary-log-button" data-task-id="${escapeHTML(l.taskId||'')}" data-project-id="${escapeHTML(l.projectId||'')}" data-log-kind="${escapeHTML(l.kind||'')}"><i></i><span>${escapeHTML(l.label)}${l.project?`<small class="diary-log-project">${escapeHTML(l.project)}</small>`:''}</span><small>${escapeHTML(l.user?nameOf(l.user):'')}　${icon('chevron-right')}</small></button>`).join('')||'<p class="muted">当日暂无已完成任务或项目。</p>'}</div><div class="diary-projects"><h3>项目当前进度</h3>${projectRows||'<p class="muted">暂无进行中的项目。</p>'}</div></div><div class="diary-load-panel"><div class="panel-heading"><h2>成员负载 · ${fmt(day)}</h2></div>${rows||'<p class="muted">暂无成员数据。</p>'}</div></div>`;
+  box.querySelectorAll('.diary-log-button').forEach(b=>b.onclick=()=>openWorkLogDetail(b.dataset.taskId,b.dataset.projectId,b.dataset.logKind));
 }
 function canManageProject(p){return Boolean(p&&(S.user?.admin||p.owner===S.user?.id))}
 function projectAssignees(p){return S.users.filter(u=>u.active&&p?.members?.[u.id]==='accepted')}
@@ -1071,7 +1033,7 @@ function deleteAccount(id){
   };
 }
 async function act(action,data){try{await api('/api/action',{action,data});await refresh();toast('操作已完成')}catch(e){toast(e.message);throw e}}
-function openModal(html){if(UI.briefSource){UI.briefSource.closest('.archive-file')?.classList.remove('is-out');UI.briefSource=null}UI.briefTyping?.finish();UI.briefTyping=null;document.querySelectorAll('.brief-folder').forEach(x=>x.remove());['#modalBackdrop','#modalBackdrop .modal','#modalContent'].forEach(s=>$(s)?.getAnimations?.().forEach(a=>a.cancel()));$('#modalContent').innerHTML=html;$('#modalBackdrop .modal')?.classList?.remove('is-wide','is-flown');$('#modalBackdrop').classList.remove('hidden')};function closeModal(){if(typeof foldBrief==='function'&&foldBrief())return;$('#modalBackdrop').classList.add('hidden')};function closeDrawer(){$('#taskDrawer').classList.add('hidden')}
+function openModal(html){UI.docDirty=false;if(UI.briefSource){UI.briefSource.closest('.archive-file')?.classList.remove('is-out');UI.briefSource=null}UI.briefTyping?.finish();UI.briefTyping=null;document.querySelectorAll('.brief-folder').forEach(x=>x.remove());['#modalBackdrop','#modalBackdrop .modal','#modalContent'].forEach(s=>$(s)?.getAnimations?.().forEach(a=>a.cancel()));$('#modalContent').innerHTML=html;$('#modalBackdrop .modal')?.classList?.remove('is-wide','is-flown');$('#modalBackdrop').classList.remove('hidden')};function closeModal(){if(UI.docDirty&&!confirm('修改还没保存，确定关闭？'))return;UI.docDirty=false;if(typeof foldBrief==='function'&&foldBrief())return;$('#modalBackdrop').classList.add('hidden')};function closeDrawer(){$('#taskDrawer').classList.add('hidden')}
 function newTask(projectId,initialDate){
   const admin=Boolean(S.user.admin),paths=taskProjects(),projects=paths.map(x=>x.p),temp=tempTaskMode(),locked=typeof projectId==='string';
   if(!projects.length&&temp==='none'){toast('你所在的规则组不能新建任务');return}
@@ -1448,8 +1410,10 @@ function archiveDrawers(cards){
 const hours=minutes=>(Number(minutes||0)/60).toFixed(1);
 const archiveDay=date=>{const d=new Date(`${date}T12:00:00`);return `${d.getMonth()+1}月${d.getDate()}日 · ${WEEKDAY_SHORT[d.getDay()]}`};
 function archiveFile(card,index,picked=false){
-  const d=new Date(`${card.date}T12:00:00`),t=card.totals||{};
-  return `<button class="archive-file${picked?' is-picked':''}" data-date="${escapeHTML(card.date)}" style="--i:${index};--tab:${index%4}" tabindex="-1" aria-label="${escapeHTML(card.date)} 团队日报"><span class="file-sheet" aria-hidden="true"><span class="file-tab"><b>${d.getDate()}</b>${WEEKDAY_SHORT[d.getDay()]}</span><span class="file-face"></span></span><span class="file-body" hidden><strong>团队日报 · ${archiveDay(card.date)}</strong><span>完成 ${t.completed||0}/${t.tasks||0} 项 · ${hours(t.load)}h</span><span>${t.members||0} 位成员 · ${t.projects||0} 个项目${card.riskCount?` · ${card.riskCount} 条关注`:''}</span></span></button>`;
+  const d=new Date(`${card.date}T12:00:00`),t=card.totals||{},mine=card.kind==='diary';
+  const body=mine?`<strong>${card.date===S.today?'今天':'我的档案'} · ${archiveDay(card.date)}</strong><span>完成 ${t.completed||0}/${t.tasks||0} 项 · ${hours(t.load)}h</span><span>${{manual:'已记录',auto:'系统整理',draft:'待记录'}[card.source]||''}</span>`
+    :`<strong>团队日报 · ${archiveDay(card.date)}</strong><span>完成 ${t.completed||0}/${t.tasks||0} 项 · ${hours(t.load)}h</span><span>${t.members||0} 位成员 · ${t.projects||0} 个项目${card.riskCount?` · ${card.riskCount} 条关注`:''}</span>`;
+  return `<button class="archive-file${picked?' is-picked':''}" data-date="${escapeHTML(card.date)}" style="--i:${index};--tab:${index%4}" tabindex="-1" aria-label="${escapeHTML(card.date)} ${mine?'我的档案':'团队日报'}"><span class="file-sheet" aria-hidden="true"><span class="file-tab"><b>${d.getDate()}</b>${WEEKDAY_SHORT[d.getDay()]}</span><span class="file-face"></span></span><span class="file-body" hidden>${body}</span></button>`;
 }
 function archiveBox(month,files,pick){
   const [year,mon]=month.split('-');
@@ -1467,11 +1431,14 @@ function archiveRuler(month,files,pick){
 const archiveStill=()=>matchMedia('(prefers-reduced-motion: reduce)').matches||!document.body.animate;
 function renderArchive(){
   const root=$('#archiveCabinet');if(!root)return;
-  const cards=briefCards(),drawers=archiveDrawers(cards),months=drawers.map(x=>x.month);
+  const admin=Boolean(S.user?.admin),cards=archiveCards(),drawers=archiveDrawers(cards),months=drawers.map(x=>x.month);
   if(!months.includes(UI.archiveMonth))UI.archiveMonth=months[0]||null;
   const files=drawers.find(x=>x.month===UI.archiveMonth)?.files||[];
   if(!files.some(f=>f.date===UI.archivePick))UI.archivePick=files[0]?.date||null;
-  $('#archiveEyebrow').textContent=`团队日报 · ${cards.length} 份`;
+  $('#archiveEyebrow').textContent=`${admin?'团队日报':'我的档案'} · ${cards.length} 份`;
+  $('#archiveTodayBtn')?.classList.toggle('hidden',admin);
+  $('#archiveExportBtn')?.classList.toggle('hidden',!admin);
+  renderArchiveLedger(UI.archivePick);
   /* Refreshes re-render every view; leave the box alone unless something in it
      changed, so the picked folder does not drop back mid-slide. */
   const key=JSON.stringify([cards,UI.archiveMonth]);
@@ -1492,6 +1459,8 @@ function pickArchive(date,force=false){
   if(pointer&&tick&&!ruler.classList.contains('is-tracking'))pointer.style.setProperty('--at',tick.style.getPropertyValue('--at'));
   if(!force&&file.classList.contains('is-picked'))return;
   UI.archivePick=date;
+  /* The admin's log and load follow the picked day, once the hand settles. */
+  if(S.user?.admin){clearTimeout(UI.ledgerTimer);UI.ledgerTimer=setTimeout(()=>renderArchiveLedger(UI.archivePick),140)}
   root.querySelectorAll('.archive-file').forEach(b=>b.classList.toggle('is-picked',b===file));
   root.querySelectorAll('.ruler-tick').forEach(t=>t.classList.toggle('is-picked',t===tick));
   const caption=root.querySelector('.caption-body'),label=pointer?.querySelector('b');
@@ -1508,7 +1477,7 @@ function stepArchive(delta){
   if(i>=0)pickArchive(dates[Math.max(0,Math.min(dates.length-1,i+delta))]);
 }
 function switchArchiveMonth(step){
-  const months=archiveDrawers(briefCards()).map(x=>x.month),next=months[months.indexOf(UI.archiveMonth)+step];
+  const months=archiveDrawers(archiveCards()).map(x=>x.month),next=months[months.indexOf(UI.archiveMonth)+step];
   if(!next)return;
   UI.archiveMonth=next;UI.archivePick=null;renderArchive();
   const stage=$('#archiveCabinet .drawer-stage');
@@ -1517,7 +1486,7 @@ function switchArchiveMonth(step){
 function bindArchive(){
   const root=$('#archiveCabinet'),stage=root.querySelector('.drawer-stage'),ruler=root.querySelector('.archive-ruler');
   root.querySelectorAll('.box-step').forEach(b=>b.onclick=()=>switchArchiveMonth(Number(b.dataset.step)));
-  const openPicked=()=>openBrief(UI.archivePick,root.querySelector('.archive-file.is-picked'));
+  const openPicked=()=>openArchive(UI.archivePick,root.querySelector('.archive-file.is-picked'));
   root.querySelector('.caption-open').onclick=openPicked;
   root.querySelectorAll('.archive-file').forEach(b=>b.onclick=openPicked);
   /* Sliding across the box picks whichever folder is under the pointer, as the
@@ -1579,13 +1548,17 @@ function briefFields(content){
   const rows=Object.entries(content).filter(([k,v])=>NOTICE_LABELS[k]&&String(v??'').trim());
   return rows.length?`<dl class="notice-fields">${rows.map(([k,v])=>`<div><dt>${NOTICE_LABELS[k]}</dt><dd>${escapeHTML(v)}</dd></div>`).join('')}</dl>`:'';
 }
-function briefDocument(brief){
+function briefDocument(brief,editable=false){
   const c=brief.content||{},t=c.totals||{},d=new Date(`${brief.date}T12:00:00`);
-  const entry=(title,meta,body)=>`<div class="brief-entry"><div class="brief-entry-head"><strong>${escapeHTML(title)}</strong><span>${escapeHTML(meta)}</span></div>${body}</div>`;
+  const entry=(title,meta,body,edited)=>`<div class="brief-entry"><div class="brief-entry-head"><strong>${escapeHTML(title)}</strong><span>${escapeHTML(meta)}</span>${editable&&edited?'<em class="doc-edited">已改</em>':''}</div>${body}</div>`;
+  const fields=(content,scope,id,keys)=>editable?editFields(content,scope,id,keys):briefFields(content);
+  const memberKeys=m=>m.summary&&typeof m.summary!=='object'?['summary']:['done','risks','next'];
+  const risks=editable?`<section class="brief-section"><h3>需要关注</h3>${docEdit((c.risks||[]).join('\n'),'data-scope="risks"')}</section>`
+    :(c.risks?.length?`<section class="brief-section"><h3>需要关注</h3><ul class="brief-risks">${c.risks.map(r=>`<li>${escapeHTML(r)}</li>`).join('')}</ul></section>`:'');
   return `<article class="brief-doc"><header class="brief-head"><div class="eyebrow">档案室 · 团队日报</div><h2>${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日 · ${WEEKDAY_SHORT[d.getDay()]}</h2><div class="brief-stats"><div><b>${t.completed||0}/${t.tasks||0}</b><span>完成任务</span></div><div><b>${hours(t.load)}h</b><span>完成工时</span></div><div><b>${t.members||0}</b><span>位成员</span></div><div><b>${t.projects||0}</b><span>个项目</span></div></div></header>`
-    +(c.risks?.length?`<section class="brief-section"><h3>需要关注</h3><ul class="brief-risks">${c.risks.map(r=>`<li>${escapeHTML(r)}</li>`).join('')}</ul></section>`:'')
-    +(c.projects?.length?`<section class="brief-section"><h3>项目进展</h3>${c.projects.map(p=>entry(p.name,`Owner · ${p.ownerName||p.owner||''} · ${p.source==='owner'?'Owner 汇报':'系统汇总'} · ${p.completed}/${p.tasks} 完成`,briefFields(p.content))).join('')}</section>`:'')
-    +(c.members?.length?`<section class="brief-section"><h3>成员总结</h3>${c.members.map(m=>entry(m.name,`${m.completed}/${m.tasks} 完成 · ${hours(m.load)}h · ${m.source==='diary'?'本人日记':'系统统计'}`,briefFields(m.summary))).join('')}</section>`:'')
+    +risks
+    +(c.projects?.length?`<section class="brief-section"><h3>项目进展</h3>${c.projects.map(p=>entry(p.name,`Owner · ${p.ownerName||p.owner||''} · ${p.source==='owner'?'Owner 汇报':'系统汇总'} · ${p.completed}/${p.tasks} 完成`,fields(p.content,'projects',p.id,['done','progress','collaborators','risks','next']),p.edited)).join('')}</section>`:'')
+    +(c.members?.length?`<section class="brief-section"><h3>成员总结</h3>${c.members.map(m=>entry(m.name,`${m.completed}/${m.tasks} 完成 · ${hours(m.load)}h · ${m.source==='diary'?'本人日记':'系统统计'}`,fields(m.summary,'members',m.id,memberKeys(m)),m.edited)).join('')}</section>`:'')
     +'</article>';
 }
 /* Opened from the archive, the folder rises a little further while the brief
@@ -1643,7 +1616,7 @@ function typeOut(root,budget=1200){
   };
   const step=now=>{start||=now;const count=Math.ceil(Math.min(1,(now-start)/span)*total);show(count);if(count<total)frame=requestAnimationFrame(step);else finish()};
   const finish=()=>{cancelAnimationFrame(frame);caret.remove();for(const part of parts){part.n.nodeValue=part.text;part.rest.remove()}};
-  root.addEventListener('pointerdown',finish,{once:true});
+  root.addEventListener('pointerdown',finish,{once:true});root.addEventListener('focusin',finish,{once:true});
   return {start:delay=>setTimeout(()=>{frame=requestAnimationFrame(step)},delay),finish};
 }
 async function openBrief(date,folder=null){
@@ -1651,10 +1624,30 @@ async function openBrief(date,folder=null){
   let brief;
   try{brief=await api('/api/action',{action:'brief.get',data:{date}})}catch(e){toast(e.message);return}
   finally{folder?.classList.remove('is-opening')}
-  openModal(`${briefDocument(brief)}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">关闭</button></div>`);
+  openModal(`${briefDocument(brief,true)}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">关闭</button><button class="primary-btn" id="saveArchiveDoc">保存</button></div>`);
+  bindArchiveDoc(async()=>{
+    const doc=$('#modalContent'),data={date},risks=doc.querySelector('.doc-edit[data-scope="risks"]');
+    if(risks)data.risks=docText(risks).split('\n').map(x=>x.trim()).filter(Boolean);
+    doc.querySelectorAll('.doc-edit[data-scope="projects"],.doc-edit[data-scope="members"]').forEach(el=>{const scope=data[el.dataset.scope]||(data[el.dataset.scope]={}),row=scope[el.dataset.id]||(scope[el.dataset.id]={});row[el.dataset.field]=docText(el)});
+    await api('/api/action',{action:'brief.update',data});
+  });
+  flyArchive(folder);
+}
+/* 档案室 holds each person's own record. A member's folders are their daily
+   archives; an admin's are the team's daily briefs. */
+function archiveCards(){
+  if(!S.user)return [];
+  if(S.user.admin)return briefCards();
+  const me=S.user.id,days=new Set([S.today]);
+  (S.diaries||[]).forEach(d=>{if(d.author===me)days.add(d.date)});
+  (S.diaryStats||[]).forEach(r=>{if(r.userId===me&&r.total)days.add(r.date)});
+  return [...days].filter(d=>d&&d<=S.today).map(date=>{const s=diaryDayStats(me,date),r=diaryReport(me,date);return {kind:'diary',date,totals:{completed:s.completed,tasks:s.total,load:s.load},source:r?(r.auto?'auto':'manual'):'draft'}});
+}
+function openArchive(date,folder=null){return S.user?.admin?openBrief(date,folder):openDiaryArchive(date,folder)}
+/* The folder flies out of the box and the paper rises out of it (see briefMotion). */
+function flyArchive(folder){
   const modal=$('#modalBackdrop .modal');
   modal?.classList.add('is-wide');
-  $('#cancelAction').onclick=closeModal;
   const face=folder?.querySelector('.file-face');
   if(!modal||!face?.isConnected||archiveStill())return;
   modal.classList.add('is-flown');folder.classList.add('is-out');UI.briefSource=face;
@@ -1663,6 +1656,91 @@ async function openBrief(date,folder=null){
   modal.animate(motion.paper,{duration:BRIEF_MS});
   UI.briefTyping=typeOut($('#modalContent'));
   UI.briefTyping.start(BRIEF_MS*.5);
+}
+/* Archives are edited in place: every collected block is plain editable text
+   on the page itself, and 保存 lights up once something changes. */
+const docText=el=>el.innerText.replace(/\u00a0/g,' ').replace(/\n{3,}/g,'\n\n').trim();
+const docEdit=(value,attrs)=>`<div class="doc-edit" contenteditable="plaintext-only" spellcheck="false" ${attrs}>${escapeHTML(value??'')}</div>`;
+function editFields(content,scope,id,keys){
+  const v=content&&typeof content==='object'?content:{summary:content||''};
+  return `<dl class="notice-fields is-editable">${keys.map(k=>`<div><dt>${NOTICE_LABELS[k]}</dt><dd>${docEdit(v[k],`data-scope="${scope}" data-id="${escapeHTML(id)}" data-field="${k}"`)}</dd></div>`).join('')}</dl>`;
+}
+function bindArchiveDoc(save,ready=false){
+  const btn=$('#saveArchiveDoc');
+  $('#cancelAction').onclick=closeModal;
+  btn.disabled=!ready;
+  $('#modalContent').addEventListener('input',e=>{if(!e.target.closest('.doc-edit'))return;UI.docDirty=true;btn.disabled=false;btn.textContent='保存'});
+  btn.onclick=async()=>{
+    btn.disabled=true;btn.textContent='保存中…';
+    try{await save();UI.docDirty=false;btn.textContent='已保存';toast('档案已保存');refresh().catch(()=>{})}
+    catch(e){btn.disabled=false;btn.textContent='保存';toast(e?.message||'保存失败')}
+  };
+}
+function diaryDocument(day){
+  const me=S.user.id,c=diaryContent(me,day),s=diaryDayStats(me,day),r=diaryReport(me,day),d=new Date(`${day}T12:00:00`),logs=workLogEntries(day,me);
+  const block=(k,label)=>`<section class="brief-section"><h3>${label}</h3>${docEdit(c[k],`data-field="${k}"`)}</section>`;
+  const log=logs.length?`<ul class="doc-log">${logs.map(l=>`<li><button type="button" class="doc-log-item" data-task-id="${escapeHTML(l.taskId||'')}" data-project-id="${escapeHTML(l.projectId||'')}" data-log-kind="${escapeHTML(l.kind||'')}"><time>${escapeHTML(String(l.at||'').slice(11,16))}</time><span>${escapeHTML(l.label)}</span>${l.project?`<small>${escapeHTML(l.project)}</small>`:''}</button></li>`).join('')}</ul>`:'<p class="muted">—</p>';
+  return `<article class="brief-doc is-personal"><header class="brief-head"><div class="eyebrow">我的档案 · ${r?(r.auto?'系统整理':'已记录'):'待记录'}</div><h2>${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日 · ${WEEKDAY_SHORT[d.getDay()]}</h2><div class="brief-stats"><div><b>${s.completed}/${s.total}</b><span>完成任务</span></div><div><b>${hours(s.load)}h</b><span>完成工时</span></div><div><b>${Math.max(0,s.total-s.completed)}</b><span>未完成</span></div><div><b>${logs.length}</b><span>条日志</span></div></div></header>${block('done','今日完成')}${block('risks','未完成与阻塞')}${block('next','明日计划')}<section class="brief-section"><h3>工作日志</h3>${log}</section></article>`;
+}
+function openDiaryArchive(day,folder=null){
+  openModal(`${diaryDocument(day)}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">关闭</button><button class="primary-btn" id="saveArchiveDoc">保存</button></div>`);
+  $$('#modalContent .doc-log-item').forEach(b=>b.onclick=()=>{closeModal();openWorkLogDetail(b.dataset.taskId,b.dataset.projectId,b.dataset.logKind)});
+  /* A day nobody has saved yet is only a template, so it can be kept as it is. */
+  bindArchiveDoc(async()=>{const content={};$$('#modalContent .doc-edit').forEach(el=>{content[el.dataset.field]=docText(el)});await api('/api/action',{action:'diary.save',data:{date:day,content}})},!diaryReport(S.user.id,day));
+  flyArchive(folder);
+}
+function openTodayArchive(){
+  UI.archiveMonth=S.today.slice(0,7);UI.archivePick=S.today;
+  if(UI.view!=='archive')switchView('archive');else renderArchive();
+  pickArchive(S.today,true);
+  openDiaryArchive(S.today,$(`#archiveCabinet .archive-file[data-date="${S.today}"]`));
+}
+/* 周档案: the week's daily briefs exactly as they read in the app, behind one
+   page that adds the week up. A single HTML file that opens anywhere and prints
+   one day per page. */
+const WEEK_EXPORT_CSS=`body{margin:0;background:#F0EEE6;color:#1F1B15;font:14px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif}
+.brief-doc{max-width:760px;margin:28px auto;padding:34px 38px;background:#FFFDF9;border:1px solid #E2DDD0;border-radius:16px}
+.eyebrow{font:600 10.5px/1.2 sans-serif;letter-spacing:.16em;color:#9E9688}
+h2{margin:6px 0 0;font:600 26px/1.3 'Palatino Linotype','Noto Serif SC','Songti SC',serif}
+.brief-head{padding-bottom:16px;border-bottom:1px solid #D2CBBB}
+.brief-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:16px}
+.brief-stats>div{display:grid;gap:2px;padding:10px 12px;border:1px solid #E2DDD0;border-radius:10px;background:#F7F4ED}
+.brief-stats b{font:600 20px/1.2 'Palatino Linotype','Noto Serif SC',serif}.brief-stats span{font-size:11.5px;color:#7C7466}
+.brief-section{margin-top:22px}.brief-section h3{margin:0 0 10px;font:600 10.5px/1.2 sans-serif;letter-spacing:.16em;color:#7C7466}
+.brief-risks{margin:0;padding-left:18px;line-height:1.8;color:#3E372C}
+.brief-entry{padding:12px 0 4px;border-top:1px solid #EDE9DE}.brief-entry-head{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline}
+.brief-entry-head strong{font:600 15px/1.4 'Palatino Linotype','Noto Serif SC',serif}.brief-entry-head span{font-size:11.5px;color:#9E9688}
+.notice-fields{margin:4px 0 6px;border-top:1px solid #D2CBBB}.notice-fields>div{display:grid;grid-template-columns:64px 1fr;gap:16px;padding:9px 0;border-bottom:1px solid #EDE9DE}
+.notice-fields dt{font:600 10.5px/1.9 sans-serif;letter-spacing:.14em;color:#9E9688}.notice-fields dd{margin:0;white-space:pre-wrap;color:#3E372C}
+.brief-text{white-space:pre-wrap;color:#3E372C}.doc-edited{font-size:11px;font-style:normal;color:#8E6E2B}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:8px 6px;border-bottom:1px solid #EDE9DE;text-align:left}th{font-size:11px;color:#7C7466;font-weight:600}
+@media print{body{background:#fff}.brief-doc{margin:0 auto;border:0;break-after:page}}`;
+function weekArchiveHTML(week){
+  const briefs=week.briefs||[],sum=k=>briefs.reduce((n,b)=>n+Number(b.content?.totals?.[k]||0),0),people=new Map(),projects=new Map();
+  for(const b of briefs){
+    for(const m of b.content?.members||[]){const x=people.get(m.id)||{name:m.name,tasks:0,completed:0,load:0,days:0};x.tasks+=m.tasks||0;x.completed+=m.completed||0;x.load+=m.load||0;x.days+=1;people.set(m.id,x)}
+    for(const p of b.content?.projects||[]){const x=projects.get(p.id)||{name:p.name,owner:p.ownerName||p.owner||'',tasks:0,completed:0,days:0};x.tasks+=p.tasks||0;x.completed+=p.completed||0;x.days+=1;projects.set(p.id,x)}
+  }
+  const risks=briefs.flatMap(b=>(b.content?.risks||[]).map(r=>`${archiveDay(b.date)}　${r}`));
+  const table=(head,rows)=>rows.length?`<table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>`:'<p>—</p>';
+  const range=`${archiveDay(week.start)} — ${archiveDay(week.end)}`;
+  const cover=`<article class="brief-doc"><header class="brief-head"><div class="eyebrow">档案室 · 周档案</div><h2>${escapeHTML(week.start.slice(0,4))}年 ${escapeHTML(range)}</h2><div class="brief-stats"><div><b>${sum('completed')}/${sum('tasks')}</b><span>完成任务</span></div><div><b>${hours(sum('load'))}h</b><span>完成工时</span></div><div><b>${people.size}</b><span>位成员</span></div><div><b>${projects.size}</b><span>个项目</span></div></div></header>`
+    +(risks.length?`<section class="brief-section"><h3>本周需要关注</h3><ul class="brief-risks">${risks.map(r=>`<li>${escapeHTML(r)}</li>`).join('')}</ul></section>`:'')
+    +`<section class="brief-section"><h3>成员本周</h3>${table(['成员','完成','工时','有记录的天数'],[...people.values()].map(x=>`<tr><td>${escapeHTML(x.name)}</td><td>${x.completed}/${x.tasks}</td><td>${hours(x.load)}h</td><td>${x.days}</td></tr>`))}</section>`
+    +`<section class="brief-section"><h3>项目本周</h3>${table(['项目','Owner','完成','有进展的天数'],[...projects.values()].map(x=>`<tr><td>${escapeHTML(x.name)}</td><td>${escapeHTML(x.owner)}</td><td>${x.completed}/${x.tasks}</td><td>${x.days}</td></tr>`))}</section></article>`;
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>周档案 ${escapeHTML(week.start)} — ${escapeHTML(week.end)}</title><style>${WEEK_EXPORT_CSS}</style></head><body>${cover}${briefs.map(b=>briefDocument(b)).join('')}</body></html>`;
+}
+async function exportArchiveWeek(){
+  const btn=$('#archiveExportBtn');if(btn)btn.disabled=true;
+  try{
+    const week=await api('/api/action',{action:'brief.week',data:{date:UI.archivePick||S.today}});
+    if(!week.briefs?.length){toast('这一周还没有档案');return}
+    const url=URL.createObjectURL(new Blob([weekArchiveHTML(week)],{type:'text/html;charset=utf-8'})),a=document.createElement('a');
+    a.href=url;a.download=`周档案 ${week.start} — ${week.end}.html`;document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),2000);
+    toast(`已导出 ${week.briefs.length} 天的档案`);
+  }catch(e){toast(e?.message||'导出失败')}
+  finally{if(btn)btn.disabled=false}
 }
 /* Fold the brief back into its folder; true when that takes over closing. */
 function foldBrief(){
@@ -1709,7 +1787,7 @@ document.addEventListener('click',e=>{
   if(e.target.closest('#accountMenu')||e.target.closest('#workspaceSwitcher'))return;
   toggleAccountMenu(false);
 });
-document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleAccountMenu(false)});document.addEventListener('keydown',e=>{if(UI.view!=='archive'||e.altKey||e.ctrlKey||e.metaKey||e.target.closest('input,textarea,select,[contenteditable],.archive-ruler')||!$('#modalBackdrop').classList.contains('hidden'))return;if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();stepArchive(e.key==='ArrowLeft'?1:-1)}});addEventListener('resize',()=>{if(UI.view==='archive')fitArchiveDrawer($('#archiveCabinet .drawer-stage'))});$$('.filter-link').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;switchView('today')});$$('.quick-tab').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;renderToday()});$('#prevDay').onclick=()=>{UI.dayOffset=(UI.dayOffset||0)-1;renderToday()};$('#nextDay').onclick=()=>{if(displayDay()>=DATE_HORIZON){toast(`日期范围目前只支持到 ${DATE_HORIZON}`);return}UI.dayOffset=(UI.dayOffset||0)+1;renderToday()};$('#inboxBtn').onclick=()=>switchView('inbox');document.querySelector('.icon-btn[title="搜索"]').onclick=openSearch;$('#closeDrawer').onclick=closeDrawer;$('#closeModal').onclick=closeModal;$('#modalBackdrop').onclick=e=>{if(e.target.id==='modalBackdrop')closeModal()};$('#taskDrawer').onclick=e=>{if(e.target.id==='taskDrawer')closeDrawer()};$('#backWeekBtn').onclick=()=>switchView('calendar');$('#backTodayBtn').onclick=()=>{if(UI.selectedWeek)UI.weekDir=UI.selectedWeek>0?'prev':'next';UI.selectedWeek=0;UI.dayOffset=0;switchView('calendar');renderCalendar()};$('#prevWeekBtn').onclick=()=>turnWeek(-1);$('#nextWeekBtn').onclick=()=>turnWeek(1);document.addEventListener('keydown',e=>{if(UI.view!=='calendar'||e.altKey||e.ctrlKey||e.metaKey||e.target.closest('input,textarea,select,[contenteditable]')||!$('#modalBackdrop').classList.contains('hidden')||!$('#taskDrawer').classList.contains('hidden'))return;if(e.key==='ArrowLeft'){e.preventDefault();turnWeek(-1)}else if(e.key==='ArrowRight'){e.preventDefault();turnWeek(1)}});$('#addProjectBtn').onclick=newProject;$('#addProjectTopBtn').onclick=newProject;$('#addTaskBtn').onclick=newTask;$('#emptyAddBtn').onclick=newTask;$('#timelineAddProjectBtn').onclick=newProject;$('#createFixedBtn').onclick=fixedTask;$('#collectionSettingsBtn').onclick=collectionSettings;$('#forceAssignBtn').onclick=()=>switchView('projects');$('#runAutomationBtn').onclick=()=>act('scheduler.run',{});$('#markAllReadBtn').onclick=()=>act('inbox.read',{all:true});$('#manageInboxBtn').onclick=()=>{UI.inboxManage=!UI.inboxManage;UI.inboxPicked=new Set();renderInbox()};$('#generateSummaryBtn').onclick=openTodayDiary;
+document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleAccountMenu(false)});document.addEventListener('keydown',e=>{if(UI.view!=='archive'||e.altKey||e.ctrlKey||e.metaKey||e.target.closest('input,textarea,select,[contenteditable],.archive-ruler')||!$('#modalBackdrop').classList.contains('hidden'))return;if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();stepArchive(e.key==='ArrowLeft'?1:-1)}});addEventListener('resize',()=>{if(UI.view==='archive')fitArchiveDrawer($('#archiveCabinet .drawer-stage'))});$$('.filter-link').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;switchView('today')});$$('.quick-tab').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;renderToday()});$('#prevDay').onclick=()=>{UI.dayOffset=(UI.dayOffset||0)-1;renderToday()};$('#nextDay').onclick=()=>{if(displayDay()>=DATE_HORIZON){toast(`日期范围目前只支持到 ${DATE_HORIZON}`);return}UI.dayOffset=(UI.dayOffset||0)+1;renderToday()};$('#inboxBtn').onclick=()=>switchView('inbox');document.querySelector('.icon-btn[title="搜索"]').onclick=openSearch;$('#closeDrawer').onclick=closeDrawer;$('#closeModal').onclick=closeModal;$('#modalBackdrop').onclick=e=>{if(e.target.id==='modalBackdrop')closeModal()};$('#taskDrawer').onclick=e=>{if(e.target.id==='taskDrawer')closeDrawer()};$('#backWeekBtn').onclick=()=>switchView('calendar');$('#backTodayBtn').onclick=()=>{if(UI.selectedWeek)UI.weekDir=UI.selectedWeek>0?'prev':'next';UI.selectedWeek=0;UI.dayOffset=0;switchView('calendar');renderCalendar()};$('#prevWeekBtn').onclick=()=>turnWeek(-1);$('#nextWeekBtn').onclick=()=>turnWeek(1);document.addEventListener('keydown',e=>{if(UI.view!=='calendar'||e.altKey||e.ctrlKey||e.metaKey||e.target.closest('input,textarea,select,[contenteditable]')||!$('#modalBackdrop').classList.contains('hidden')||!$('#taskDrawer').classList.contains('hidden'))return;if(e.key==='ArrowLeft'){e.preventDefault();turnWeek(-1)}else if(e.key==='ArrowRight'){e.preventDefault();turnWeek(1)}});$('#addProjectBtn').onclick=newProject;$('#addProjectTopBtn').onclick=newProject;$('#addTaskBtn').onclick=newTask;$('#emptyAddBtn').onclick=newTask;$('#timelineAddProjectBtn').onclick=newProject;$('#createFixedBtn').onclick=fixedTask;$('#collectionSettingsBtn').onclick=collectionSettings;$('#forceAssignBtn').onclick=()=>switchView('projects');$('#runAutomationBtn').onclick=()=>act('scheduler.run',{});$('#markAllReadBtn').onclick=()=>act('inbox.read',{all:true});$('#manageInboxBtn').onclick=()=>{UI.inboxManage=!UI.inboxManage;UI.inboxPicked=new Set();renderInbox()};$('#archiveTodayBtn').onclick=openTodayArchive;$('#archiveExportBtn').onclick=exportArchiveWeek;
 window.addEventListener('focus',()=>{if(UI.view==='inbox')refreshInboxState()});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&UI.view==='inbox')refreshInboxState()});
 $('#pipBtn').classList.toggle('hidden',!pipSupported());$('#pipBtn').onclick=openPip;

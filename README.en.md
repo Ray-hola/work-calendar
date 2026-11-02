@@ -31,9 +31,9 @@ Most collaboration tools want your tasks, daily notes and team data in someone e
 
 **Collaboration and records**
 - Per-recipient inbox: delete a notice from its card, or switch to 管理 to delete several or clear the read ones. A chat area with shared rooms and one room per project, with @mentions.
-- Daily notes and statistics: at 23:30 each day, everyone's completed work and load are summarised.
-- Team brief: the next morning the superadmin receives one report for the day, covering members' summaries, project progress and what needs attention, instead of a notice per person.
-- Archive room: one line-drawn archive box per month, with arrows to change month. Slide the pointer across the box, drag the date ruler below it or turn the wheel to pick a folder; the picked folder lifts out with its summary, and a click opens the full brief (admins only).
+- Archive room (the former diary and archive merged): one line-drawn archive box per month, with arrows to change month. Slide the pointer across the box, drag the date ruler below it or turn the wheel to pick a folder, and click to open it. Everyone sees only their own archive:
+  - Members: one archive a day, pre-filled from that day's tasks (done / open and blocked / next) with the day's work log attached. Open it and edit it in place, then save. 记录今天 opens today's. Days left unwritten are filled in from the tasks at 23:30.
+  - Admins: one team brief a day (made the next morning: members' summaries, project progress, what needs attention), also editable in place; a diary filed later does not overwrite what was changed. Under the box are the picked day's work log, member load and project progress. 导出本周 exports the week (Saturday to Friday) as one HTML file with a weekly summary on top, ready to print to PDF.
 - Desktop widget: an always-on-top picture-in-picture window with today's to-dos and a pomodoro timer (Chrome / Edge on desktop).
 - AI assistant (optional): admins configure an OpenAI-compatible endpoint; the key stays on the server. Press 规划任务 (plan) and say in one sentence what needs doing; the assistant lays out project and task cards that are already filled in and split up. Each card can be edited (assignee, date, time, priority and so on), removed, or joined by a new one, and on confirm they are created, or requested, under your own rules. Nothing is written before you confirm.
 - Personal signature: one line written in your profile, shown under the avatar in the sidebar, the account menu and the account list.
