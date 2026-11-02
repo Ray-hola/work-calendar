@@ -138,6 +138,66 @@ test('assignee and project markup escapes user-provided text', () => {
   assert.ok(!evil.includes('<img'));
 });
 
+test('entry points follow the rule group: new, request, or not offered', () => {
+  const a=app();
+  a.run(`S.today='2026-11-02';S.user={id:'test002',admin:0};S.users=[];S.projects=[
+    {id:'p',name:'甲',owner:'test001',status:'active',members:{test001:'accepted',test002:'accepted'}},
+    {id:'q',name:'乙',owner:'test002',status:'active',members:{test002:'accepted'}},
+    {id:'r',name:'丙',owner:'test003',status:'active',members:{test003:'accepted',test002:'pending'}}];
+    S.creationRules={project:'approval',tempTask:'direct',projectTask:'none'};`);
+  assert.equal(a.run('projectMode()'),'approval');
+  // Your own project is always direct; a project you only collaborate on follows the group.
+  assert.deepEqual(a.json('taskProjects().map(x=>[x.p.id,x.mode])'),[['q','direct']]);
+  assert.equal(a.run('taskEntryMode()'),'direct');
+  assert.ok(a.run("entryLabel('approval','项目')").endsWith('申请项目'));
+  assert.ok(a.run("entryLabel('direct','任务')").endsWith('新任务'));
+  a.run(`S.projects=S.projects.filter(p=>p.id!=='q');S.creationRules={project:'none',tempTask:'approval',projectTask:'approval'}`);
+  assert.deepEqual(a.json('taskProjects().map(x=>[x.p.id,x.mode])'),[['p','approval']]);
+  assert.equal(a.run('taskEntryMode()'),'approval');
+  a.run(`S.creationRules={project:'none',tempTask:'none',projectTask:'none'}`);
+  assert.equal(a.run('taskEntryMode()'),'none');
+  // Requests: the project's Owner or an admin settles a project task, only an admin a one-off.
+  a.run(`S.taskRequests=[{id:'a',status:'pending',projectId:'p',requester:'test002'},{id:'b',status:'pending',projectId:null,requester:'test002'},{id:'c',status:'approved',projectId:'p'}];S.user={id:'test001',admin:0}`);
+  assert.deepEqual(a.json("['a','b','c'].map(id=>canReviewTaskRequest(taskRequestById(id)))"),[true,false,false]);
+  a.run(`S.user={id:'superadmin',admin:1}`);
+  assert.deepEqual(a.json("['a','b','c'].map(id=>canReviewTaskRequest(taskRequestById(id)))"),[true,true,false]);
+  assert.equal(a.run('projectMode()'),'direct');
+  assert.equal(a.run('taskEntryMode()'),'direct');
+});
+
+test('rule groups live in 系统设置: a list of groups, each made or changed on a card', () => {
+  const list = liftFunction('renderCreationPolicy'), card = liftFunction('editRuleGroup'), item = liftFunction('renderAccountItem');
+  assert.ok(/class="rule-row"/.test(list) && /editRuleGroup\(null\)/.test(list), '已有的规则组是列表，新建打开卡片');
+  assert.ok(/class="rule-opt/.test(card) && /AGENT_ACCESS_LABELS/.test(card), '卡片上每条规则一键选择，含 AI 助手');
+  assert.ok(/class="rule-person/.test(card) && /rulePickAll/.test(card), '成员直接在卡片上点选，可以全选');
+  assert.ok(!/<select/.test(list + card), '规则组不用下拉框');
+  assert.ok(!/group:/.test(item), '账户行的权限组下拉只剩 superadmin / admin / 普通用户');
+  assert.ok(/<h2>规则组<\/h2>/.test(list), '叫「规则组」，不和权限组混淆');
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const accounts = html.match(/<section id="accountsView"[\s\S]*?<\/section>/)[0], settings = html.match(/<section id="settingsView"[\s\S]*?<\/section>/)[0];
+  assert.ok(!/creationPolicy|automation-card/.test(accounts), '账户管理只留账户本身');
+  assert.ok(/creationPolicy/.test(settings) && /automation-card/.test(settings), '规则组和日记自动化都在系统设置');
+});
+
+test('every drafted card says what will happen to it before anything is sent', () => {
+  const a=app();
+  a.run(['PLAN_DAY','planDay','planUser','agentTidyTaskName','planDraft','planTaskPath'].map(liftFunction).join('\n'));
+  a.run(`S.today='2026-11-02';S.user={id:'test002',admin:0};S.users=[{id:'superadmin',admin:1,active:1},{id:'test001',active:1,displayName:'林一'},{id:'test002',active:1},{id:'test003',active:1}];
+    S.projects=[{id:'p',name:'甲',owner:'test001',status:'active',members:{test001:'accepted',test002:'accepted'}},{id:'w',name:'待批',owner:'test002',status:'pending',members:{test002:'accepted'}}];
+    S.creationRules={project:'approval',tempTask:'direct',projectTask:'none'};
+    var board=planDraft({projects:[{ref:'P1',name:'复盘',members:['林一','ghost']}],tasks:[
+      {name:'甲·整理数据',projectId:'p',assignee:'test003'},{name:'出初稿',projectRef:'P1'},{name:'自己看',assignee:'林一',date:'2020-01-01'},{name:'等审批',projectId:'w'}]});`);
+  assert.deepEqual(a.json('board.projects[0].members'), ['test001'], '中文名换成账户，查无此人的丢掉');
+  assert.equal(a.run('board.tasks[0].name'), '整理数据', '去掉项目名前缀');
+  assert.equal(a.run('board.tasks[2].date'), '2026-11-02', '过去的日期挪到今天');
+  assert.deepEqual(a.json('board.tasks.map(t=>planTaskPath(board,t).mode)'), ['none','wait','direct','wait'],
+    '只协作的项目不允许、新项目要先审批、临时任务直接建、待批项目里的等着');
+  assert.deepEqual(a.json('planTaskPath(board,board.tasks[2]).assignees'), ['test002'], '临时任务只能给自己');
+  a.run(`S.user={id:'superadmin',admin:1};S.creationRules=null;board=planDraft({projects:[{ref:'P1',name:'复盘',owner:'test003',members:['test001']}],tasks:[{name:'出初稿',projectRef:'P1'}]})`);
+  assert.equal(a.run('planTaskPath(board,board.tasks[0]).mode'), 'direct');
+  assert.deepEqual(a.json('planTaskPath(board,board.tasks[0]).assignees'), ['test003','test001'], '管理员建的项目，Owner 和协作者都能接');
+});
+
 test('project operations are available to admin and project owner; assignees must be active confirmed members', () => {
   const a=app();
   a.run(`S.projects=[{id:'p',owner:'test001',status:'active',members:{test001:'accepted',test002:'accepted',test003:'pending',disabled:'accepted'}}];S.users=[{id:'test001',active:1},{id:'test002',active:1},{id:'test003',active:1},{id:'disabled',active:0}];`);
@@ -335,19 +395,25 @@ test('achievement archive is superadmin-only and sorts latest completed first', 
   assert.deepEqual(a.json(`completedProjects()`), []);
 });
 
-test('account management groups superadmins and labels members by project role', () => {
+test('identity is only the 权限组, rows keep the dragged order and carry no per-row actions', () => {
   const a = app();
   a.run(`S.projects=[
-    {id:'p1',name:'项目甲',owner:'test001',members:{test001:'accepted',test002:'accepted'}},
-    {id:'p2',name:'项目乙',owner:'test003',members:{test003:'accepted'}}
-  ];S.user={id:'superadmin',admin:1};S.users=[
-    {id:'superadmin',admin:1,active:1},{id:'test001',admin:0,active:1},{id:'test002',admin:0,active:1}
-  ];`);
-  assert.equal(a.run("accountRoleLabel({id:'superadmin',admin:1,role:'superadmin',active:1})"), '', '权限组本身已写明角色，不再附加权限说明');
-  assert.equal(a.run("accountRoleLabel({id:'boss',admin:1,role:'admin',active:1})"), '');
-  assert.equal(a.run("accountRoleLabel({id:'test001',admin:0,active:1})"), 'Owner：项目甲');
-  assert.equal(a.run("accountRoleLabel({id:'test002',admin:0,active:1})"), '协作者：项目甲');
-  assert.equal(a.run("accountRoleLabel({id:'promoted',admin:0,active:1})"), '暂无项目归属');
+    {id:'p1',name:'项目甲',owner:'test001',members:{test001:'accepted',test002:'accepted'}}
+  ];S.user={id:'superadmin',admin:1,role:'superadmin'};S.users=[
+    {id:'superadmin',admin:1,role:'superadmin',active:1},{id:'test001',admin:0,role:'member',active:1},{id:'test002',admin:0,role:'member',active:0},{id:'test003',admin:0,role:'member',active:1}
+  ];S.accountOrder=['test003','test001'];`);
+  assert.equal(a.run("accountRoleLabel(S.users[0])"), 'superadmin');
+  assert.equal(a.run("accountRoleLabel({id:'boss',admin:1,role:'admin',active:1})"), 'admin');
+  assert.equal(a.run("accountRoleLabel(S.users[1])"), '普通用户', '做项目 Owner 不是身份');
+  assert.deepEqual(a.json("sortedAccounts(S.users.filter(u=>u.role==='member')).map(u=>u.id)"), ['test003', 'test001', 'test002'],
+    '按拖出来的顺序，没排过的接在后面');
+  const row = a.run("renderAccountItem(S.users[2],true,false)");
+  assert.ok(/account-grip/.test(row), 'superadmin 有拖动把手');
+  assert.ok(/已停用/.test(row));
+  assert.ok(!/Owner|协作者|切换|重置密码|删除/.test(row), '行里不再有项目身份和逐个操作的按钮');
+  const picking = a.run("UI.accountPicked=new Set(['test001']);renderAccountItem(S.users[1],true,true)");
+  assert.ok(/account-pick/.test(picking) && /checked/.test(picking) && !/account-grip/.test(picking), '管理模式下改成勾选');
+  assert.ok(!/account-grip/.test(a.run("renderAccountItem(S.users[1],false,false)")), '不是 superadmin 不能拖');
 });
 
 test('agent action envelopes are parsed and removed from the reply text', () => {
@@ -496,18 +562,26 @@ test('the run pace is a standing switch instead of a per-run question', () => {
   assert.ok(AGENT_MAX_STEPS >= 100, '步数上限应远高于原来的 12');
 });
 
-test('planning parses a <plan> array and keeps it out of the reply text', () => {
-  const {clean, plan} = splitPlan('我把它拆成两个任务。\n<plan>[{"name":"A","assignee":"wang00"},{"name":"B"}]</plan>');
-  assert.deepEqual(plan.map(t => t.name), ['A', 'B'], '应解析出计划里的每一项');
-  assert.ok(!clean.includes('<plan>'), '正文里不应残留计划块');
-  assert.equal(clean, '我把它拆成两个任务。');
+/* Built rather than written out, so the tags survive any tooling that strips
+   tag-like text from a source file. */
+const PLAN = body => '<plan>' + body + '</plan>';
+
+test('planning parses a drafted plan of projects and tasks and keeps it out of the reply text', () => {
+  const {clean, projects, tasks} = splitPlan('拆成一个项目、两个任务。\n' + PLAN('{"projects":[{"ref":"P1","name":"复盘"}],"tasks":[{"name":"A","projectRef":"P1","assignee":"wang00"},{"name":"B"}]}'));
+  assert.deepEqual(projects.map(p => p.name), ['复盘'], '应解析出起草的项目');
+  assert.deepEqual(tasks.map(t => t.name), ['A', 'B'], '应解析出计划里的每个任务');
+  assert.ok(!clean.includes(PLAN('').slice(0, 6)), '正文里不应残留计划块');
+  assert.equal(clean, '拆成一个项目、两个任务。');
+  /* 旧格式（只有任务的数组）照样认得 */
+  assert.deepEqual(splitPlan(PLAN('[{"name":"A"},{"name":"B"}]')).tasks.map(t => t.name), ['A', 'B']);
 });
 
-test('a malformed or non-array plan is ignored rather than half-applied', () => {
-  assert.deepEqual(splitPlan('<plan>{"name":"不是数组"}</plan>').plan, [], '非数组应被忽略');
-  assert.deepEqual(splitPlan('<plan>[{坏 JSON</plan>').plan, [], '坏 JSON 应被忽略');
-  assert.deepEqual(splitPlan('<plan>[{"nope":1}]</plan>').plan, [], '没有任务名的条目应被丢掉');
-  assert.deepEqual(splitPlan('一段没有计划块的回复').plan, []);
+test('a malformed plan is ignored rather than half-applied', () => {
+  const cards = text => { const d = splitPlan(text); return [...d.projects, ...d.tasks]; };
+  assert.deepEqual(cards(PLAN('{"name":"既不是数组也没有 tasks"}')), [], '没有 projects/tasks 的对象应被忽略');
+  assert.deepEqual(cards(PLAN('[{坏 JSON')), [], '坏 JSON 应被忽略');
+  assert.deepEqual(cards(PLAN('{"tasks":[{"nope":1}],"projects":[{"name":"  "}]}')), [], '没有名称的卡片应被丢掉');
+  assert.deepEqual(cards('一段没有计划块的回复'), []);
 });
 
 test('a long run is no longer cut short by the old step ceiling', async () => {
@@ -820,17 +894,28 @@ test('the planning rule rides in the system prompt, not around the message', () 
     '旧的「把提示词包在用户消息外面」的写法应已移除，否则记录里存的就是提示词而不是原话');
 });
 
-test('the composer toggle marks the message instead of sending it', () => {
+test('规划任务 is a switch on the composer: it drafts what is typed, or the next message', () => {
   const toggle = source.match(/function agentTogglePlan\(\)\{[\s\S]*?\n\}/)[0];
-  assert.ok(/input\.value=AGENT_PLAN_MARK\+' '\+input\.value/.test(toggle),
-    '点一下给输入框加上前缀');
-  assert.ok(/input\.value=intent\.body/.test(toggle), '再点一下把前缀取下来');
+  assert.ok(!/input\.value=AGENT_PLAN_MARK/.test(toggle), '不再往输入框里塞前缀');
+  assert.ok(/agentPlanSubmit\(text\)/.test(toggle), '框里已经有字时，点一下直接起草');
+  assert.ok(/agentState\.plan=!agentState\.plan/.test(toggle), '框里没字时，切换成「下一条起草」');
+  assert.ok(/input\.value=intent\.body/.test(toggle), '手打的前缀点一下就取下来');
 
   const submit = source.match(/async function agentSubmit\(\)\{[\s\S]*?\n\}/)[0];
-  assert.ok(/if\(intent\.plan\)\{input\.value='';agentSyncPlanButton\(\);return agentPlanSubmit\(intent\.body\)\}/.test(submit),
-    '发送时读回前缀并转到规划');
+  assert.ok(/if\(intent\.plan\|\|agentState\.plan\)\{[^}]*return agentPlanSubmit\(intent\.body\)\}/.test(submit),
+    '开关打开或带前缀时，发送转到起草');
   assert.ok(/async function agentPlanSubmit\(body\)/.test(source),
     '规划以正文为参数，不再自己去读输入框');
+});
+
+/* The draft is created through the ordinary actions, under the user's own
+   rules, never through the assistant's agent.execute. */
+test('a confirmed draft is created through the normal actions, projects first', () => {
+  const submit = source.match(/async function planSubmit\(board\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(!/agent\.execute/.test(submit), '起草的卡片由用户自己提交，不走 agent.execute');
+  assert.ok(submit.indexOf("action:'project.create'") < submit.indexOf("action:'task.create'"), '先建项目，任务才能挂上去');
+  assert.ok(/t\.project='id:'\+r\.id/.test(submit), '挂在新项目下的任务改指向真正建出来的项目');
+  assert.ok(/\['wait','none'\]\.includes\(planTaskPath\(board,t\)\.mode\)/.test(submit), '等审批或不允许的卡片不提交');
 });
 
 test('a planning message is labelled in the transcript and in reopened history', () => {

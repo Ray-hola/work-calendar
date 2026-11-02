@@ -24,7 +24,8 @@ Most collaboration tools want your tasks, daily notes and team data in someone e
 - When assigning, you see how many hours the person already has inside the task's own dates.
 
 **Projects**
-- Members apply for projects and an admin approves them. Project settings change the name, dates and collaborators; admins can also hand a project to a new Owner.
+- Rule groups: under 系统设置 (system settings) in the sidebar, separate from the superadmin / admin / member roles, superadmin keeps rule groups for ordinary members. Existing groups are listed one per row; creating a group or opening one shows a card where one click sets whether a new project, a one-off task for oneself and a task inside a project one collaborates on is created directly, needs approval, or is not allowed, and whether the AI assistant is off, can answer and draft plans, or can act on the member's behalf; members are picked right on the card, all at once if needed. Members in no group follow the default rules: request projects, create their own one-off tasks directly, and use the assistant for questions and plans. A project task request goes to that project's Owner, a one-off task request to the admins. The top bar shows "+ New project / Request project" and "+ New task / Request task" to match. The diary automation settings live in 系统设置 too; account management only manages accounts.
+- Project settings change the name, dates and collaborators; admins can also hand a project to a new Owner.
 - Project tasks sort by priority, start or end date, or a manual drag order. The timeline view draws every project on one date scale.
 - Closing a project takes a report and superadmin approval; closed projects move to the achievements archive.
 
@@ -34,11 +35,12 @@ Most collaboration tools want your tasks, daily notes and team data in someone e
 - Team brief: the next morning the superadmin receives one report for the day, covering members' summaries, project progress and what needs attention, instead of a notice per person.
 - Archive room: one line-drawn archive box per month, with arrows to change month. Slide the pointer across the box, drag the date ruler below it or turn the wheel to pick a folder; the picked folder lifts out with its summary, and a click opens the full brief (admins only).
 - Desktop widget: an always-on-top picture-in-picture window with today's to-dos and a pomodoro timer (Chrome / Edge on desktop).
-- AI assistant (optional): admins configure an OpenAI-compatible endpoint; the key stays on the server.
+- AI assistant (optional): admins configure an OpenAI-compatible endpoint; the key stays on the server. Press 规划任务 (plan) and say in one sentence what needs doing; the assistant lays out project and task cards that are already filled in and split up. Each card can be edited (assignee, date, time, priority and so on), removed, or joined by a new one, and on confirm they are created, or requested, under your own rules. Nothing is written before you confirm.
+- Personal signature: one line written in your profile, shown under the avatar in the sidebar, the account menu and the account list.
 
 **Layout and access**
 - Desktop, tablet and phone layouts.
-- superadmin, admin, project Owner and collaborator roles, enforced on the server. Account management is visible to admins only, and account switching lists only accounts that signed in on that browser.
+- Identity is one of three roles: superadmin, admin or member. Being a project's Owner or a collaborator only decides what one can do inside that project. The server refuses anything beyond these rights. Account management is visible to admins only: superadmin drags accounts to reorder them or move them to another role, or presses 管理 (manage) on a role to tick several accounts and disable / enable, delete, reset the password to 123456 or set the Chinese name. Account switching in the avatar menu lists only accounts that signed in on that browser.
 
 <p align="center">
   <img src="assets/readme/projects.png" alt="Projects: each card lists its tasks, collaborators and the fixed tasks attached to it" width="74%">

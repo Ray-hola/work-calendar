@@ -1382,6 +1382,35 @@ select {
   margin-top: 4px;
 }
 
+/* 个性签名: the holder's own line, set like a handwritten note under the name. */
+.signature {
+  display: block;
+  overflow: hidden;
+  max-width: 100%;
+  margin-top: 3px;
+  font: italic 400 12px/1.4 var(--font-serif);
+  color: var(--ink-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.workspace-switcher .signature {
+  max-width: 150px;
+  margin-top: 1px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.account-menu-head {
+  flex-wrap: wrap;
+}
+
+.account-menu-head > .signature {
+  flex-basis: 100%;
+  margin-top: 0;
+  white-space: normal;
+}
+
 .account-menu-group {
   display: grid;
   gap: 1px;
@@ -5771,6 +5800,315 @@ select {
   letter-spacing: 0;
 }
 
+/* Rule groups (规则组): the groups that exist read as a list in 系统设置; a group
+   is made or changed on a card in a dialog, every rule one click. */
+.creation-card {
+  margin-bottom: 18px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.creation-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.creation-head h2 {
+  margin: 0;
+  font: 600 18px/1.3 var(--font-serif);
+}
+
+.rule-list {
+  display: grid;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.rule-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 160px) minmax(0, 1fr) auto 16px;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+}
+
+.rule-row + .rule-row {
+  border-top: 1px solid var(--line-soft);
+}
+
+.rule-row:hover,
+.rule-row:focus-visible {
+  outline: none;
+  background: var(--surface-sunk);
+}
+
+.rule-row-name {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rule-row-name strong {
+  overflow: hidden;
+  font: 600 14.5px/1.3 var(--font-serif);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rule-row-name small {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.rule-row-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.rule-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 99px;
+  background: var(--surface-sunk);
+  color: var(--ink-2);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.rule-tag small {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.rule-tag.is-direct,
+.rule-tag.is-operate { color: var(--c-green-ink); background: var(--c-green-soft); }
+.rule-tag.is-approval,
+.rule-tag.is-read { color: var(--c-gold-ink); background: var(--c-gold-soft); }
+.rule-tag.is-none,
+.rule-tag.is-off { color: var(--danger-ink); background: var(--c-coral-soft); }
+
+.rule-row-people {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.rule-row-people .avatar {
+  width: 24px;
+  height: 24px;
+  margin-right: -6px;
+  font-size: 10px;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+.rule-row-people span {
+  margin-left: 12px;
+}
+
+.rule-row .task-arrow svg {
+  width: 15px;
+  height: 15px;
+  color: var(--faint);
+}
+
+@media (max-width: 760px) {
+  .rule-row {
+    grid-template-columns: minmax(0, 1fr) auto 16px;
+  }
+
+  .rule-row-tags {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+.rule-card {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.rule-card.is-editing {
+  margin-top: 4px;
+}
+
+.rule-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rule-name {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  padding: 0 8px;
+  margin-left: -8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font: 600 22px/1 var(--font-serif);
+}
+
+.rule-name:hover {
+  border-color: var(--line);
+}
+
+.rule-name:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface);
+}
+
+.rule-badge {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.rule-lines {
+  display: grid;
+  gap: 8px;
+}
+
+.rule-line {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+.rule-seg {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.rule-opt {
+  min-width: 0;
+  height: 30px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+
+.rule-opt:hover {
+  color: var(--ink);
+}
+
+.rule-opt.is-on {
+  background: var(--ink-deep);
+  color: var(--surface);
+  font-weight: 600;
+}
+
+.rule-members {
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+
+.rule-members-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.rule-members-head .ghost-btn {
+  height: 26px;
+  padding: 0 9px;
+  font-size: 11.5px;
+}
+
+.rule-people {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 38vh;
+  overflow-y: auto;
+}
+
+.rule-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 3px 11px 3px 3px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  background: var(--surface);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+
+.rule-person .avatar {
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+}
+
+.rule-person span {
+  display: grid;
+  line-height: 1.2;
+}
+
+.rule-person small {
+  font-size: 10.5px;
+  color: var(--faint);
+}
+
+.rule-person.is-on {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.rule-person:disabled {
+  cursor: default;
+}
+
+.modal-footer .rule-delete {
+  margin-right: auto;
+  color: var(--danger);
+}
+
 .account-group {
   margin-bottom: 18px;
   background: var(--surface-sunk);
@@ -5874,6 +6212,221 @@ select {
 .account-group > .muted {
   padding: 4px 8px 10px;
   margin: 0;
+}
+
+/* 账户管理: drag by the grip (superadmin), 管理 mode picks several at once. */
+.page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.account-rows .account-empty {
+  padding: 4px 8px 10px;
+  margin: 0;
+}
+
+.account-rows:has(.account-item) .account-empty {
+  display: none;
+}
+
+.account-group-heading .group-manage {
+  height: 28px;
+  margin-left: auto;
+  padding: 0 11px;
+  font-size: 12px;
+}
+
+.group-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
+  animation: wcFadeIn var(--t) var(--ease-out) both;
+}
+
+.group-tools .ghost-btn,
+.group-tools .primary-btn {
+  height: 28px;
+  padding: 0 11px;
+  font-size: 12px;
+}
+
+.group-tools .ghost-btn.is-danger:not(:disabled) {
+  color: var(--danger);
+}
+
+.group-tools button:disabled {
+  opacity: .4;
+  cursor: default;
+}
+
+.account-group-heading {
+  flex-wrap: wrap;
+}
+
+.account-group-heading strong {
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .group-tools {
+    flex-basis: 100%;
+    justify-content: flex-start;
+    margin-left: 0;
+  }
+}
+
+.group-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.account-group-heading .group-picked {
+  background: none;
+  padding: 0 4px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.account-group.is-managing .account-item {
+  cursor: pointer;
+}
+
+.account-group.is-managing .account-item.is-picked {
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent-line);
+}
+
+.account-pick {
+  width: 16px;
+  height: 16px;
+  margin: 0 2px 0 0;
+  accent-color: var(--accent);
+  animation: wcFadeIn var(--t) var(--ease-out) both;
+}
+
+.account-item.is-off .avatar,
+.account-item.is-off .account-copy {
+  opacity: .55;
+}
+
+.name-tag.self {
+  color: var(--ink-2);
+  background: var(--surface-sunk);
+  border: 1px solid var(--line);
+}
+
+.name-tag.off {
+  color: var(--danger-ink);
+  background: var(--c-coral-soft);
+  border: 1px solid var(--danger-line);
+}
+
+.account-grip {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 30px;
+  margin: 0 -4px 0 -2px;
+  border-radius: 6px;
+  color: var(--faint);
+  cursor: grab;
+  touch-action: none;
+  opacity: .5;
+  transition: opacity var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+
+.account-grip svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 3;
+}
+
+.account-item:hover .account-grip {
+  opacity: 1;
+}
+
+.account-grip:hover {
+  background: var(--surface-sunk);
+  color: var(--ink-2);
+}
+
+/* The row being dragged leaves a dashed slot; a lifted copy follows the pointer. */
+.account-list .account-item.is-placeholder {
+  background: var(--surface-sunk);
+  box-shadow: inset 0 0 0 1.5px var(--line-strong);
+}
+
+.account-item.is-placeholder > * {
+  visibility: hidden;
+}
+
+.account-ghost {
+  position: fixed;
+  z-index: 40;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 12px 8px;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-md), 0 0 0 1px var(--accent-line);
+  pointer-events: none;
+  transform: scale(1.02);
+  transform-origin: 20% 50%;
+}
+
+.account-ghost .account-grip {
+  opacity: 1;
+  cursor: grabbing;
+}
+
+body.is-dragging-account,
+body.is-dragging-account * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+.account-group:has(.is-placeholder) {
+  border-color: var(--accent-line);
+}
+
+.account-name-list {
+  display: grid;
+  gap: 8px;
+  max-height: 52vh;
+  margin: 6px 0 4px;
+  overflow-y: auto;
+}
+
+.account-name-row {
+  display: grid;
+  grid-template-columns: auto 90px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.account-name-row input {
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.account-name-row input:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 /* 17 · Team chat --------------------------------------------------------------- */
@@ -6712,48 +7265,348 @@ select {
   box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 
-/* The parsed plan, before anything is written: blocks rather than a table,
-   since the panel is too narrow for six columns. */
-.agent-plan-list {
+/* 规划草稿: the panel opens wider while a draft is out, and the draft is a set
+   of filled-in cards the user edits in place before confirming. */
+.agent-panel.is-planning {
+  width: min(780px, calc(100vw - 32px));
+  height: min(800px, calc(100vh - 48px));
+}
+
+.agent-panel {
+  transition: transform var(--t) var(--ease), box-shadow var(--t) var(--ease), border-color var(--t) var(--ease), width var(--t-slow) var(--ease-out), height var(--t-slow) var(--ease-out);
+}
+
+.agent-panel.is-plan-mode .agent-mode {
+  display: none;
+}
+
+.agent-message.agent-drafting {
+  color: var(--muted);
+  animation: ledgerPulse 1.6s var(--ease-out) infinite;
+}
+
+.agent-message.plan-board {
+  justify-self: stretch;
+  width: 100%;
+  max-width: 100%;
+  padding: 0;
+  background: none;
+  white-space: normal;
+}
+
+.plan-board-head {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
-  max-height: 280px;
-  overflow-y: auto;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  margin-bottom: 10px;
-  background: var(--line-soft);
-}
-
-.agent-plan-item {
-  background: var(--surface);
-  padding: 8px 10px;
-}
-
-.agent-plan-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.agent-plan-name {
-  font-size: 13px;
-  font-weight: 500;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
   color: var(--ink);
-  line-height: 1.4;
 }
 
-.agent-plan-head .priority {
-  flex: none;
+.plan-board-head svg {
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+  align-self: center;
 }
 
-.agent-plan-meta {
-  margin-top: 3px;
+.plan-board-head strong {
+  font: 600 15px/1.3 var(--font-serif);
+}
+
+.plan-board-head span {
+  flex-basis: 100%;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+.plan-hint {
+  margin: 4px 0 10px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.plan-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 10px;
+}
+
+/* Cards are dealt onto the table one after another as the draft arrives. */
+.plan-cards.is-entering .plan-card {
+  animation: planDeal 420ms var(--ease-spring) both;
+  animation-delay: calc(var(--i, 0) * 70ms);
+}
+
+@keyframes planDeal {
+  from { opacity: 0; transform: translateY(14px) scale(.96); }
+  to { opacity: 1; transform: none; }
+}
+
+.plan-card {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 11px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.plan-card.is-project {
+  border-color: var(--accent-line);
+  background: linear-gradient(var(--accent-soft), var(--surface) 60%);
+}
+
+.plan-card.is-none {
+  opacity: .72;
+}
+.plan-card-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.plan-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: auto;
+  font-weight: 600;
+}
+
+.plan-kind svg {
+  width: 13px;
+  height: 13px;
+}
+
+.plan-state {
+  padding: 2px 7px;
+  border-radius: 99px;
   font-size: 11px;
-  line-height: 1.5;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.plan-state.is-direct { color: var(--c-green-ink); background: var(--c-green-soft); }
+.plan-state.is-approval { color: var(--c-gold-ink); background: var(--c-gold-soft); }
+.plan-state.is-wait { color: var(--c-blue-ink); background: var(--c-blue-soft); }
+.plan-state.is-none { color: var(--danger-ink); background: var(--c-coral-soft); }
+
+.plan-remove {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
   color: var(--faint);
+}
+
+.plan-remove:hover {
+  background: var(--surface-sunk);
+  color: var(--danger);
+}
+
+.plan-remove svg {
+  width: 13px;
+  height: 13px;
+}
+
+.plan-prio {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.plan-prio .priority {
+  border: 0;
+  cursor: pointer;
+  opacity: .38;
+  transition: opacity var(--t-fast) var(--ease);
+}
+
+.plan-prio .priority.is-on,
+.plan-prio .priority:hover {
+  opacity: 1;
+}
+
+.plan-title {
+  width: 100%;
+  min-width: 0;
+  padding: 4px 6px;
+  margin: 0 -6px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  font: 600 14px/1.35 var(--font-sans);
+}
+
+.plan-title:hover,
+.plan-desc:hover {
+  border-color: var(--line);
+}
+
+.plan-title:focus,
+.plan-desc:focus,
+.plan-grid select:focus,
+.plan-grid input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface);
+}
+.plan-desc {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: var(--surface-sunk);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.plan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 8px;
+}
+
+.plan-grid label {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.plan-grid .is-wide {
+  grid-column: 1 / -1;
+}
+
+.plan-grid select,
+.plan-grid input {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.plan-grid select:disabled {
+  background: var(--surface-sunk);
+  color: var(--ink-2);
+  opacity: 1;
+}
+
+.plan-people {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.plan-people > span:first-child {
+  margin-right: 2px;
+}
+
+.plan-person {
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  background: var(--surface);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 11.5px;
+}
+
+.plan-person.is-on {
+  border-color: var(--ink-deep);
+  background: var(--ink-deep);
+  color: var(--surface);
+}
+
+.plan-note,
+.plan-error {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.plan-error {
+  color: var(--danger);
+}
+.plan-card.is-done {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 12px;
+  border-style: dashed;
+  background: var(--surface-sunk);
+  box-shadow: none;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.plan-card.is-done svg {
+  width: 14px;
+  height: 14px;
+  color: var(--success);
+}
+
+.plan-card.is-done strong {
+  overflow: hidden;
+  font-weight: 500;
+  color: var(--ink-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.plan-foot {
+  position: sticky;
+  bottom: -14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 0 2px;
+  background: linear-gradient(transparent, var(--surface) 30%);
+}
+
+.plan-foot.is-closed {
+  position: static;
+  background: none;
+}
+
+.plan-sum {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.plan-reopen-history {
+  display: block;
+  height: 26px;
+  margin-top: 6px;
+  font-size: 11.5px;
 }
 
 /* One quiet receipt per executed step, so a multi-step run stays scannable. */

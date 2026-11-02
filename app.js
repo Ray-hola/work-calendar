@@ -38,6 +38,7 @@ const ICON_PATHS={
   'dot':'<circle cx="12" cy="12" r="3"/>',
   'chat':'<path d="M20 13.5a2 2 0 0 1-2 2H8.5L4 19V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2Z"/>',
   'mic':'<rect x="9" y="3" width="6" height="10" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v3"/>',
+  'grip':'<path d="M9 6h.01"/><path d="M15 6h.01"/><path d="M9 12h.01"/><path d="M15 12h.01"/><path d="M9 18h.01"/><path d="M15 18h.01"/>',
   'pip':'<rect x="2.5" y="4.5" width="19" height="15" rx="2"/><rect x="12" y="11" width="7" height="6" rx="1"/>'
 };
 function icon(name,extra=''){
@@ -112,7 +113,7 @@ async function refreshInboxState(){
   return inboxRefreshPromise;
 }
 function switchView(view){
-  if((view==='achievements'||view==='accounts'||view==='archive')&&!S.user?.admin){view='calendar'}
+  if((view==='achievements'||view==='accounts'||view==='archive'||view==='settings')&&!S.user?.admin){view='calendar'}
   const changed=UI.view!==view;
   UI.view=view;
   /* Returning to the week rail should show the current week, not whichever
@@ -120,7 +121,7 @@ function switchView(view){
   if(view==='calendar'&&changed)UI.selectedWeek=0;
   $$('.view').forEach(v=>v.classList.toggle('active-view',v.id===`${view}View`));
   $$('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.view===view));
-  const labels={today:'今日任务',calendar:'周视图',summary:'日记',projects:'项目空间',timeline:'项目时间轴',achievements:'成果库',archive:'档案室',inbox:'收件箱',accounts:'账户管理',dayDetail:'日期详情',chat:'沟通区'};
+  const labels={today:'今日任务',calendar:'周视图',summary:'日记',projects:'项目空间',timeline:'项目时间轴',achievements:'成果库',archive:'档案室',inbox:'收件箱',accounts:'账户管理',settings:'系统设置',dayDetail:'日期详情',chat:'沟通区'};
   $('#crumbCurrent').textContent=`/ ${labels[view]||view}`;
   renderScheduleScope();
   if(view==='calendar')renderCalendar();
@@ -133,6 +134,7 @@ function switchView(view){
   if(view==='archive')renderArchive();
   if(view==='inbox'){renderInbox();refreshInboxState();}
   if(view==='accounts')renderAccounts();
+  if(view==='settings')renderSettings();
   if(view==='chat'){renderChatChannels();loadChat(true);refreshChatPresence();startChatPolling()}else{stopChatPolling()}
   /* The badge hides while you are in the room; leaving it should reveal what is
      still unread there, without waiting for the next poll. updateChatDot is
@@ -218,7 +220,7 @@ function weekTaskChip(t,iso){
     +`<span class="week-task-name">${escapeHTML(t.name)}</span>`
     +`<span class="week-task-meta">${escapeHTML(meta)}${!cont&&isMultiDay(t)?` · ${spanDays(t)} 天`:''}</span></button>`;
 }
-function weekDayColumn(iso,tasks,admin){
+function weekDayColumn(iso,tasks,canAdd){
   const today=iso===S.today,past=iso<S.today,out=iso>DATE_HORIZON,day=sortTasks(tasks.filter(t=>taskActiveOn(t,iso)));
   const shown=day.slice(0,WEEK_DAY_LIMIT),more=day.length-shown.length,done=day.filter(t=>t.status==='done').length;
   return `<section class="week-day${today?' today':''}${past?' past':''}${out?' out':''}" data-date="${iso}">`
@@ -226,19 +228,19 @@ function weekDayColumn(iso,tasks,admin){
     +`${day.length?`<small>${done}/${day.length}</small>`:''}</header>`
     +`<div class="week-day-tasks">${shown.map(t=>weekTaskChip(t,iso)).join('')}`
     +`${more>0?`<button class="week-day-more" type="button" data-date="${iso}">还有 ${more} 项</button>`:''}</div>`
-    +`${admin&&!out?`<button class="week-day-add" type="button" data-date="${iso}" aria-label="在 ${escapeHTML(fmt(iso))} 新增任务">${icon('plus')}</button>`:''}</section>`;
+    +`${canAdd&&!out?`<button class="week-day-add" type="button" data-date="${iso}" aria-label="在 ${escapeHTML(fmt(iso))} 新增任务">${icon('plus')}</button>`:''}</section>`;
 }
 function renderCalendar(){
   const horizon=weekOffsetFor(DATE_HORIZON);
   UI.selectedWeek=Math.min(UI.selectedWeek||0,horizon);
-  const days=week(UI.selectedWeek),tasks=scheduleTasks(),admin=Boolean(S.user?.admin);
+  const days=week(UI.selectedWeek),tasks=scheduleTasks(),canAdd=taskEntryMode()!=='none';
   const inWeek=tasks.filter(t=>days.some(d=>taskActiveOn(t,d))),done=inWeek.filter(t=>t.status==='done').length;
   $('#weekRangeLabel').textContent=`${weekLabel(UI.selectedWeek)} · ${fmt(days[0])} — ${fmt(days[6])} · ${inWeek.length} 项任务${inWeek.length?` · 完成 ${done}`:''}`;
   $('#backTodayBtn').classList.toggle('is-current',UI.selectedWeek===0);
   $('#nextWeekBtn').disabled=UI.selectedWeek>=horizon;
   const board=$('#weekCarousel');
   board.dataset.turn=UI.weekDir||'';UI.weekDir='';
-  board.innerHTML=`<div class="week-grid">${days.map(iso=>weekDayColumn(iso,tasks,admin)).join('')}</div>`;
+  board.innerHTML=`<div class="week-grid">${days.map(iso=>weekDayColumn(iso,tasks,canAdd)).join('')}</div>`;
   $$('#weekCarousel .week-task').forEach(b=>b.onclick=()=>openDrawer(b.dataset.id));
   $$('#weekCarousel .week-day-open, #weekCarousel .week-day-more').forEach(b=>b.onclick=()=>renderDayDetail(b.dataset.date));
   $$('#weekCarousel .week-day-add').forEach(b=>b.onclick=()=>newTask(null,b.dataset.date));
@@ -256,7 +258,7 @@ function renderDayContent(){
   const iso=UI.detailDate||displayDay();
   $('#dayDetailKicker').textContent=`${wd(iso)} · ${fmt(iso)}`;
   const tasks=scheduleTasks().filter(t=>taskActiveOn(t,iso));
-  const add=S.user?.admin?`<button class="secondary-btn calendar-add-task" data-date="${iso}">${icon('plus')}在此日期新增任务</button>`:'';
+  const mode=taskEntryMode(),add=mode!=='none'?`<button class="secondary-btn calendar-add-task" data-date="${iso}">${icon(mode==='approval'?'arrow-up-right':'plus')}${mode==='approval'?'在此日期申请任务':'在此日期新增任务'}</button>`:'';
   $('#dayDetailContent').innerHTML=add+(dailyTaskGroups(tasks)||'<div class="empty-state"><div class="empty-icon">—</div><h3>这一天还没有安排</h3></div>');
   bindTaskCards('#dayDetailContent');
   $('#dayDetailContent .calendar-add-task')?.addEventListener('click',()=>newTask(null,iso));
@@ -401,6 +403,16 @@ function renderSummary(){
 function canManageProject(p){return Boolean(p&&(S.user?.admin||p.owner===S.user?.id))}
 function projectAssignees(p){return S.users.filter(u=>u.active&&p?.members?.[u.id]==='accepted')}
 function manageableProjects(){return S.projects.filter(p=>p.status==='active'&&canManageProject(p))}
+/* What this account may start, from its rule group (规则组): 'direct',
+   'approval' or 'none'. Admins, and an Owner inside their own project, always
+   act directly. */
+const RULE_LABELS={direct:'直接创建',approval:'需要审批',none:'不允许'};
+const creationRules=()=>S.creationRules||(S.user?.admin?{project:'direct',tempTask:'direct',projectTask:'direct',agent:'operate'}:{project:'approval',tempTask:'direct',projectTask:'none',agent:'read'});
+const projectMode=()=>S.user?.admin?'direct':creationRules().project;
+const tempTaskMode=()=>S.user?.admin?'direct':creationRules().tempTask;
+function taskProjects(){return S.projects.filter(p=>p.status==='active'&&!isProjectHidden(p)).map(p=>({p,mode:canManageProject(p)?'direct':p.members?.[S.user?.id]==='accepted'?creationRules().projectTask:'none'})).filter(x=>x.mode!=='none')}
+function taskEntryMode(){const modes=[tempTaskMode(),...taskProjects().map(x=>x.mode)];return modes.includes('direct')?'direct':modes.includes('approval')?'approval':'none'}
+const entryLabel=(mode,thing)=>mode==='approval'?icon('arrow-up-right')+'申请'+thing:icon('plus')+'新'+thing;
 function projectTasksComplete(p){
   if(!p||p.status!=='active')return false;
   const tasks=S.tasks.filter(t=>t.projectId===p.id&&!t.repeatId);
@@ -473,7 +485,7 @@ function renderProjects(){
     const manage=canManageProject(p)&&p.status==='active',hasSlot=S.users.some(u=>u.active&&!u.admin&&u.id!==p.owner&&!accepted.includes(u.id)&&(admin||!pending.includes(u.id)));
     const drag=manage&&mode==='manual'&&tasks.length>1,byId=new Map(S.tasks.map(t=>[t.id,t]));
     const sorter=tasks.length>1?`<select class="project-task-sort" data-project="${escapeHTML(p.id)}" aria-label="任务排序">${Object.entries(PROJECT_SORTS).map(([k,v])=>`<option value="${k}" ${k===mode?'selected':''}>${v}</option>`).join('')}</select>`:'';
-    return `<article class="project-card project-node"><div class="project-node-heading"><div><div class="project-title"><h3>${escapeHTML(p.name)}</h3><span class="project-status">${projectStatus(p)}</span></div><p>${escapeHTML(p.desc||'暂无描述')}</p></div><div class="project-node-actions">${manage?`<button class="primary-btn add-project-task" data-project="${escapeHTML(p.id)}">${icon('plus')}新建并指派任务</button><button class="secondary-btn project-settings" data-id="${escapeHTML(p.id)}">项目设置</button>`:''}${manage&&hasSlot?`<button class="secondary-btn invite-members" data-id="${escapeHTML(p.id)}">${admin?'直接添加协作者':'邀请协作者'}</button>`:''}${p.status==='active'&&!manage&&(p.members||{})[S.user.id]==='accepted'?`<button class="ghost-btn leave-project" data-id="${escapeHTML(p.id)}">退出项目</button>`:''}${p.status==='pending'&&admin?`<button class="secondary-btn approve-project" data-id="${escapeHTML(p.id)}">审批项目</button>`:''}${p.status==='active'&&manage&&!admin&&projectTasksComplete(p)?`<button class="secondary-btn request-project-completion" data-id="${escapeHTML(p.id)}">申请项目结项</button>`:''}${p.status==='active'&&manage&&!admin&&!projectTasksComplete(p)?``:''}${p.status==='pending_completion'&&admin?`<button class="secondary-btn approve-project-completion" data-id="${escapeHTML(p.id)}">审批项目完成</button>`:''}${canManageProject(p)?`<button class="ghost-btn delete-project" data-id="${escapeHTML(p.id)}">删除项目</button>`:''}</div></div><div class="project-members"><span>Owner · ${escapeHTML(nameOf(p.owner))}　协作者：${accepted.filter(id=>id!==p.owner).map(id=>escapeHTML(nameOf(id))).join('、')||'暂无'}${pending.length?`　待确认：${pending.map(id=>escapeHTML(nameOf(id))).join('、')}`:''}</span><span>${canManageProject(p)?'项目':'我的任务'} ${done}/${tasks.length} 已完成 · 截止 ${escapeHTML(p.end||'未设置')}</span></div><div class="project-task-tree" data-project="${escapeHTML(p.id)}"><div class="project-tree-label">${canManageProject(p)?'项目任务':'分配给我的任务'} <span>${tasks.length}</span>${sorter}</div>${tasks.map(t=>`<div class="project-child-row"${drag?` draggable="true" data-root="${escapeHTML(taskRootId(t,byId))}"`:''}>${drag?'<span class="drag-handle" aria-hidden="true">⋮⋮</span>':''}<button class="project-task-open" data-id="${escapeHTML(t.id)}"><span class="priority ${escapeHTML(t.priority)}">${escapeHTML(t.priority)}</span><strong>${escapeHTML(t.name)}</strong><span class="child-assignee" title="${escapeHTML(t.assignee)}">${escapeHTML(nameOf(t.assignee))}</span><span class="child-date">${escapeHTML(fmt(t.date))}</span><span>${status(t)[1]}</span><span aria-hidden="true">${icon('chevron-right')}</span></button>${manage&&['todo','doing'].includes(t.status)?`<button class="ghost-btn assign-project-task" data-id="${escapeHTML(t.id)}">调整指派</button>`:''}</div>`).join('')||`<p class="project-task-empty">${p.status==='pending'?'待审批':'暂无任务'}</p>`}${fixed.length?`<div class="project-tree-label">固定任务 <span>${fixed.length}</span></div>${fixed.map(r=>`<div class="project-fixed-row"><strong>${escapeHTML(r.name)}</strong><small>${escapeHTML(repeatPattern(r))} · ${escapeHTML(r.time||'09:00')} · ${escapeHTML((r.assignees||[]).map(nameOf).join('、'))}${r.end?` · 至 ${escapeHTML(r.end)}`:''}</small></div>`).join('')}`:''}</div></article>`;
+    return `<article class="project-card project-node"><div class="project-node-heading"><div><div class="project-title"><h3>${escapeHTML(p.name)}</h3><span class="project-status">${projectStatus(p)}</span></div><p>${escapeHTML(p.desc||'暂无描述')}</p></div><div class="project-node-actions">${manage?`<button class="primary-btn add-project-task" data-project="${escapeHTML(p.id)}">${icon('plus')}新建并指派任务</button><button class="secondary-btn project-settings" data-id="${escapeHTML(p.id)}">项目设置</button>`:''}${manage&&hasSlot?`<button class="secondary-btn invite-members" data-id="${escapeHTML(p.id)}">${admin?'直接添加协作者':'邀请协作者'}</button>`:''}${p.status==='active'&&!manage&&(p.members||{})[S.user.id]==='accepted'&&creationRules().projectTask!=='none'?`<button class="secondary-btn add-project-task" data-project="${escapeHTML(p.id)}">${entryLabel(creationRules().projectTask,'任务')}</button>`:''}${p.status==='active'&&!manage&&(p.members||{})[S.user.id]==='accepted'?`<button class="ghost-btn leave-project" data-id="${escapeHTML(p.id)}">退出项目</button>`:''}${p.status==='pending'&&admin?`<button class="secondary-btn approve-project" data-id="${escapeHTML(p.id)}">审批项目</button>`:''}${p.status==='active'&&manage&&!admin&&projectTasksComplete(p)?`<button class="secondary-btn request-project-completion" data-id="${escapeHTML(p.id)}">申请项目结项</button>`:''}${p.status==='active'&&manage&&!admin&&!projectTasksComplete(p)?``:''}${p.status==='pending_completion'&&admin?`<button class="secondary-btn approve-project-completion" data-id="${escapeHTML(p.id)}">审批项目完成</button>`:''}${canManageProject(p)?`<button class="ghost-btn delete-project" data-id="${escapeHTML(p.id)}">删除项目</button>`:''}</div></div><div class="project-members"><span>Owner · ${escapeHTML(nameOf(p.owner))}　协作者：${accepted.filter(id=>id!==p.owner).map(id=>escapeHTML(nameOf(id))).join('、')||'暂无'}${pending.length?`　待确认：${pending.map(id=>escapeHTML(nameOf(id))).join('、')}`:''}</span><span>${canManageProject(p)?'项目':'我的任务'} ${done}/${tasks.length} 已完成 · 截止 ${escapeHTML(p.end||'未设置')}</span></div><div class="project-task-tree" data-project="${escapeHTML(p.id)}"><div class="project-tree-label">${canManageProject(p)?'项目任务':'分配给我的任务'} <span>${tasks.length}</span>${sorter}</div>${tasks.map(t=>`<div class="project-child-row"${drag?` draggable="true" data-root="${escapeHTML(taskRootId(t,byId))}"`:''}>${drag?'<span class="drag-handle" aria-hidden="true">⋮⋮</span>':''}<button class="project-task-open" data-id="${escapeHTML(t.id)}"><span class="priority ${escapeHTML(t.priority)}">${escapeHTML(t.priority)}</span><strong>${escapeHTML(t.name)}</strong><span class="child-assignee" title="${escapeHTML(t.assignee)}">${escapeHTML(nameOf(t.assignee))}</span><span class="child-date">${escapeHTML(fmt(t.date))}</span><span>${status(t)[1]}</span><span aria-hidden="true">${icon('chevron-right')}</span></button>${manage&&['todo','doing'].includes(t.status)?`<button class="ghost-btn assign-project-task" data-id="${escapeHTML(t.id)}">调整指派</button>`:''}</div>`).join('')||`<p class="project-task-empty">${p.status==='pending'?'待审批':'暂无任务'}</p>`}${fixed.length?`<div class="project-tree-label">固定任务 <span>${fixed.length}</span></div>${fixed.map(r=>`<div class="project-fixed-row"><strong>${escapeHTML(r.name)}</strong><small>${escapeHTML(repeatPattern(r))} · ${escapeHTML(r.time||'09:00')} · ${escapeHTML((r.assignees||[]).map(nameOf).join('、'))}${r.end?` · 至 ${escapeHTML(r.end)}`:''}</small></div>`).join('')}`:''}</div></article>`;
   }).join('')||'<div class="empty-state">暂无项目</div>';
   $$('.add-project-task').forEach(b=>b.onclick=()=>newTask(b.dataset.project));
   $$('.project-task-open').forEach(b=>b.onclick=()=>openDrawer(b.dataset.id));
@@ -596,11 +608,14 @@ function relTime(iso){
 }
 function renderInbox(){
   const notifications=S.notifications||[],requests=(S.requests||[]).filter(r=>r.status==='pending');
-  const approvalInfo=x=>{const chatMention=x.kind==='chat_mention';const p=S.projects.find(p=>p.id===x.reference);const editReq=(S.editRequests||[]).find(r=>r.id===x.reference);const task=S.tasks.find(t=>t.id===x.reference||t.id===editReq?.taskId);const projectPending=Boolean(S.user?.admin&&x.kind==='approval'&&x.title==='项目审批申请'&&p?.status==='pending');const projectCompletionPending=Boolean(S.user?.admin&&x.kind==='project_completion'&&p?.status==='pending_completion');const editPending=Boolean(x.kind==='task_edit_approval'&&editReq&&editReq.status==='pending'&&editReq.approver===S.user?.id&&task);return {project:p,task,editReq,projectPending,projectCompletionPending,editPending,chatMention,pending:projectPending||projectCompletionPending||editPending}};
+  const approvalInfo=x=>{const chatMention=x.kind==='chat_mention';const p=S.projects.find(p=>p.id===x.reference);const editReq=(S.editRequests||[]).find(r=>r.id===x.reference);const task=S.tasks.find(t=>t.id===x.reference||t.id===editReq?.taskId);const projectPending=Boolean(S.user?.admin&&x.kind==='approval'&&x.title==='项目审批申请'&&p?.status==='pending');const projectCompletionPending=Boolean(S.user?.admin&&x.kind==='project_completion'&&p?.status==='pending_completion');const editPending=Boolean(x.kind==='task_edit_approval'&&editReq&&editReq.status==='pending'&&editReq.approver===S.user?.id&&task);const taskRequestPending=x.kind==='task_request'&&canReviewTaskRequest(taskRequestById(x.reference));return {project:p,task,editReq,projectPending,projectCompletionPending,editPending,taskRequestPending,chatMention,pending:projectPending||projectCompletionPending||editPending||taskRequestPending}};
   const unreadRequests=requests.filter(r=>!r.read).length;
   const unreadNotifications=notifications.filter(x=>!x.read).length;
   const unreadCount=unreadRequests+unreadNotifications;$('#inboxCount').textContent=unreadCount;$('.notification-dot').classList.toggle('hidden',unreadCount===0);$('#inboxView .eyebrow').textContent=`通知中心 · ${unreadCount} 条未读`;
-  const cards=[...requests.map(r=>{const p=S.projects.find(x=>x.id===r.projectId);const unread=!r.read;return {priority:2,time:r.createdAt,html:`<article class="inbox-item request-inbox-item ${unread?'unread':''}" data-request="${escapeHTML(r.id)}"><div class="inbox-icon">${icon('folder')}</div><div class="inbox-copy"><strong>项目协作邀请</strong>${unread?'<i class="unread-dot"></i>':''}<p>「${escapeHTML(p?.name||'项目')}」</p><small title="${escapeHTML(r.createdAt)}">${escapeHTML(relTime(r.createdAt))}</small><div class="inbox-actions"><button class="primary-btn accept-request" data-id="${escapeHTML(r.id)}">接受</button><button class="secondary-btn reject-request" data-id="${escapeHTML(r.id)}">拒绝</button></div></div></article>`}}),...notifications.map(x=>{const {project,task,projectPending,projectCompletionPending,editPending,chatMention,pending}=approvalInfo(x);const unread=!x.read||pending;const actions=chatMention?`<div class="inbox-actions"><button class="primary-btn open-chat-from-mention" data-channel="${escapeHTML(x.channel||'')}">去沟通区</button></div>`:projectPending?`<div class="inbox-actions"><button class="primary-btn approve-project-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意创建</button><button class="secondary-btn reject-project-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:projectCompletionPending?`<div class="inbox-actions"><button class="primary-btn approve-project-completion-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意完成</button><button class="secondary-btn reject-project-completion-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:editPending?`<div class="inbox-actions"><button class="primary-btn approve-edit-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意修改</button><button class="secondary-btn reject-edit-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:'';return {priority:pending?2:unread?1:0,time:x.createdAt,html:`<article class="inbox-item ${unread?'unread':''} ${pending?'approval-pending':''} ${UI.inboxManage?'is-managing':''} ${UI.inboxPicked?.has(x.id)?'is-picked':''}" data-id="${escapeHTML(x.id)}">${UI.inboxManage?`<label class="inbox-pick"><input type="checkbox" tabindex="-1" ${UI.inboxPicked?.has(x.id)?'checked':''} aria-label="选择这条通知"></label>`:''}<div class="inbox-icon${UI.inboxManage?' hidden':''}">${editPending?icon('edit'):projectCompletionPending?icon('diamond'):x.kind==='brief'?icon('archive'):x.kind==='report'?icon('clock'):x.kind==='approval'?icon('folder'):x.kind==='request'?icon('mail'):icon('trend')}</div><div class="inbox-copy"><strong>${escapeHTML(x.title)}</strong>${unread?'<i class="unread-dot"></i>':''}<p>${escapeHTML(noticeText(x.body))}</p><small title="${escapeHTML(x.createdAt)}">${escapeHTML(relTime(x.createdAt))}</small>${actions}</div><span class="task-arrow">${icon('chevron-right')}</span>${UI.inboxManage?'':`<button class="inbox-delete" data-delete="${escapeHTML(x.id)}" title="删除这条通知" aria-label="删除这条通知">${icon('x')}</button>`}</article>`}})].sort((a,b)=>(b.priority-a.priority)||String(b.time).localeCompare(String(a.time)));
+  /* Your own task requests stay visible while they wait; they are not notices,
+     so they cannot be deleted and do not count as unread. */
+  const asks=(S.taskRequests||[]).filter(r=>r.requester===S.user?.id&&r.status==='pending');
+  const cards=[...asks.map(r=>({priority:1,time:r.createdAt,html:`<article class="inbox-item task-ask-item" data-task-request="${escapeHTML(r.id)}"><div class="inbox-icon">${icon('clock')}</div><div class="inbox-copy"><strong>任务申请审批中</strong><p>「${escapeHTML(r.draft?.name||'任务')}」· ${escapeHTML(fmt(r.draft?.date||S.today))} · 等待${escapeHTML(taskRequestApprover(r))}审批</p><small title="${escapeHTML(r.createdAt)}">${escapeHTML(relTime(r.createdAt))}</small></div><span class="task-arrow">${icon('chevron-right')}</span></article>`})),...requests.map(r=>{const p=S.projects.find(x=>x.id===r.projectId);const unread=!r.read;return {priority:2,time:r.createdAt,html:`<article class="inbox-item request-inbox-item ${unread?'unread':''}" data-request="${escapeHTML(r.id)}"><div class="inbox-icon">${icon('folder')}</div><div class="inbox-copy"><strong>项目协作邀请</strong>${unread?'<i class="unread-dot"></i>':''}<p>「${escapeHTML(p?.name||'项目')}」</p><small title="${escapeHTML(r.createdAt)}">${escapeHTML(relTime(r.createdAt))}</small><div class="inbox-actions"><button class="primary-btn accept-request" data-id="${escapeHTML(r.id)}">接受</button><button class="secondary-btn reject-request" data-id="${escapeHTML(r.id)}">拒绝</button></div></div></article>`}}),...notifications.map(x=>{const {project,task,projectPending,projectCompletionPending,editPending,taskRequestPending,chatMention,pending}=approvalInfo(x);const unread=!x.read||pending;const actions=chatMention?`<div class="inbox-actions"><button class="primary-btn open-chat-from-mention" data-channel="${escapeHTML(x.channel||'')}">去沟通区</button></div>`:projectPending?`<div class="inbox-actions"><button class="primary-btn approve-project-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意创建</button><button class="secondary-btn reject-project-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:projectCompletionPending?`<div class="inbox-actions"><button class="primary-btn approve-project-completion-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意完成</button><button class="secondary-btn reject-project-completion-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:editPending?`<div class="inbox-actions"><button class="primary-btn approve-edit-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">同意修改</button><button class="secondary-btn reject-edit-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">驳回申请</button></div>`:taskRequestPending?`<div class="inbox-actions"><button class="primary-btn approve-task-request" data-id="${escapeHTML(x.reference)}">同意创建</button><button class="secondary-btn reject-task-request" data-id="${escapeHTML(x.reference)}">驳回申请</button></div>`:'';return {priority:pending?2:unread?1:0,time:x.createdAt,html:`<article class="inbox-item ${unread?'unread':''} ${pending?'approval-pending':''} ${UI.inboxManage?'is-managing':''} ${UI.inboxPicked?.has(x.id)?'is-picked':''}" data-id="${escapeHTML(x.id)}">${UI.inboxManage?`<label class="inbox-pick"><input type="checkbox" tabindex="-1" ${UI.inboxPicked?.has(x.id)?'checked':''} aria-label="选择这条通知"></label>`:''}<div class="inbox-icon${UI.inboxManage?' hidden':''}">${taskRequestPending?icon('plus'):editPending?icon('edit'):projectCompletionPending?icon('diamond'):x.kind==='brief'?icon('archive'):x.kind==='report'?icon('clock'):x.kind==='approval'?icon('folder'):x.kind==='request'?icon('mail'):icon('trend')}</div><div class="inbox-copy"><strong>${escapeHTML(x.title)}</strong>${unread?'<i class="unread-dot"></i>':''}<p>${escapeHTML(noticeText(x.body))}</p><small title="${escapeHTML(x.createdAt)}">${escapeHTML(relTime(x.createdAt))}</small>${actions}</div><span class="task-arrow">${icon('chevron-right')}</span>${UI.inboxManage?'':`<button class="inbox-delete" data-delete="${escapeHTML(x.id)}" title="删除这条通知" aria-label="删除这条通知">${icon('x')}</button>`}</article>`}})].sort((a,b)=>(b.priority-a.priority)||String(b.time).localeCompare(String(a.time)));
   $('#inboxList').innerHTML=cards.map(x=>x.html).join('')||'<div class="empty-state">收件箱很安静</div>';
   const pick=id=>{UI.inboxPicked=UI.inboxPicked||new Set();if(UI.inboxPicked.has(id))UI.inboxPicked.delete(id);else UI.inboxPicked.add(id);renderInbox()};
   $$('#inboxList .inbox-item').forEach(e=>{e.tabIndex=0;e.onkeydown=ev=>{if(ev.key==='Enter'&&!ev.target.closest('.inbox-actions,.inbox-delete')){if(e.dataset.id)UI.inboxManage?pick(e.dataset.id):openNotification(e.dataset.id);else openRequest(e.dataset.request)}}});
@@ -612,11 +627,34 @@ function renderInbox(){
   $$('.approve-project-request').forEach(b=>b.onclick=ev=>{ev.stopPropagation();reviewProject(b.dataset.id,true,b.dataset.notification)});$$('.reject-project-request').forEach(b=>b.onclick=ev=>{ev.stopPropagation();reviewProject(b.dataset.id,false,b.dataset.notification)});
   $$('.approve-project-completion-request').forEach(b=>b.onclick=ev=>{ev.stopPropagation();reviewProjectCompletion(b.dataset.id,true,b.dataset.notification)});$$('.reject-project-completion-request').forEach(b=>b.onclick=ev=>{ev.stopPropagation();reviewProjectCompletion(b.dataset.id,false,b.dataset.notification)});
   $$('.approve-edit-request').forEach(b=>b.onclick=ev=>{ev.stopPropagation();reviewTaskEdit(b.dataset.id,true,b.dataset.notification)});$$('.reject-edit-request').forEach(b=>b.onclick=ev=>{ev.stopPropagation();reviewTaskEdit(b.dataset.id,false,b.dataset.notification)});
+  $$('.approve-task-request').forEach(b=>b.onclick=ev=>{ev.stopPropagation();reviewTaskRequest(b.dataset.id,true)});$$('.reject-task-request').forEach(b=>b.onclick=ev=>{ev.stopPropagation();reviewTaskRequest(b.dataset.id,false)});
+  $$('#inboxList .task-ask-item').forEach(e=>{e.tabIndex=0;e.onclick=()=>openTaskRequest(e.dataset.taskRequest);e.onkeydown=ev=>{if(ev.key==='Enter')openTaskRequest(e.dataset.taskRequest)}});
+}
+/* Task requests: a project task is for its Owner (or an admin) to settle, a
+   one-off task for an admin. */
+const taskRequestById=id=>(S.taskRequests||[]).find(r=>r.id===id);
+function canReviewTaskRequest(r){if(!r||r.status!=='pending')return false;if(S.user?.admin)return true;return Boolean(r.projectId&&S.projects.find(p=>p.id===r.projectId)?.owner===S.user?.id)}
+function taskRequestApprover(r){const p=r.projectId&&S.projects.find(x=>x.id===r.projectId);return p?`${nameOf(p.owner)}（项目 Owner）`:'管理员'}
+function openTaskRequest(id){
+  const r=taskRequestById(id);if(!r)return;const t=r.draft||{},p=r.projectId&&S.projects.find(x=>x.id===r.projectId),review=canReviewTaskRequest(r);
+  const state=r.status==='pending'?`等待${taskRequestApprover(r)}审批`:r.status==='approved'?'已通过':`已驳回：${r.reason||''}`;
+  const footer=review?`<button class="secondary-btn" id="detailRejectTaskRequest">驳回申请</button><button class="primary-btn" id="detailApproveTaskRequest">同意创建</button>`:'<button class="secondary-btn" id="cancelAction">关闭</button>';
+  openModal(`<div class="eyebrow">任务申请 · ${escapeHTML(nameOf(r.requester))}</div><h2>${escapeHTML(t.name||'任务')}</h2>${t.desc?`<p>${escapeHTML(t.desc)}</p>`:''}<div class="detail-grid"><div><span>项目</span><strong>${escapeHTML(p?.name||'临时任务')}</strong></div><div><span>负责人</span><strong>${escapeHTML(nameOf(t.assignee))}</strong></div><div><span>安排</span><strong>${escapeHTML(fmt(t.date||S.today))} ${escapeHTML(t.time||'')}${t.deadline&&t.deadline!==t.date?' – '+escapeHTML(fmt(t.deadline)):''}</strong></div><div><span>时长 · 优先级</span><strong>${escapeHTML(String(t.duration||30))} 分钟 · ${escapeHTML(t.priority||'P1')}</strong></div><div><span>状态</span><strong>${escapeHTML(state)}</strong></div></div><div class="modal-footer">${footer}</div>`);
+  $('#cancelAction')?.addEventListener('click',closeModal);
+  $('#detailApproveTaskRequest')?.addEventListener('click',()=>reviewTaskRequest(id,true));
+  $('#detailRejectTaskRequest')?.addEventListener('click',()=>reviewTaskRequest(id,false));
+}
+async function reviewTaskRequest(id,accept){
+  if(accept){try{closeModal();await act('task.request_review',{id,accept:true})}catch(e){}return}
+  openModal(`<div class="eyebrow">任务申请</div><h2>驳回任务申请</h2><label class="form-field">驳回原因<textarea id="taskRequestReason"></textarea></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmTaskRequestReject">确认驳回</button></div>`);
+  $('#cancelAction').onclick=closeModal;
+  $('#confirmTaskRequestReject').onclick=async()=>{const reason=$('#taskRequestReason').value.trim();if(!reason){toast('请填写驳回原因');return}try{await act('task.request_review',{id,accept:false,reason});closeModal()}catch(e){}};
 }
 function openRequest(id){const r=S.requests.find(x=>x.id===id);if(!r)return;const p=S.projects.find(x=>x.id===r.projectId);openModal(`<div class="eyebrow">收件箱详情 · 项目邀请</div><h2>加入「${escapeHTML(p?.name||'项目')}」</h2><div class="detail-grid"><div><span>Owner</span><strong>${escapeHTML(p?.owner||'—')}</strong></div><div><span>项目状态</span><strong>${p?projectStatus(p):'—'}</strong></div></div><div class="modal-footer"><button class="secondary-btn" id="detailRejectRequest">拒绝</button><button class="primary-btn" id="detailAcceptRequest">接受邀请</button></div>`);$('#detailAcceptRequest').onclick=()=>{closeModal();act('request.respond',{id,accept:true})};$('#detailRejectRequest').onclick=()=>{closeModal();act('request.respond',{id,accept:false})};api('/api/action',{action:'request.read',data:{id}}).then(refresh).catch(()=>{})}
 function openNotification(id){
   const n=S.notifications.find(x=>x.id===id); if(!n)return;
   if(n.kind==='brief'){if(!n.read)api('/api/action',{action:'inbox.read',data:{id}}).then(refresh).catch(()=>{});openBrief(String(n.reference||'').replace(/^brief:/,''));return}
+  if((n.kind==='task_request'||n.kind==='task_request_result')&&taskRequestById(n.reference)){if(!n.read)api('/api/action',{action:'inbox.read',data:{id}}).then(refresh).catch(()=>{});openTaskRequest(n.reference);return}
   const editReq=(S.editRequests||[]).find(r=>r.id===n.reference),p=n.reference&&S.projects.find(x=>x.id===n.reference),t=n.reference&&S.tasks.find(x=>x.id===n.reference)||S.tasks.find(x=>x.id===editReq?.taskId),projectPending=Boolean(S.user?.admin&&n.kind==='approval'&&p?.status==='pending'),projectCompletionPending=Boolean(S.user?.admin&&n.kind==='project_completion'&&p?.status==='pending_completion'),editPending=Boolean(n.kind==='task_edit_approval'&&editReq&&editReq.status==='pending'&&editReq.approver===S.user?.id&&t);
   const action=projectPending?`<div class="modal-footer"><button class="secondary-btn" id="detailRejectProject">驳回申请</button><button class="primary-btn" id="detailApproveProject">同意创建</button></div>`:projectCompletionPending?`<div class="modal-footer"><button class="secondary-btn" id="detailRejectProjectCompletion">驳回申请</button><button class="primary-btn" id="detailApproveProjectCompletion">同意完成</button></div>`:editPending?`<div class="modal-footer"><button class="secondary-btn" id="detailRejectEdit">驳回申请</button><button class="primary-btn" id="detailApproveEdit">同意修改</button></div>`:'<div class="modal-footer"><button class="secondary-btn" id="cancelAction">关闭</button></div>';
   openModal(`<div class="eyebrow">收件箱详情 · ${escapeHTML(n.kind||'通知')}</div><h2>${escapeHTML(n.title)}</h2>${noticeDetail(n.body)}${t?`<div class="detail-grid"><div><span>任务</span><strong>${escapeHTML(t.name)}</strong></div><div><span>负责人</span><strong>${escapeHTML(nameOf(t.assignee))}</strong></div><div><span>状态</span><strong>${status(t)[1]}</strong></div><div><span>项目</span><strong>${escapeHTML(projectName(t))}</strong></div></div>${t.completionSummary?`<div class="completion-summary"><span>提交的完成总结</span><p>${escapeHTML(t.completionSummary)}</p></div>`:''}${editReq?renderEditRequestSummary(t):''}`:p?`<div class="detail-grid"><div><span>关联项目</span><strong>${escapeHTML(p.name)}</strong></div><div><span>项目 Owner</span><strong>${escapeHTML(nameOf(p.owner))}</strong></div><div><span>项目状态</span><strong>${projectStatus(p)}</strong></div></div>${p.completionReport?`<div class="completion-summary"><span>结项报告</span><p>${escapeHTML(p.completionReport)}</p></div>`:''}`:''}<div class="detail-grid"><div><span>通知时间</span><strong title="${escapeHTML(n.createdAt)}">${escapeHTML(relTime(n.createdAt))}</strong></div></div>${action}`);
@@ -677,16 +715,10 @@ function renderRepeats(){
   $$('.repeat-project').forEach(b=>b.onclick=()=>repeatProjectDialog(b.dataset.id));
   $$('.skip-repeat').forEach(b=>b.onclick=()=>{const date=prompt('请输入本次不执行的日期（YYYY-MM-DD）',S.today);if(!date)return;act('repeat.skip',{id:b.dataset.id,date,skip:true}).catch(()=>{})});
 }
-function accountProjectRoles(id){const owned=S.projects.filter(p=>p.owner===id).map(p=>p.name),joined=S.projects.filter(p=>p.owner!==id&&(p.members||{})[id]==='accepted').map(p=>p.name);return {owned,joined}}
-function accountRoleLabel(x){
-  const role=roleOf(x);
-  if(role==='superadmin'||role==='admin')return '';
-  const {owned,joined}=accountProjectRoles(x.id);const parts=[];
-  if(owned.length)parts.push('Owner：'+owned.join('、'));
-  if(joined.length)parts.push('协作者：'+joined.join('、'));
-  if(!x.active)parts.push('账户已停用');
-  return parts.join('　')||'暂无项目归属';
-}
+/* Identity is only the 权限组: superadmin, admin or 普通用户. Owning or joining
+   a project is not an identity. */
+const ROLE_LABELS={superadmin:'superadmin',admin:'admin',member:'普通用户'};
+function accountRoleLabel(x){return ROLE_LABELS[roleOf(x)]||'普通用户'}
 function roleOf(x){return x&&(x.role||(x.admin?'superadmin':'member'))}
 function userById(id){return (S.users||[]).find(u=>u.id===id)}
 /* 中文名称 is the formal ledger name; 昵称 is what the holder calls themselves.
@@ -750,7 +782,8 @@ function editProfile(id,initialMode){
   let pendingAvatar=target.avatar||'';
   const nameField=canName?`<label class="form-field">中文名称<input id="profileDisplayName" maxlength="12" value="${escapeHTML(target.displayName||'')}" ></label>`:'';
   const selfFields=self?`<label class="form-field">昵称<input id="profileNickname" maxlength="12" value="${escapeHTML(target.nickname||'')}" placeholder="自己想被叫的名字"></label>
-    <div class="form-field">头像<div class="avatar-editor"><span class="avatar large" id="profileAvatarPreview">${escapeHTML(avatarSeed(id))}</span><input type="file" id="profileAvatarFile" accept="image/*" class="hidden"><button type="button" class="secondary-btn" id="profileAvatarPick">选择图片</button><button type="button" class="ghost-btn" id="profileAvatarClear">移除</button></div></div>`:'';
+    <div class="form-field">头像<div class="avatar-editor"><span class="avatar large" id="profileAvatarPreview">${escapeHTML(avatarSeed(id))}</span><input type="file" id="profileAvatarFile" accept="image/*" class="hidden"><button type="button" class="secondary-btn" id="profileAvatarPick">选择图片</button><button type="button" class="ghost-btn" id="profileAvatarClear">移除</button></div></div>
+    <label class="form-field">个性签名<input id="profileSignature" maxlength="40" value="${escapeHTML(target.signature||'')}" placeholder="一句话，显示在头像下方"></label>`:'';
   openModal(`<div class="eyebrow">账户资料 · ${escapeHTML(target.id)}</div><h2>${escapeHTML(target.displayName||target.id)}</h2>${nameField}${selfFields}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmProfile">保存</button></div>`);
   /* The avatar element only exists on your own card. A superadmin opening
      someone else's card just to set their 中文名称 used to hit a null here and
@@ -780,7 +813,7 @@ function editProfile(id,initialMode){
         await api('/api/action',{action:'account.profile',data:{id,displayName:$('#profileDisplayName').value.trim()}});
       }
       if(self){
-        await api('/api/action',{action:'profile.self',data:{nickname:($('#profileNickname')?.value||'').trim(),avatar:pendingAvatar}});
+        await api('/api/action',{action:'profile.self',data:{nickname:($('#profileNickname')?.value||'').trim(),avatar:pendingAvatar,signature:($('#profileSignature')?.value||'').trim()}});
       }
       closeModal();await refresh();toast('资料已更新');
     }catch(err){
@@ -789,41 +822,190 @@ function editProfile(id,initialMode){
     }
   };
 }
-function roleText(x){const role=roleOf(x);return role==='superadmin'?'Super Admin':role==='admin'?'Admin':(accountProjectRoles(x.id).owned.length?'项目 Owner':'普通用户')}
-function renderAccountItem(x,owner,admin){
-  const self=x.id===S.user.id,role=roleOf(x);
-  const nameBtn=owner?`<button class="ghost-btn edit-profile" data-user="${x.id}" data-mode="name">中文名</button>`:'';
-  const selfBtn=self?`<button class="ghost-btn edit-profile" data-user="${x.id}" data-mode="self">昵称 / 头像</button>`:'';
-  const actions=self?`<span class="permission-pill">当前身份</span> ${selfBtn} <button class="ghost-btn change-password" data-user="${x.id}">修改密码</button>`
-    :owner?`<select class="role-select" data-user="${x.id}" title="权限组"><option value="superadmin"${role==='superadmin'?' selected':''}>superadmin</option><option value="admin"${role==='admin'?' selected':''}>admin</option><option value="member"${role==='member'?' selected':''}>普通用户</option></select> <button class="ghost-btn reset-password" data-user="${x.id}">重置密码</button> ${nameBtn} <button class="ghost-btn toggle-account" data-user="${x.id}" data-active="${x.active?1:0}">${x.active?'停用':'启用'}</button> ${x.id!=='superadmin'?`<button class="ghost-btn delete-account" data-user="${x.id}">删除</button>`:''} `
-    :(self?nameBtn:'');
-  const tail=self?'':(x.active?`<button class="ghost-btn switch-login" data-user="${x.id}">切换</button>`:'<span class="muted">不可用</span>');
-  const nickTag=x.nickname?`<span class="name-tag nick">${escapeHTML(x.nickname)}</span>`:'';
-  const codeTag=x.displayName?`<span class="name-tag code">${escapeHTML(x.id)}</span>`:'';
-  return `<article class="account-item ${self?'current-account':''}">${avatarHTML(x.id)}<div class="account-copy"><div class="account-name"><strong>${escapeHTML(x.displayName||x.id)}</strong>${nickTag}${codeTag}</div><span>${escapeHTML(roleText(x))}</span><small>${escapeHTML(accountRoleLabel(x))}</small></div>${actions||tail?`<div class="account-actions">${actions}${tail}</div>`:''}</article>`;
+/* Rule groups (规则组) for 普通用户: what each group may start and how far its
+   AI assistant goes. They sit apart from the superadmin / admin / 普通用户
+   roles, which still decide who is an administrator. Only superadmin sees them,
+   in 系统设置. */
+const CREATION_KINDS=['project','tempTask','projectTask'],KIND_LABELS={project:'新项目',tempTask:'临时任务',projectTask:'项目任务'};
+const AGENT_ACCESS_LABELS={off:'关闭',read:'查询与规划',operate:'可代为操作'};
+function groupOf(x){const policy=S.creationPolicy,gid=policy?.assign?.[x.id];return policy?.groups?.some(g=>g.id===gid)?gid:'default'}
+async function saveCreationPolicy(patch={}){const p=S.creationPolicy;await api('/api/action',{action:'creation.update',data:{groups:patch.groups||p.groups,assign:patch.assign||p.assign}});await refresh()}
+/* 系统设置 holds what used to sit under 账户管理: the rule groups (superadmin)
+   and the diary automation (admins). */
+function renderSettings(){
+  const admin=Boolean(S.user?.admin);
+  $('#settingsView .automation-card')?.classList.toggle('hidden',!admin);
+  $('#runAutomationBtn')?.classList.toggle('hidden',!admin);
+  renderCreationPolicy();
+}
+/* Groups that exist read as a list, one row each; a group is made or changed
+   on a card (editRuleGroup). */
+function renderCreationPolicy(){
+  const box=$('#creationPolicy');if(!box)return;
+  const policy=S.creationPolicy,show=Boolean(S.user?.role==='superadmin'&&policy);
+  box.classList.toggle('hidden',!show);if(!show)return;
+  const inGroup=gid=>S.users.filter(u=>roleOf(u)==='member'&&groupOf(u)===gid);
+  const tag=(label,value,labels)=>`<span class="rule-tag is-${escapeHTML(value)}"><small>${label}</small>${labels[value]||''}</span>`;
+  const row=g=>{const list=inGroup(g.id);return `<div class="rule-row" data-group="${escapeHTML(g.id)}" role="button" tabindex="0" aria-label="编辑「${escapeHTML(g.name)}」"><div class="rule-row-name"><strong>${escapeHTML(g.name)}</strong></div><div class="rule-row-tags">${CREATION_KINDS.map(k=>tag(KIND_LABELS[k],g[k],RULE_LABELS)).join('')}${tag('AI 助手',g.agent||'read',AGENT_ACCESS_LABELS)}</div><div class="rule-row-people" title="${escapeHTML(list.map(u=>nameOf(u.id)).join('、'))}">${list.slice(0,4).map(u=>avatarHTML(u.id)).join('')}<span>${list.length} 人</span></div><span class="task-arrow">${icon('chevron-right')}</span></div>`};
+  box.innerHTML=`<div class="creation-head"><h2>规则组</h2><button class="secondary-btn" id="addCreationGroup">${icon('plus')}新建规则组</button></div><div class="rule-list">${policy.groups.map(row).join('')}</div>`;
+  $$('#creationPolicy .rule-row').forEach(r=>{r.onclick=()=>editRuleGroup(r.dataset.group);r.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();editRuleGroup(r.dataset.group)}}});
+  $('#addCreationGroup').onclick=()=>editRuleGroup(null);
+}
+/* One card both makes a group and changes it: each rule is one click and the
+   members are ticked on the card itself, several at once. Nothing is saved
+   until 创建 / 保存. Who is left in no group follows 默认规则, so that card
+   shows its members without letting them be picked. */
+function editRuleGroup(gid){
+  const policy=S.creationPolicy;if(!policy)return;
+  const isNew=!gid,current=policy.groups.find(g=>g.id===gid),fallback=policy.groups.find(g=>g.id==='default')?.name||'默认规则';
+  if(!isNew&&!current)return;
+  const names=new Set(policy.groups.map(g=>g.name));let n=1,name='新规则组';while(names.has(name))name=`新规则组 ${++n}`;
+  const draft=isNew?{id:'g-'+Math.random().toString(36).slice(2,8),name,project:'approval',tempTask:'direct',projectTask:'none',agent:'read'}:{agent:'read',...current};
+  const isDefault=draft.id==='default',members=S.users.filter(u=>roleOf(u)==='member');
+  const picked=new Set(isNew?[]:members.filter(u=>groupOf(u)===draft.id).map(u=>u.id));
+  const groupName=id=>policy.groups.find(x=>x.id===id)?.name||fallback;
+  const seg=(key,labels,label)=>`<div class="rule-line"><span>${label}</span><div class="rule-seg" role="radiogroup" aria-label="${label}">${Object.entries(labels).map(([v,l])=>`<button type="button" class="rule-opt${draft[key]===v?' is-on':''}" role="radio" aria-checked="${draft[key]===v}" data-key="${key}" data-value="${v}">${l}</button>`).join('')}</div></div>`;
+  const person=u=>{const cur=groupOf(u),from=!picked.has(u.id)&&cur!=='default'?`<small>${escapeHTML(groupName(cur))}</small>`:'';return `<button type="button" class="rule-person${picked.has(u.id)?' is-on':''}" data-user="${escapeHTML(u.id)}" aria-pressed="${picked.has(u.id)}"${isDefault?' disabled':''}>${avatarHTML(u.id)}<span>${escapeHTML(nameOf(u.id))}${from}</span></button>`};
+  const tools=isDefault?'':'<span><button type="button" class="ghost-btn" id="rulePickAll">全选</button> <button type="button" class="ghost-btn" id="rulePickNone">全不选</button></span>';
+  openModal(`<div class="rule-card is-editing"><header class="rule-card-head"><input class="rule-name" id="ruleGroupName" value="${escapeHTML(draft.name)}" maxlength="20" aria-label="规则组名称"></header><div class="rule-lines">${CREATION_KINDS.map(k=>seg(k,RULE_LABELS,KIND_LABELS[k])).join('')}${seg('agent',AGENT_ACCESS_LABELS,'AI 助手')}</div><div class="rule-members"><div class="rule-members-head"><span>成员</span>${tools}</div><div class="rule-people">${members.map(person).join('')||'<span class="muted">还没有普通用户。</span>'}</div></div></div><div class="modal-footer">${isNew||isDefault?'':'<button class="ghost-btn rule-delete" id="deleteRuleGroup">删除</button>'}<button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="saveRuleGroup">${isNew?'创建':'保存'}</button></div>`);
+  const sync=()=>$$('#modalContent .rule-person').forEach(b=>{const on=picked.has(b.dataset.user);b.classList.toggle('is-on',on);b.setAttribute('aria-pressed',String(on))});
+  $$('#modalContent .rule-opt').forEach(b=>b.onclick=()=>{draft[b.dataset.key]=b.dataset.value;b.parentElement.querySelectorAll('.rule-opt').forEach(x=>{x.classList.toggle('is-on',x===b);x.setAttribute('aria-checked',String(x===b))})});
+  if(!isDefault){
+    $$('#modalContent .rule-person').forEach(b=>b.onclick=()=>{const id=b.dataset.user;if(picked.has(id))picked.delete(id);else picked.add(id);sync()});
+    $('#rulePickAll').onclick=()=>{members.forEach(u=>picked.add(u.id));sync()};
+    $('#rulePickNone').onclick=()=>{picked.clear();sync()};
+  }
+  $('#cancelAction').onclick=closeModal;
+  $('#deleteRuleGroup')?.addEventListener('click',async()=>{const count=members.filter(u=>groupOf(u)===draft.id).length;if(!confirm(`删除「${current.name}」？组里的 ${count} 人会回到「${fallback}」。`))return;try{await saveCreationPolicy({groups:policy.groups.filter(x=>x.id!==draft.id),assign:Object.fromEntries(Object.entries(policy.assign||{}).filter(([,g])=>g!==draft.id))});closeModal();toast('规则组已删除')}catch(e){toast(e.message)}});
+  $('#saveRuleGroup').onclick=async()=>{
+    const label=$('#ruleGroupName').value.trim();if(!label){toast('请填写规则组名称');return}
+    const group={...draft,name:label},groups=isNew?[...policy.groups,group]:policy.groups.map(g=>g.id===group.id?group:g);
+    const assign={...policy.assign};
+    if(!isDefault){Object.keys(assign).forEach(id=>{if(assign[id]===group.id&&!picked.has(id))delete assign[id]});picked.forEach(id=>{assign[id]=group.id})}
+    try{await saveCreationPolicy({groups,assign});closeModal();toast(isNew?`已创建「${label}」`:`「${label}」已保存`)}catch(e){toast(e.message)}
+  };
+}
+/* 账户管理 lists accounts by 权限组 and nothing else. superadmin drags a row to
+   reorder it or to move it into another 权限组, and works on several accounts
+   at once from a group's 管理 mode; everyone else only sees the list. */
+const RESET_PASSWORD='123456';
+const ACCOUNT_GROUPS=[['superadmin','superadmin 权限组'],['admin','admin 权限组'],['member','普通用户']];
+function sortedAccounts(list){const order=S.accountOrder||[],at=(u,i)=>{const k=order.indexOf(u.id);return k<0?order.length+i:k};return list.map((u,i)=>[at(u,i),u]).sort((a,b)=>a[0]-b[0]).map(x=>x[1])}
+function renderAccountItem(x,owner,picking){
+  const self=x.id===S.user.id,on=Boolean(UI.accountPicked?.has(x.id));
+  const grip=owner&&!picking?`<span class="account-grip" title="拖动调整顺序或权限组">${icon('grip')}</span>`:'';
+  const pick=picking?`<input type="checkbox" class="account-pick" value="${escapeHTML(x.id)}"${on?' checked':''}${self?' disabled':''} aria-label="选择 ${escapeHTML(x.displayName||x.id)}">`:'';
+  const tags=(x.nickname?`<span class="name-tag nick">${escapeHTML(x.nickname)}</span>`:'')+(x.displayName?`<span class="name-tag code">${escapeHTML(x.id)}</span>`:'')+(self?'<span class="name-tag self">我</span>':'')+(x.active?'':'<span class="name-tag off">已停用</span>');
+  return `<article class="account-item${self?' current-account':''}${on?' is-picked':''}${x.active?'':' is-off'}" data-user="${escapeHTML(x.id)}">${grip}${pick}${avatarHTML(x.id)}<div class="account-copy"><div class="account-name"><strong>${escapeHTML(x.displayName||x.id)}</strong>${tags}</div>${x.signature?`<em class="signature">${escapeHTML(x.signature)}</em>`:''}</div></article>`;
 }
 function renderAccounts(){
-  const u=S.users,admin=Boolean(S.user?.admin),owner=S.user?.role==='superadmin';
-  const ownerProjects=S.projects.filter(p=>p.owner===S.user.id);
-  $('#currentRoleLabel').textContent=owner?'Super Admin':admin?'Admin':ownerProjects.length?'项目 Owner':'协作者';
-  const me=userById(S.user.id)||{};
-  applyAvatar($('.account-banner .avatar'),S.user.id);
-  $('.account-banner strong').innerHTML=escapeHTML(me.displayName||S.user.id)+(me.nickname?` <span class="name-tag nick">${escapeHTML(me.nickname)}</span>`:'');
-  $('.account-banner span').textContent=owner?'Super Admin':admin?'Admin':'';
-  $('.account-banner .permission-pill')?.remove();
+  /* A refresh mid-drag would rebuild the rows under the pointer. */
+  if(UI.accountDrag)return;
+  const owner=S.user?.role==='superadmin',admin=Boolean(S.user?.admin);
   $('#forceAssignBtn').classList.toggle('hidden',!admin);
-  $('#runAutomationBtn').classList.toggle('hidden',!admin);
-  $('#accountsView .automation-card').classList.toggle('hidden',!admin);
-  const superadmins=u.filter(x=>roleOf(x)==='superadmin'),admins=u.filter(x=>roleOf(x)==='admin'),members=u.filter(x=>roleOf(x)==='member');
-  const section=(title,hint,list)=>`<div class="account-group"><div class="account-group-heading"><strong>${title}</strong><span>${list.length}</span></div>${list.map(x=>renderAccountItem(x,owner,admin)).join('')||'<p class="muted">暂无账户。</p>'}</div>`;
-  $('#accountList').innerHTML=section('superadmin 权限组','',superadmins)+section('admin 权限组','',admins)+section('普通用户','',members);
-  $$('.switch-login').forEach(b=>b.onclick=async()=>{try{await api('/api/logout',{});showAuth();$('#loginUser').value=b.dataset.user;$('#loginPass').focus()}catch(e){toast(e.message)}});
-  $$('.toggle-account').forEach(b=>b.onclick=async()=>{try{await act('account.toggle',{id:b.dataset.user,active:b.dataset.active==='0'});toast(b.dataset.active==='0'?'账户已启用':'账户已停用')}catch(e){}});
-  $$('.role-select').forEach(sel=>sel.onchange=async()=>{const next=sel.value,prev=sel.dataset.changed||sel.querySelector(`option[selected]`)?.value;try{await api('/api/action',{action:'account.role',data:{id:sel.dataset.user,role:next}});await refresh();toast(`${sel.dataset.user} 已设为 ${next==='member'?'普通用户':next}`)}catch(e){toast(e.message||'操作失败');await refresh()}});
-  $$('.change-password').forEach(b=>b.onclick=async()=>{const current=prompt('请输入当前密码');if(current===null)return;const pw=prompt('请输入新密码（至少6位）');if(!pw)return;try{await api('/api/password',{id:b.dataset.user,current,password:pw});toast('密码已更新')}catch(e){toast(e.message)}});
-  $$('.reset-password').forEach(b=>b.onclick=async()=>{const pw=prompt(`为 ${b.dataset.user} 设置新密码（至少6位）`);if(!pw)return;try{await api('/api/password',{id:b.dataset.user,password:pw});toast('密码已重置，该账户需重新登录')}catch(e){toast(e.message)}});
-  $$('.edit-profile').forEach(b=>b.onclick=()=>editProfile(b.dataset.user,b.dataset.mode));
-  $$('.delete-account').forEach(b=>b.onclick=()=>deleteAccount(b.dataset.user));
+  if(!owner)UI.accountManage=null;
+  if(!UI.accountPicked)UI.accountPicked=new Set();
+  const section=([role,title])=>{
+    const list=sortedAccounts(S.users.filter(x=>roleOf(x)===role)),picking=UI.accountManage===role;
+    const choosable=list.filter(u=>u.id!==S.user.id),picked=choosable.filter(u=>UI.accountPicked.has(u.id));
+    const btn=(kind,label,ok,cls='ghost-btn')=>`<button class="${cls}" data-batch="${kind}"${ok?'':' disabled'}>${label}</button>`;
+    const tools=picking?`<div class="group-tools"><label class="group-all"><input type="checkbox" class="account-pick-all"${choosable.length&&picked.length===choosable.length?' checked':''}>全选</label><span class="group-picked">已选 ${picked.length}</span>${btn('off','停用',picked.some(u=>u.active))}${btn('on','启用',picked.some(u=>!u.active))}${btn('password','重置密码',picked.length)}${btn('name','设置中文名',picked.length)}${btn('delete','删除',picked.length,'ghost-btn is-danger')}${btn('done','完成',true,'primary-btn')}</div>`:owner&&choosable.length?`<button class="ghost-btn group-manage" data-role="${role}">管理</button>`:'';
+    return `<div class="account-group${picking?' is-managing':''}" data-role="${role}"><div class="account-group-heading"><strong>${title}</strong><span>${list.length}</span>${tools}</div><div class="account-rows">${list.map(x=>renderAccountItem(x,owner,picking)).join('')}<p class="muted account-empty">暂无账户</p></div></div>`;
+  };
+  const box=$('#accountList');
+  box.innerHTML=ACCOUNT_GROUPS.map(section).join('');
+  box.classList.toggle('can-drag',owner&&!UI.accountManage);
+  const pick=(id,on)=>{if(id===S.user.id)return;if(on)UI.accountPicked.add(id);else UI.accountPicked.delete(id);renderAccounts()};
+  $$('#accountList .group-manage').forEach(b=>b.onclick=()=>{UI.accountManage=b.dataset.role;UI.accountPicked=new Set();renderAccounts()});
+  $$('#accountList .is-managing .account-item').forEach(r=>r.onclick=e=>{if(e.target.closest('.account-pick'))return;pick(r.dataset.user,!UI.accountPicked.has(r.dataset.user))});
+  $$('#accountList .account-pick').forEach(c=>c.onchange=()=>pick(c.value,c.checked));
+  $$('#accountList .account-pick-all').forEach(c=>c.onchange=()=>{const role=c.closest('.account-group').dataset.role;S.users.filter(u=>roleOf(u)===role&&u.id!==S.user.id).forEach(u=>c.checked?UI.accountPicked.add(u.id):UI.accountPicked.delete(u.id));renderAccounts()});
+  $$('#accountList [data-batch]').forEach(b=>b.onclick=()=>batchAccountAction(b.dataset.batch));
+  $$('#accountList .account-grip').forEach(g=>g.onpointerdown=e=>startAccountDrag(e,g.closest('.account-item')));
+}
+async function runAccountBatch(ids,label,run){
+  const fails=[];
+  for(const id of ids){try{await run(id)}catch(e){fails.push(`${nameOf(id)}：${e?.message||'失败'}`)}}
+  try{await refresh()}catch(_){}
+  /* The same people often need a second action, so the picks stay. */
+  UI.accountPicked=new Set([...(UI.accountPicked||[])].filter(id=>userById(id)));
+  renderAccounts();
+  toast(fails.length?`${label} ${ids.length-fails.length} 个，${fails.length} 个没成功：${fails.join('；')}`:`已${label} ${ids.length} 个账户`);
+}
+async function batchAccountAction(kind){
+  if(kind==='done'){UI.accountManage=null;UI.accountPicked=new Set();renderAccounts();return}
+  const ids=[...(UI.accountPicked||[])].filter(id=>userById(id)&&id!==S.user.id);if(!ids.length)return;
+  if(kind==='name')return accountNamesDialog(ids);
+  if(kind==='delete')return deleteAccounts(ids);
+  if(kind==='password'){
+    if(!confirm(`把 ${ids.length} 个账户的密码重置为 ${RESET_PASSWORD}？`))return;
+    return runAccountBatch(ids,'重置密码',id=>api('/api/password',{id,password:RESET_PASSWORD}));
+  }
+  const active=kind==='on';
+  return runAccountBatch(ids.filter(id=>Boolean(userById(id).active)!==active),active?'启用':'停用',id=>api('/api/action',{action:'account.toggle',data:{id,active}}));
+}
+function accountNamesDialog(ids){
+  openModal(`<h2>设置中文名</h2><div class="account-name-list">${ids.map(id=>{const u=userById(id);return `<label class="account-name-row">${avatarHTML(id)}<span>${escapeHTML(id)}</span><input data-user="${escapeHTML(id)}" maxlength="12" value="${escapeHTML(u?.displayName||'')}" placeholder="中文名"></label>`}).join('')}</div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmNames">保存</button></div>`);
+  $('#modalContent .account-name-row input')?.focus();
+  $('#cancelAction').onclick=closeModal;
+  $('#confirmNames').onclick=async()=>{
+    const changed=$$('#modalContent .account-name-row input').filter(i=>i.value.trim()!==(userById(i.dataset.user)?.displayName||'')).map(i=>[i.dataset.user,i.value.trim()]);
+    closeModal();if(!changed.length)return;
+    const names=Object.fromEntries(changed);
+    await runAccountBatch(Object.keys(names),'设置中文名',id=>api('/api/action',{action:'account.profile',data:{id,displayName:names[id]}}));
+  };
+}
+/* One account keeps the typed-name check; several are confirmed together. */
+function deleteAccounts(ids){
+  if(ids.length===1){UI.accountPicked=new Set();return deleteAccount(ids[0])}
+  openModal(`<div class="eyebrow danger-eyebrow">不可撤销</div><h2>删除 ${ids.length} 个账户</h2><div class="danger-panel"><ul class="danger-impact">${ids.map(id=>`<li><strong>${escapeHTML(nameOf(id))}</strong> ${escapeHTML(id)}</li>`).join('')}</ul></div><label class="danger-confirm">输入 <code>删除</code> 以继续<input id="deleteAccountsConfirm" autocomplete="off" spellcheck="false"></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="danger-btn" id="confirmDeleteAccounts" disabled>永久删除</button></div>`);
+  const text=$('#deleteAccountsConfirm'),btn=$('#confirmDeleteAccounts');
+  text.oninput=()=>{btn.disabled=text.value.trim()!=='删除'};
+  $('#cancelAction').onclick=closeModal;
+  btn.onclick=async()=>{if(btn.disabled)return;closeModal();await runAccountBatch(ids,'删除',id=>api('/api/action',{action:'account.delete',data:{id,confirm:id}}))};
+}
+/* Drag by the grip: the row lifts into a floating copy, the others slide out
+   of the way, and dropping it in another 权限组 changes that account's group.
+   Pointer events keep it working with a mouse, a pen or a finger. */
+function startAccountDrag(e,row){
+  if(!row||e.button>0||UI.accountManage||S.user?.role!=='superadmin')return;
+  e.preventDefault();
+  const id=row.dataset.user,from=row.closest('.account-group').dataset.role,self=id===S.user.id;
+  const start=[...$$('#accountList .account-item')].map(r=>r.dataset.user).join();
+  const rect=row.getBoundingClientRect(),offX=e.clientX-rect.left,offY=e.clientY-rect.top;
+  const ghost=row.cloneNode(true);ghost.classList.add('account-ghost');
+  Object.assign(ghost.style,{width:rect.width+'px',left:rect.left+'px',top:rect.top+'px'});
+  document.body.appendChild(ghost);row.classList.add('is-placeholder');document.body.classList.add('is-dragging-account');
+  UI.accountDrag={id};
+  const rows=()=>[...$$('#accountList .account-item')];
+  const flip=change=>{const before=new Map(rows().map(r=>[r,r.getBoundingClientRect().top]));change();rows().forEach(r=>{if(r===row)return;const d=before.get(r)-r.getBoundingClientRect().top;if(d)r.animate([{transform:`translateY(${d}px)`},{transform:'none'}],{duration:200,easing:'cubic-bezier(.2,.8,.2,1)'})})};
+  let scroll=0;
+  const move=ev=>{
+    ghost.style.left=(ev.clientX-offX)+'px';ghost.style.top=(ev.clientY-offY)+'px';
+    scroll=ev.clientY<70?-10:ev.clientY>innerHeight-70?10:0;
+    const group=document.elementFromPoint(ev.clientX,ev.clientY)?.closest('#accountList .account-group');
+    if(!group||(self&&group.dataset.role!==from))return;
+    const list=group.querySelector('.account-rows'),others=[...list.querySelectorAll('.account-item')].filter(r=>r!==row);
+    const before=others.find(r=>{const b=r.getBoundingClientRect();return ev.clientY<b.top+b.height/2})||list.querySelector('.account-empty');
+    if(row.parentElement===list&&row.nextElementSibling===before)return;
+    flip(()=>list.insertBefore(row,before));
+  };
+  const tick=setInterval(()=>{if(scroll)scrollBy(0,scroll)},16);
+  const drop=async()=>{
+    removeEventListener('pointermove',move);removeEventListener('pointerup',drop);removeEventListener('pointercancel',drop);clearInterval(tick);
+    const to=row.closest('.account-group').dataset.role,end=row.getBoundingClientRect(),now=ghost.getBoundingClientRect();
+    ghost.animate([{transform:'scale(1.02)'},{transform:`translate(${end.left-now.left}px,${end.top-now.top}px)`}],{duration:170,easing:'cubic-bezier(.2,.8,.2,1)'}).onfinish=()=>{ghost.remove();row.classList.remove('is-placeholder');document.body.classList.remove('is-dragging-account')};
+    const order=rows().map(r=>r.dataset.user);
+    UI.accountDrag=null;
+    if(to===from&&order.join()===start)return;
+    try{
+      if(to!==from)await api('/api/action',{action:'account.role',data:{id,role:to}});
+      await api('/api/action',{action:'account.order',data:{order}});
+      if(to!==from)toast(`${nameOf(id)} 已移到 ${ACCOUNT_GROUPS.find(g=>g[0]===to)[1]}`);
+    }catch(err){toast(err?.message||'调整失败')}
+    try{await refresh()}catch(_){}
+  };
+  addEventListener('pointermove',move);addEventListener('pointerup',drop);addEventListener('pointercancel',drop);
 }
 /* The workspace chip opens a menu: who you are, your own settings, a fast
    account switch and sign-out. Switching accounts only signs out and carries
@@ -832,9 +1014,9 @@ function renderAccountMenu(){
   const menu=$('#accountMenu');if(!menu)return;
   const me=userById(S.user.id)||{};
   const others=knownAccounts().filter(id=>id!==S.user.id).map(userById).filter(u=>u?.active);
-  const head=`<div class="account-menu-head">${avatarHTML(S.user.id,'large')}<div class="account-menu-identity"><strong>${escapeHTML(me.displayName||S.user.id)}</strong>${me.nickname?`<span class="name-tag nick">${escapeHTML(me.nickname)}</span>`:''}<small>${escapeHTML(accountRoleLabel(S.user))}</small></div></div>`;
+  const head=`<div class="account-menu-head">${avatarHTML(S.user.id,'large')}<div class="account-menu-identity"><strong>${escapeHTML(me.displayName||S.user.id)}</strong>${me.nickname?`<span class="name-tag nick">${escapeHTML(me.nickname)}</span>`:''}<small>${escapeHTML(accountRoleLabel(S.user))}</small></div>${me.signature?`<em class="signature">${escapeHTML(me.signature)}</em>`:''}</div>`;
   const row=(action,label,hint)=>`<button class="account-menu-item" data-action="${action}" role="menuitem">${escapeHTML(label)}${hint?`<small>${escapeHTML(hint)}</small>`:''}</button>`;
-  const mine=`<div class="account-menu-group">${row('profile','我的资料','昵称 / 头像')}${row('password','修改密码')}${S.user?.admin?row('accounts','账户管理'):''}</div>`;
+  const mine=`<div class="account-menu-group">${row('profile','我的资料','昵称 / 头像 / 签名')}${row('password','修改密码')}${S.user?.admin?row('accounts','账户管理')+row('settings','系统设置'):''}</div>`;
   const switchGroup=`<div class="account-menu-group"><span class="account-menu-label">切换账户</span>${others.map(u=>`<button class="account-menu-item switch" data-user="${escapeHTML(u.id)}" role="menuitem">${avatarHTML(u.id)}<span>${escapeHTML(u.displayName||u.id)}${u.nickname?`<small>${escapeHTML(u.nickname)}</small>`:''}</span></button>`).join('')}<button class="account-menu-item switch" data-user="" role="menuitem">登录其他账户</button></div>`;
   const foot=`<div class="account-menu-group"><button class="account-menu-item danger" data-action="logout" role="menuitem">退出登录</button></div>`;
   menu.innerHTML=head+mine+switchGroup+foot;
@@ -846,6 +1028,7 @@ function accountMenuAction(action){
   if(action==='profile')editProfile(S.user.id,'self');
   else if(action==='password')changeOwnPassword();
   else if(action==='accounts')switchView('accounts');
+  else if(action==='settings')switchView('settings');
   else if(action==='logout')signOutTo('');
 }
 function changeOwnPassword(){
@@ -890,14 +1073,18 @@ function deleteAccount(id){
 async function act(action,data){try{await api('/api/action',{action,data});await refresh();toast('操作已完成')}catch(e){toast(e.message);throw e}}
 function openModal(html){if(UI.briefSource){UI.briefSource.closest('.archive-file')?.classList.remove('is-out');UI.briefSource=null}UI.briefTyping?.finish();UI.briefTyping=null;document.querySelectorAll('.brief-folder').forEach(x=>x.remove());['#modalBackdrop','#modalBackdrop .modal','#modalContent'].forEach(s=>$(s)?.getAnimations?.().forEach(a=>a.cancel()));$('#modalContent').innerHTML=html;$('#modalBackdrop .modal')?.classList?.remove('is-wide','is-flown');$('#modalBackdrop').classList.remove('hidden')};function closeModal(){if(typeof foldBrief==='function'&&foldBrief())return;$('#modalBackdrop').classList.add('hidden')};function closeDrawer(){$('#taskDrawer').classList.add('hidden')}
 function newTask(projectId,initialDate){
-  const admin=Boolean(S.user.admin),projects=manageableProjects().filter(p=>!isProjectHidden(p)),locked=typeof projectId==='string';
+  const admin=Boolean(S.user.admin),paths=taskProjects(),projects=paths.map(x=>x.p),temp=tempTaskMode(),locked=typeof projectId==='string';
+  if(!projects.length&&temp==='none'){toast('你所在的规则组不能新建任务');return}
   const initial=projects.find(p=>p.id===projectId)?.id||projects[0]?.id;
   /* 临时任务 belongs to no project: a member writes one for themselves, an
-     admin can hand one to any member. */
+     admin can hand one to any member. Each kind and project is offered only
+     where the account's rule group allows it; where it needs approval
+     the dialog turns into a request. */
   let kind=projects.length?'project':'adhoc',serverMinutes=null,ask=0;
-  const kinds=locked?'':`<div class="task-kind-switch">${projects.length?'<button type="button" class="task-kind-btn" data-kind="project">项目任务</button>':''}<button type="button" class="task-kind-btn" data-kind="adhoc">临时任务</button>${admin?'<button type="button" class="task-kind-btn" id="kindFixedTask">固定任务</button>':''}</div>`;
-  openModal(`<div class="eyebrow">${admin?'管理员':projects.length?'项目 Owner':'我的任务'}</div><h2>新建任务</h2>${kinds}<label class="form-field" id="taskProjectField">所属项目<select id="taskProject" ${locked?'disabled':''}>${projects.map(p=>`<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('')}</select></label><label class="form-field">任务名称<input id="taskName" maxlength="120"></label><label class="form-field">任务描述<textarea id="taskDesc"></textarea></label><label class="form-field">指派给<select id="taskAssignee"></select><div id="taskAssigneeLoad" class="assignee-load-hint"></div></label><div class="task-form-grid"><label class="form-field">安排日期<input id="taskDate" type="date" max="${DATE_HORIZON}" value="${initialDate||(UI.view==='dayDetail'?UI.detailDate:displayDay())}"></label><label class="form-field">结束日期<input id="taskDeadline" type="date" max="${DATE_HORIZON}"></label><label class="form-field">时间<input id="taskTime" type="time" value="09:00"></label><label class="form-field">预计时长<input id="taskDuration" type="number" min="1" max="1440" value="30"></label><label class="form-field">优先级<select id="taskPriority"><option>P0</option><option selected>P1</option><option>P2</option></select></label></div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmTask">创建任务</button></div>`);
+  const kinds=locked?'':`<div class="task-kind-switch">${projects.length?'<button type="button" class="task-kind-btn" data-kind="project">项目任务</button>':''}${temp!=='none'?'<button type="button" class="task-kind-btn" data-kind="adhoc">临时任务</button>':''}${admin?'<button type="button" class="task-kind-btn" id="kindFixedTask">固定任务</button>':''}</div>`;
+  openModal(`<h2 id="taskDialogTitle">新任务</h2>${kinds}<label class="form-field" id="taskProjectField">所属项目<select id="taskProject" ${locked?'disabled':''}>${projects.map(p=>`<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('')}</select></label><label class="form-field">任务名称<input id="taskName" maxlength="120"></label><label class="form-field">任务描述<textarea id="taskDesc"></textarea></label><label class="form-field">指派给<select id="taskAssignee"></select><div id="taskAssigneeLoad" class="assignee-load-hint"></div></label><div class="task-form-grid"><label class="form-field">安排日期<input id="taskDate" type="date" max="${DATE_HORIZON}" value="${initialDate||(UI.view==='dayDetail'?UI.detailDate:displayDay())}"></label><label class="form-field">结束日期<input id="taskDeadline" type="date" max="${DATE_HORIZON}"></label><label class="form-field">时间<input id="taskTime" type="time" value="09:00"></label><label class="form-field">预计时长<input id="taskDuration" type="number" min="1" max="1440" value="30"></label><label class="form-field">优先级<select id="taskPriority"><option>P0</option><option selected>P1</option><option>P2</option></select></label></div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmTask">创建任务</button></div>`);
   const project=()=>kind==='project'?projects.find(p=>p.id===$('#taskProject').value):null;
+  const mode=()=>kind==='project'?paths.find(x=>x.p.id===$('#taskProject').value)?.mode:temp;
   const candidates=()=>kind==='adhoc'?S.users.filter(u=>u.active&&(admin?!u.admin:u.id===S.user.id)):projectAssignees(project());
   /* The load beside each name is what that person already has inside this
      task's own dates, across every project, not their whole backlog. */
@@ -911,11 +1098,13 @@ function newTask(projectId,initialDate){
     const who=$('#taskAssignee').value,mine=who?load(who,period):null,[start,end]=period;
     $('#taskAssigneeLoad').textContent=users.length?`${fmt(start)}${end!==start?' – '+fmt(end):''} 已安排 ${hours(mine.mins)}h · ${mine.count} 项`:'项目暂无成员';
     $('#confirmTask').disabled=!users.length;
+    const asking=mode()==='approval';
+    $('#taskDialogTitle').textContent=asking?'申请任务':'新任务';$('#confirmTask').textContent=asking?'提交申请':'创建任务';
   };
   /* An Owner only sees their own projects' tasks, so their numbers come from
      the server; an admin already holds every task. */
   const recount=()=>{
-    serverMinutes=null;render();const p=project();if(admin||!p)return;
+    serverMinutes=null;render();const p=project();if(admin||!p||p.owner!==S.user.id)return;
     const [start,end]=span(),mine=++ask;
     api('/api/action',{action:'project.member_loads',data:{id:p.id,start,end}}).then(r=>{if(mine!==ask||$('#modalBackdrop').classList.contains('hidden'))return;serverMinutes=r.minutes||null;render()}).catch(()=>{});
   };
@@ -926,25 +1115,29 @@ function newTask(projectId,initialDate){
   const _sd=$('#taskDate'),_dl=$('#taskDeadline');const _syncDl=()=>{_dl.min=_sd.value||S.today;if(_dl.value&&_dl.value<_dl.min)_dl.value=''};
   _sd.onchange=()=>{_syncDl();recount()};_dl.onchange=recount;$('#taskProject').onchange=recount;$('#taskAssignee').onchange=render;_syncDl();
   setKind(kind);$('#cancelAction').onclick=closeModal;
-  $('#confirmTask').onclick=async()=>{if(!$('#taskName').value.trim()){toast('请填写任务名称');return}const _start=$('#taskDate').value,_end=$('#taskDeadline').value;if(_end&&_end<_start){toast('结束日期不能早于安排日期');return}const data={name:$('#taskName').value,desc:$('#taskDesc').value,projectId:kind==='project'?$('#taskProject').value:null,assignee:$('#taskAssignee').value,date:$('#taskDate').value,deadline:$('#taskDeadline').value||null,time:$('#taskTime').value,duration:Number($('#taskDuration').value),priority:$('#taskPriority').value};try{await act('task.create',data);closeModal()}catch(e){}};
+  $('#confirmTask').onclick=async()=>{if(!$('#taskName').value.trim()){toast('请填写任务名称');return}const _start=$('#taskDate').value,_end=$('#taskDeadline').value;if(_end&&_end<_start){toast('结束日期不能早于安排日期');return}const data={name:$('#taskName').value,desc:$('#taskDesc').value,projectId:kind==='project'?$('#taskProject').value:null,assignee:$('#taskAssignee').value,date:$('#taskDate').value,deadline:$('#taskDeadline').value||null,time:$('#taskTime').value,duration:Number($('#taskDuration').value),priority:$('#taskPriority').value};try{const r=await api('/api/action',{action:'task.create',data});await refresh();toast(r?.requested?'申请已提交，等待审批':'任务已创建');closeModal()}catch(e){toast(e.message)}};
 }
 function editTaskAssignment(id){
   const t=S.tasks.find(t=>t.id===id),p=S.projects.find(p=>p.id===t?.projectId);
   if(!canManageProject(p)||p.status!=='active'||!['todo','doing'].includes(t.status)){toast('当前任务不可调整');return}
   const users=projectAssignees(p);
-  openModal(`<div class="eyebrow">${escapeHTML(p.name)} · ${S.user.admin?'管理员':'项目 Owner'}</div><h2>调整任务指派</h2><p>${escapeHTML(t.name)}<br>当前负责人：${escapeHTML(t.assignee)}。调整后将通知原负责人及新负责人。</p><label class="form-field">指派给<select id="assignmentUser">${users.map(u=>`<option value="${escapeHTML(u.id)}">${escapeHTML(u.id)}${u.id===p.owner?' · Owner':''}</option>`).join('')}</select></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmAssignment" ${users.length?'':'disabled'}>保存指派并通知</button></div>`);
+  openModal(`<div class="eyebrow">${escapeHTML(p.name)}</div><h2>调整任务指派</h2><p>${escapeHTML(t.name)}<br>当前负责人：${escapeHTML(t.assignee)}。调整后将通知原负责人及新负责人。</p><label class="form-field">指派给<select id="assignmentUser">${users.map(u=>`<option value="${escapeHTML(u.id)}">${escapeHTML(u.id)}${u.id===p.owner?' · Owner':''}</option>`).join('')}</select></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmAssignment" ${users.length?'':'disabled'}>保存指派并通知</button></div>`);
   if(users.some(u=>u.id===t.assignee))$('#assignmentUser').value=t.assignee;
   $('#cancelAction').onclick=closeModal;$('#confirmAssignment').onclick=async()=>{const assignee=$('#assignmentUser').value;if(assignee===t.assignee){toast('负责人未变更');return}try{await act('task.update',{id,assignee});closeModal();if(!$('#taskDrawer').classList.contains('hidden'))openDrawer(id)}catch(e){}};
 }
 function newProject(){
-  const admin=S.user?.admin,ownerOptions=S.users.filter(u=>u.active&&!u.admin),owner=admin?`<label class="form-field">项目 Owner<select id="projectOwner">${ownerOptions.map(u=>`<option value="${escapeHTML(u.id)}">${escapeHTML(u.id)}</option>`).join('')}</select></label>`:'';
-  const collaborators=admin?`<fieldset class="member-checkboxes"><legend>协作者（直接加入项目）</legend>${ownerOptions.map(u=>`<label><input type="checkbox" name="projectMember" value="${escapeHTML(u.id)}"> <strong>${escapeHTML(u.id)}</strong></label>`).join('')}</fieldset>`:'';
-  openModal(`<div class="eyebrow">项目空间 · ${admin?'superadmin 创建':'成员申请'}</div><h2>${admin?'创建项目':'申请创建项目'}</h2><label class="form-field">项目名称<input id="projectName" maxlength="120"></label><label class="form-field">项目描述<textarea id="projectDesc"></textarea></label>${owner}<div class="project-date-fields"><label class="form-field">开始日期<input id="projectStart" type="date" max="${DATE_HORIZON}" value="${S.today}"></label><label class="form-field">截止日期（可留空）<input id="projectEnd" type="date" min="${S.today}" max="${DATE_HORIZON}"></label></div>${collaborators}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmProject">${admin?'创建项目':'提交审批'}</button></div>`);
+  /* An admin names the Owner and adds collaborators outright; anyone else owns
+     what they start and invites collaborators, who still have to accept. The
+     dialog becomes a request when the rule group needs approval. */
+  const admin=S.user?.admin,asking=projectMode()==='approval',ownerOptions=S.users.filter(u=>u.active&&!u.admin),owner=admin?`<label class="form-field">项目 Owner<select id="projectOwner">${ownerOptions.map(u=>`<option value="${escapeHTML(u.id)}">${escapeHTML(u.id)}</option>`).join('')}</select></label>`:'';
+  const pool=admin?ownerOptions:ownerOptions.filter(u=>u.id!==S.user.id);
+  const collaborators=pool.length?`<fieldset class="member-checkboxes"><legend>${admin?'协作者（直接加入项目）':'邀请协作者'}</legend>${pool.map(u=>`<label><input type="checkbox" name="projectMember" value="${escapeHTML(u.id)}"> <strong>${escapeHTML(nameOf(u.id))}</strong></label>`).join('')}</fieldset>`:'';
+  openModal(`<div class="eyebrow">项目空间 · ${admin?'superadmin 创建':asking?'成员申请':'成员创建'}</div><h2>${asking?'申请项目':'新项目'}</h2><label class="form-field">项目名称<input id="projectName" maxlength="120"></label><label class="form-field">项目描述<textarea id="projectDesc"></textarea></label>${owner}<div class="project-date-fields"><label class="form-field">开始日期<input id="projectStart" type="date" max="${DATE_HORIZON}" value="${S.today}"></label><label class="form-field">截止日期（可留空）<input id="projectEnd" type="date" min="${S.today}" max="${DATE_HORIZON}"></label></div>${collaborators}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmProject">${asking?'提交申请':'创建项目'}</button></div>`);
   $('#cancelAction').onclick=closeModal;$('#projectStart').onchange=()=>$('#projectEnd').min=$('#projectStart').value;
   /* The Owner is on the project by definition, so they are never offered as a collaborator. */
   const syncOwner=()=>{const owner=$('#projectOwner')?.value;$$('input[name="projectMember"]').forEach(x=>{const own=x.value===owner;if(own)x.checked=false;x.closest('label').classList.toggle('hidden',own)})};
   if(admin){$('#projectOwner').onchange=syncOwner;syncOwner()}
-  $('#confirmProject').onclick=async()=>{const start=$('#projectStart').value,end=$('#projectEnd').value;if(!$('#projectName').value.trim()||!start){toast('请填写项目名称和开始日期');return}if(end&&end<start){toast('截止日期不能早于开始日期');return}const data={name:$('#projectName').value,desc:$('#projectDesc').value,start,end,cycle:end?'range':'infinite'};if(admin){data.owner=$('#projectOwner').value;data.members=$$('input[name="projectMember"]:checked').map(x=>x.value)}try{await act('project.create',data);closeModal()}catch(e){}};
+  $('#confirmProject').onclick=async()=>{const start=$('#projectStart').value,end=$('#projectEnd').value;if(!$('#projectName').value.trim()||!start){toast('请填写项目名称和开始日期');return}if(end&&end<start){toast('截止日期不能早于开始日期');return}const data={name:$('#projectName').value,desc:$('#projectDesc').value,start,end,cycle:end?'range':'infinite',members:$$('input[name="projectMember"]:checked').map(x=>x.value)};if(admin)data.owner=$('#projectOwner').value;try{const p=await api('/api/action',{action:'project.create',data});await refresh();toast(p?.status==='pending'?'申请已提交，等待审批':'项目已创建');closeModal()}catch(e){toast(e.message)}};
 }
 function fixedTask(){
   const users=S.users.filter(u=>u.active&&!u.admin),days=['周一','周二','周三','周四','周五','周六','周日'];
@@ -1007,10 +1200,11 @@ function collectionSettings(){
 }
 function renderAll(){
   $$('.admin-only-nav').forEach(n=>n.classList.toggle('hidden',!S.user?.admin));
-  const projectLabel=(S.user.admin?'创建项目':'申请项目');
-  ['#addProjectBtn','#addProjectTopBtn','#timelineAddProjectBtn'].forEach(id=>$(id).innerHTML=icon('plus')+projectLabel);
-  const canAssign=Boolean(S.user.admin||manageableProjects().length);
-  $('#addTaskBtn').innerHTML=icon('plus')+(canAssign?'指派任务':'新建任务');
+  const pm=projectMode();
+  ['#addProjectBtn','#addProjectTopBtn','#timelineAddProjectBtn'].forEach(id=>{$(id).innerHTML=entryLabel(pm,'项目');$(id).classList.toggle('hidden',pm==='none')});
+  const tm=taskEntryMode();
+  $('#addTaskBtn').innerHTML=entryLabel(tm,'任务');$('#addTaskBtn').classList.toggle('hidden',tm==='none');
+  $('#emptyAddBtn').textContent=tm==='approval'?'申请任务':'新任务';$('#emptyAddBtn').classList.toggle('hidden',tm==='none');
   $('#createFixedBtn')?.classList.toggle('hidden',!S.user.admin);
   $('#repeatAdminPanel')?.classList.toggle('hidden',!S.user.admin);
   renderRepeats();
@@ -1020,10 +1214,18 @@ function renderAll(){
   $('.workspace-switcher small').textContent=S.user.admin?'团队工作区':'成员工作区';
   const meUser=userById(S.user.id)||{};
   $('.workspace-switcher strong').innerHTML=escapeHTML(meUser.displayName||S.user.id)+(meUser.nickname?` <span class="name-tag nick">${escapeHTML(meUser.nickname)}</span>`:'');
+  /* 个性签名: one line under the name, cut short here and shown whole on hover
+     and in the account menu. */
+  $('.workspace-switcher em.signature')?.remove();
+  if(meUser.signature)$('.workspace-switcher strong').insertAdjacentHTML('afterend',`<em class="signature" title="${escapeHTML(meUser.signature)}">${escapeHTML(meUser.signature)}</em>`);
   if(!$('#accountMenu')?.classList.contains('hidden'))renderAccountMenu();
   $('#crumbRoot').textContent=S.user.admin?'团队工作台':'我的工作台';
+  /* superadmin can switch a rule group's assistant off entirely. */
+  const agentOff=S.agentCapabilities?.mode==='off';
+  $('#agentBtn')?.classList.toggle('hidden',agentOff);
+  if(agentOff)$('#agentPanel')?.classList.add('hidden');
   $('.focus-card > span').textContent=S.user.admin?'成员今日安排':'今日安排';
-  renderStats();renderInbox();renderAccounts();switchView(UI.view);
+  renderStats();renderInbox();renderAccounts();renderSettings();switchView(UI.view);
 }
 
 function scheduleTasks(includeHistory){
@@ -1519,7 +1721,7 @@ const AGENT_CONFIG_KEY='work-calendar-agent-config-v1';
 const TRANSCRIBE_ENDPOINT='/api/transcribe';
 const OPENCODE_GO_ENDPOINT='https://opencode.ai/zen/go/v1/chat/completions';
 const OPENCODE_GO_MODELS=['glm-5.3-flash','glm-5.3','glm-5.2','glm-5.1','kimi-k3','kimi-k2.7-code','kimi-k2.6','longcat-2.0','deepseek-v4.1-flash','deepseek-v4-pro','deepseek-v4-flash','deepseek-v4-flash-vision-exp','mimo-v2.5','mimo-v2.5-pro','hy4-preview','hy3','grok-4.5'];
-const agentState={messages:[],busy:false,steps:0,failures:0,mode:null,lastActionKey:'',repeats:0,autoRun:false,stop:false,pendingResolve:null,sessionId:(globalThis.crypto?.randomUUID?.()||`wc-${Date.now()}-${Math.random().toString(36).slice(2)}`)};
+const agentState={messages:[],busy:false,steps:0,failures:0,mode:null,lastActionKey:'',repeats:0,autoRun:false,stop:false,pendingResolve:null,plan:false,planBoard:null,sessionId:(globalThis.crypto?.randomUUID?.()||`wc-${Date.now()}-${Math.random().toString(36).slice(2)}`)};
 let agentServerConfig=null;
 let agentServerAsr=null;
 function agentConfig(){
@@ -1532,7 +1734,10 @@ function renderAgentCapability(){
   const configBtn=$('#agentConfigBtn');
   if(configBtn)configBtn.classList.toggle('hidden',c.role!=='superadmin');
   const operator=c.mode==='operator';
-  e.innerHTML=`<span class="agent-role-chip ${operator?'is-operator':''}">${escapeHTML(operator?'操作员':'只读')}</span>`;
+  e.innerHTML=`<span class="agent-role-chip ${operator?'is-operator':''}">${escapeHTML(operator?(c.role==='member'?'可代为操作':'操作员'):'查询与规划')}</span>`;
+  /* Step-by-step versus hands-off only means something when the assistant
+     can act; for a read-only assistant the switch is just noise. */
+  $('#agentPanel .agent-mode')?.classList.toggle('hidden',!operator);
   renderAgentModelChip();
 }
 /* Which model is answering, at a glance — "not configured" is the state that
@@ -1561,12 +1766,13 @@ function agentSamples(context){
 function agentRenderEmptyState(list){
   const samples=agentSamples();
   list.innerHTML='<div class="agent-samples">'
-    +samples.map(s=>`<button type="button" class="agent-sample ${s.plan?'is-plan':''}" data-text="${escapeHTML((s.plan?AGENT_PLAN_MARK+' ':'')+s.text)}">`
+    +samples.map(s=>`<button type="button" class="agent-sample ${s.plan?'is-plan':''}" data-text="${escapeHTML(s.text)}"${s.plan?' data-plan="1"':''}>`
       +(s.plan?icon('sparkles'):'')+escapeHTML(s.text)+'</button>').join('')
     +'</div>';
   $$('#agentMessages .agent-sample').forEach(b=>b.onclick=()=>{
     const input=$('#agentInput');if(!input)return;
     input.value=b.dataset.text;
+    agentState.plan=Boolean(b.dataset.plan);
     agentSyncPlanButton();
     input.focus();
   });
@@ -1649,6 +1855,12 @@ function agentMessageNode(m){
   const chip=agentIntentChip(intent.plan?'plan':'');
   if(chip)node.appendChild(chip);
   const text=document.createElement('span');text.textContent=intent.plan?intent.body:(m.content||'');node.appendChild(text);
+  /* A stored draft reads as a one-line summary and can be opened again as cards. */
+  if(m.role==='assistant'&&/<plan>/i.test(m.content||'')){
+    const draft=agentSplitPlan(m.content);
+    text.textContent=(draft.clean?draft.clean+' ':'')+`（草稿：${draft.projects.length?draft.projects.length+' 个项目、':''}${draft.tasks.length} 个任务）`;
+    if(draft.projects.length||draft.tasks.length){const btn=document.createElement('button');btn.type='button';btn.className='ghost-btn plan-reopen-history';btn.textContent='再打开这份草稿';btn.onclick=()=>agentPlanBoard(draft);node.appendChild(btn)}
+  }
   const stamp=document.createElement('small');stamp.className='agent-time';stamp.textContent=agentFormatTime(m.createdAt);node.appendChild(stamp);
   return node;
 }
@@ -1664,6 +1876,9 @@ async function agentLoadOwnHistory(){
     const restoreCard=()=>{
       const card=agentState.pendingCard;
       if(card&&agentState.pendingResolve&&!card.isConnected)list.appendChild(card);
+      /* An open draft is the user's unfinished work; it outlives a reload of the list. */
+      const board=agentState.planBoard;
+      if(board&&!board.closed&&!board.el.isConnected)list.appendChild(board.el);
     };
     if(!messages.length){agentRenderEmptyState(list);restoreCard();list.scrollTop=list.scrollHeight;return}
     /* A blank line is not a turn. One used to be stored whenever the model
@@ -1783,35 +1998,45 @@ function agentPlanIntent(text){
   }
   return {plan:false,body:String(text||'')};
 }
+/* 规划任务 is a switch on the composer rather than a command typed into it:
+   with words already in the box one click drafts them at once, otherwise the
+   next message is drafted. The typed marks above still work for people who
+   prefer them, and stored lines keep the mark so history can label them. */
 function agentTogglePlan(){
   const input=$('#agentInput');if(!input||agentState.busy)return;
   const intent=agentPlanIntent(input.value);
-  /* Clicking again takes the mark back off, so the switch is never a trap. */
-  if(intent.plan)input.value=intent.body;
-  else input.value=AGENT_PLAN_MARK+' '+input.value;
+  if(intent.plan){input.value=intent.body;agentState.plan=false}
+  else if(!agentState.plan&&input.value.trim()){const text=input.value;input.value='';agentState.plan=false;agentSyncPlanButton();agentPlanSubmit(text);return}
+  else agentState.plan=!agentState.plan;
   agentSyncPlanButton();
   input.focus();
 }
 function agentSyncPlanButton(){
   const input=$('#agentInput');
-  const on=Boolean(input)&&agentPlanIntent(input.value).plan;
+  const on=Boolean(agentState.plan)||(Boolean(input)&&agentPlanIntent(input.value).plan);
   const btn=$('#agentPlanBtn');
   if(btn){
     btn.classList.toggle('is-on',on);
     btn.setAttribute('aria-pressed',on?'true':'false');
   }
+  $('#agentPanel')?.classList.toggle('is-plan-mode',on);
   $('#agentPlanHint')?.classList.toggle('hidden',!on);
+  agentUpdateBusy();
 }
+/* The draft comes back as {projects, tasks}; an older reply that is a bare
+   array is read as tasks. Anything malformed is dropped, never half-used. */
 function agentSplitPlan(text){
-  let plan=[];
+  let projects=[],tasks=[];
+  const named=x=>Array.isArray(x)?x.filter(i=>i&&typeof i==='object'&&String(i.name||'').trim()):[];
   const clean=String(text||'').replace(/<plan>([\s\S]*?)<\/plan>/gi,(_,body)=>{
     try{
       const parsed=JSON.parse(body.trim());
-      if(Array.isArray(parsed))plan=parsed.filter(x=>x&&typeof x==='object'&&x.name);
+      if(Array.isArray(parsed))tasks=named(parsed);
+      else if(parsed&&typeof parsed==='object'){projects=named(parsed.projects);tasks=named(parsed.tasks)}
     }catch(_){}
     return '';
   }).trim();
-  return {clean,plan};
+  return {clean,projects,tasks};
 }
 
 /* Runs are meant to go the distance for a real job, so the ceiling sits far
@@ -1823,20 +2048,26 @@ const AGENT_MAX_REPEATS=2;     /* same action proposed this many extra times */
 const AGENT_CONTEXT_LIMIT=24;  /* how many turns we replay back to the model */
 
 function agentContext(){
-  return {role:S.agentCapabilities?.role||'member',mode:S.agentCapabilities?.mode||'readonly'};
+  return {role:S.agentCapabilities?.role||'member',mode:S.agentCapabilities?.mode||'readonly',rules:S.user?.admin?null:creationRules(),self:S.user?.id||''};
 }
-const AGENT_PLAN_RULE='这次是一条任务规划请求：把用户那句话拆成一组标准任务，'
-  +'但不要执行任何操作，不要输出 <action> 动作块，也不要声称已经创建。'
-  +'先用一两句话说明拆解思路，然后另起一行输出一个 <plan> 块，块里是单行 JSON 数组：'
-  +'<plan>[{"name":"任务名","projectId":"项目ID","assignee":"负责人账户","date":"YYYY-MM-DD",'
-  +'"deadline":"可选","priority":"P0/P1/P2","duration":分钟数}]</plan>。'
-  +'规则：name 只写任务本身，不要带项目名前缀；projectId 与 assignee 必须用数据里真实存在的 id（负责人写账户 id，不是中文名）；'
-  +'date 不早于今天、不晚于可排期上限；宁可少拆几个也不要编造不存在的项目或账户；'
-  +'确实无法确定负责人时，用当前账户。';
+const AGENT_PLAN_RULE='这次是一条规划请求：用户想安排一些事。把这句话起草成已经填好的项目和任务卡片，'
+  +'但不要执行任何操作，不要输出 <action> 动作块，也不要声称已经创建——用户会在卡片上逐个修改，再自己确认。'
+  +'先用一句话（不超过 30 字，不列步骤，不解释你的推理）说明你怎么拆的，然后另起一行输出一个 <plan> 块，块里是单行 JSON 对象：'
+  +'<plan>{"projects":[{"ref":"P1","name":"项目名","desc":"一句话说明","start":"YYYY-MM-DD","end":"YYYY-MM-DD 或空","owner":"负责人账户","members":["协作者账户"]}],'
+  +'"tasks":[{"name":"任务名","desc":"可选","projectId":"已有项目ID","projectRef":"P1","assignee":"负责人账户","date":"YYYY-MM-DD","time":"HH:MM","duration":分钟数,"priority":"P0/P1/P2"}]}</plan>。'
+  +'规则：只有这件事明显是一个要多人、多步推进的新目标，而且已有项目里没有合适的，才起草新项目，否则 projects 留空；'
+  +'任务放进已有项目时写 projectId，放进新项目时写 projectRef，都不写就是临时任务。'
+  +'name 只写事情本身，不带项目名前缀；projectId 与账户必须是数据里真实存在的 id（账户写 id，不是中文名）；'
+  +'date 不早于今天、不晚于可排期上限；用户没说的按默认补齐：负责人为点名的人，否则当前账户；日期今天；时间 09:00；时长 60；优先级 P1。'
+  +'宁可少拆几张，也不要编造不存在的项目或账户。';
 function agentSystemPrompt(context,planning){
   /* The rule lives in the system prompt rather than wrapped around the user's
      words, so the stored transcript stays exactly what was typed. */
-  if(planning)return `你是「战略小组台账」工作助手。当前账户角色：${context.role}，权限模式：${context.mode}。${AGENT_PLAN_RULE}`;
+  if(planning){
+    const r=context.rules,labels={direct:'直接创建',approval:'需审批',none:'不允许'};
+    const own=r?`当前账户 ${context.self} 的创建规则：新项目${labels[r.project]}，给自己的临时任务${labels[r.tempTask]}，在参与的项目里建任务${labels[r.projectTask]}（自己做 Owner 的项目总能直接建）；临时任务只能给自己；新项目由当前账户做 Owner。规则为「不允许」的那类卡片不要起草。`:'';
+    return `你是「战略小组台账」的安排助手。当前账户角色：${context.role}。${own}${AGENT_PLAN_RULE}`;
+  }
   const rule=context.mode==='operator'
     ?'用户要求改动数据时，输出一个 <action>{"action":"…","data":{…}}</action> 动作块，一次只输出一个动作，然后停下来等待系统回执。系统会把结果以【系统回执】或【系统回执·失败】的形式发给你。收到成功回执后，先看回执里的「数据核对」，确认这一步确实产生了预期的变化，再输出下一个动作；核对结果与预期不符就先修正它。如果用户的目标还没完成就继续输出下一个动作，完成了就用一句话总结并明确结束。收到失败回执时先读懂原因：如果是缺了前置步骤（例如负责人还没加入项目、项目还没审批），就输出补救动作把它补上再继续；如果确实做不到，用一句话说明原因并结束。绝对不要在收到回执之前声称操作已经完成，也不要重复提交同一个已经失败的动作。'
     :'你是只读助手，不能创建、指派、修改或审批任何数据。';
@@ -1918,6 +2149,7 @@ function agentUpdateBusy(){
     input.placeholder=agentState.pendingResolve?'等待确认…'
       :agentState.busy?'处理中…'
       :voice.active?'正在聆听…'
+      :agentState.plan?'说说要安排什么，我来起草项目和任务卡片…'
       :'问点什么…';
   }
 }
@@ -2064,8 +2296,8 @@ async function agentSubmit(){
     return;
   }
   const intent=agentPlanIntent(text);
-  /* The mark is the request itself — no separate mode to remember. */
-  if(intent.plan){input.value='';agentSyncPlanButton();return agentPlanSubmit(intent.body)}
+  /* The 规划任务 switch, or a typed mark, turns this message into a draft. */
+  if(intent.plan||agentState.plan){input.value='';agentState.plan=false;agentSyncPlanButton();return agentPlanSubmit(intent.body)}
   input.value='';const asked=agentAppend('user',text);
   agentState.autoRun=false;agentState.stop=false;agentState.steps=0;agentState.failures=0;
   agentState.mode=agentPref();agentState.lastActionKey='';agentState.repeats=0;
@@ -2082,8 +2314,12 @@ async function agentSubmit(){
   agentUpdateBusy();
   input.focus();
 }
-/* Plan a set of tasks from free text. The model returns a <plan> array, the
-   user approves a rendered table, and only then does anything get written. */
+/* ------------------------------------------------------------ 规划草稿 --
+   A plan comes back as cards that are already filled in and already split.
+   Nothing is written until the user has gone over the cards, changed what they
+   like and pressed confirm; each card is then made through the same actions as
+   the normal dialogs, under the user's own rules, so this works whatever the
+   assistant itself is allowed to do. */
 async function agentPlanSubmit(body){
   const input=$('#agentInput');
   const source=body===undefined?(input?.value||''):body;
@@ -2094,71 +2330,198 @@ async function agentPlanSubmit(body){
                                :'助手还在处理上一条消息，点「停止」可以打断它');
     return;
   }
-  const shown=AGENT_PLAN_MARK+' '+text;
   input.value='';agentSyncPlanButton();
-  agentAppend('user',shown,'','plan');
+  agentAppend('user',AGENT_PLAN_MARK+' '+text,'','plan');
   agentState.busy=true;agentUpdateBusy();
-  agentState.stop=false;agentState.steps=0;agentState.failures=0;agentState.mode=agentPref();
-  agentState.lastActionKey='';agentState.repeats=0;agentState.pendingResolve=null;
+  const wait=agentAppend('assistant','正在起草卡片…','agent-drafting');
+  agentState.messages.pop();
   try{
     const answer=await agentRequest([{role:'system',content:agentSystemPrompt(agentContext(),true)},...agentRecentMessages()]);
-    const {clean,plan}=agentSplitPlan(answer);
-    if(clean)agentAppend('assistant',clean);
-    if(!plan.length)agentAppend('assistant','没能从这段内容里拆出任务。可以写得更具体一点，比如「下周三给 wang00 安排一次 2 小时的季度复盘」。','error');
-    else agentPlanCard(plan.map(item=>agentTidyTaskName('task.create',item)));
+    agentState.messages.push({role:'assistant',content:answer});
+    wait?.remove();
+    const draft=agentSplitPlan(answer);
+    if(!draft.projects.length&&!draft.tasks.length)agentAppend('assistant',(draft.clean?draft.clean+'\n':'')+'没能起草出卡片。可以说得具体一点，比如「下周三安排一次 2 小时的季度复盘」。','error');
+    else agentPlanBoard(draft);
   }catch(e){
+    wait?.remove();
     agentAppend('assistant',e?.message||'暂时无法连接 Agent 服务。','error');
   }
   agentState.busy=false;agentUpdateBusy();
   input.focus();
 }
-function agentPlanCard(items){
-  const list=$('#agentMessages');if(!list)return;
-  const projectName=id=>{const hit=(S.projects||[]).find(x=>x.id===id);return hit?hit.name:(id||'—')};
-  /* The panel is about 380px wide; a six-column table ran off the edge and
-     needed sideways scrolling, so each task gets a compact two-line block. */
-  const rows=items.map(t=>`<div class="agent-plan-item">`
-    +`<div class="agent-plan-head"><span class="agent-plan-name">${escapeHTML(t.name||'')}</span>`
-    +`<span class="priority ${escapeHTML(t.priority||'P1')}">${escapeHTML(t.priority||'P1')}</span></div>`
-    +`<div class="agent-plan-meta">${escapeHTML(projectName(t.projectId))} · ${escapeHTML(nameOf(t.assignee))} · `
-    +(t.date?escapeHTML(fmt(t.date)):'待定')+(t.deadline?` → ${escapeHTML(fmt(t.deadline))}`:'')+`</div></div>`).join('');
-  const card=document.createElement('div');
-  card.className='agent-message assistant agent-plan';
-  card.innerHTML=`<div class="agent-action-title">计划 · ${items.length} 个任务</div>`
-    +`<div class="agent-plan-list">${rows}</div>`
-    +`<div class="agent-action-buttons"><button class="ghost-btn agent-plan-cancel">取消</button>`
-    +`<button class="primary-btn agent-plan-create">按此创建 ${items.length} 个任务</button></div>`;
-  list.appendChild(card);list.scrollTop=list.scrollHeight;
-  const bar=card.querySelector('.agent-action-buttons');
-  card.querySelector('.agent-plan-cancel').onclick=()=>{bar.innerHTML='<span class="agent-action-done">已取消，没有创建任何任务</span>'};
-  card.querySelector('.agent-plan-create').onclick=async()=>{
-    if(agentState.busy)return;
-    agentState.busy=true;agentUpdateBusy();
-    bar.innerHTML='<span class="agent-action-done">创建中…</span>';
-    const done=await agentRunPlan(items);
-    bar.innerHTML=`<span class="agent-action-done">已创建 ${done.created} 个${done.failed?` · 失败 ${done.failed}`:''}</span>`;
-    agentFoldTrail(card);
-    agentState.busy=false;agentUpdateBusy();
-  };
+const PLAN_DAY=/^\d{4}-\d{2}-\d{2}$/;
+function planDay(v,fallback){v=String(v||'');return PLAN_DAY.test(v)&&v<=DATE_HORIZON?(v<S.today?S.today:v):fallback}
+function planUser(v){v=String(v||'').trim();if(!v)return '';const u=S.users.find(u=>u.id===v)||S.users.find(u=>u.displayName===v||u.nickname===v);return u&&u.active?u.id:''}
+/* Turn what the model wrote into editable cards: unknown people and projects
+   are dropped to sensible defaults rather than carried along. */
+function planDraft(raw){
+  const admin=Boolean(S.user?.admin),people=S.users.filter(u=>u.active&&!u.admin).map(u=>u.id);
+  const projects=(raw.projects||[]).slice(0,6).map((p,i)=>{
+    const owner=admin?(planUser(p.owner)||planUser((p.members||[])[0])||people[0]||''):S.user.id;
+    const members=[...new Set((p.members||[]).map(planUser).filter(id=>id&&id!==owner&&people.includes(id)))];
+    return {ref:String(p.ref||'P'+(i+1)),name:String(p.name).trim().slice(0,120),desc:String(p.desc||'').slice(0,2000),start:planDay(p.start,S.today),end:planDay(p.end,''),owner,members,state:'draft'};
+  });
+  const tasks=(raw.tasks||[]).slice(0,30).map((t,i)=>{
+    const ref=projects.find(p=>p.ref===String(t.projectRef||'')),existing=S.projects.find(p=>p.id===t.projectId);
+    const project=ref?'ref:'+ref.ref:existing?'id:'+existing.id:'';
+    const name=agentTidyTaskName('task.create',{name:String(t.name).trim().slice(0,120),projectId:existing?.id}).name;
+    return {key:'t'+i,name,desc:String(t.desc||'').slice(0,2000),project,assignee:planUser(t.assignee),date:planDay(t.date,S.today),time:/^\d{2}:\d{2}$/.test(String(t.time||''))?t.time:'09:00',duration:Math.min(1440,Math.max(1,Math.round(Number(t.duration)||60))),priority:['P0','P1','P2'].includes(t.priority)?t.priority:'P1',state:'draft'};
+  });
+  return {projects,tasks,next:tasks.length};
 }
-async function agentRunPlan(items){
-  const failures=[];
-  let created=0;
-  for(const item of items){
+/* What would happen to a task card and who may take it: 'direct', 'approval',
+   'wait' (its project still has to be approved) or 'none'. Mirrors the server's
+   rules so the card says it before the user presses anything. */
+function planTaskPath(board,t){
+  const admin=Boolean(S.user?.admin),people=S.users.filter(u=>u.active&&!u.admin).map(u=>u.id);
+  const draftProject=t.project.startsWith('ref:')?board.projects.find(x=>'ref:'+x.ref===t.project):null;
+  if(draftProject){
+    const pm=projectMode(),p=draftProject;
+    if(pm==='none')return {mode:'none',assignees:[S.user.id],note:'你的规则组不能新建项目，可以改成已有项目或临时任务'};
+    if(pm==='approval')return {mode:'wait',assignees:[S.user.id],note:'项目要先通过审批；这张卡会留在草稿里，通过后再建'};
+    return {mode:'direct',assignees:admin?[p.owner,...p.members].filter(Boolean):[S.user.id],note:!admin&&p.members.length?'协作者接受邀请后，才能把任务交给他们':''};
+  }
+  if(t.project.startsWith('id:')){
+    const id=t.project.slice(3),p=S.projects.find(x=>x.id===id),path=taskProjects().find(x=>x.p.id===id);
+    if(path)return {mode:path.mode,assignees:projectAssignees(path.p).map(u=>u.id),note:path.mode==='approval'?`由「${path.p.name}」的 Owner 审批`:''};
+    if(p?.status==='pending')return {mode:'wait',assignees:[t.assignee||S.user.id],note:`「${p.name}」通过审批后再建`};
+    return {mode:'none',assignees:[],note:'这个项目现在不能新建任务'};
+  }
+  const mode=tempTaskMode();
+  return {mode,assignees:admin?people:[S.user.id],note:mode==='none'?'你的规则组不能新建临时任务':mode==='approval'?'临时任务由管理员审批':''};
+}
+const PLAN_STATE={direct:'创建',approval:'提交申请',wait:'稍后再建',none:'不能创建'};
+function planCardsHTML(board){
+  const admin=Boolean(S.user?.admin),people=S.users.filter(u=>u.active&&!u.admin),pm=projectMode();
+  const opt=(v,l,cur)=>`<option value="${escapeHTML(v)}"${v===cur?' selected':''}>${escapeHTML(l)}</option>`;
+  const chip=(mode,why='')=>`<span class="plan-state is-${mode}"${why?` title="${escapeHTML(why)}"`:''}>${PLAN_STATE[mode]}</span>`;
+  const top=(kind,label,mode,extra='',why='')=>`<div class="plan-card-top"><span class="plan-kind">${icon(kind)}${label}</span>${extra}${chip(mode,why)}<button type="button" class="plan-remove" title="不要这张卡" aria-label="删除这张卡">${icon('x')}</button></div>`;
+  const done=x=>`<article class="plan-card is-done">${icon('check')}<span>${escapeHTML(x.result)}</span><strong>${escapeHTML(x.name)}</strong></article>`;
+  const note=(text,cls='plan-note')=>text?`<p class="${cls}">${escapeHTML(text)}</p>`:'';
+  const projectCard=p=>p.state==='done'?done(p):`<article class="plan-card is-project is-${pm}" data-ref="${escapeHTML(p.ref)}">${top('folder','新项目',pm,'',pm==='none'?'你的规则组不能新建项目':pm==='approval'?'提交后由管理员审批':'')}<input class="plan-title" data-f="name" value="${escapeHTML(p.name)}" maxlength="120" placeholder="项目名称" aria-label="项目名称"><textarea class="plan-desc" data-f="desc" rows="2" placeholder="项目描述（可选）" aria-label="项目描述">${escapeHTML(p.desc)}</textarea><div class="plan-grid">${admin?`<label class="is-wide">Owner<select data-f="owner">${people.map(u=>opt(u.id,nameOf(u.id),p.owner)).join('')}</select></label>`:''}<label>开始<input type="date" data-f="start" value="${escapeHTML(p.start)}" min="${S.today}" max="${DATE_HORIZON}"></label><label>截止（可空）<input type="date" data-f="end" value="${escapeHTML(p.end)}" min="${escapeHTML(p.start)}" max="${DATE_HORIZON}"></label></div><div class="plan-people"><span>${admin?'协作者':'邀请协作者'}</span>${people.filter(u=>u.id!==p.owner).map(u=>`<button type="button" class="plan-person${p.members.includes(u.id)?' is-on':''}" data-user="${escapeHTML(u.id)}" aria-pressed="${p.members.includes(u.id)}">${escapeHTML(nameOf(u.id))}</button>`).join('')||'<span class="muted">没有其他成员</span>'}</div>${note(p.error,'plan-error')}</article>`;
+  const taskCard=t=>{
+    if(t.state==='done')return done(t);
+    const path=planTaskPath(board,t);if(!path.assignees.includes(t.assignee))t.assignee=path.assignees[0]||'';
+    const open=taskProjects(),projects=[opt('','临时任务（不挂项目）',t.project),...board.projects.filter(p=>p.state!=='done').map(p=>opt('ref:'+p.ref,'新项目 · '+(p.name||'未命名'),t.project)),...open.map(x=>opt('id:'+x.p.id,x.p.name,t.project))];
+    if(t.project.startsWith('id:')&&!open.some(x=>'id:'+x.p.id===t.project))projects.push(opt(t.project,S.projects.find(x=>'id:'+x.id===t.project)?.name||'已不存在的项目',t.project));
+    const prio=`<span class="plan-prio" role="radiogroup" aria-label="优先级">${['P0','P1','P2'].map(v=>`<button type="button" class="priority ${v}${t.priority===v?' is-on':''}" data-prio="${v}" aria-checked="${t.priority===v}" role="radio">${v}</button>`).join('')}</span>`;
+    return `<article class="plan-card is-${path.mode}" data-key="${escapeHTML(t.key)}">${top('calendar-check','任务',path.mode,prio,path.note)}<input class="plan-title" data-f="name" value="${escapeHTML(t.name)}" maxlength="120" placeholder="任务名称" aria-label="任务名称"><div class="plan-grid"><label class="is-wide">放在<select data-f="project">${projects.join('')}</select></label><label>负责人<select data-f="assignee"${path.assignees.length>1?'':' disabled'}>${path.assignees.map(id=>opt(id,nameOf(id),t.assignee)).join('')||opt('','—','')}</select></label><label>日期<input type="date" data-f="date" value="${escapeHTML(t.date)}" min="${S.today}" max="${DATE_HORIZON}"></label><label>时间<input type="time" data-f="time" value="${escapeHTML(t.time)}"></label><label>时长（分钟）<input type="number" data-f="duration" min="1" max="1440" value="${Number(t.duration)||60}"></label></div><textarea class="plan-desc" data-f="desc" rows="1" placeholder="补充说明（可选）" aria-label="任务说明">${escapeHTML(t.desc)}</textarea>${note(t.error,'plan-error')}</article>`;
+  };
+  return board.projects.map(projectCard).join('')+board.tasks.map(taskCard).join('');
+}
+/* How many cards would be made, asked for, held back or refused. */
+function planTally(board){
+  const n={direct:0,approval:0,wait:0,none:0},pm=projectMode();
+  board.projects.forEach(p=>{if(p.state!=='done')n[pm]+=1});
+  board.tasks.forEach(t=>{if(t.state!=='done')n[planTaskPath(board,t).mode]+=1});
+  return n;
+}
+function planConfirmLabel(n){
+  if(!n.direct&&!n.approval)return n.wait?'等审批通过后再建':'没有可以创建的卡片';
+  if(!n.approval)return `创建 ${n.direct} 项`;
+  if(!n.direct)return `提交 ${n.approval} 个申请`;
+  return `创建 ${n.direct} 项 · 申请 ${n.approval} 项`;
+}
+function agentPlanBoard(raw){
+  const list=$('#agentMessages');if(!list)return null;
+  const board={...planDraft(raw),note:raw.clean||'',closed:false,busy:false};
+  board.el=document.createElement('div');
+  board.el.className='agent-message assistant plan-board';
+  agentState.planBoard=board;
+  list.appendChild(board.el);
+  planRender(board,true);
+  list.scrollTop=Math.max(0,board.el.offsetTop-12);
+  return board;
+}
+function planRender(board,entering=false){
+  const el=board.el;
+  $('#agentPanel')?.classList.toggle('is-planning',Boolean(agentState.planBoard&&!agentState.planBoard.closed));
+  const head=`<div class="plan-board-head">${icon('sparkles')}<strong>起草了${board.projects.length?` ${board.projects.length} 个项目、`:' '}${board.tasks.length} 个任务</strong></div>`;
+  if(board.closed){
+    el.innerHTML=head+`<div class="plan-foot is-closed"><span class="plan-sum">${escapeHTML(board.closedNote||'草稿已收起，没有创建任何内容')}</span><button type="button" class="ghost-btn plan-reopen">重新打开</button></div>`;
+  }else{
+    const n=planTally(board),left=board.projects.concat(board.tasks).some(x=>x.state!=='done');
+    const sum=[n.wait?`${n.wait} 项要等审批`:'',n.none?`${n.none} 项不能创建`:''].filter(Boolean).join(' · ');
+    el.innerHTML=head+`<div class="plan-cards${entering?' is-entering':''}">${planCardsHTML(board)}</div><div class="plan-foot"><button type="button" class="ghost-btn plan-add">${icon('plus')}加一个任务</button><span class="plan-sum">${sum}</span><button type="button" class="ghost-btn plan-cancel">${left?'先不建了':'收起'}</button><button type="button" class="primary-btn plan-confirm"${n.direct+n.approval&&!board.busy?'':' disabled'}>${board.busy?'正在创建…':planConfirmLabel(n)}</button></div>`;
+    if(entering)el.querySelectorAll('.plan-card').forEach((c,i)=>c.style.setProperty('--i',String(i)));
+  }
+  planBind(board);
+}
+/* One set of listeners per board; every card reads and writes the draft. */
+function planBind(board){
+  const el=board.el;if(el.dataset.bound)return;el.dataset.bound='1';
+  const item=node=>{const card=node.closest('.plan-card');if(!card)return null;return card.dataset.ref!=null?board.projects.find(p=>p.ref===card.dataset.ref):board.tasks.find(t=>t.key===card.dataset.key)};
+  el.addEventListener('input',e=>{const f=e.target.dataset?.f,x=item(e.target);if(x&&['name','desc'].includes(f))x[f]=e.target.value});
+  el.addEventListener('change',e=>{
+    const f=e.target.dataset?.f,x=item(e.target);if(!f||!x)return;
+    x[f]=f==='duration'?Math.min(1440,Math.max(1,Math.round(Number(e.target.value)||60))):e.target.value;x.error='';
+    if(f==='start'&&x.end&&x.end<x.start)x.end='';
+    if(f==='owner')x.members=x.members.filter(id=>id!==x.owner);
+    if(['project','owner','start'].includes(f)||(f==='name'&&x.ref!=null))planRender(board);
+  });
+  el.addEventListener('click',e=>{
+    const b=e.target.closest('button');if(!b||board.busy)return;
+    const x=item(b);
+    if(b.classList.contains('plan-remove')&&x)return planRemove(board,x);
+    if(b.classList.contains('plan-person')&&x){const id=b.dataset.user;x.members=x.members.includes(id)?x.members.filter(m=>m!==id):[...x.members,id];return planRender(board)}
+    if(b.dataset.prio&&x){x.priority=b.dataset.prio;return planRender(board)}
+    if(b.classList.contains('plan-add'))return planAddTask(board);
+    if(b.classList.contains('plan-cancel')){board.closed=true;board.closedNote=board.projects.concat(board.tasks).some(x=>x.state==='done')?board.closedNote:'';return planRender(board)}
+    if(b.classList.contains('plan-reopen')){board.closed=false;agentState.planBoard=board;return planRender(board)}
+    if(b.classList.contains('plan-confirm'))planSubmit(board);
+  });
+}
+function planRemove(board,x){
+  if(x.ref!=null){
+    board.projects=board.projects.filter(p=>p!==x);
+    const moved=board.tasks.filter(t=>t.project==='ref:'+x.ref);moved.forEach(t=>{t.project=''});
+    if(moved.length)toast(`它下面的 ${moved.length} 个任务改成了临时任务`);
+  }else board.tasks=board.tasks.filter(t=>t!==x);
+  planRender(board);
+}
+function planAddTask(board){
+  const last=board.tasks.filter(t=>t.state!=='done').at(-1),key='t'+(board.next++);
+  board.tasks.push({key,name:'',desc:'',project:last?.project||'',assignee:last?.assignee||'',date:last?.date||S.today,time:'09:00',duration:60,priority:'P1',state:'draft'});
+  planRender(board);
+  board.el.querySelector(`.plan-card[data-key="${key}"] .plan-title`)?.focus();
+}
+/* Projects first, so tasks drafted under them can follow; each card goes
+   through the normal action and keeps its own error if it is refused, so the
+   user fixes that card and confirms again without redoing the rest. */
+async function planSubmit(board){
+  if(board.busy||agentState.busy)return;
+  const open=board.projects.concat(board.tasks).filter(x=>x.state!=='done');
+  open.forEach(x=>{if(!String(x.name||'').trim())x.error=x.ref!=null?'请填写项目名称':'请填写任务名称'});
+  if(open.some(x=>x.error&&!String(x.name||'').trim())){planRender(board);toast('有卡片还没写名称');return}
+  board.busy=true;agentState.busy=true;agentUpdateBusy();planRender(board);
+  const made=[],asked=[],failed=[];
+  if(projectMode()!=='none')for(const p of board.projects.filter(p=>p.state!=='done')){
     try{
-      await api('/api/action',{action:'agent.execute',data:{action:'task.create',data:item,confirmed:true}});
-      created+=1;
-      agentShowStep(`已创建 · ${item.name||''}`);
-    }catch(e){
-      failures.push(`「${item.name||''}」${e?.message||'创建失败'}`);
-      agentShowStep(`未创建 · ${item.name||''}：${e?.message||'创建失败'}`);
-    }
+      const data={name:p.name.trim(),desc:p.desc,start:p.start,end:p.end,cycle:p.end?'range':'infinite',members:p.members};
+      if(S.user.admin)data.owner=p.owner;
+      const r=await api('/api/action',{action:'project.create',data}),pending=r?.status==='pending';
+      Object.assign(p,{state:'done',error:'',result:pending?'已提交项目申请':'已创建项目'});(pending?asked:made).push(p.name);
+      board.tasks.forEach(t=>{if(t.project==='ref:'+p.ref)t.project='id:'+r.id});
+    }catch(e){p.error=e?.message||'创建失败';failed.push(p.name)}
   }
   try{await refresh()}catch(_){}
-  agentAppend('assistant',failures.length
-    ? `按计划创建了 ${created} 个任务，有 ${failures.length} 个没成功：${failures.join('；')}`
-    : `计划里的 ${created} 个任务都已创建。`,'');
-  return {created,failed:failures.length};
+  for(const t of board.tasks.filter(t=>t.state!=='done')){
+    if(['wait','none'].includes(planTaskPath(board,t).mode))continue;
+    /* Its new project was refused just now; the task waits on that card. */
+    if(t.project.startsWith('ref:')){t.error='所属的新项目还没建成';continue}
+    try{
+      const r=await api('/api/action',{action:'task.create',data:{name:t.name.trim(),desc:t.desc,projectId:t.project.startsWith('id:')?t.project.slice(3):null,assignee:t.assignee,date:t.date,deadline:null,time:t.time,duration:Number(t.duration)||60,priority:t.priority}});
+      Object.assign(t,{state:'done',error:'',result:r?.requested?'已提交申请':'已创建'});(r?.requested?asked:made).push(t.name);
+    }catch(e){t.error=e?.message||'创建失败';failed.push(t.name)}
+  }
+  try{await refresh()}catch(_){}
+  board.busy=false;agentState.busy=false;agentUpdateBusy();
+  const n=planTally(board);
+  const parts=[made.length?`创建了 ${made.length} 项`:'',asked.length?`提交了 ${asked.length} 个申请`:'',failed.length?`${failed.length} 项没成功，原因写在卡片上`:'',n.wait?`${n.wait} 项等审批通过后再建`:''].filter(Boolean);
+  board.closedNote=parts.join('，');
+  if(!board.projects.concat(board.tasks).some(x=>x.state!=='done'))board.closed=true;
+  planRender(board);
+  agentAppend('assistant',(board.closedNote||'没有可以创建的卡片')+'。');
 }
 /* ---------------------------------------------------------------- 沟通区 --
    One shared room, plus a channel per project. Chat deliberately sits outside
