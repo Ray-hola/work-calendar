@@ -24,7 +24,7 @@ Most collaboration tools want your tasks, daily notes and team data in someone e
 - When assigning, you see how many hours the person already has inside the task's own dates.
 
 **Projects**
-- Permission groups: superadmin creates groups in account management, each saying whether a new project, a one-off task for oneself and a task inside a project one collaborates on is created directly, needs approval, or is not allowed, then puts each member in a group. The default group applies for projects and creates its own one-off tasks directly. A project task request goes to that project's Owner, a one-off task request to the admins. The top bar shows "+ New project / Request project" and "+ New task / Request task" to match.
+- Rule groups: in account management superadmin sets up rule groups for ordinary members as cards, separate from the superadmin / admin / member roles. On each card one click sets whether a new project, a one-off task for oneself and a task inside a project one collaborates on is created directly, needs approval, or is not allowed, and whether the AI assistant is off, can answer and draft plans, or can act on the member's behalf; members are ticked in or removed right on the card, several at a time. Members in no group follow the default rules: request projects, create their own one-off tasks directly, and use the assistant for questions and plans. A project task request goes to that project's Owner, a one-off task request to the admins. The top bar shows "+ New project / Request project" and "+ New task / Request task" to match.
 - Project settings change the name, dates and collaborators; admins can also hand a project to a new Owner.
 - Project tasks sort by priority, start or end date, or a manual drag order. The timeline view draws every project on one date scale.
 - Closing a project takes a report and superadmin approval; closed projects move to the achievements archive.
@@ -35,7 +35,8 @@ Most collaboration tools want your tasks, daily notes and team data in someone e
 - Team brief: the next morning the superadmin receives one report for the day, covering members' summaries, project progress and what needs attention, instead of a notice per person.
 - Archive room: one line-drawn archive box per month, with arrows to change month. Slide the pointer across the box, drag the date ruler below it or turn the wheel to pick a folder; the picked folder lifts out with its summary, and a click opens the full brief (admins only).
 - Desktop widget: an always-on-top picture-in-picture window with today's to-dos and a pomodoro timer (Chrome / Edge on desktop).
-- AI assistant (optional): admins configure an OpenAI-compatible endpoint; the key stays on the server.
+- AI assistant (optional): admins configure an OpenAI-compatible endpoint; the key stays on the server. Press 规划任务 (plan) and say in one sentence what needs doing; the assistant lays out project and task cards that are already filled in and split up. Each card can be edited (assignee, date, time, priority and so on), removed, or joined by a new one, and on confirm they are created, or requested, under your own rules. Nothing is written before you confirm.
+- Personal signature: one line written in your profile, shown under the avatar in the sidebar, the account menu and the account list.
 
 **Layout and access**
 - Desktop, tablet and phone layouts.

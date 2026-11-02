@@ -580,7 +580,7 @@ class ScheduleAccessTests(unittest.TestCase):
 
 
 class CreationPolicyTests(unittest.TestCase):
-    """Permission groups decide whether members start projects and tasks directly, by request, or not at all."""
+    """Rule groups decide whether members start projects and tasks directly, by request, or not at all, and how far their AI assistant goes."""
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -716,6 +716,68 @@ class CreationPolicyTests(unittest.TestCase):
         self.store.action(self.admin, 'creation.update', {'groups': [{'id': 'default', 'name': '普通用户', 'project': 'approval', 'tempTask': 'direct', 'projectTask': 'none'}], 'assign': {'test002': 'leads'}})
         rules = self.store.creation_rules(self.member('test002'))
         self.assertEqual((rules['group'], rules['project']), ('default', 'approval'))
+
+    def test_rule_group_opens_or_closes_the_ai_assistant(self):
+        # Groups saved before the assistant rule existed read as 查询与规划.
+        self.set_group({'project': 'approval', 'tempTask': 'direct', 'projectTask': 'none'})
+        lead = self.member('test002')
+        self.assertEqual(self.store.action(lead, 'agent.capabilities', {})['mode'], 'readonly')
+        with self.assertRaises(Problem) as error:
+            self.store.action(self.admin, 'creation.update', {'groups': [{'id': 'default', 'name': '默认规则', 'project': 'approval', 'tempTask': 'direct', 'projectTask': 'none', 'agent': 'everything'}]})
+        self.assertEqual(error.exception.status, 400)
+
+        self.set_group({'project': 'approval', 'tempTask': 'direct', 'projectTask': 'none', 'agent': 'off'})
+        caps = self.store.action(self.member('test002'), 'agent.capabilities', {})
+        self.assertEqual((caps['mode'], caps['tools']), ('off', []))
+        self.assertEqual(self.store.snapshot(self.member('test002'))['creationRules']['agent'], 'off')
+        with self.assertRaises(Problem) as error:
+            self.store.action(self.member('test002'), 'agent.authorize', {'tool': 'agent.chat'})
+        self.assertEqual(error.exception.status, 403)
+        # The default group is untouched by it.
+        self.assertEqual(self.store.action(self.member('test003'), 'agent.capabilities', {})['mode'], 'readonly')
+
+        self.set_group({'project': 'approval', 'tempTask': 'direct', 'projectTask': 'none', 'agent': 'operate'})
+        lead = self.member('test002')
+        caps = self.store.action(lead, 'agent.capabilities', {})
+        self.assertEqual(caps['mode'], 'operator')
+        self.assertIn('task.create', caps['requiresConfirmation'])
+        self.assertNotIn('account.manage', caps['tools'])
+        made = self.store.action(lead, 'agent.execute', {'action': 'task.create', 'confirmed': True, 'data': {
+            'name': '助手代建', 'assignee': 'test002', 'date': self.day}})
+        self.assertEqual((made['name'], made['assignee']), ('助手代建', 'test002'))
+        # It still acts with the member's own rights, nothing more.
+        for payload in ({'action': 'task.create', 'data': {'name': 'x', 'projectId': self.project['id'], 'assignee': 'test002', 'date': self.day}},
+                        {'action': 'account.create', 'data': {'username': 'test009', 'password': 'password-long'}}):
+            with self.subTest(action=payload['action']), self.assertRaises(Problem) as error:
+                self.store.action(lead, 'agent.execute', {**payload, 'confirmed': True})
+            self.assertEqual(error.exception.status, 403)
+
+
+class SignatureTests(unittest.TestCase):
+    """个性签名 is a single short line the account holder writes about themselves."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.store = Store(Path(self.temp.name) / 'signature.sqlite3', seed=False)
+        for name in ['superadmin', 'test001']:
+            self.store.create_user(name, 'test-only-password', admin=name == 'superadmin')
+
+    def tearDown(self):
+        self.store.close()
+        self.temp.cleanup()
+
+    def test_signature_is_one_trimmed_line_and_survives_an_older_page(self):
+        me = self.store.user('test001')
+        saved = self.store.action(me, 'profile.self', {'nickname': '一一', 'avatar': '', 'signature': '  慢慢来，\n比较快。  ' + '长' * 60})
+        self.assertTrue(saved['signature'].startswith('慢慢来， 比较快。'))
+        self.assertEqual(len(saved['signature']), 40)
+        self.assertEqual(self.store.user('test001')['signature'], saved['signature'])
+        # A page that predates the field sends no signature; it is kept.
+        self.store.action(me, 'profile.self', {'nickname': '一一', 'avatar': ''})
+        self.assertEqual(self.store.user('test001')['signature'], saved['signature'])
+        self.store.action(me, 'profile.self', {'nickname': '一一', 'avatar': '', 'signature': ''})
+        self.assertEqual(self.store.user('test001')['signature'], '')
+        self.assertIn('signature', self.store.snapshot(self.store.user('superadmin'))['users'][0])
 
 
 class TaskApprovalTests(unittest.TestCase):

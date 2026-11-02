@@ -1382,6 +1382,35 @@ select {
   margin-top: 4px;
 }
 
+/* 个性签名: the holder's own line, set like a handwritten note under the name. */
+.signature {
+  display: block;
+  overflow: hidden;
+  max-width: 100%;
+  margin-top: 3px;
+  font: italic 400 12px/1.4 var(--font-serif);
+  color: var(--ink-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.workspace-switcher .signature {
+  max-width: 150px;
+  margin-top: 1px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.account-menu-head {
+  flex-wrap: wrap;
+}
+
+.account-menu-head > .signature {
+  flex-basis: 100%;
+  margin-top: 0;
+  white-space: normal;
+}
+
 .account-menu-group {
   display: grid;
   gap: 1px;
@@ -5771,7 +5800,8 @@ select {
   letter-spacing: 0;
 }
 
-/* Member permission groups: one row per group, a rule per kind of creation. */
+/* Rule groups (规则组): one card per group; every rule is a one-click segment
+   and the members sit on the card as chips. */
 .creation-card {
   margin-bottom: 18px;
   padding: 18px;
@@ -5793,86 +5823,205 @@ select {
   font: 600 18px/1.3 var(--font-serif);
 }
 
-.creation-table {
+.rule-cards {
   display: grid;
-  gap: 6px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
 }
 
-.creation-row {
+.rule-card {
   display: grid;
-  grid-template-columns: minmax(120px, 1.4fr) repeat(3, minmax(96px, 1fr)) 56px 56px;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 10px;
+  align-content: start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
   background: var(--surface-sunk);
 }
 
-.creation-row.is-head {
-  padding-block: 0 2px;
-  background: none;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--muted);
+.rule-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.creation-name,
-.creation-rule {
+.rule-name {
+  flex: 1;
   min-width: 0;
-  height: 30px;
+  height: 32px;
   padding: 0 8px;
-  border: 1px solid var(--line);
+  border: 1px solid transparent;
   border-radius: 8px;
-  background: var(--surface);
+  background: transparent;
   color: var(--ink);
-  font: inherit;
-  font-size: 12.5px;
+  font: 600 15px/1 var(--font-serif);
 }
 
-.creation-name {
-  font-weight: 600;
+.rule-name:hover {
+  border-color: var(--line);
 }
 
-.creation-name:focus,
-.creation-rule:focus {
+.rule-name:focus {
   outline: none;
   border-color: var(--accent);
+  background: var(--surface);
 }
 
-.creation-count {
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.creation-cell {
-  display: grid;
-  min-width: 0;
-}
-
-/* The column heads name each rule on wide screens; narrow rows carry their own. */
-.creation-cell small {
-  display: none;
-  margin-bottom: 3px;
+.rule-badge {
+  flex: none;
   font-size: 11px;
   color: var(--muted);
 }
 
-@media (max-width: 760px) {
-  .creation-row.is-head {
-    display: none;
-  }
+.rule-lines {
+  display: grid;
+  gap: 7px;
+}
 
-  .creation-row {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
+.rule-line {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
 
-  .creation-name {
-    grid-column: 1 / -1;
-  }
+.rule-seg {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+}
 
-  .creation-cell small {
-    display: block;
-  }
+.rule-opt {
+  min-width: 0;
+  height: 26px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11.5px;
+  white-space: nowrap;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+
+.rule-opt:hover {
+  color: var(--ink);
+}
+
+.rule-opt.is-on {
+  background: var(--ink-deep);
+  color: var(--surface);
+  font-weight: 600;
+}
+
+.rule-members {
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
+.rule-members-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.rule-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.rule-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 4px 0 3px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  background: var(--surface);
+}
+
+.rule-chip .avatar {
+  width: 22px;
+  height: 22px;
+  font-size: 10px;
+}
+
+.rule-chip > span:not(.avatar) {
+  padding-right: 4px;
+}
+
+.rule-chip-out {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-left: -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--faint);
+}
+
+.rule-chip-out:hover {
+  background: var(--surface-sunk);
+  color: var(--danger);
+}
+
+.rule-chip-out svg {
+  width: 12px;
+  height: 12px;
+}
+
+.rule-pick-tools {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0 10px;
+}
+
+.rule-pick-list {
+  display: grid;
+  gap: 6px;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+
+.rule-pick-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.rule-pick-item:has(input:checked) {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.rule-pick-item span:last-child {
+  display: grid;
+  gap: 2px;
+}
+
+.rule-pick-item small {
+  font-size: 11px;
+  color: var(--muted);
 }
 
 .account-group {
@@ -6816,48 +6965,348 @@ select {
   box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 
-/* The parsed plan, before anything is written: blocks rather than a table,
-   since the panel is too narrow for six columns. */
-.agent-plan-list {
+/* 规划草稿: the panel opens wider while a draft is out, and the draft is a set
+   of filled-in cards the user edits in place before confirming. */
+.agent-panel.is-planning {
+  width: min(780px, calc(100vw - 32px));
+  height: min(800px, calc(100vh - 48px));
+}
+
+.agent-panel {
+  transition: transform var(--t) var(--ease), box-shadow var(--t) var(--ease), border-color var(--t) var(--ease), width var(--t-slow) var(--ease-out), height var(--t-slow) var(--ease-out);
+}
+
+.agent-panel.is-plan-mode .agent-mode {
+  display: none;
+}
+
+.agent-message.agent-drafting {
+  color: var(--muted);
+  animation: ledgerPulse 1.6s var(--ease-out) infinite;
+}
+
+.agent-message.plan-board {
+  justify-self: stretch;
+  width: 100%;
+  max-width: 100%;
+  padding: 0;
+  background: none;
+  white-space: normal;
+}
+
+.plan-board-head {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
-  max-height: 280px;
-  overflow-y: auto;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  margin-bottom: 10px;
-  background: var(--line-soft);
-}
-
-.agent-plan-item {
-  background: var(--surface);
-  padding: 8px 10px;
-}
-
-.agent-plan-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.agent-plan-name {
-  font-size: 13px;
-  font-weight: 500;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
   color: var(--ink);
-  line-height: 1.4;
 }
 
-.agent-plan-head .priority {
-  flex: none;
+.plan-board-head svg {
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+  align-self: center;
 }
 
-.agent-plan-meta {
-  margin-top: 3px;
+.plan-board-head strong {
+  font: 600 15px/1.3 var(--font-serif);
+}
+
+.plan-board-head span {
+  flex-basis: 100%;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+.plan-hint {
+  margin: 4px 0 10px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.plan-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 10px;
+}
+
+/* Cards are dealt onto the table one after another as the draft arrives. */
+.plan-cards.is-entering .plan-card {
+  animation: planDeal 420ms var(--ease-spring) both;
+  animation-delay: calc(var(--i, 0) * 70ms);
+}
+
+@keyframes planDeal {
+  from { opacity: 0; transform: translateY(14px) scale(.96); }
+  to { opacity: 1; transform: none; }
+}
+
+.plan-card {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 11px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.plan-card.is-project {
+  border-color: var(--accent-line);
+  background: linear-gradient(var(--accent-soft), var(--surface) 60%);
+}
+
+.plan-card.is-none {
+  opacity: .72;
+}
+.plan-card-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.plan-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: auto;
+  font-weight: 600;
+}
+
+.plan-kind svg {
+  width: 13px;
+  height: 13px;
+}
+
+.plan-state {
+  padding: 2px 7px;
+  border-radius: 99px;
   font-size: 11px;
-  line-height: 1.5;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.plan-state.is-direct { color: var(--c-green-ink); background: var(--c-green-soft); }
+.plan-state.is-approval { color: var(--c-gold-ink); background: var(--c-gold-soft); }
+.plan-state.is-wait { color: var(--c-blue-ink); background: var(--c-blue-soft); }
+.plan-state.is-none { color: var(--danger-ink); background: var(--c-coral-soft); }
+
+.plan-remove {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
   color: var(--faint);
+}
+
+.plan-remove:hover {
+  background: var(--surface-sunk);
+  color: var(--danger);
+}
+
+.plan-remove svg {
+  width: 13px;
+  height: 13px;
+}
+
+.plan-prio {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.plan-prio .priority {
+  border: 0;
+  cursor: pointer;
+  opacity: .38;
+  transition: opacity var(--t-fast) var(--ease);
+}
+
+.plan-prio .priority.is-on,
+.plan-prio .priority:hover {
+  opacity: 1;
+}
+
+.plan-title {
+  width: 100%;
+  min-width: 0;
+  padding: 4px 6px;
+  margin: 0 -6px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  font: 600 14px/1.35 var(--font-sans);
+}
+
+.plan-title:hover,
+.plan-desc:hover {
+  border-color: var(--line);
+}
+
+.plan-title:focus,
+.plan-desc:focus,
+.plan-grid select:focus,
+.plan-grid input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface);
+}
+.plan-desc {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: var(--surface-sunk);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.plan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 8px;
+}
+
+.plan-grid label {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.plan-grid .is-wide {
+  grid-column: 1 / -1;
+}
+
+.plan-grid select,
+.plan-grid input {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.plan-grid select:disabled {
+  background: var(--surface-sunk);
+  color: var(--ink-2);
+  opacity: 1;
+}
+
+.plan-people {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.plan-people > span:first-child {
+  margin-right: 2px;
+}
+
+.plan-person {
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  background: var(--surface);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 11.5px;
+}
+
+.plan-person.is-on {
+  border-color: var(--ink-deep);
+  background: var(--ink-deep);
+  color: var(--surface);
+}
+
+.plan-note,
+.plan-error {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.plan-error {
+  color: var(--danger);
+}
+.plan-card.is-done {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 12px;
+  border-style: dashed;
+  background: var(--surface-sunk);
+  box-shadow: none;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.plan-card.is-done svg {
+  width: 14px;
+  height: 14px;
+  color: var(--success);
+}
+
+.plan-card.is-done strong {
+  overflow: hidden;
+  font-weight: 500;
+  color: var(--ink-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.plan-foot {
+  position: sticky;
+  bottom: -14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 0 2px;
+  background: linear-gradient(transparent, var(--surface) 30%);
+}
+
+.plan-foot.is-closed {
+  position: static;
+  background: none;
+}
+
+.plan-sum {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.plan-reopen-history {
+  display: block;
+  height: 26px;
+  margin-top: 6px;
+  font-size: 11.5px;
 }
 
 /* One quiet receipt per executed step, so a multi-step run stays scannable. */

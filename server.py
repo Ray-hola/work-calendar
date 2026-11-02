@@ -102,14 +102,16 @@ TRANSCRIBE_PATH = '/api/transcribe'
 MAX_AUDIO_BYTES = 8_000_000
 TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'task_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages', 'messages')
 
-# Who may start what.  superadmin sorts members into permission groups; each
-# group says, for a new project, a one-off task for oneself and a task inside a
-# project one collaborates on, whether it is made at once, asked for, or not
-# offered.  Admins and a project's own Owner always act directly.  The default
-# group keeps the original behaviour.
+# Who may start what.  superadmin sorts members into rule groups (规则组, kept
+# apart from the superadmin/admin/member roles); each group says, for a new
+# project, a one-off task for oneself and a task inside a project one
+# collaborates on, whether it is made at once, asked for, or not offered, and
+# how far the AI assistant may go.  Admins and a project's own Owner always act
+# directly.  The default group keeps the original behaviour.
 CREATION_RULES = ('direct', 'approval', 'none')
 CREATION_KINDS = ('project', 'tempTask', 'projectTask')
-DEFAULT_GROUP = {'id': 'default', 'name': '普通用户', 'project': 'approval', 'tempTask': 'direct', 'projectTask': 'none'}
+AGENT_ACCESS = ('off', 'read', 'operate')
+DEFAULT_GROUP = {'id': 'default', 'name': '默认规则', 'project': 'approval', 'tempTask': 'direct', 'projectTask': 'none', 'agent': 'read'}
 
 # Agent capability boundary.  The future chat/browser adapter must use these
 # capabilities instead of exposing Store internals or the generic action API.
@@ -130,6 +132,13 @@ AGENT_WRITE_TOOLS = frozenset({
     'task.edit_review', 'repeat.manage', 'automation.manage',
     'report.manage', 'report.schedule.manage', 'assignment.manage',
     'collection.manage', 'profile.correct', 'scheduler.run',
+})
+# What a member's assistant may do once superadmin opens operation to their
+# rule group.  Every action still runs through Store._action as that member,
+# so these only ever reach what the member could do by hand.
+AGENT_MEMBER_WRITE_TOOLS = frozenset({
+    'project.create', 'project.update', 'project.invite', 'project.complete_request',
+    'task.create', 'task.update', 'task.delete', 'task.review', 'task.edit_review',
 })
 
 # Mapping used by the chat adapter when a model proposes a concrete Store
@@ -223,6 +232,9 @@ class Store:
             self.db.execute('ALTER TABLE users ADD COLUMN nickname TEXT')
         if 'avatar' not in columns:
             self.db.execute('ALTER TABLE users ADD COLUMN avatar TEXT')
+        # 个性签名: one short line the holder writes, shown under the avatar.
+        if 'signature' not in columns:
+            self.db.execute('ALTER TABLE users ADD COLUMN signature TEXT')
         self.db.execute('CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires TEXT NOT NULL)')
         self.db.execute('CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, ran_at TEXT NOT NULL)')
         for table in TABLES:
@@ -264,13 +276,14 @@ class Store:
         return obj
 
     def users(self):
-        rows = self.db.execute('SELECT id,admin,active,role,display_name,nickname,avatar FROM users ORDER BY admin DESC,id')
+        rows = self.db.execute('SELECT id,admin,active,role,display_name,nickname,avatar,signature FROM users ORDER BY admin DESC,id')
         result = []
         for row in rows:
             item = dict(row)
             item['displayName'] = item.pop('display_name') or ''
             item['nickname'] = item.pop('nickname') or ''
             item['avatar'] = item.pop('avatar') or ''
+            item['signature'] = item.pop('signature') or ''
             result.append(item)
         return result
 
@@ -293,19 +306,34 @@ class Store:
             raise Problem(403, '此操作需要 superadmin 权限')
 
     def agent_capabilities(self, user):
-        """Return the explicit capability contract for an embedded agent."""
-        tools = AGENT_READ_TOOLS | (AGENT_WRITE_TOOLS if user.get('admin') else frozenset())
+        """Return the explicit capability contract for an embedded agent.
+
+        Admins operate.  A member's rule group decides between 'off' (no
+        assistant), 'read' (questions and drafted plans the member submits by
+        hand) and 'operate' (confirmed actions within the member's own rights).
+        """
+        access = 'operate' if user.get('admin') else self.creation_rules(user).get('agent', 'read')
+        if user.get('admin'):
+            tools = AGENT_READ_TOOLS | AGENT_WRITE_TOOLS
+        elif access == 'operate':
+            tools = AGENT_READ_TOOLS | AGENT_MEMBER_WRITE_TOOLS
+        elif access == 'read':
+            tools = AGENT_READ_TOOLS
+        else:
+            tools = frozenset()
         return {
             'role': user.get('role') or ('superadmin' if user.get('admin') else 'member'),
-            'mode': 'operator' if user.get('admin') else 'readonly',
+            'mode': {'operate': 'operator', 'read': 'readonly'}.get(access, 'off'),
             'tools': sorted(tools),
-            'requiresConfirmation': sorted(AGENT_WRITE_TOOLS) if user.get('admin') else [],
+            'requiresConfirmation': sorted(tools & AGENT_WRITE_TOOLS),
         }
 
     def authorize_agent_tool(self, user, tool):
         """Authorize one semantic Agent tool before an adapter executes it."""
         tool = str(tool or '').strip()
         capabilities = self.agent_capabilities(user)
+        if capabilities['mode'] == 'off':
+            raise Problem(403, 'AI 助手还没有对你开放，请联系 superadmin')
         if tool not in capabilities['tools']:
             raise Problem(403, '当前账户的 Agent 仅支持查询，不能执行该操作')
         return {'allowed': True, 'tool': tool, 'mode': capabilities['mode'],
@@ -576,20 +604,29 @@ class Store:
                                    '（更早的 %d 轮对话因长度限制已省略，必要时先向用户确认。）' % dropped})
         # Keep the permission contract in the model context as a second line of
         # defence; actual mutations still go through Store.action authorization.
-        policy = ('你是「战略小组台账」助手。当前账户是 superadmin，可协助查询并提出管理操作；'
-                  '任何创建、指派、调整或审批都必须先向用户展示拟执行内容并等待明确确认。'
-                  if user.get('admin') else
-                  '你是「战略小组台账」查询助手。当前账户是普通成员，只能回答该成员有权看到的信息，'
-                  '不能创建、删除、指派、调整或审批任何数据。')
+        caps = self.agent_capabilities(user)
+        operator = caps['mode'] == 'operator'
         if user.get('admin'):
+            policy = ('你是「战略小组台账」助手。当前账户是 superadmin，可协助查询并提出管理操作；'
+                      '任何创建、指派、调整或审批都必须先向用户展示拟执行内容并等待明确确认。')
+        elif operator:
+            policy = ('你是「战略小组台账」助手。当前账户是普通成员，superadmin 已允许助手代这位成员操作：'
+                      '只能做这位成员自己有权限做的创建、调整和提交申请，不能替别人审批，也不能改账户或权限；'
+                      '任何改动都必须先向用户展示拟执行内容并等待明确确认。')
+        else:
+            policy = ('你是「战略小组台账」查询助手。当前账户是普通成员，只能回答该成员有权看到的信息，'
+                      '不能创建、删除、指派、调整或审批任何数据。'
+                      '用户想安排事情时，告诉他点输入框上方的「规划任务」，助手会起草好卡片由他确认。')
+        if operator:
             # Teach the operator model the one structured envelope the browser
             # knows how to turn into a confirmation card.  Without this the
             # assistant can only describe an action and never apply it.
+            allowed = sorted(a for a, t in AGENT_ACTION_TO_TOOL.items() if t in caps['tools'])
             policy += ('\n当用户要求创建、指派、调整、审批或删除数据，且你能从上下文确定必填字段时，'
                        '先在正文用一两句话说明拟执行内容，然后另起一行输出一个动作块：'
                        '<action>{"action":"动作名","data":{...}}</action>。'
                        '动作块必须是单行合法 JSON，不要放进 Markdown 代码围栏，也不要输出多个动作块。'
-                       f'可用动作名：{", ".join(sorted(AGENT_ACTION_TO_TOOL))}。'
+                       f'可用动作名：{", ".join(allowed)}。'
                        '创建任务的示例：'
                        '<action>{"action":"task.create","data":{"name":"整理周报","projectId":"项目ID","assignee":"成员账户","date":"2026-09-14","duration":60,"priority":"P1"}}</action>。'
                        '日期使用 YYYY-MM-DD，优先级为 P0/P1/P2。前端会解析动作块并请用户确认后再执行，'
@@ -602,9 +639,11 @@ class Store:
                        '- 项目任务的负责人必须是该项目 members 里状态为 accepted 的成员。'
                        '如果目标成员不在其中，先输出 project.invite（data:{"id":"项目ID","members":["账户"]}），'
                        '拿到成功回执后再输出原来的 task.create。\n'
-                       '- 只有 status 为 active 的项目可以安排任务。待审批的项目先输出 '
-                       'project.review（data:{"id":"项目ID","accept":true}）。\n'
-                       '- 任务日期必须落在项目的 start 与 end 之间，且不能超出可排期范围。\n'
+                       + ('- 只有 status 为 active 的项目可以安排任务。待审批的项目先输出 '
+                          'project.review（data:{"id":"项目ID","accept":true}）。\n'
+                          if user.get('admin') else
+                          '- 只有 status 为 active 的项目可以安排任务；待审批的项目要等管理员通过。\n')
+                       + '- 任务日期必须落在项目的 start 与 end 之间，且不能超出可排期范围。\n'
                        '每执行完一个动作，回执里会附上「数据核对」，写明数据实际发生了什么变化。'
                        '先拿它和你的预期比一比，对得上再输出下一个动作；对不上或没有生效，先修正它，不要继续往下推进。\n'
                        '执行失败时系统会回一条【系统回执·失败】。先读懂原因再决定怎么做：'
@@ -719,11 +758,12 @@ class Store:
     def execute_agent_action(self, user, data):
         """Execute a model-proposed business action after explicit confirmation.
 
-        Only superadmin may drive the operator agent; members are read-only and
-        are rejected here even if a client forges the confirmation flag.
+        Admins, and members whose rule group allows it, may drive the operator
+        agent; anyone else is rejected here even if a client forges the
+        confirmation flag.  The action itself runs with the caller's own rights.
         """
-        if not user.get('admin'):
-            raise Problem(403, '只有管理员账户的 Agent 可以执行操作，成员仅可查询')
+        if self.agent_capabilities(user)['mode'] != 'operator':
+            raise Problem(403, '你的 AI 助手只能查询和起草，不能代为操作')
         action = str(data.get('action') or '').strip()
         tool = AGENT_ACTION_TO_TOOL.get(action)
         if not tool:
@@ -1103,16 +1143,17 @@ class Store:
 
     def creation_policy(self):
         value=next((x.get('value') for x in self.all('settings') if x.get('id')=='creation'),None) or {}
-        groups=[dict(g) for g in value.get('groups') or [] if isinstance(g,dict)]
+        groups=[{'agent':DEFAULT_GROUP['agent'],**g} for g in value.get('groups') or [] if isinstance(g,dict)]
         if not any(g.get('id')=='default' for g in groups):groups.insert(0,dict(DEFAULT_GROUP))
         return {'groups':groups,'assign':dict(value.get('assign') or {})}
 
     def creation_rules(self, user):
-        """What `user` may start, as 'direct' | 'approval' | 'none' per kind."""
-        if user.get('admin'):return {'group':None,**{k:'direct' for k in CREATION_KINDS}}
+        """What `user` may start ('direct' | 'approval' | 'none' per kind) and
+        how far their AI assistant goes ('off' | 'read' | 'operate')."""
+        if user.get('admin'):return {'group':None,**{k:'direct' for k in CREATION_KINDS},'agent':'operate'}
         policy=self.creation_policy();groups={g['id']:g for g in policy['groups']}
         group=groups.get(policy['assign'].get(user['id'])) or groups['default']
-        return {'group':group['id'],**{k:group.get(k,DEFAULT_GROUP[k]) for k in CREATION_KINDS}}
+        return {'group':group['id'],**{k:group.get(k,DEFAULT_GROUP[k]) for k in CREATION_KINDS},'agent':group.get('agent',DEFAULT_GROUP['agent'])}
 
     def task_create_mode(self, user, data):
         """'direct' or 'approval' for this new task, or refuse it outright."""
@@ -1120,7 +1161,7 @@ class Store:
         rules=self.creation_rules(user);pid=data.get('projectId') or None
         if not pid:
             if data.get('assignee',user['id'])!=user['id']:raise Problem(403,'临时任务只能建给自己；指派给他人请放进项目')
-            if rules['tempTask']=='none':raise Problem(403,'你所在的权限组不能新建临时任务')
+            if rules['tempTask']=='none':raise Problem(403,'你所在的规则组不能新建临时任务')
             return rules['tempTask']
         p=self.get('projects',pid)
         if p['owner']==user['id']:return 'direct'
@@ -1732,10 +1773,13 @@ class Store:
                 raise Problem(400,'头像格式无效')
             if len(avatar)>160000:
                 raise Problem(400,'头像文件过大，请换一张更小的图片')
+            # An older page does not send a signature; keep the stored one then.
+            signature=(' '.join(str(d.get('signature') or '').split())[:40] if 'signature' in d
+                       else next((u['signature'] for u in self.users() if u['id']==user['id']),''))
             with self.lock,self.db:
-                self.db.execute('UPDATE users SET nickname=?,avatar=? WHERE id=?',(nickname,avatar,user['id']))
-            self.audit(user['id'],'profile.self',{'nickname':nickname})
-            return {'id':user['id'],'nickname':nickname,'avatar':avatar}
+                self.db.execute('UPDATE users SET nickname=?,avatar=?,signature=? WHERE id=?',(nickname,avatar,signature,user['id']))
+            self.audit(user['id'],'profile.self',{'nickname':nickname,'signature':signature})
+            return {'id':user['id'],'nickname':nickname,'avatar':avatar,'signature':signature}
         if action=='account.create':
             # Only the superadmin group manages accounts and roles.
             self.superadmin(user)
@@ -1845,7 +1889,7 @@ class Store:
             return {'id':target,'deleted':True}
         if action=='project.create':
             rule=self.creation_rules(user)['project']
-            if rule=='none':raise Problem(403,'你所在的权限组不能新建项目')
+            if rule=='none':raise Problem(403,'你所在的规则组不能新建项目')
             direct=rule=='direct'
             owner=d.get('owner',user['id']) if user['admin'] else user['id'];self.user(owner)
             members={m:'pending' for m in d.get('members',[]) if m!=owner};members[owner]='accepted'
@@ -2375,22 +2419,24 @@ class Store:
             for a in r['assignees']:self.notify(a,'固定安排临时调整',f'「{r["name"]}」{day} 已'+('挖空，本次无需执行。' if skip else '恢复。'),'repeat',r['id'])
             return r
         if action=='creation.update':
-            # Permission groups and who is in them; superadmin only.  Members
-            # left in a group that is removed fall back to the default group.
+            # Rule groups and who is in them; superadmin only.  Members left in
+            # a group that is removed fall back to the default group.
             self.superadmin(user)
             groups=d.get('groups')
-            if not isinstance(groups,list) or not groups or len(groups)>20:raise Problem(400,'权限组无效')
+            if not isinstance(groups,list) or not groups or len(groups)>20:raise Problem(400,'规则组无效')
             clean=[];ids=set();names=set()
             for g in groups:
-                if not isinstance(g,dict):raise Problem(400,'权限组无效')
+                if not isinstance(g,dict):raise Problem(400,'规则组无效')
                 gid=str(g.get('id','')).strip();name=str(g.get('name','')).strip()
-                if not re.fullmatch(r'[a-z0-9-]{1,24}',gid) or gid in ids:raise Problem(400,'权限组编号无效或重复')
-                if not name or len(name)>20:raise Problem(400,'权限组名称需为 1–20 个字')
-                if name in names:raise Problem(400,f'已有名为「{name}」的权限组')
+                if not re.fullmatch(r'[a-z0-9-]{1,24}',gid) or gid in ids:raise Problem(400,'规则组编号无效或重复')
+                if not name or len(name)>20:raise Problem(400,'规则组名称需为 1–20 个字')
+                if name in names:raise Problem(400,f'已有名为「{name}」的规则组')
                 rules={k:g.get(k) for k in CREATION_KINDS}
-                if any(v not in CREATION_RULES for v in rules.values()):raise Problem(400,'权限规则无效')
-                ids.add(gid);names.add(name);clean.append({'id':gid,'name':name,**rules})
-            if 'default' not in ids:raise Problem(400,'默认权限组不能删除')
+                if any(v not in CREATION_RULES for v in rules.values()):raise Problem(400,'创建规则无效')
+                agent=g.get('agent',DEFAULT_GROUP['agent'])
+                if agent not in AGENT_ACCESS:raise Problem(400,'AI 助手权限无效')
+                ids.add(gid);names.add(name);clean.append({'id':gid,'name':name,**rules,'agent':agent})
+            if 'default' not in ids:raise Problem(400,'默认规则组不能删除')
             members={u['id'] for u in self.users() if not u['admin']}
             assign={str(uid):str(gid) for uid,gid in (d.get('assign') or {}).items() if uid in members and gid in ids and gid!='default'}
             before=self.creation_policy()
