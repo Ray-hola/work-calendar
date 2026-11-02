@@ -547,6 +547,42 @@ class ScheduleAccessTests(unittest.TestCase):
             self.store.action(self.store.user('test002'), 'brief.get', {'date': yesterday})
         self.assertFalse(any(r['kind'] == 'brief' for r in self.store.snapshot(self.store.user('test002'))['reports']))
 
+    def test_admin_rewrites_a_filed_brief_and_exports_the_week(self):
+        day = date.fromisoformat(self.day)
+        yesterday = (day - timedelta(days=1)).isoformat()
+        self.store.put('tasks', {'name': '联调', 'date': yesterday, 'duration': 60, 'assignee': 'test002', 'projectId': None,
+                                 'priority': 'P1', 'status': 'done', 'fixed': False, 'type': '通用'})
+        self.store.db.commit()
+        self.store.schedule(datetime.combine(day, time(0, 5), TZ))
+        before = self.store.action(self.admin, 'brief.get', {'date': yesterday})
+        auto_risks = before['content']['risks']
+        edited = self.store.action(self.admin, 'brief.update', {'date': yesterday, 'risks': ['  周三前要定版  ', ''],
+                                                                'members': {'test002': {'done': '联调完成，接口已对齐', 'next': before['content']['members'][0]['summary'].get('next', '')}}})
+        self.assertEqual(edited['content']['risks'], ['周三前要定版'])
+        member = edited['content']['members'][0]
+        self.assertEqual((member['summary']['done'], member['edited']), ('联调完成，接口已对齐', True))
+        # Only what changed is kept; unchanged fields are not copied into the overlay.
+        self.assertEqual(self.store.get('reports', f'brief:{yesterday}')['edits']['members'], {'test002': {'done': '联调完成，接口已对齐'}})
+        # A late diary rebuilds the brief underneath, and the admin's changes survive it.
+        self.store.action(self.store.user('test002'), 'diary.save', {'date': yesterday, 'content': {'done': '补记', 'risks': '无', 'next': '上线'}})
+        again = self.store.action(self.admin, 'brief.get', {'date': yesterday})
+        self.assertEqual((again['content']['risks'], again['content']['members'][0]['summary']['done'], again['content']['members'][0]['summary']['next']),
+                         (['周三前要定版'], '联调完成，接口已对齐', '上线'))
+        self.assertNotEqual(auto_risks, again['content']['risks'])
+        with self.assertRaises(Problem) as error:
+            self.store.action(self.store.user('test002'), 'brief.update', {'date': yesterday, 'risks': []})
+        self.assertEqual(error.exception.status, 403)
+        # The week runs Saturday to Friday like the week view and stops at today.
+        week = self.store.action(self.admin, 'brief.week', {'date': yesterday})
+        saturday = date.fromisoformat(yesterday) - timedelta(days=(date.fromisoformat(yesterday).weekday() + 2) % 7)
+        self.assertEqual(saturday.weekday(), 5)
+        self.assertEqual((week['start'], week['end']), (saturday.isoformat(), (saturday + timedelta(days=6)).isoformat()))
+        self.assertTrue(all(week['start'] <= b['date'] <= min(week['end'], self.day) for b in week['briefs']))
+        filed = next(b for b in week['briefs'] if b['date'] == yesterday)
+        self.assertEqual(filed['content']['risks'], ['周三前要定版'])
+        with self.assertRaises(Problem):
+            self.store.action(self.store.user('test002'), 'brief.week', {'date': yesterday})
+
     def test_inbox_notices_can_be_deleted_one_by_one_or_in_bulk(self):
         member, other = self.store.user('test002'), self.store.user('test003')
         notes = [self.store.notify('test002', f'通知 {i}', '内容', 'task') for i in range(4)]

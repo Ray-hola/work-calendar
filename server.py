@@ -111,6 +111,9 @@ TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notific
 CREATION_RULES = ('direct', 'approval', 'none')
 CREATION_KINDS = ('project', 'tempTask', 'projectTask')
 AGENT_ACCESS = ('off', 'read', 'operate')
+# The parts of a filed team report an admin may rewrite by hand.
+BRIEF_PROJECT_FIELDS = ('done', 'progress', 'collaborators', 'risks', 'next')
+BRIEF_MEMBER_FIELDS = ('done', 'risks', 'next', 'summary')
 DEFAULT_GROUP = {'id': 'default', 'name': '默认规则', 'project': 'approval', 'tempTask': 'direct', 'projectTask': 'none', 'agent': 'read'}
 
 # Agent capability boundary.  The future chat/browser adapter must use these
@@ -2544,7 +2547,48 @@ class Store:
             self.admin(user)
             brief=self.get('reports',f'brief:{valid_date(d.get("date"))}')
             if brief.get('kind')!='brief':raise Problem(404,'档案不存在')
-            return brief
+            return self.apply_brief_edits(brief)
+        if action=='brief.update':
+            # Admins rewrite parts of a filed team report by hand. Only what
+            # differs from the collected text is kept, as an overlay, so a late
+            # diary still updates everything else.
+            self.admin(user)
+            day=valid_date(d.get('date'))
+            brief=self.get('reports',f'brief:{day}')
+            if brief.get('kind')!='brief':raise Problem(404,'档案不存在')
+            content=brief.get('content') or {}
+            clip=lambda v,limit=4000:str(v or '').strip()[:limit]
+            edits={}
+            if isinstance(d.get('risks'),list):
+                risks=[clip(r,500) for r in d['risks'] if clip(r,500)][:50]
+                if risks!=[str(r) for r in content.get('risks') or []]:edits['risks']=risks
+            for scope,key,fields in (('projects','content',BRIEF_PROJECT_FIELDS),('members','summary',BRIEF_MEMBER_FIELDS)):
+                incoming=d.get(scope) if isinstance(d.get(scope),dict) else {}
+                for row in content.get(scope) or []:
+                    change=incoming.get(row.get('id'))
+                    if not isinstance(change,dict):continue
+                    base=row.get(key) if isinstance(row.get(key),dict) else ({'summary':row.get(key)} if row.get(key) else {})
+                    diff={f:clip(v) for f,v in change.items() if f in fields and clip(v)!=str(base.get(f) or '').strip()}
+                    if diff:edits.setdefault(scope,{})[row['id']]=diff
+            brief.update({'edits':edits,'editedBy':user['id'],'editedAt':timestamp()})
+            self.put('reports',brief)
+            self.audit(user['id'],'brief.update',{'date':day})
+            return self.apply_brief_edits(brief)
+        if action=='brief.week':
+            # One week of team reports for export, Saturday to Friday like the
+            # week view: filed ones as they stand, days not filed yet assembled
+            # on the spot.
+            self.admin(user)
+            day=date.fromisoformat(valid_date(d.get('date')))
+            start=day-timedelta(days=(day.weekday()+2)%7);today=now().date().isoformat()
+            briefs=[]
+            for i in range(7):
+                ds=(start+timedelta(days=i)).isoformat()
+                if ds>today:break
+                row=self.db.execute('SELECT data FROM reports WHERE id=?',(f'brief:{ds}',)).fetchone()
+                brief=json.loads(row['data']) if row else self.compose_brief(ds)
+                if brief:briefs.append(self.apply_brief_edits(brief))
+            return {'start':start.isoformat(),'end':(start+timedelta(days=6)).isoformat(),'briefs':briefs}
         if action=='inbox.delete':
             # Only the recipient's own notices. Invitations are answered, not
             # deleted, so they are not touched here.
@@ -2691,10 +2735,10 @@ class Store:
                 'loadTotal':sum(int(t.get('duration',0) or 0) for t in tasks),
                 'content':content}
 
-    def build_brief(self, day, at=None):
-        """Assemble one team report for a day: every member's work and summary,
-        every project's progress, and what needs attention. Returns None for a
-        day on which nothing happened."""
+    def compose_brief(self, day, at=None):
+        """Assemble one team report for a day without filing it: every member's
+        work and summary, every project's progress, and what needs attention.
+        Returns None for a day on which nothing happened."""
         at=at or now()
         # The 23:30 digest writes an automatic diary for everyone; only one a
         # person wrote counts as their summary or as a submitted progress note.
@@ -2740,11 +2784,37 @@ class Store:
             if m['tasks']>m['completed']:risks.append(f'{m["name"]} 有 {m["tasks"]-m["completed"]} 项任务当天未完成')
         totals={'members':len(members),'tasks':sum(m['tasks'] for m in members),'completed':sum(m['completed'] for m in members),
                 'load':sum(m['load'] for m in members),'loadTotal':sum(m['loadTotal'] for m in members),'projects':len(projects)}
+        return {'id':f'brief:{day}','kind':'brief','projectId':None,'author':'system','date':day,
+                'content':{'totals':totals,'members':members,'projects':projects,'risks':risks},
+                'confirmed':True,'createdAt':at.isoformat(),'updatedAt':at.isoformat()}
+
+    def build_brief(self, day, at=None):
+        """File the day's team report, keeping when it was first filed and
+        whatever an admin rewrote in it."""
+        at=at or now()
+        brief=self.compose_brief(day,at)
+        if brief is None:return None
         existing=self.db.execute('SELECT data FROM reports WHERE id=?',(f'brief:{day}',)).fetchone()
-        created=json.loads(existing['data']).get('createdAt') if existing else at.isoformat()
-        return self.put('reports',{'id':f'brief:{day}','kind':'brief','projectId':None,'author':'system','date':day,
-                                   'content':{'totals':totals,'members':members,'projects':projects,'risks':risks},
-                                   'confirmed':True,'createdAt':created,'updatedAt':at.isoformat()})
+        if existing:
+            old=json.loads(existing['data'])
+            brief['createdAt']=old.get('createdAt') or brief['createdAt']
+            for key in ('edits','editedBy','editedAt'):
+                if old.get(key):brief[key]=old[key]
+        return self.put('reports',brief)
+
+    def apply_brief_edits(self, brief):
+        """The report as read: what was collected, with an admin's changes on top."""
+        edits=brief.get('edits') or {}
+        if not edits:return brief
+        content=json.loads(json.dumps(brief.get('content') or {}))
+        if isinstance(edits.get('risks'),list):content['risks']=list(edits['risks'])
+        for scope,key in (('projects','content'),('members','summary')):
+            for row in content.get(scope) or []:
+                change=(edits.get(scope) or {}).get(row.get('id'))
+                if not change:continue
+                base=row.get(key) if isinstance(row.get(key),dict) else ({'summary':row[key]} if row.get(key) else {})
+                row[key]={**base,**change};row['edited']=True
+        return {**brief,'content':content}
 
     def brief_card(self, brief):
         content=brief.get('content') or {}
