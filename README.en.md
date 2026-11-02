@@ -24,7 +24,8 @@ Most collaboration tools want your tasks, daily notes and team data in someone e
 - When assigning, you see how many hours the person already has inside the task's own dates.
 
 **Projects**
-- Members apply for projects and an admin approves them. Project settings change the name, dates and collaborators; admins can also hand a project to a new Owner.
+- Permission groups: superadmin creates groups in account management, each saying whether a new project, a one-off task for oneself and a task inside a project one collaborates on is created directly, needs approval, or is not allowed, then puts each member in a group. The default group applies for projects and creates its own one-off tasks directly. A project task request goes to that project's Owner, a one-off task request to the admins. The top bar shows "+ New project / Request project" and "+ New task / Request task" to match.
+- Project settings change the name, dates and collaborators; admins can also hand a project to a new Owner.
 - Project tasks sort by priority, start or end date, or a manual drag order. The timeline view draws every project on one date scale.
 - Closing a project takes a report and superadmin approval; closed projects move to the achievements archive.
 

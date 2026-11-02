@@ -138,6 +138,33 @@ test('assignee and project markup escapes user-provided text', () => {
   assert.ok(!evil.includes('<img'));
 });
 
+test('entry points follow the permission group: new, request, or not offered', () => {
+  const a=app();
+  a.run(`S.today='2026-11-02';S.user={id:'test002',admin:0};S.users=[];S.projects=[
+    {id:'p',name:'甲',owner:'test001',status:'active',members:{test001:'accepted',test002:'accepted'}},
+    {id:'q',name:'乙',owner:'test002',status:'active',members:{test002:'accepted'}},
+    {id:'r',name:'丙',owner:'test003',status:'active',members:{test003:'accepted',test002:'pending'}}];
+    S.creationRules={project:'approval',tempTask:'direct',projectTask:'none'};`);
+  assert.equal(a.run('projectMode()'),'approval');
+  // Your own project is always direct; a project you only collaborate on follows the group.
+  assert.deepEqual(a.json('taskProjects().map(x=>[x.p.id,x.mode])'),[['q','direct']]);
+  assert.equal(a.run('taskEntryMode()'),'direct');
+  assert.ok(a.run("entryLabel('approval','项目')").endsWith('申请项目'));
+  assert.ok(a.run("entryLabel('direct','任务')").endsWith('新任务'));
+  a.run(`S.projects=S.projects.filter(p=>p.id!=='q');S.creationRules={project:'none',tempTask:'approval',projectTask:'approval'}`);
+  assert.deepEqual(a.json('taskProjects().map(x=>[x.p.id,x.mode])'),[['p','approval']]);
+  assert.equal(a.run('taskEntryMode()'),'approval');
+  a.run(`S.creationRules={project:'none',tempTask:'none',projectTask:'none'}`);
+  assert.equal(a.run('taskEntryMode()'),'none');
+  // Requests: the project's Owner or an admin settles a project task, only an admin a one-off.
+  a.run(`S.taskRequests=[{id:'a',status:'pending',projectId:'p',requester:'test002'},{id:'b',status:'pending',projectId:null,requester:'test002'},{id:'c',status:'approved',projectId:'p'}];S.user={id:'test001',admin:0}`);
+  assert.deepEqual(a.json("['a','b','c'].map(id=>canReviewTaskRequest(taskRequestById(id)))"),[true,false,false]);
+  a.run(`S.user={id:'superadmin',admin:1}`);
+  assert.deepEqual(a.json("['a','b','c'].map(id=>canReviewTaskRequest(taskRequestById(id)))"),[true,true,false]);
+  assert.equal(a.run('projectMode()'),'direct');
+  assert.equal(a.run('taskEntryMode()'),'direct');
+});
+
 test('project operations are available to admin and project owner; assignees must be active confirmed members', () => {
   const a=app();
   a.run(`S.projects=[{id:'p',owner:'test001',status:'active',members:{test001:'accepted',test002:'accepted',test003:'pending',disabled:'accepted'}}];S.users=[{id:'test001',active:1},{id:'test002',active:1},{id:'test003',active:1},{id:'disabled',active:0}];`);

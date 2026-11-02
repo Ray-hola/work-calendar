@@ -579,6 +579,145 @@ class ScheduleAccessTests(unittest.TestCase):
         self.assertEqual(next(t['status'] for t in chain if t['date'] == self.day), 'doing')
 
 
+class CreationPolicyTests(unittest.TestCase):
+    """Permission groups decide whether members start projects and tasks directly, by request, or not at all."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.store = Store(Path(self.temp.name) / 'creation.sqlite3', seed=False)
+        for name in ['superadmin', 'test001', 'test002', 'test003']:
+            self.store.create_user(name, 'test-only-password', admin=name == 'superadmin')
+        self.admin = self.store.user('superadmin')
+        self.day = now().date().isoformat()
+        self.project = self.store.action(self.admin, 'project.create', {
+            'name': '协作项目', 'owner': 'test001', 'members': ['test002', 'test003'], 'start': self.day})
+
+    def tearDown(self):
+        self.store.close()
+        self.temp.cleanup()
+
+    def member(self, name):
+        return self.store.user(name)
+
+    def set_group(self, rules, members=('test002',)):
+        groups = [{'id': 'default', 'name': '普通用户', 'project': 'approval', 'tempTask': 'direct', 'projectTask': 'none'},
+                  {'id': 'leads', 'name': '组长', **rules}]
+        return self.store.action(self.admin, 'creation.update', {'groups': groups, 'assign': {m: 'leads' for m in members}})
+
+    def test_default_group_keeps_the_original_rules(self):
+        rules = self.store.snapshot(self.member('test002'))['creationRules']
+        self.assertEqual((rules['group'], rules['project'], rules['tempTask'], rules['projectTask']), ('default', 'approval', 'direct', 'none'))
+        self.assertEqual(self.store.snapshot(self.admin)['creationRules']['projectTask'], 'direct')
+        self.assertIsNone(self.store.snapshot(self.member('test002'))['creationPolicy'])
+        self.assertEqual(self.store.snapshot(self.admin)['creationPolicy']['groups'][0]['id'], 'default')
+        with self.assertRaises(Problem) as error:
+            self.store.action(self.member('test002'), 'task.create', {'name': 'x', 'projectId': self.project['id'], 'assignee': 'test002', 'date': self.day})
+        self.assertEqual(error.exception.status, 403)
+
+    def test_only_superadmin_edits_groups_and_bad_rules_are_refused(self):
+        self.store.create_user('boss', 'test-only-password')
+        self.store.action(self.admin, 'account.role', {'id': 'boss', 'role': 'admin'})
+        for who in (self.member('test002'), self.store.user('boss')):
+            with self.assertRaises(Problem) as error:
+                self.store.action(who, 'creation.update', {'groups': [{'id': 'default', 'name': '普通用户', 'project': 'direct', 'tempTask': 'direct', 'projectTask': 'none'}]})
+            self.assertEqual(error.exception.status, 403)
+        bad = [
+            [{'id': 'leads', 'name': '组长', 'project': 'direct', 'tempTask': 'direct', 'projectTask': 'none'}],
+            [{'id': 'default', 'name': '普通用户', 'project': 'maybe', 'tempTask': 'direct', 'projectTask': 'none'}],
+            [{'id': 'default', 'name': '普通用户', 'project': 'direct', 'tempTask': 'direct', 'projectTask': 'none'},
+             {'id': 'b', 'name': '普通用户', 'project': 'direct', 'tempTask': 'direct', 'projectTask': 'none'}],
+            [{'id': 'Bad Id', 'name': '组长', 'project': 'direct', 'tempTask': 'direct', 'projectTask': 'none'}],
+        ]
+        for groups in bad:
+            with self.assertRaises(Problem) as error:
+                self.store.action(self.admin, 'creation.update', {'groups': groups})
+            self.assertEqual(error.exception.status, 400)
+        # Admin accounts and unknown ids are never filed into a group.
+        policy = self.set_group({'project': 'direct', 'tempTask': 'direct', 'projectTask': 'none'}, members=('test002', 'boss', 'ghost'))
+        self.assertEqual(policy['assign'], {'test002': 'leads'})
+
+    def test_group_decides_whether_a_project_starts_at_once(self):
+        self.set_group({'project': 'direct', 'tempTask': 'direct', 'projectTask': 'none'})
+        started = self.store.action(self.member('test002'), 'project.create', {'name': '组长项目', 'members': ['test003'], 'start': self.day})
+        self.assertEqual((started['status'], started['owner']), ('active', 'test002'))
+        self.assertTrue(any(r['projectId'] == started['id'] and r['to'] == 'test003' for r in self.store.all('requests')))
+        self.assertFalse(any(n['kind'] == 'approval' and n['reference'] == started['id'] for n in self.store.all('notifications')))
+        # Someone in the default group still asks first.
+        asked = self.store.action(self.member('test003'), 'project.create', {'name': '普通申请', 'start': self.day})
+        self.assertEqual(asked['status'], 'pending')
+        self.set_group({'project': 'none', 'tempTask': 'direct', 'projectTask': 'none'})
+        with self.assertRaises(Problem) as error:
+            self.store.action(self.member('test002'), 'project.create', {'name': '不允许', 'start': self.day})
+        self.assertEqual(error.exception.status, 403)
+
+    def test_one_off_task_request_goes_to_the_admins(self):
+        self.set_group({'project': 'approval', 'tempTask': 'approval', 'projectTask': 'none'})
+        result = self.store.action(self.member('test002'), 'task.create', {'name': '采购', 'assignee': 'test002', 'date': self.day, 'duration': 40})
+        self.assertTrue(result['requested'])
+        self.assertFalse(any(t['name'] == '采购' for t in self.store.all('tasks')))
+        notice = next(n for n in self.store.all('notifications') if n['kind'] == 'task_request')
+        self.assertEqual((notice['to'], notice['reference']), ('superadmin', result['id']))
+        with self.assertRaises(Problem) as error:
+            self.store.action(self.member('test001'), 'task.request_review', {'id': result['id'], 'accept': True})
+        self.assertEqual(error.exception.status, 403)
+        with self.assertRaises(Problem):
+            self.store.action(self.admin, 'task.request_review', {'id': result['id'], 'accept': False})
+        approved = self.store.action(self.admin, 'task.request_review', {'id': result['id'], 'accept': True})
+        task = self.store.get('tasks', approved['taskId'])
+        self.assertEqual((task['assignee'], task['creator'], task['approvedBy'], task['duration'], task['projectId']), ('test002', 'test002', 'superadmin', 40, None))
+        self.assertTrue(self.store.get('notifications', notice['id'])['read'])
+        self.assertTrue(any(n['to'] == 'test002' and n['title'] == '任务申请已通过' for n in self.store.all('notifications')))
+        self.assertFalse(any(n['to'] == 'test002' and n['title'] == '收到任务指派' for n in self.store.all('notifications')))
+        with self.assertRaises(Problem) as error:
+            self.store.action(self.admin, 'task.request_review', {'id': result['id'], 'accept': True})
+        self.assertEqual(error.exception.status, 409)
+        self.set_group({'project': 'approval', 'tempTask': 'none', 'projectTask': 'none'})
+        with self.assertRaises(Problem) as error:
+            self.store.action(self.member('test002'), 'task.create', {'name': '不允许', 'assignee': 'test002', 'date': self.day})
+        self.assertEqual(error.exception.status, 403)
+
+    def test_collaborator_adds_project_work_directly_or_by_owner_approval(self):
+        pid = self.project['id']
+        self.set_group({'project': 'approval', 'tempTask': 'direct', 'projectTask': 'direct'})
+        direct = self.store.action(self.member('test002'), 'task.create', {'name': '补测试', 'projectId': pid, 'assignee': 'test003', 'date': self.day})
+        self.assertEqual((direct['creator'], direct['assignee']), ('test002', 'test003'))
+        self.assertTrue(any(n['to'] == 'test001' and n['title'] == '协作者新建任务' for n in self.store.all('notifications')))
+        self.assertTrue(any(n['to'] == 'test003' and n['title'] == '收到任务指派' for n in self.store.all('notifications')))
+        # Members of the group still cannot add work to a project they are not in.
+        other = self.store.action(self.admin, 'project.create', {'name': '别的项目', 'owner': 'test003', 'start': self.day})
+        with self.assertRaises(Problem) as error:
+            self.store.action(self.member('test002'), 'task.create', {'name': 'x', 'projectId': other['id'], 'assignee': 'test002', 'date': self.day})
+        self.assertEqual(error.exception.status, 403)
+
+        self.set_group({'project': 'approval', 'tempTask': 'direct', 'projectTask': 'approval'})
+        asked = self.store.action(self.member('test002'), 'task.create', {'name': '整理文档', 'projectId': pid, 'assignee': 'test002', 'date': self.day})
+        self.assertEqual((asked['approver'], asked['projectId']), ('test001', pid))
+        visible = lambda name: {r['id'] for r in self.store.snapshot(self.member(name))['taskRequests']}
+        self.assertIn(asked['id'], visible('test001'))
+        self.assertIn(asked['id'], visible('test002'))
+        self.assertNotIn(asked['id'], visible('test003'))
+        with self.assertRaises(Problem) as error:
+            self.store.action(self.member('test003'), 'task.request_review', {'id': asked['id'], 'accept': True})
+        self.assertEqual(error.exception.status, 403)
+        rejected = self.store.action(self.member('test001'), 'task.request_review', {'id': asked['id'], 'accept': False, 'reason': '本周排满'})
+        self.assertEqual((rejected['status'], rejected['reason']), ('rejected', '本周排满'))
+        self.assertTrue(any(n['to'] == 'test002' and n['title'] == '任务申请被驳回' for n in self.store.all('notifications')))
+        again = self.store.action(self.member('test002'), 'task.create', {'name': '整理文档', 'projectId': pid, 'assignee': 'test002', 'date': self.day})
+        done = self.store.action(self.member('test001'), 'task.request_review', {'id': again['id'], 'accept': True})
+        task = self.store.get('tasks', done['taskId'])
+        self.assertEqual((task['projectId'], task['assignee'], task['creator'], task['approvedBy']), (pid, 'test002', 'test002', 'test001'))
+        # The project's own Owner is never asked to request work in it.
+        own = self.store.action(self.member('test001'), 'task.create', {'name': 'Owner 自己排', 'projectId': pid, 'assignee': 'test002', 'date': self.day})
+        self.assertNotIn('requested', own)
+
+    def test_members_of_a_removed_group_fall_back_to_the_default(self):
+        self.set_group({'project': 'direct', 'tempTask': 'direct', 'projectTask': 'direct'})
+        self.assertEqual(self.store.creation_rules(self.member('test002'))['group'], 'leads')
+        self.store.action(self.admin, 'creation.update', {'groups': [{'id': 'default', 'name': '普通用户', 'project': 'approval', 'tempTask': 'direct', 'projectTask': 'none'}], 'assign': {'test002': 'leads'}})
+        rules = self.store.creation_rules(self.member('test002'))
+        self.assertEqual((rules['group'], rules['project']), ('default', 'approval'))
+
+
 class TaskApprovalTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(); self.store=Store(Path(self.temp.name)/'approval.sqlite3',seed=False)
