@@ -1452,5 +1452,78 @@ class TaskApprovalTests(unittest.TestCase):
         self.assertEqual({(t['projectId'], t['status']) for t in occurrences()}, {(None, 'todo')})
 
 
+class ProjectSpaceTests(unittest.TestCase):
+    """项目空间: the folder tree, the write-up and the project's files."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.store = Store(Path(self.temp.name) / 'space.sqlite3', seed=False)
+        for name in ['superadmin', 'test001', 'test002', 'test003']:
+            self.store.create_user(name, 'test-only-password', admin=name == 'superadmin')
+        self.admin = self.store.user('superadmin')
+        self.day = now().date().isoformat()
+
+    def tearDown(self):
+        self.store.close()
+        self.temp.cleanup()
+
+    def test_project_space_folders_background_and_staffing(self):
+
+        owner, other = self.store.user('test001'), self.store.user('test002')
+        project = self.store.action(self.admin, 'project.create', {
+            'name': 'space', 'owner': 'test001', 'members': ['test002'], 'start': self.day, 'cycle': 'infinite',
+        })
+        # Folders are the admins' to keep.
+        with self.assertRaises(Problem):
+            self.store.action(owner, 'folder.create', {'name': '战略'})
+        folder = self.store.action(self.admin, 'folder.create', {'name': '战略'})
+        with self.assertRaises(Problem):
+            self.store.action(self.admin, 'folder.create', {'name': '战略'})
+        self.assertEqual([f['name'] for f in self.store.snapshot(other)['folders']], ['战略'])
+        # The Owner files the project and writes it up; a collaborator only reads.
+        self.store.action(owner, 'project.space', {
+            'id': project['id'], 'folderId': folder['id'], 'background': '为什么做',
+            'staffing': {'test002': '调研', 'test003': '不在项目里', 'test001': '  '},
+        })
+        saved = self.store.get('projects', project['id'])
+        self.assertEqual((saved['folderId'], saved['background'], saved['staffing']), (folder['id'], '为什么做', {'test002': '调研'}))
+        with self.assertRaises(Problem):
+            self.store.action(other, 'project.space', {'id': project['id'], 'background': 'x'})
+        with self.assertRaises(Problem):
+            self.store.action(owner, 'project.space', {'id': project['id'], 'folderId': 'missing'})
+        # Removing the folder leaves the project unfiled, not gone.
+        self.store.action(self.admin, 'folder.delete', {'id': folder['id']})
+        self.assertIsNone(self.store.get('projects', project['id'])['folderId'])
+        self.assertEqual(self.store.all('folders'), [])
+
+    def test_project_files_follow_project_access(self):
+        owner, member, outsider = [self.store.user(x) for x in ('test001', 'test002', 'test003')]
+        project = self.store.action(self.admin, 'project.create', {
+            'name': 'files', 'owner': 'test001', 'members': ['test002'], 'start': self.day, 'cycle': 'infinite',
+        })
+        record = self.store.upload_file(member, project['id'], '../方案 v1.pdf', 'application/pdf', b'%PDF-1')
+        self.assertEqual((record['name'], record['size'], record['uploader']), ('方案 v1.pdf', 6, 'test002'))
+        self.assertEqual(self.store.read_file(owner, record['id'])[1], b'%PDF-1')
+        self.assertEqual([f['id'] for f in self.store.snapshot(owner)['files']], [record['id']])
+        self.assertEqual(self.store.snapshot(outsider)['files'], [])
+        with self.assertRaises(Problem):
+            self.store.read_file(outsider, record['id'])
+        with self.assertRaises(Problem):
+            self.store.upload_file(outsider, project['id'], 'x.txt', 'text/plain', b'x')
+        with self.assertRaises(Problem):
+            self.store.upload_file(member, project['id'], 'empty.txt', 'text/plain', b'')
+        # Only the uploader, the Owner or an admin removes a file.
+        mine = self.store.upload_file(owner, project['id'], 'owner.txt', 'text/plain', b'o')
+        with self.assertRaises(Problem):
+            self.store.action(member, 'file.delete', {'id': mine['id']})
+        self.store.action(member, 'file.delete', {'id': record['id']})
+        with self.assertRaises(Problem):
+            self.store.read_file(owner, record['id'])
+        # Deleting the project takes its files with it.
+        self.store.action(owner, 'project.delete', {'id': project['id'], 'confirm': 'files'})
+        self.assertEqual(self.store.all('files'), [])
+        self.assertIsNone(self.store.db.execute('SELECT 1 FROM file_blobs').fetchone())
+
+
 if __name__ == '__main__':
+
     unittest.main()

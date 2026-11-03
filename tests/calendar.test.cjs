@@ -1205,3 +1205,42 @@ test('a day sits at the same place on the ruler for ticks and the week band', ()
   assert.equal(a.run('rulerAt(0,30)'), a.run('rulerAt(1,30)'), '月初之前的一周从 1 号画起');
   assert.equal(a.run('rulerAt(45,31)'), '100.00');
 });
+
+test('the project space lists folders on the left and opens a project with its background, people and files', () => {
+  const a=app(); const elements={};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={}),querySelectorAll:()=>[]};
+  a.run(`S.today='2026-11-03';S.notifications=[];S.folders=[{id:'f1',name:'年度战略'},{id:'f2',name:'空文件夹'}];
+    S.users=[{id:'superadmin',admin:1,active:1},{id:'test001',active:1},{id:'test002',active:1}];
+    S.projects=[
+      {id:'p',name:'入池项目',owner:'test001',status:'active',folderId:'f1',start:'2026-11-01',end:'2026-11-11',createdAt:'2026-10-30T09:00:00+08:00',
+       members:{test001:'accepted',test002:'accepted'},background:'为什么做',staffing:{test002:'调研'}},
+      {id:'q',name:'散落项目',owner:'test001',status:'active',members:{test001:'accepted'}}];
+    S.tasks=[{id:'t',projectId:'p',name:'子任务',assignee:'test002',priority:'P1',status:'done',date:'2026-11-02',duration:90}];
+    S.files=[{id:'x',projectId:'p',name:'方案.pdf',size:2048,uploader:'test002',createdAt:'2026-11-02T10:00:00+08:00'},
+      {id:'y',projectId:'q',name:'别的.txt',size:1,uploader:'test001',createdAt:'2026-11-02T10:00:00+08:00'}];`);
+  a.run("S.user={id:'test002',admin:0};UI.space='';renderProjects()");
+  let nav=elements['#projectNav'].innerHTML;
+  assert.ok(nav.includes('年度战略')&&!nav.includes('空文件夹'), '成员只看到有自己项目的文件夹');
+  assert.ok(nav.indexOf('年度战略')<nav.indexOf('入池项目'), '项目排在自己的文件夹下');
+  assert.ok(elements['#projectGrid'].innerHTML.includes('open-space'));
+  a.run("S.user={id:'superadmin',admin:1};renderProjects()");
+  nav=elements['#projectNav'].innerHTML;
+  assert.ok(nav.includes('空文件夹')&&nav.includes('未归类')&&nav.includes('addFolderBtn'));
+  assert.ok(nav.indexOf('年度战略')<nav.indexOf('入池项目')&&nav.indexOf('入池项目')<nav.indexOf('未归类')&&nav.indexOf('未归类')<nav.indexOf('散落项目'));
+  a.run("UI.space='p';renderProjects()");
+  let space=elements['#projectSpace'].innerHTML;
+  assert.equal(elements['#projectGrid'].innerHTML, '');
+  assert.equal(elements['#projectsView h1'].textContent, '入池项目');
+  assert.ok(space.includes('id="spaceBackground"')&&space.includes('为什么做'));
+  assert.ok(space.includes('value="调研"')&&space.includes('进行中 0 · 已完成 1 · 1.5 小时'));
+  assert.ok(space.includes('第 2 / 10 天')&&space.includes('1 / 1 已完成'));
+  assert.ok(space.includes('/api/files/x')&&space.includes('2 KB')&&!space.includes('别的.txt'));
+  assert.ok(space.includes('id="spaceFolder"')&&space.includes('file-delete')&&!space.includes('open-space'));
+  a.run("S.projects[0].members.test003='accepted';S.users.push({id:'test003',active:1});S.user={id:'test003',admin:0};renderProjects()");
+  space=elements['#projectSpace'].innerHTML;
+  assert.ok(!space.includes('spaceBackground')&&space.includes('为什么做'), '协作者只读');
+  assert.ok(!space.includes('file-delete')&&!space.includes('spaceFolder'), '不能删别人的文件');
+  assert.ok(!space.includes('进行中 0 · 已完成 1'), '看不到别人的负荷');
+  a.run("S.projects[0].status='done';renderProjects()");
+  assert.equal(a.run('UI.space'), '', '项目不可见后回到全部项目');
+});

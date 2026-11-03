@@ -100,7 +100,12 @@ MAX_TRANSCRIPT_CHARS = 40_000
 # not text; it is enforced per-route below.
 TRANSCRIBE_PATH = '/api/transcribe'
 MAX_AUDIO_BYTES = 8_000_000
-TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'task_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages', 'messages')
+# Project files (项目空间 · 项目文件).  The bytes live in their own table so a
+# snapshot never carries them; only the list of files travels with the state.
+# Like the audio route, the bound is raised per-route in do_POST.
+FILES_PATH = '/api/files'
+MAX_FILE_BYTES = 20_000_000
+TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'task_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages', 'messages', 'folders', 'files')
 
 # Who may start what.  superadmin sorts members into rule groups (规则组, kept
 # apart from the superadmin/admin/member roles); each group says, for a new
@@ -250,6 +255,7 @@ class Store:
         self.db.execute('CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, ran_at TEXT NOT NULL)')
         for table in TABLES:
             self.db.execute(f'CREATE TABLE IF NOT EXISTS {table} (id TEXT PRIMARY KEY, data TEXT NOT NULL)')
+        self.db.execute('CREATE TABLE IF NOT EXISTS file_blobs (id TEXT PRIMARY KEY, data BLOB NOT NULL)')
         self.db.commit()
         # One JSON record stores the global automatic collection policy.  The
         # default keeps the existing behaviour: collect the previous day's
@@ -924,6 +930,33 @@ class Store:
         if not user['admin'] and p['owner']!=user['id']:
             raise Problem(403, '只有项目 Owner 或 superadmin 可以操作')
 
+    def upload_file(self, user, project_id, name, content_type, raw):
+        """Keep one file in a project's space.  Anyone working on the project
+        may add one; the bytes go to file_blobs, the list to `files`."""
+        with self.lock, self.db:
+            p=self.get('projects',project_id)
+            if not self.can_view_project(user,p):raise Problem(403,'无权访问该项目')
+            name=os.path.basename(str(name).replace('\\','/')).strip()[:120]
+            if not name:raise Problem(400,'请选择文件')
+            if not raw:raise Problem(400,'文件是空的')
+            record=self.put('files',{'projectId':p['id'],'name':name,'size':len(raw),'type':str(content_type or '')[:100],
+                                     'uploader':user['id'],'createdAt':timestamp()})
+            self.db.execute('INSERT INTO file_blobs(id,data) VALUES (?,?)',(record['id'],sqlite3.Binary(raw)))
+            self.audit(user['id'],'file.upload',{'projectId':p['id'],'file':name,'size':len(raw)})
+            return record
+
+    def read_file(self, user, id):
+        with self.lock:
+            f=self.get('files',id);p=self.get('projects',f['projectId'])
+            if not self.can_view_project(user,p):raise Problem(403,'无权访问该文件')
+            row=self.db.execute('SELECT data FROM file_blobs WHERE id=?',(id,)).fetchone()
+            if not row:raise Problem(404,'文件内容已丢失')
+            return f,bytes(row['data'])
+
+    def drop_file(self, id):
+        self.db.execute('DELETE FROM file_blobs WHERE id=?',(id,))
+        self.db.execute('DELETE FROM files WHERE id=?',(id,))
+
     def _lineage_root(self, task, by_id):
         """Walk originId/reworkOf links to the oldest record of a task lineage."""
         root=task.get('id'); parent=task.get('originId') or task.get('reworkOf'); seen=set()
@@ -1389,7 +1422,7 @@ class Store:
             owned={p['id'] for p in projects if p['owner']==user['id']}
             task_requests=[r for r in self.all('task_requests') if user['admin'] or r.get('requester')==user['id'] or r.get('projectId') in owned]
             automation=next((x.get('value',{}) for x in self.all('settings') if x.get('id')=='automation'),{})
-            return {'user':user,'users':self.users(),'today':now().date().isoformat(),'projects':projects,'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees'] or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':[n for n in self.all('notifications') if n['to']==user['id'] and '12:00 初稿' not in str(n.get('title',''))], 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'taskRequests':task_requests, 'creationRules':self.creation_rules(user), 'creationPolicy':self.creation_policy() if user.get('role')=='superadmin' else None, 'accountOrder':next((x.get('value') or [] for x in self.all('settings') if x.get('id')=='account_order'),[]) if user['admin'] else [], 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or self.get('projects',s['projectId'])['owner']==user['id'])], 'chat':self.chat_summary(user),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.all('audit')[-60:] if user['admin'] else []}
+            return {'user':user,'users':self.users(),'today':now().date().isoformat(),'projects':projects,'folders':self.all('folders'),'files':[f for f in self.all('files') if f.get('projectId') in pids],'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees'] or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':[n for n in self.all('notifications') if n['to']==user['id'] and '12:00 初稿' not in str(n.get('title',''))], 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'taskRequests':task_requests, 'creationRules':self.creation_rules(user), 'creationPolicy':self.creation_policy() if user.get('role')=='superadmin' else None, 'accountOrder':next((x.get('value') or [] for x in self.all('settings') if x.get('id')=='account_order'),[]) if user['admin'] else [], 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or self.get('projects',s['projectId'])['owner']==user['id'])], 'chat':self.chat_summary(user),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.all('audit')[-60:] if user['admin'] else []}
 
     def diary_statistics(self, viewer, start=None, end=None):
         """Return daily completion/load summaries for the diary dashboard.
@@ -2054,6 +2087,8 @@ class Store:
                 for r in self.all('repeats'):
                     if r.get('projectId')==p['id']:
                         self.db.execute('DELETE FROM repeats WHERE id=?',(r['id'],))
+                for f in self.all('files'):
+                    if f.get('projectId')==p['id']:self.drop_file(f['id'])
                 self.db.execute('DELETE FROM projects WHERE id=?',(p['id'],))
             self.audit(user['id'],'project.delete',{'project':p['name'],'projectId':p['id'],**counts})
             for member,status in (p.get('members') or {}).items():
@@ -2179,6 +2214,43 @@ class Store:
             p['taskOrder']=list(dict.fromkeys(str(x) for x in order if str(x) in known))
             self.put('projects',p)
             return p
+        # 项目目录: admins keep the folders; a project's Owner files it into one.
+        if action=='folder.create':
+            self.admin(user);name=required(d,'name').strip()[:40]
+            if any(f['name']==name for f in self.all('folders')):raise Problem(400,'已有同名文件夹')
+            return self.put('folders',{'name':name,'createdBy':user['id'],'createdAt':timestamp()})
+        if action=='folder.update':
+            self.admin(user);f=self.get('folders',d.get('id'));name=required(d,'name').strip()[:40]
+            if any(x['name']==name and x['id']!=f['id'] for x in self.all('folders')):raise Problem(400,'已有同名文件夹')
+            f['name']=name;return self.put('folders',f)
+        if action=='folder.delete':
+            # A folder only groups projects: removing it leaves them 未归类.
+            self.admin(user);f=self.get('folders',d.get('id'))
+            for p in self.all('projects'):
+                if p.get('folderId')==f['id']:p['folderId']=None;self.put('projects',p)
+            self.db.execute('DELETE FROM folders WHERE id=?',(f['id'],))
+            return {'id':f['id'],'deleted':True}
+        if action=='project.space':
+            # 项目空间: the background, who does what and the folder.  Kept apart
+            # from project.update so a project still waiting for approval can be
+            # written up before it starts.
+            p=self.get('projects',d.get('id'));self.project_owner(user,p)
+            if 'background' in d:p['background']=str(d['background'] or '')[:20000]
+            if 'staffing' in d:
+                staffing=d['staffing'] if isinstance(d['staffing'],dict) else {}
+                p['staffing']={k:str(v).strip()[:200] for k,v in staffing.items()
+                               if k in (p.get('members') or {}) and str(v or '').strip()}
+            if 'folderId' in d:
+                folder=d['folderId'] or None
+                if folder:self.get('folders',folder)
+                p['folderId']=folder
+            return self.put('projects',p)
+        if action=='file.delete':
+            f=self.get('files',d.get('id'));p=self.get('projects',f['projectId'])
+            if not (user['admin'] or p['owner']==user['id'] or f.get('uploader')==user['id']):
+                raise Problem(403,'只有上传者、项目 Owner 或管理员可以删除文件')
+            self.drop_file(f['id'])
+            return {'id':f['id'],'deleted':True}
         if action=='project.update':
             p=self.get('projects',d['id']);self.project_owner(user,p);old=dict(p)
             if d.get('status')=='done' and not user['admin']:
@@ -3124,6 +3196,14 @@ def main():
             try:
                 if self.path=='/api/state':self.send(200,store.snapshot(store.authenticate(self.token())));return
                 if self.path=='/api/health':self.send(200,{'ok':True,'timezone':'Asia/Shanghai'});return
+                if self.path.startswith(FILES_PATH+'/'):
+                    # Always a download, never rendered: an uploaded page must
+                    # not run as this site.
+                    f,raw=store.read_file(store.authenticate(self.token()),urllib.parse.unquote(self.path[len(FILES_PATH)+1:].split('?')[0]))
+                    self.send_response(200);self.send_header('Content-Type','application/octet-stream')
+                    self.send_header('Content-Disposition',"attachment; filename*=UTF-8''"+urllib.parse.quote(f['name']))
+                    self.send_header('Cache-Control','private, no-store');self.send_header('X-Content-Type-Options','nosniff')
+                    self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
                 filename={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/styles.css':'styles.css'}.get(self.path.split('?')[0])
                 if not filename:self.send(404,{'error':'页面不存在'});return
                 raw=(ROOT/filename).read_bytes();self.send_response(200);self.send_header('Content-Type',{'index.html':'text/html; charset=utf-8','app.js':'text/javascript; charset=utf-8','styles.css':'text/css; charset=utf-8'}[filename]);self.send_header('Cache-Control','no-cache');self.send_header('X-Content-Type-Options','nosniff');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
@@ -3137,8 +3217,17 @@ def main():
                 # The generic JSON endpoints stay bounded here; the audio route
                 # below raises the ceiling just for that one upload, so a long
                 # clip is not silently turned into a 413 with a text-shaped error.
-                limit=MAX_AUDIO_BYTES if self.path==TRANSCRIBE_PATH else 200_000
-                if size>limit:raise Problem(413,'请求内容过大')
+                route=self.path.split('?')[0]
+                limit=MAX_AUDIO_BYTES if route==TRANSCRIBE_PATH else MAX_FILE_BYTES if route==FILES_PATH else 200_000
+                if size>limit:raise Problem(413,'文件不能超过 20MB' if route==FILES_PATH else '请求内容过大')
+                if route==FILES_PATH:
+                    # Raw bytes, like the audio route; the name rides in a header.
+                    user=store.authenticate(self.token())
+                    project=(urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('project') or [''])[0]
+                    raw=self.rfile.read(size) if size>0 else b''
+                    name=urllib.parse.unquote(self.headers.get('X-File-Name',''))
+                    self.send(200,store.upload_file(user,project,name,self.headers.get('Content-Type',''),raw));return
+
                 if self.path==TRANSCRIBE_PATH:
                     # Audio is not JSON, so this route reads the raw body before
                     # the generic decode below ever sees it.
