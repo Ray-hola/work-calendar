@@ -42,6 +42,8 @@ const ICON_PATHS={
   'pip':'<rect x="2.5" y="4.5" width="19" height="15" rx="2"/><rect x="12" y="11" width="7" height="6" rx="1"/>',
   'folder-open':'<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>',
   'file':'<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5Z"/><path d="M14 2v6h6"/>',
+  'copy':'<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  'undo':'<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
   'upload':'<path d="M12 15V4"/><path d="m7 9 5-5 5 5"/><path d="M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/>'
 };
 function icon(name,extra=''){
@@ -217,7 +219,10 @@ const getState=()=>fetch('/api/state',{credentials:'same-origin'}).then(async r=
 const fmt=iso=>{const d=new Date(`${iso}T12:00:00`);return `${d.getMonth()+1}月${d.getDate()}日`};
 const wd=iso=>['周日','周一','周二','周三','周四','周五','周六'][new Date(`${iso}T12:00:00`).getDay()];
 const add=(iso,n)=>{const d=new Date(`${iso}T12:00:00`);d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)};
-const weekStart=iso=>{const d=new Date(`${iso}T12:00:00`);d.setDate(d.getDate()-(d.getDay()+1)%7);return d.toISOString().slice(0,10)};
+/* The team's first day of the week (0 = 周日 … 6 = 周六), set in 系统设置;
+   Saturday until an admin picks another. */
+const weekStartDay=()=>Number.isInteger(S.weekStart)&&S.weekStart>=0&&S.weekStart<=6?S.weekStart:6;
+const weekStart=iso=>{const d=new Date(`${iso}T12:00:00`);d.setDate(d.getDate()-(d.getDay()-weekStartDay()+7)%7);return d.toISOString().slice(0,10)};
 const DATE_HORIZON='2027-04-30';
 const displayDay=()=>{const day=add(S.today,UI.dayOffset||0);return day>DATE_HORIZON?DATE_HORIZON:day};
 const week=off=>{const start=add(weekStart(S.today),off*7);return Array.from({length:7},(_,i)=>add(start,i))};
@@ -1111,17 +1116,19 @@ function projectBackground(p,manage){
 function projectStaffing(p,manage){
   const people=Object.entries(p.members||{}).filter(([,v])=>v==='accepted').map(([id])=>id)
     .sort((a,b)=>(b===p.owner)-(a===p.owner));
-  const tasks=S.tasks.filter(t=>t.projectId===p.id&&!isSuperseded(t)&&t.status!=='skipped');
+  const tasks=S.tasks.filter(t=>t.projectId===p.id&&!isSuperseded(t)&&t.status!=='skipped'),period=loadWindow(p);
+  const inPeriod=t=>t.date<=period[1]&&taskEnd(t)>=period[0];
   const row=id=>{
     const mine=tasks.filter(t=>t.assignee===id),open=mine.filter(t=>['todo','doing'].includes(t.status)).length;
-    const done=mine.filter(t=>t.status==='done').length,mins=mine.reduce((sum,t)=>sum+Number(t.duration||0),0),role=p.staffing?.[id]||'';
+    const done=mine.filter(t=>t.status==='done'&&inPeriod(t)).length,mins=memberLoad(id,period,tasks).mins,role=p.staffing?.[id]||'';
     return `<div class="staff-row">${avatarHTML(id)}<div class="staff-name"><strong>${escapeHTML(nameOf(id))}</strong>`
       +`<small>${id===p.owner?'Owner':'协作者'}</small></div>`
       +`${manage?`<input class="staff-role" data-member="${escapeHTML(id)}" maxlength="200" value="${escapeHTML(role)}" `
       +`placeholder="负责什么" aria-label="${escapeHTML(nameOf(id))} 的分工">`:`<span class="staff-role-text">${escapeHTML(role||'—')}</span>`}`
       +`<span class="staff-load">${manage||id===S.user?.id?`进行中 ${open} · 已完成 ${done}${mins?` · ${hours(mins)} 小时`:''}`:''}</span></div>`;
   };
-  return `<section class="space-section"><div class="space-head"><h2>项目人力 <span>${people.length}</span></h2>`
+  return `<section class="space-section"><div class="space-head"><h2>项目人力 <span>${people.length}</span>`
+    +`<small class="space-window">${escapeHTML(loadWindowLabel(p))}</small></h2>`
     +`${manage&&p.status==='active'?'<button class="secondary-btn" id="spaceInvite">添加协作者</button>':''}</div>`
     +`<div class="staff-list">${people.map(row).join('')}</div></section>`;
 }
@@ -1306,11 +1313,11 @@ function inviteCollaborators(projectId){
   openModal(`<div class="eyebrow">${escapeHTML(p.name)} · ${admin?'管理员直接指派':'Owner 添加协作者'}</div><h2>添加协作者</h2>`
     +`<fieldset class="member-checkboxes" id="currentMembers"><legend>当前协作者（${current.length}）</legend>`
     +`${current.map(id=>`<div class="member-row"><strong>${escapeHTML(nameOf(id))}</strong><small>`
-    +`${escapeHTML(id)} · 时间范围内 <b>${memberTaskCount(id,p)}</b> 项任务</small>`
+    +`${escapeHTML(id)} · ${escapeHTML(loadWindowLabel(p))} <b>${memberTaskCount(id,p)}</b> 项任务</small>`
     +`<button type="button" class="ghost-btn remove-member" data-member="${escapeHTML(id)}">移出</button>`
     +`</div>`).join('')||'<p class="muted">还没有协作者</p>'}</fieldset><div class="member-checkboxes">`
     +`${candidates.map(u=>`<label><input type="checkbox" name="inviteMember" value="${escapeHTML(u.id)}"> <strong>`
-    +`${escapeHTML(u.id)}</strong><small>成员 · 时间范围内 <b data-member-load="${escapeHTML(u.id)}">`
+    +`${escapeHTML(u.id)}</strong><small>成员 · ${escapeHTML(loadWindowLabel(p))} <b data-member-load="${escapeHTML(u.id)}">`
     +`${memberTaskCount(u.id,p)}</b> 项任务</small></label>`).join('')||'<p class="muted">暂无可添加成员</p>'}</div>`
     +`<div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button>`
     +`<button class="primary-btn" id="confirmInvite" ${candidates.length?'':'disabled'}>添加并通知</button></div>`);
@@ -1330,7 +1337,8 @@ function inviteCollaborators(projectId){
       closeModal();toast('已移出 '+nameOf(who)+'，他的沟通区里不再有这个工作区');
     }catch(e){}
   });
-  api('/api/action',{action:'project.member_loads',data:{id:projectId}}).then(result=>{
+  const [loadStart,loadEnd]=loadWindow(p);
+  api('/api/action',{action:'project.member_loads',data:{id:projectId,start:loadStart,end:loadEnd}}).then(result=>{
     if($('#modalBackdrop')?.classList.contains('hidden'))return;
     for(const [id,total] of Object.entries(result.counts||{})){const el=$$('[data-member-load]').find(node=>node.dataset.memberLoad===id);if(el)el.textContent=total}
   }).catch(()=>{});
@@ -1590,7 +1598,20 @@ function renderSettings(){
   const admin=Boolean(S.user?.admin);
   $('#settingsView .automation-card')?.classList.toggle('hidden',!admin);
   $('#runAutomationBtn')?.classList.toggle('hidden',!admin);
+  renderWeekStartSetting();
   renderCreationPolicy();
+}
+function renderWeekStartSetting(){
+  const box=$('#weekStartCard');if(!box)return;
+  box.classList.toggle('hidden',!S.user?.admin);if(!S.user?.admin)return;
+  const order=[1,2,3,4,5,6,0],day=weekStartDay();
+  box.innerHTML=`<div><span class="eyebrow">周视图</span><h2>每周从哪天开始</h2><p class="muted">周视图、档案室的周范围和本周周报都从这一天算起，`
+    +`全员生效。</p></div><div class="rule-seg week-start-seg" role="radiogroup" aria-label="每周开始日">${order.map(d=>`<button type="button" `
+    +`class="rule-opt${d===day?' is-on':''}" role="radio" aria-checked="${d===day}" data-day="${d}">${WEEKDAY_SHORT[d]}</button>`).join('')}</div>`;
+  box.querySelectorAll('[data-day]').forEach(b=>b.onclick=async()=>{
+    const next=Number(b.dataset.day);if(next===weekStartDay())return;
+    try{await act('week_start.update',{day:next});toast(`每周改为从${WEEKDAY_SHORT[next]}开始`)}catch(e){}
+  });
 }
 /* Groups that exist read as a list, one row each; a group is made or changed
    on a card (editRuleGroup). */
@@ -1860,7 +1881,7 @@ function newTask(projectId,initialDate){
      task's own dates, across every project, not their whole backlog. */
   const span=()=>{const start=$('#taskDate').value||S.today,end=$('#taskDeadline').value;return [start,end&&end>start?end:start]};
   const hours=mins=>Math.round(mins/60*10)/10;
-  const load=(id,[start,end])=>{const ts=S.tasks.filter(t=>t.assignee===id&&!['skipped','deferred'].includes(t.status)&&!isSuperseded(t)&&t.date<=end&&taskEnd(t)>=start);return {count:ts.length,mins:serverMinutes&&id in serverMinutes?serverMinutes[id]:ts.reduce((n,t)=>n+Number(t.duration||0),0)}};
+  const load=(id,period)=>{const mine=memberLoad(id,period);return {count:mine.count,mins:serverMinutes&&id in serverMinutes?serverMinutes[id]:mine.mins}};
   /* A member holds only their own tasks, so another person's load is unknown
      outside the projects they run; it is left out rather than shown as 0. */
   const known=id=>admin||id===S.user.id||Boolean(serverMinutes&&id in serverMinutes);
@@ -2013,11 +2034,17 @@ function scheduleTasks(includeHistory){
   if(!S.user?.admin)return visible.filter(t=>t.assignee===S.user.id);
   return UI.member!=='all'?visible.filter(t=>t.assignee===UI.member):visible;
 }
-function memberTaskCount(userId,project){
-  if(!project)return 0;
-  const start=project.start||'0000-01-01',end=project.end||'9999-12-31';
-  return S.tasks.filter(t=>t.assignee===userId&&t.date>=start&&t.date<=end&&!isSuperseded(t)).length;
+/* 人力 numbers cover a project's own dates; one without an end counts only the
+   last week and the coming one, not its whole open-ended history. */
+function loadWindow(p){return p?.end?[p.start||p.end,p.end]:[add(S.today,-6),add(S.today,7)]}
+function loadWindowLabel(p){const [start,end]=loadWindow(p);return p?.end?'项目周期内':`近两周（${fmt(start)}–${fmt(end)}）`}
+/* What someone carries over [start, end]: every task touching those days, less
+   what was skipped or handed on by a deferral. */
+function memberLoad(id,[start,end],tasks=S.tasks){
+  const ts=tasks.filter(t=>t.assignee===id&&!['skipped','deferred'].includes(t.status)&&!isSuperseded(t)&&t.date<=end&&taskEnd(t)>=start);
+  return {count:ts.length,mins:ts.reduce((n,t)=>n+Number(t.duration||0),0)};
 }
+function memberTaskCount(userId,project){return project?memberLoad(userId,loadWindow(project)).count:0}
 function renderScheduleScope(){
   const visible=Boolean(S.user?.admin&&['today','calendar','dayDetail'].includes(UI.view));
   $('#scheduleScope').classList.toggle('hidden',!visible);
@@ -2536,7 +2563,7 @@ function openTodayArchive(){
   pickArchive(S.today,true);
   openDiaryArchive(S.today,$(`#archiveCabinet .archive-file[data-date="${S.today}"]`));
 }
-/* 周报: one week of team briefs, Saturday to Friday like the week view, added
+/* 周报: one week of team briefs, from the team's first weekday like the week view, added
    up and read in place. It opens over the archive box: the stats count up,
    each day's bar rises, and the arrows slide to the week before or after. A
    day opens that day's brief. */
@@ -2728,6 +2755,7 @@ function agentIsBusy(){return agentState.busy}
 function agentResetUser(){
   agentHalt();agentState.messages=[];agentState.lastInput='';agentState.editing=null;
   agentState.plan=false;agentState.planBoard=null;
+  agentState.conversationId=null;agentState.viewing=null;agentState.viewConversation=null;agentToggleSessions(false);
   for(const id of ['#agentMessages','#agentDraftCards']){const el=$(id);if(el)el.innerHTML=''}
   $('#agentPanel')?.classList.add('hidden');$('#agentDraftArea')?.classList.add('hidden');
 }
@@ -2802,11 +2830,15 @@ function agentAppend(role,content,kind='',intent=''){
 function agentMessageTools(node,message,index){
   if(!['user','assistant'].includes(message.role))return;
   const tools=document.createElement('div');tools.className='agent-message-tools';
-  const button=(label,run)=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=run;tools.appendChild(b)};
-  button('复制',async()=>{try{await navigator.clipboard.writeText(message.content);toast('已复制')}catch(_){toast('复制失败，请选中文字复制')}});
+  const button=(name,label,run)=>{const b=document.createElement('button');b.type='button';b.className='agent-tool-btn';
+    b.innerHTML=icon(name);b.title=label;b.setAttribute('aria-label',label);b.onclick=()=>run(b);tools.appendChild(b)};
+  button('copy','复制',async b=>{
+    try{await navigator.clipboard.writeText(message.content);b.innerHTML=icon('check');b.classList.add('is-done');
+      setTimeout(()=>{b.innerHTML=icon('copy');b.classList.remove('is-done')},1400)}catch(_){toast('复制失败，请选中文字复制')}
+  });
   if(index>=0){
-    if(message.role==='user')button('修改重发',()=>agentEditMessage(index));
-    button('回退到这里',()=>agentRewind(index));
+    if(message.role==='user')button('edit','修改重发',()=>agentEditMessage(index));
+    button('undo','回退到这里',()=>agentRewind(index));
   }
   node.appendChild(tools);
 }
@@ -2864,7 +2896,7 @@ function agentFoldTrail(anchor){
 function agentRenderTranscript(box,messages){
   if(!box)return;
   box.innerHTML='';
-  const live=box===$('#agentMessages');let turn=0;
+  const live=box===$('#agentMessages')&&!agentState.viewing;let turn=0;
   let trail=[];
   const flush=()=>{agentFoldRun(trail).forEach(n=>box.appendChild(n));trail=[]};
   messages.forEach(m=>{const index=live&&['user','assistant'].includes(m.role)&&String(m.content||'').trim()?turn++:-1;const node=agentMessageNode(m,index);if(!node)return;if(m.role==='user'){flush();box.appendChild(node)}else trail.push(node)});
@@ -2920,7 +2952,13 @@ function agentMessageNode(m,index=-1){
 }
 async function agentLoadOwnHistory(){
   try{
-    const data=await api('/api/action',{action:'agent.history',data:{}});
+    /* Opening the panel continues the latest conversation, or starts one. */
+    if(!agentState.conversationId){
+      let latest=null;
+      try{latest=(await api('/api/action',{action:'agent.conversations',data:{}})).conversations?.[0]?.id||null}catch(_){}
+      agentUseConversation(latest||agentNewConversationId());
+    }
+    const data=await api('/api/action',{action:'agent.history',data:{conversationId:agentState.conversationId}});
     const messages=data.messages||[],list=$('#agentMessages');if(!list)return;
     list.innerHTML='';
     /* A card still waiting for a click is not part of the stored transcript,
@@ -2945,15 +2983,102 @@ async function agentLoadOwnHistory(){
     list.scrollTop=list.scrollHeight;
   }catch(_){}
 }
-async function agentShowHistory(){
-  const admin=Boolean(S.user?.admin);
-  openModal(`<div class="eyebrow">WORK AGENT · 工作记录</div><h2>AI 工作记录</h2>${admin?`<label class="form-field">查看账户<select id="agentHistoryUser">${S.users.map(u=>`<option value="${escapeHTML(u.id)}">${escapeHTML(u.id)}</option>`).join('')}</select></label>`:''}<div id="agentHistoryList" class="agent-history-list"></div><div class="modal-footer"><button class="secondary-btn" id="agentHistoryClear">清空记录</button><button class="primary-btn" id="agentHistoryClose">关闭</button></div>`);
-  const target=()=>$('#agentHistoryUser')?.value||S.user.id;
-  const load=async()=>{const box=$('#agentHistoryList');box.innerHTML='<p class="muted">正在加载…</p>';try{const data=await api('/api/action',{action:'agent.history',data:{userId:target()}});const msgs=data.messages||[];box.innerHTML='';if(!msgs.length){box.innerHTML='<p class="muted">该账户暂无 AI 工作记录。</p>';return}agentRenderTranscript(box,msgs)}catch(e){box.innerHTML=`<p class="muted">加载失败：${escapeHTML(e.message||'')}</p>`}};
-  $('#agentHistoryUser')?.addEventListener('change',load);
-  $('#agentHistoryClose').onclick=closeModal;
-  $('#agentHistoryClear').onclick=async()=>{if(!confirm(`确认清空 ${target()} 的 AI 工作记录？`))return;try{await api('/api/action',{action:'agent.history.clear',data:{userId:target()}});toast('记录已清空');await load()}catch(e){toast(e.message||'清空失败')}};
-  await load();
+/* 对话记录: a side list like a general agent's, opened from the header. Each
+   conversation keeps its own lines (its id is the session id the chat sends);
+   lines from before conversations existed sit under 早期记录. One may start a
+   new conversation, open, rename or delete one; admins can also read another
+   account's conversations, read-only. */
+const agentNewConversationId=()=>globalThis.crypto?.randomUUID?.()||`wc-${Date.now()}-${Math.random().toString(36).slice(2,10)}`;
+function agentUseConversation(id){
+  agentState.conversationId=id;agentState.sessionId=id==='legacy'?null:id;
+  agentState.messages=[];agentState.editing=null;agentState.lastInput='';
+}
+async function agentToggleSessions(open=!agentState.sessionsOpen){
+  agentState.sessionsOpen=open;
+  $('#agentSessions')?.classList.toggle('hidden',!open);
+  $('#agentPanel')?.classList.toggle('is-browsing',open);
+  $('#agentHistoryBtn')?.setAttribute('aria-pressed',String(open));
+  if(open)await agentRenderSessions();
+  else if(agentState.viewing){agentState.viewing=null;agentState.viewConversation=null;agentSyncReview();await agentLoadOwnHistory()}
+}
+function agentSyncReview(){
+  const who=agentState.viewing;
+  $('#agentPanel')?.classList.toggle('is-reviewing',Boolean(who));
+  const banner=$('#agentReviewBanner');if(banner)banner.textContent=who?`正在查看 ${nameOf(who)} 的对话，只读`:'';
+}
+async function agentRenderSessions(){
+  const box=$('#agentSessions');if(!box||!agentState.sessionsOpen)return;
+  const me=S.user?.id,target=agentState.viewing||me,mine=target===me;
+  let list=[];
+  try{list=(await api('/api/action',{action:'agent.conversations',data:{userId:target}})).conversations||[]}
+  catch(e){box.innerHTML=`<p class="muted agent-sessions-empty">加载失败：${escapeHTML(e.message||'')}</p>`;return}
+  const current=mine?agentState.conversationId:agentState.viewConversation;
+  /* A conversation just started has no lines yet, so it is listed by hand. */
+  if(mine&&current&&!list.some(c=>c.id===current))list.unshift({id:current,title:'新对话',count:0,updatedAt:''});
+  const row=c=>`<div class="agent-session${c.id===current?' is-on':''}" data-conv="${escapeHTML(c.id)}"><button type="button" `
+    +`class="agent-session-open"><span>${escapeHTML(c.title)}</span><small>${c.updatedAt?escapeHTML(relTime(c.updatedAt))+' · ':''}`
+    +`${c.count} 条</small></button>${mine?`<button type="button" class="agent-session-act" data-act="rename" title="重命名" `
+    +`aria-label="重命名「${escapeHTML(c.title)}」">${icon('edit')}</button>`:''}${c.count?`<button type="button" class="agent-session-act" `
+    +`data-act="delete" title="删除" aria-label="删除「${escapeHTML(c.title)}」">${icon('x')}</button>`:''}</div>`;
+  box.innerHTML=`<div class="agent-sessions-head"><strong>对话</strong>${mine?`<button type="button" class="agent-icon-btn" `
+    +`id="agentNewChat" title="新对话" aria-label="新对话">${icon('plus')}</button>`:''}</div>`
+    +`${S.user?.admin?`<select id="agentSessionsUser" class="agent-sessions-user" aria-label="查看账户">${S.users.map(u=>`<option `
+    +`value="${escapeHTML(u.id)}"${u.id===target?' selected':''}>${escapeHTML(nameOf(u.id))}</option>`).join('')}</select>`:''}`
+    +`<div class="agent-session-list">${list.map(row).join('')||'<p class="muted agent-sessions-empty">还没有对话</p>'}</div>`;
+  $('#agentNewChat')?.addEventListener('click',agentNewChat);
+  $('#agentSessionsUser')?.addEventListener('change',e=>{
+    const who=e.target.value===me?null:e.target.value;agentState.viewing=who;agentState.viewConversation=null;agentSyncReview();
+    if(!who)agentLoadOwnHistory();else{const box=$('#agentMessages');if(box)box.innerHTML='<p class="muted agent-sessions-empty">选一段对话查看</p>'}
+    agentRenderSessions();
+  });
+  box.querySelectorAll('.agent-session').forEach(el=>{
+    const id=el.dataset.conv,c=list.find(x=>x.id===id);
+    el.querySelector('.agent-session-open').onclick=()=>agentOpenConversation(id);
+    const rename=el.querySelector('[data-act="rename"]');if(rename)rename.onclick=()=>agentRenameConversation(el,c);
+    const drop=el.querySelector('[data-act="delete"]');if(drop)drop.onclick=()=>{
+      /* A second click deletes, so one stray click never does. */
+      if(!drop.dataset.armed){drop.dataset.armed='1';drop.classList.add('is-armed');drop.title='再点一次删除';
+        setTimeout(()=>{if(drop.isConnected){delete drop.dataset.armed;drop.classList.remove('is-armed');drop.title='删除'}},3000);return}
+      agentDeleteConversation(id,target);
+    };
+  });
+}
+async function agentNewChat(){
+  if(agentState.busy){toast('先停止当前执行，再开新对话');return}
+  agentUseConversation(agentNewConversationId());
+  const list=$('#agentMessages');if(list){list.innerHTML='';agentRenderEmptyState(list)}
+  await agentRenderSessions();$('#agentInput')?.focus();
+}
+async function agentOpenConversation(id){
+  if(agentState.viewing){
+    agentState.viewConversation=id;
+    try{const data=await api('/api/action',{action:'agent.history',data:{userId:agentState.viewing,conversationId:id}});
+      agentRenderTranscript($('#agentMessages'),data.messages||[])}catch(e){toast(e.message)}
+    agentRenderSessions();return;
+  }
+  if(id===agentState.conversationId)return;
+  if(agentState.busy){toast('先停止当前执行，再切换对话');return}
+  agentUseConversation(id);await agentLoadOwnHistory();agentRenderSessions();
+}
+function agentRenameConversation(el,c){
+  const open=el.querySelector('.agent-session-open');
+  const input=document.createElement('input');input.className='agent-session-rename';input.maxLength=40;input.value=c.title;
+  input.setAttribute('aria-label','对话名称');open.replaceWith(input);input.focus();input.select();
+  let done=false;
+  const save=async keep=>{
+    if(done)return;done=true;const title=input.value.trim();
+    if(keep&&title&&title!==c.title){try{await api('/api/action',{action:'agent.conversation.rename',data:{conversationId:c.id,title}})}catch(e){toast(e.message)}}
+    agentRenderSessions();
+  };
+  input.onkeydown=e=>{if(imeEnter(e))return;if(e.key==='Enter'){e.preventDefault();save(true)}if(e.key==='Escape')save(false)};
+  input.onblur=()=>save(true);
+}
+async function agentDeleteConversation(id,target){
+  if(id===agentState.conversationId&&agentState.busy){toast('先停止当前执行，再删除这段对话');return}
+  try{await api('/api/action',{action:'agent.conversation.delete',data:{userId:target,conversationId:id}})}catch(e){toast(e.message);return}
+  if(agentState.viewing){if(agentState.viewConversation===id){agentState.viewConversation=null;const box=$('#agentMessages');if(box)box.innerHTML=''}}
+  else if(id===agentState.conversationId){agentState.conversationId=null;await agentLoadOwnHistory()}
+  toast('对话已删除');agentRenderSessions();
 }
 function agentSetConfigVisible(show){
   $('#agentConfig')?.classList.toggle('hidden',!show);
@@ -3000,6 +3125,7 @@ async function agentRequest(messages,planning=false){
   const controller=new AbortController();agentState.controller=controller;
   try{
     const data=await api('/api/agent/chat',{messages,sessionId:agentState.sessionId,planning},{signal:controller.signal});
+    if(agentState.sessionsOpen&&!agentState.viewing)agentRenderSessions();
     const text=agentExtractText(data);if(!text)throw new Error('服务端 Agent 未返回文本');return String(text);
   }finally{if(agentState.controller===controller)agentState.controller=null}
 }
@@ -3283,7 +3409,7 @@ function agentRunOne(proposal){
       buttons.innerHTML='<span class="agent-action-done">执行中…</span>';
       const before=agentFingerprint();
       try{
-        const result=await api('/api/action',{action:'agent.execute',data:{action:proposal.action,data:payload,confirmed:true}});
+        const result=await api('/api/action',{action:'agent.execute',data:{action:proposal.action,data:payload,confirmed:true,sessionId:agentState.sessionId}});
         await refresh();
         /* The ledger is read again here rather than trusting the return value:
            a step that reports success but changed nothing has to be visible to
@@ -4059,7 +4185,7 @@ function initChatUI(){
 }
 function initAgentUI(){
   $('#agentBtn')?.addEventListener('click',async()=>{$('#agentPanel').classList.remove('hidden');renderAgentCapability();await agentLoadOwnHistory();await agentLoadServerConfig();agentSyncPlanButton();agentInitVoice();$('#agentInput').focus()});
-  $('#agentHistoryBtn')?.addEventListener('click',()=>agentShowHistory());
+  $('#agentHistoryBtn')?.addEventListener('click',()=>agentToggleSessions());
   $('#agentCloseBtn')?.addEventListener('click',()=>{agentStopVoice();$('#agentPanel').classList.add('hidden')});
   $('#agentStopBtn')?.addEventListener('click',()=>agentHalt('已停止，草稿和已执行记录保留。'));
   $('#agentPauseBtn')?.addEventListener('click',()=>agentTogglePause());

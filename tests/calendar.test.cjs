@@ -1584,3 +1584,44 @@ test('a drop between directory rows becomes a parent and an order between the ne
   assert.deepEqual(at('project',80,90),{parent:'f',before:null,level:1,y:95,top:95},'偏右：归到文件夹里');
   assert.equal(at('folder',80,50).before,'r','文件夹落点跳过别人的子项');
 });
+
+test('an open-ended project counts people over the two weeks around today only', () => {
+  const a = app();
+  a.run(`S.today='2026-11-10';S.tasks=[
+    {id:'old',assignee:'test002',date:'2026-10-01',duration:60,status:'done'},
+    {id:'recent',assignee:'test002',date:'2026-11-05',duration:60,status:'done'},
+    {id:'spans',assignee:'test002',date:'2026-10-20',deadline:'2026-11-04',duration:30,status:'doing'},
+    {id:'soon',assignee:'test002',date:'2026-11-17',duration:60,status:'todo'},
+    {id:'later',assignee:'test002',date:'2026-11-18',duration:60,status:'todo'},
+    {id:'skipped',assignee:'test002',date:'2026-11-11',duration:60,status:'skipped'}];`);
+  assert.deepEqual(a.json("loadWindow({start:'2026-01-01'})"), ['2026-11-04','2026-11-17']);
+  assert.equal(a.run("memberTaskCount('test002',{start:'2026-01-01'})"), 3);
+  assert.deepEqual(a.json("memberLoad('test002',loadWindow({start:'2026-01-01'}))"), {count:3,mins:150});
+  assert.equal(a.run("memberTaskCount('test002',{start:'2026-09-01',end:'2026-12-31'})"), 5, '有截止日期的按项目周期');
+  assert.ok(a.run("loadWindowLabel({start:'2026-01-01'})").startsWith('近两周'));
+});
+
+test('the week starts on the day the team picked', () => {
+  const a = app();
+  a.run("S.today='2026-11-04'");
+  assert.equal(a.run('weekStart(S.today)'), '2026-10-31', '默认仍从周六开始');
+  a.run('S.weekStart=1');
+  assert.equal(a.run('weekStart(S.today)'), '2026-11-02');
+  assert.deepEqual(a.json('week(1)').slice(0,2), ['2026-11-09','2026-11-10']);
+  a.run('S.weekStart=0');
+  assert.equal(a.run("weekStart('2026-11-08')"), '2026-11-08', '当天就是开始日');
+  a.run('S.weekStart=9');
+  assert.equal(a.run('weekStart(S.today)'), '2026-10-31', '无效值回到周六');
+});
+
+test('the assistant keeps conversations in a side list and its message tools are icons', () => {
+  const tools = source.match(/function agentMessageTools\([\s\S]*?\n\}/)[0];
+  for (const [name, label] of [['copy','复制'],['edit','修改重发'],['undo','回退到这里']])
+    assert.ok(tools.includes(`button('${name}','${label}'`), label);
+  assert.ok(!/agentShowHistory/.test(source), '不再弹出单独的工作记录卡片');
+  assert.ok(/agentHistoryBtn'\)\?\.addEventListener\('click',\(\)=>agentToggleSessions\(\)\)/.test(source));
+  const history = source.match(/async function agentLoadOwnHistory\(\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/conversationId:agentState\.conversationId/.test(history), '只载入当前这段对话');
+  const use = source.match(/function agentUseConversation\(id\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/agentState\.sessionId=id==='legacy'\?null:id/.test(use), '早期记录不带会话 ID，服务端照旧归档');
+});
