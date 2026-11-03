@@ -1878,3 +1878,54 @@ test('failed card retry does not replay completed cards; duplicate targets are r
   a.run('board=planDraft({tasks:[raw,{...raw,operation:"delete"}]})');
   assert.ok(a.run('planProblems(board,board.tasks[0]).target'));
 });
+
+test('accepting one card ignores unrelated invalid cards and leaves their fields untouched',async()=>{
+  const a=planningApp(),writes=[];a.context.document={querySelector:()=>null};
+  a.context.fetch=async(path,o)=>{writes.push(JSON.parse(o.body));return {ok:true,text:async()=>'{"id":"accepted"}'}};
+  a.run(`refresh=async()=>{};agentAppend=()=>{};var board={...planDraft({tasks:[{name:'接受这一张',assignee:'test001'},{name:'',assignee:''},{name:'保留这一张',assignee:'test002'}]}),el:{querySelector:()=>null},history:[]};var untouched=JSON.stringify(board.tasks.slice(1));`);
+  await a.run('planSubmit(board,[board.tasks[0]])');
+  assert.equal(writes.length,1);assert.equal(writes[0].data.changes.name,'接受这一张');
+  assert.equal(a.run('JSON.stringify(board.tasks.slice(1))'),a.run('untouched'));
+  assert.equal(a.run('planOpenCards(board).length'),2);assert.ok(!a.run('board.closed'));
+  const html=a.run('planCardsHTML(board)');assert.ok(!html.includes('接受这一张'));assert.ok(html.includes('plan-accept')&&html.includes('plan-reject')&&html.includes('data-plan-select'));
+});
+test('multiselect accepts only selected cards and keeps a failed selection available for retry',async()=>{
+  const a=planningApp(),writes=[];a.context.document={querySelector:()=>null};
+  a.context.fetch=async(path,o)=>{const b=JSON.parse(o.body);writes.push(b);if(b.data.changes.name==='B'&&writes.filter(x=>x.data.changes.name==='B').length===1)return {ok:false,text:async()=>'{"error":"暂时失败"}'};return {ok:true,text:async()=>'{"id":"ok"}'}};
+  a.run(`refresh=async()=>{};agentAppend=()=>{};var board={...planDraft({tasks:['A','B','C'].map(name=>({name,assignee:'test001'}))}),el:{querySelector:()=>null},history:[]};board.tasks[0].selected=true;board.tasks[1].selected=true;`);
+  await a.run('planSubmit(board,planSelectedCards(board))');
+  assert.deepEqual(writes.map(x=>x.data.changes.name),['A','B']);
+  assert.equal(a.run('planSelectedCards(board)[0].name'),'B');assert.equal(a.run('board.tasks[2].state'),'draft');
+  await a.run('planSubmit(board,planSelectedCards(board))');
+  assert.deepEqual(writes.map(x=>x.data.changes.name),['A','B','B']);assert.equal(a.run('planOpenCards(board)[0].name'),'C');
+});
+test('rejecting a project is local, preserves dependent task data and can be undone',async()=>{
+  const a=planningApp();let writes=0;a.context.fetch=async()=>{writes++;throw Error('must not write')};
+  a.run(`var board={...planDraft({projects:[{ref:'P1',name:'新项目',owner:'test001'}],tasks:[{name:'待处理任务',assignee:'test001',projectRef:'P1'}]}),el:{},history:[]};var beforeTask=JSON.stringify(board.tasks[0]);`);
+  await a.run('planReject(board,[board.projects[0]])');
+  assert.equal(writes,0);assert.equal(a.run('board.projects[0].state'),'rejected');
+  assert.equal(a.run('JSON.stringify(board.tasks[0])'),a.run('beforeTask'));
+  assert.equal(a.run('planTaskPath(board,board.tasks[0]).mode'),'none');
+  assert.ok(a.run('planCardsHTML(board)').includes('原新项目已拒绝'));
+  a.run('planUndo(board)');assert.equal(a.run('board.projects[0].state'),'draft');
+});
+test('a child accepted alone never implicitly accepts its project; selected dependencies submit in order',async()=>{
+  const a=planningApp(),writes=[];a.context.document={querySelector:()=>null};
+  a.context.fetch=async(path,o)=>{const b=JSON.parse(o.body);writes.push(b);return {ok:true,text:async()=>'{"id":"project-created","status":"active"}'}};
+  a.run(`agentAppend=()=>{};refresh=async()=>{S.projects=[{id:'project-created',name:'新项目',owner:'test001',status:'active',members:{test001:'accepted'}}]};var board={...planDraft({projects:[{ref:'P1',name:'新项目',owner:'test001'}],tasks:[{name:'子任务',assignee:'test001',projectRef:'P1'}]}),el:{},history:[]};`);
+  await a.run('planSubmit(board,[board.tasks[0]])');assert.equal(writes.length,0);assert.equal(a.run('board.projects[0].state'),'draft');
+  await a.run('planSubmit(board,[board.tasks[0],board.projects[0]])');
+  assert.deepEqual(writes.map(x=>x.data.kind),['project','task']);assert.equal(writes[1].data.changes.projectId,'project-created');
+});
+test('accept-all processes valid cards and retains invalid cards instead of blocking the entire group',async()=>{
+  const a=planningApp(),writes=[];a.context.document={querySelector:()=>null};
+  a.context.fetch=async(path,o)=>{writes.push(JSON.parse(o.body));return {ok:true,text:async()=>'{"id":"made"}'}};
+  a.run(`refresh=async()=>{};agentAppend=()=>{};var board={...planDraft({tasks:[{name:'',assignee:''},{name:'有效卡',assignee:'test001'}]}),el:{},history:[]};`);
+  await a.run('planSubmit(board)');assert.equal(writes.length,1);assert.equal(a.run('planOpenCards(board).length'),1);assert.equal(a.run('board.tasks[0].state'),'draft');assert.ok(a.run('planProblems(board,board.tasks[0]).name'));assert.equal(a.run('planConfirmLabel()'),'全部接受');
+});
+test('a visual exit failure cannot turn an already accepted card back into a retryable card',async()=>{
+  const a=planningApp(),writes=[];a.context.document={querySelector:()=>null};
+  a.context.fetch=async(path,o)=>{writes.push(JSON.parse(o.body));return {ok:true,text:async()=>'{"id":"made"}'}};
+  a.run(`refresh=async()=>{};agentAppend=()=>{};var board={...planDraft({tasks:[{name:'动画不能影响业务',assignee:'test001'}]}),el:{querySelectorAll:()=>[{dataset:{key:'t0'},animate:()=>{throw Error('animation unavailable')}}]},history:[]};`);
+  await a.run('planSubmit(board)');assert.equal(a.run('board.tasks[0].state'),'done');await a.run('planSubmit(board)');assert.equal(writes.length,1);
+});

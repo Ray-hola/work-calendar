@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#F0EEE6" />
   <title>战略小组台账</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23D97757'/%3E%3Cpath d='M17 20h30v8H17zm0 14h21v8H17z' fill='%23FFFDF9'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="styles.css?v=20261103-work-cards" />
+  <link rel="stylesheet" href="styles.css?v=20261103-card-selection" />
 </head>
 <body>
   <div class="app-shell">
@@ -78,6 +78,6 @@
     </div></div>
     <div id="agentConfig" class="agent-config hidden"><div class="agent-config-title"><strong>AI 接入配置</strong><button id="agentConfigClose" class="agent-text-btn">收起</button></div><label>服务商<select id="agentProvider"></select></label><label>API 地址<input id="agentEndpoint" placeholder="https://api.example.com/v1" autocomplete="url"><small class="agent-config-hint">填到 /v1 即可，写完整的 …/chat/completions 也行</small></label><label>API Key<input id="agentApiKey" type="password" placeholder="留空表示保持原密钥" autocomplete="off"></label><div class="agent-config-test"><button type="button" class="secondary-btn" id="agentConfigTest">测试连接</button><p id="agentConfigStatus" class="agent-config-status" role="status" aria-live="polite"></p></div><label>模型<select id="agentModelSelect"></select><input id="agentCustomModel" class="hidden" placeholder="输入模型 ID" autocomplete="off"></label><label>单次对话容量<select id="agentContextChars"><option value="16000">精简 · 1.6 万字符</option><option value="32000">标准 · 3.2 万字符</option><option value="64000">充足 · 6.4 万字符</option></select><small class="agent-config-hint">助手按需检索你有权查看的数据，并在只读工作区完成统计。容量包含对话历史和查询结果，超过时会省略较早内容；上下文窗口较小的模型选「精简」。</small></label><div class="agent-config-actions"><button type="button" class="secondary-btn" id="agentConfigReset">清除本机配置</button><button type="button" class="primary-btn" id="agentConfigSave">保存服务端配置</button></div><div class="agent-asr-config"><div class="agent-config-title"><strong>语音输入 · 语音转写（可选）</strong></div><label>转写服务地址<input id="agentAsrEndpoint" placeholder="http://127.0.0.1:8000/v1" autocomplete="url"></label><label>模型<input id="agentAsrModel" placeholder="Qwen/Qwen3-ASR-0.6B" autocomplete="off"></label><label>识别语言<input id="agentAsrLanguage" placeholder="zh" autocomplete="off"></label><label>API Key<input id="agentAsrApiKey" type="password" placeholder="留空表示保持原密钥" autocomplete="off"></label><div class="agent-config-actions"><button type="button" class="secondary-btn" id="agentAsrClear">停用语音转写</button><button type="button" class="primary-btn" id="agentAsrSave">保存转写配置</button></div></div></div>
   </aside>
-  <script src="app.js?v=20261103-work-cards"></script>
+  <script src="app.js?v=20261103-card-selection"></script>
 </body>
 </html>

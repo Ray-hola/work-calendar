@@ -8434,6 +8434,7 @@ body.is-dragging-account * {
 
 .agent-config {
   position: absolute;
+  z-index: 5;
   inset: 0;
   background: var(--surface);
   padding: 18px;
@@ -10395,3 +10396,15 @@ body.is-resizing-agent { user-select: none; }
 .plan-diff strong { color: var(--ink); font-weight: 500; }
 .plan-diff p { margin: 0; color: var(--muted); }
 .plan-reload { justify-self: start; font-size: 11px; }
+
+.plan-selection { position: sticky; top: 0; z-index: 2; background: var(--paper); display: flex; align-items: center; flex-wrap: wrap; gap: 7px 9px; margin: 12px 0; padding: 10px 0; border-block: 1px solid var(--line); font-size: 12px; }
+.plan-select-label, .plan-pick { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.plan-select-label input, .plan-pick input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.plan-select-count { flex: 1; min-width: 64px; color: var(--muted); font-size: 11px; }
+.plan-selection button { font-size: 11px; padding: 5px 8px; }
+.plan-card.is-selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+.plan-card-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; border-top: 1px solid var(--line); padding-top: 8px; margin-top: 2px; }
+.plan-card-actions button { padding: 5px 13px; min-height: 30px; font-size: 12px; }
+.plan-empty { display: grid; justify-items: center; gap: 10px; padding: 28px 16px; color: var(--muted); border: 1px dashed var(--line); border-radius: 12px; text-align: center; font-size: 12px; }
+.plan-empty svg { color: var(--success); width: 22px; height: 22px; }
+.plan-empty strong { color: var(--ink); font: 600 16px/1.4 var(--font-serif); }

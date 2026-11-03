@@ -3900,6 +3900,7 @@ function planTaskPath(board,t){
   if((t.operation||'create')!=='create')return planMutationPath(t,'task');
   const admin=Boolean(S.user?.admin),people=S.users.filter(u=>u.active&&!u.admin).map(u=>u.id);
   const draftProject=t.project.startsWith('ref:')?board.projects.find(x=>'ref:'+x.ref===t.project):null;
+  if(draftProject&&draftProject.state==='rejected')return {mode:'none',assignees:[t.assignee].filter(Boolean),note:'所属项目卡已拒绝，请选择其他项目或临时任务'};
   if(draftProject&&(draftProject.operation||'create')!=='create')return {mode:'none',assignees:[],note:'只能选择新建项目卡或已有项目'};
   if(draftProject){
     const pm=projectMode(),p=draftProject;
@@ -3916,17 +3917,18 @@ function planTaskPath(board,t){
   const mode=tempTaskMode();
   return {mode,assignees:people,note:mode==='none'?'你的规则组不能新建临时任务':mode==='approval'?'临时任务由管理员审批':''};
 }
-function planProblems(board,x){
-  if(x.state==='done')return {};
+function planProblems(board,x,scope=planOpenCards(board)){
+  if(!planPending(x))return {};
   const errors={};
   const op=planOperation(x),kind=x.ref!=null?'project':'task';
-  if(kind==='task'&&board.projects.some(p=>p.id===(x.before?.projectId||x.project?.replace(/^id:/,''))&&planOperation(p)==='delete'&&p.state!=='done'))errors.project='本组将删除所属项目，请移除这张任务卡';
+  if(kind==='task'&&scope.some(p=>p.ref!=null&&p.id===(x.before?.projectId||x.project?.replace(/^id:/,''))&&planOperation(p)==='delete'&&planPending(p)))errors.project='本组将删除所属项目，请移除这张任务卡';
   if(op!=='create'){
     const path=planMutationPath(x,kind);
     if(path.mode==='none')errors.target=path.note;
     if(!['update','delete'].includes(op))errors.target='未知操作，请重新起草';
-    if(board[kind+'s'].some(y=>y!==x&&y.id===x.id&&y.state!=='done'))errors.target='同一对象只能保留一张修改或删除卡';
+    if(scope.some(y=>y!==x&&(y.ref!=null?'project':'task')===kind&&y.id===x.id&&planPending(y)))errors.target='同一对象只能保留一张修改或删除卡';
     if(op==='delete'){
+      if(kind==='project'&&scope.some(t=>t.ref==null&&(t.before?.projectId||t.project?.replace(/^id:/,''))===x.id&&planPending(t)))errors.target='请分开接受项目删除与其关联任务的卡片';
       if(kind==='project'&&x.confirm!==x.before?.name)errors.confirm='请输入完整项目名以确认删除';
       if(kind==='task'&&!x.deleteConfirmed)errors.deleteConfirmed='请勾选确认删除';
       return errors;
@@ -3943,7 +3945,7 @@ function planProblems(board,x){
   }else{
     const path=planTaskPath(board,x);
     if(!x.assignee||!path.assignees.includes(x.assignee))errors.assignee='请选择可执行这项任务的负责人';
-    if(board.projects.some(p=>p.id===(x.before?.projectId||x.project?.replace(/^id:/,''))&&planOperation(p)==='delete'&&p.state!=='done'))errors.project='本组将删除所属项目，请移除这张任务卡';
+    if(scope.some(p=>p.ref!=null&&p.id===(x.before?.projectId||x.project?.replace(/^id:/,''))&&planOperation(p)==='delete'&&planPending(p)))errors.project='本组将删除所属项目，请移除这张任务卡';
     if(x.deadline&&(!validDay(x.deadline)||x.deadline<x.date))errors.deadline='截止日期不能早于任务日期';
     if(x.project.startsWith('missing:'))errors.project='未找到所属项目，请重新选择';
     const p=x.project.startsWith('ref:')?board.projects.find(p=>'ref:'+p.ref===x.project):S.projects.find(p=>'id:'+p.id===x.project);
@@ -3953,6 +3955,34 @@ function planProblems(board,x){
   }
   return errors;
 }
+function planPending(x){return !x.state||x.state==='draft'}
+function planOpenCards(board){return board.projects.concat(board.tasks).filter(planPending)}
+function planSelectedCards(board){return planOpenCards(board).filter(x=>x.selected)}
+function planUpdateSelection(board){
+  const open=planOpenCards(board),selected=open.filter(x=>x.selected),el=board.el;
+  const all=el.querySelector('.plan-select-all');
+  if(all){all.checked=open.length>0&&selected.length===open.length;all.indeterminate=selected.length>0&&selected.length<open.length;all.disabled=Boolean(board.busy)||!open.length;}
+  const count=el.querySelector('.plan-select-count');if(count)count.textContent=selected.length?`已选 ${selected.length} 项`:`待处理 ${open.length} 项`;
+  el.querySelectorAll('.plan-card').forEach(card=>{const x=card.dataset.ref!=null?board.projects.find(p=>p.ref===card.dataset.ref):board.tasks.find(t=>t.key===card.dataset.key);card.classList.toggle('is-selected',Boolean(x?.selected));const box=card.querySelector('[data-plan-select]');if(box)box.checked=Boolean(x?.selected)});
+  el.querySelectorAll('.plan-accept-selected,.plan-reject-selected').forEach(b=>b.disabled=Boolean(board.busy)||!selected.length);
+}
+async function planRetire(board,x,state,result){
+  x.state=state;x.selected=false;x.result=result;x.error='';
+  const card=Array.from(board.el?.querySelectorAll?.('.plan-card')||[]).find(el=>x.ref!=null?el.dataset.ref===x.ref:el.dataset.key===x.key);
+  if(card?.animate&&!navReducedMotion()){
+    try{const animation=card.animate([{opacity:1,transform:'translateY(0) scale(1)'},{opacity:0,transform:'translateY(-12px) scale(1.025)'}],{duration:180,easing:'ease-out',fill:'forwards'});await animation.finished.catch(()=>{})}catch(_){}
+  }
+}
+async function planReject(board,items){
+  if(board.busy||agentState.busy||agentWriteBlocked())return;
+  if(board.conversationId!==undefined&&(board!==agentState.planBoard||board.conversationId!==agentState.conversationId))return;
+  const targets=planOpenCards(board).filter(x=>items.includes(x));if(!targets.length)return;
+  planCheckpoint(board);board.busy=true;planRender(board);
+  try{for(const x of targets){await planRetire(board,x,'rejected','已拒绝');planRender(board)}}
+  finally{board.busy=false;planRender(board)}
+  toast(`已拒绝 ${targets.length} 张卡片`);
+}
+
 function planCheckpoint(board){
   const copy=JSON.stringify({projects:board.projects,tasks:board.tasks,next:board.next});
   board.history=board.history||[];
@@ -4038,36 +4068,38 @@ function planCardsHTML(board){
   const opt=(v,l,cur)=>`<option value="${escapeHTML(v)}"${v===cur?' selected':''}>${escapeHTML(l)}</option>`;
   const chip=(mode,why='')=>`<span class="plan-state is-${mode}"${why?` title="${escapeHTML(why)}"`:''}>${PLAN_STATE[mode]}</span>`;
   const top=(kind,label,mode,extra='',why='')=>`<div class="plan-card-top"><span class="plan-kind">${icon(kind)}${label}</span>${extra}${chip(mode,why)}<button type="button" class="plan-remove" title="移除这张卡" aria-label="移除这张卡">${icon('x')}</button></div>`;
-  const done=x=>`<article class="plan-card is-done">${icon('check')}<span>${escapeHTML(x.result)}</span><strong>${escapeHTML(x.name)}</strong></article>`;
   const note=(text,cls='plan-note')=>text?`<p class="${cls}">${escapeHTML(text)}</p>`:'';
-  const projectCard=p=>p.state==='done'?done(p):planOperation(p)!=='create'?planMutationHTML(board,p,'project'):`<article class="plan-card is-project is-${pm}" data-ref="${escapeHTML(p.ref)}">${top('folder','新项目',pm,'',pm==='none'?'你的规则组不能新建项目':pm==='approval'?'提交后由管理员审批':'')}<input class="plan-title" data-f="name" value="${escapeHTML(p.name)}" maxlength="120" placeholder="项目名称" aria-label="项目名称"><textarea class="plan-desc" data-f="desc" rows="2" placeholder="项目描述（可选）" aria-label="项目描述">${escapeHTML(p.desc)}</textarea><div class="plan-grid">${admin?`<label class="is-wide">Owner<select data-f="owner">${opt('','请选择负责人',p.owner)}${people.map(u=>opt(u.id,nameOf(u.id),p.owner)).join('')}</select></label>`:''}<label>优先级<select data-f="priority">${['P0','P1','P2'].map(v=>opt(v,v,p.priority)).join('')}</select></label><label>开始<input type="date" data-f="start" value="${escapeHTML(p.start)}" min="${S.today}" max="${DATE_HORIZON}"></label><label>截止（可空）<input type="date" data-f="end" value="${escapeHTML(p.end)}" min="${escapeHTML(p.start)}" max="${DATE_HORIZON}"></label></div><div class="plan-people"><span>${admin?'协作者':'邀请协作者'}</span>${people.filter(u=>u.id!==p.owner).map(u=>`<button type="button" class="plan-person${p.members.includes(u.id)?' is-on':''}" data-user="${escapeHTML(u.id)}" aria-pressed="${p.members.includes(u.id)}">${escapeHTML(nameOf(u.id))}</button>`).join('')||'<span class="muted">没有其他成员</span>'}</div>${note(p.error,'plan-error')}</article>`;
+  const projectCard=p=>planOperation(p)!=='create'?planMutationHTML(board,p,'project'):`<article class="plan-card is-project is-${pm}" data-ref="${escapeHTML(p.ref)}">${top('folder','新项目',pm,'',pm==='none'?'你的规则组不能新建项目':pm==='approval'?'提交后由管理员审批':'')}<input class="plan-title" data-f="name" value="${escapeHTML(p.name)}" maxlength="120" placeholder="项目名称" aria-label="项目名称"><textarea class="plan-desc" data-f="desc" rows="2" placeholder="项目描述（可选）" aria-label="项目描述">${escapeHTML(p.desc)}</textarea><div class="plan-grid">${admin?`<label class="is-wide">Owner<select data-f="owner">${opt('','请选择负责人',p.owner)}${people.map(u=>opt(u.id,nameOf(u.id),p.owner)).join('')}</select></label>`:''}<label>优先级<select data-f="priority">${['P0','P1','P2'].map(v=>opt(v,v,p.priority)).join('')}</select></label><label>开始<input type="date" data-f="start" value="${escapeHTML(p.start)}" min="${S.today}" max="${DATE_HORIZON}"></label><label>截止（可空）<input type="date" data-f="end" value="${escapeHTML(p.end)}" min="${escapeHTML(p.start)}" max="${DATE_HORIZON}"></label></div><div class="plan-people"><span>${admin?'协作者':'邀请协作者'}</span>${people.filter(u=>u.id!==p.owner).map(u=>`<button type="button" class="plan-person${p.members.includes(u.id)?' is-on':''}" data-user="${escapeHTML(u.id)}" aria-pressed="${p.members.includes(u.id)}">${escapeHTML(nameOf(u.id))}</button>`).join('')||'<span class="muted">没有其他成员</span>'}</div>${note(p.error,'plan-error')}</article>`;
   const taskCard=t=>{
-    if(t.state==='done')return done(t);
     if(planOperation(t)!=='create')return planMutationHTML(board,t,'task');
     const path=planTaskPath(board,t);
-    const open=taskProjects(),projects=[opt('','临时任务（不挂项目）',t.project),...board.projects.filter(p=>p.state!=='done'&&planOperation(p)==='create').map(p=>opt('ref:'+p.ref,'新项目 · '+(p.name||'未命名'),t.project)),...open.map(x=>opt('id:'+x.p.id,x.p.name,t.project))];
+    const open=taskProjects(),projects=[opt('','临时任务（不挂项目）',t.project),...board.projects.filter(p=>planPending(p)&&planOperation(p)==='create').map(p=>opt('ref:'+p.ref,'新项目 · '+(p.name||'未命名'),t.project)),...open.map(x=>opt('id:'+x.p.id,x.p.name,t.project))];
+    if(t.project.startsWith('ref:')&&!board.projects.some(p=>'ref:'+p.ref===t.project&&planPending(p)))projects.push(opt(t.project,'原新项目已拒绝，请重新选择',t.project));
     if(t.project.startsWith('missing:'))projects.push(opt(t.project,'请选择所属项目',t.project));
     if(t.project.startsWith('id:')&&!open.some(x=>'id:'+x.p.id===t.project))projects.push(opt(t.project,S.projects.find(x=>'id:'+x.id===t.project)?.name||'已不存在的项目',t.project));
     const prio=`<span class="plan-prio" role="radiogroup" aria-label="优先级">${['P0','P1','P2'].map(v=>`<button type="button" class="priority ${v}${t.priority===v?' is-on':''}" data-prio="${v}" aria-checked="${t.priority===v}" role="radio">${v}</button>`).join('')}</span>`;
-    return `<article class="plan-card is-${path.mode}" data-key="${escapeHTML(t.key)}">${top('calendar-check','任务',path.mode,prio,path.note)}<input class="plan-title" data-f="name" value="${escapeHTML(t.name)}" maxlength="120" placeholder="任务名称" aria-label="任务名称"><div class="plan-grid"><label class="is-wide">放在<select data-f="project">${projects.join('')}</select></label><label>负责人<select data-f="assignee">${opt('','请选择负责人',t.assignee)}${path.assignees.map(id=>opt(id,nameOf(id),t.assignee)).join('')||opt('','—','')}</select></label><label>日期<input type="date" data-f="date" value="${escapeHTML(t.date)}" min="${S.today}" max="${DATE_HORIZON}"></label><label>时间<input type="time" data-f="time" value="${escapeHTML(t.time)}"></label><label>时长（分钟）<input type="number" data-f="duration" min="1" max="1440" value="${escapeHTML(t.duration)}"></label></div><textarea class="plan-desc" data-f="desc" rows="1" placeholder="补充说明（可选）" aria-label="任务说明">${escapeHTML(t.desc)}</textarea>${note(t.error,'plan-error')}</article>`;
+    return `<article class="plan-card is-${path.mode}" data-key="${escapeHTML(t.key)}">${top('calendar-check','任务',path.mode,prio,path.note)}<input class="plan-title" data-f="name" value="${escapeHTML(t.name)}" maxlength="120" placeholder="任务名称" aria-label="任务名称"><div class="plan-grid"><label class="is-wide">放在<select data-f="project">${projects.join('')}</select></label><label>负责人<select data-f="assignee">${opt('','请选择负责人',t.assignee)}${path.assignees.map(id=>opt(id,nameOf(id),t.assignee)).join('')||opt('','—','')}</select></label><label>日期<input type="date" data-f="date" value="${escapeHTML(t.date)}" min="${S.today}" max="${DATE_HORIZON}"></label><label>时间<input type="time" data-f="time" value="${escapeHTML(t.time)}"></label><label>时长（分钟）<input type="number" data-f="duration" min="1" max="1440" value="${escapeHTML(t.duration)}"></label></div><textarea class="plan-desc" data-f="desc" rows="1" placeholder="补充说明（可选）" aria-label="任务说明">${escapeHTML(t.desc)}</textarea>${note(path.note)}${note(t.error,'plan-error')}</article>`;
   };
-  return (board.projects.map(projectCard).join('')+board.tasks.map(taskCard).join(''))
-    .replaceAll('</article>','<p class="plan-validation" role="status"></p></article>');
+  const decorate=(html,x)=>{
+    const working=x.state==='submitting',disabled=board.busy?' disabled':'';
+    html=html.replace(/<button type="button" class="plan-remove"[\s\S]*?<\/button>/,'');
+    html=html.replace('<div class="plan-card-top">',`<div class="plan-card-top"><label class="plan-pick"><input type="checkbox" data-plan-select aria-label="选择${escapeHTML(x.name||'这张卡片')}"${x.selected?' checked':''}${disabled}></label>`);
+    if(working)html=html.replace(/(<span class="plan-state[^>]*>)[^<]*/, '$1接受中…');
+    return html.replace('</article>',`<p class="plan-validation" role="status"></p><div class="plan-card-actions"><button type="button" class="ghost-btn plan-reject"${disabled}>拒绝</button><button type="button" class="primary-btn plan-accept"${disabled}>${working?'接受中…':'接受'}</button></div></article>`);
+  };
+  const visible=x=>planPending(x)||x.state==='submitting';
+  return board.projects.filter(visible).map(x=>decorate(projectCard(x),x)).join('')+board.tasks.filter(visible).map(x=>decorate(taskCard(x),x)).join('');
+
 }
 /* How many cards would be made, asked for, held back or refused. */
 function planTally(board){
   const n={direct:0,approval:0,wait:0,none:0,update:0,delete:0},pm=projectMode();
-  board.projects.forEach(p=>{if(p.state!=='done')n[planOperation(p)==='create'?pm:planMutationPath(p,'project').mode]+=1});
-  board.projects.concat(board.tasks).forEach(x=>{if(x.state!=='done'&&planOperation(x)!=='create')n[planOperation(x)]++});
-  board.tasks.forEach(t=>{if(t.state!=='done')n[planTaskPath(board,t).mode]+=1});
+  board.projects.forEach(p=>{if(planPending(p))n[planOperation(p)==='create'?pm:planMutationPath(p,'project').mode]+=1});
+  board.projects.concat(board.tasks).forEach(x=>{if(planPending(x)&&planOperation(x)!=='create')n[planOperation(x)]++});
+  board.tasks.forEach(t=>{if(planPending(t))n[planTaskPath(board,t).mode]+=1});
   return n;
 }
-function planConfirmLabel(n){
-  if((n.update||n.delete)&&(n.direct||n.approval))return `确认 ${n.direct+n.approval} 项变更${n.delete?' · 含删除':''}`;
-  if(!n.direct&&!n.approval)return n.wait?'等审批通过后再建':'没有可以创建的卡片';
-  if(!n.approval)return `创建 ${n.direct} 项`;
-  if(!n.direct)return `提交 ${n.approval} 个申请`;
-  return `创建 ${n.direct} 项 · 申请 ${n.approval} 项`;
+function planConfirmLabel(){return '全部接受';
 }
 function agentPlanBoard(raw){
   const list=$('#agentDraftCards')||$('#agentMessages');if(!list)return null;
@@ -4088,17 +4120,17 @@ function planActivate(board){
   $('#agentDraftCards')?.appendChild(board.el);
 }
 function planRender(board,entering=false){
-  const el=board.el;
+  const el=board.el,all=board.projects.concat(board.tasks),open=planOpenCards(board),accepted=all.filter(x=>x.state==='done').length,rejected=all.filter(x=>x.state==='rejected').length,working=all.filter(x=>x.state==='submitting').length;
   agentSyncDraftLayout();
-  const head=`<div class="plan-board-head">${icon('sparkles')}<strong>待确认 · ${board.projects.length+board.tasks.length} 张管理卡片</strong><span>${escapeHTML(board.note)}</span></div>`;
+  const progress=[working?`接受中 ${working}`:'',accepted?`已接受 ${accepted}`:'',rejected?`已拒绝 ${rejected}`:''].filter(Boolean).join(' · ');
+  const head=`<div class="plan-board-head">${icon('sparkles')}<strong>待处理 · ${open.length} 张卡片</strong><span>${escapeHTML(progress||board.note)}</span></div>`;
   if(board.closed){
-    el.innerHTML=head+`<div class="plan-foot is-closed"><span class="plan-sum">${escapeHTML(board.closedNote||'草稿已收起，未提交的卡片不会执行')}</span><button type="button" class="ghost-btn plan-reopen">重新打开</button></div>`;
+    el.innerHTML=head+`<div class="plan-foot is-closed"><span class="plan-sum">${escapeHTML(board.closedNote||'未处理的卡片已保留')}</span><button type="button" class="ghost-btn plan-reopen">重新打开</button></div>`;
   }else{
-    const n=planTally(board),left=board.projects.concat(board.tasks).some(x=>x.state!=='done');
-    const sum=[n.wait?`${n.wait} 项要等审批`:'',n.none?`${n.none} 项无权执行`:''].filter(Boolean).join(' · ');
-    el.innerHTML=head+`<div class="plan-draft-tools"><button type="button" class="ghost-btn plan-undo"${board.history?.length&&!board.busy?'':' disabled'}>撤销修改</button><button type="button" class="ghost-btn plan-copy">复制草稿</button><span>标红字段需要补充，确认前不会改动数据</span></div><div class="plan-cards${entering?' is-entering':''}">${planCardsHTML(board)}</div><div class="plan-foot"><button type="button" class="ghost-btn plan-add">${icon('plus')}加一个任务</button><span class="plan-sum">${sum}</span><button type="button" class="ghost-btn plan-cancel">${left?'收起草稿':'收起'}</button><button type="button" class="primary-btn plan-confirm"${n.direct+n.approval&&!board.busy?'':' disabled'}>${board.busy?'正在提交…':planConfirmLabel(n)}</button></div>`;
-    el.querySelectorAll('input,textarea,select').forEach(field=>{field.disabled=Boolean(board.busy)});
-    planMarkFields(board);
+    const n=planTally(board),sum=[n.wait?`${n.wait} 项要等审批`:'',n.none?`${n.none} 项暂不能接受`:''].filter(Boolean).join(' · ');
+    el.innerHTML=head+`<div class="plan-draft-tools"><button type="button" class="ghost-btn plan-undo"${board.history?.length&&!board.busy?'':' disabled'}>撤销修改</button><button type="button" class="ghost-btn plan-copy">复制草稿</button><span>可逐张接受或拒绝，也可以勾选后批量处理</span></div><div class="plan-selection"><label class="plan-select-label"><input type="checkbox" class="plan-select-all">全选</label><span class="plan-select-count" role="status"></span><button type="button" class="ghost-btn plan-reject-selected">拒绝所选</button><button type="button" class="secondary-btn plan-accept-selected">接受所选</button></div><div class="plan-cards${entering?' is-entering':''}">${planCardsHTML(board)||'<div class="plan-empty">'+icon('check')+'<strong>本组卡片已处理完</strong><span>接受与拒绝的结果已保留，可继续提出新的安排。</span></div>'}</div><div class="plan-foot"><button type="button" class="ghost-btn plan-add">${icon('plus')}加一个任务</button><span class="plan-sum">${sum}</span><button type="button" class="ghost-btn plan-cancel">${open.length?'收起草稿':'收起'}</button><button type="button" class="primary-btn plan-confirm"${open.length&&!board.busy?'':' disabled'}>${board.busy?'正在接受…':planConfirmLabel()}</button></div>`;
+    el.querySelectorAll('input,textarea,select,button').forEach(field=>{field.disabled=Boolean(board.busy)||field.disabled});
+    planMarkFields(board);planUpdateSelection(board);
     if(entering)el.querySelectorAll('.plan-card').forEach((c,i)=>c.style.setProperty('--i',String(i)));
   }
   planBind(board);
@@ -4110,7 +4142,10 @@ function planBind(board){
   el.addEventListener('focusin',e=>{if(item(e.target)&&!board.busy)planCheckpoint(board)});
   el.addEventListener('input',e=>{const f=e.target.dataset?.f,x=item(e.target);if(board.busy)return;if(x&&['name','desc','reason','confirm'].includes(f)){x[f]=e.target.value;planMarkFields(board);const undo=el.querySelector('.plan-undo');if(undo)undo.disabled=!board.history?.length}});
   el.addEventListener('change',e=>{
-    const f=e.target.dataset?.f,x=item(e.target);if(!f||!x||board.busy)return;
+    const f=e.target.dataset?.f,x=item(e.target);if(board.busy)return;
+    if(e.target.classList.contains('plan-select-all')){planOpenCards(board).forEach(x=>x.selected=e.target.checked);planUpdateSelection(board);return}
+    if(e.target.hasAttribute('data-plan-select')&&x){x.selected=e.target.checked;planUpdateSelection(board);return}
+    if(!f||!x)return;
     if(!['name','desc','reason','confirm'].includes(f))planCheckpoint(board);
     x[f]=f==='deleteConfirmed'?e.target.checked:f==='duration'?Number(e.target.value):e.target.value;x.error='';
     if(f==='start'&&x.end&&x.end<x.start)x.end='';
@@ -4125,29 +4160,26 @@ function planBind(board){
     const b=e.target.closest('button');if(!b||board.busy)return;
     const x=item(b);
     if(b.classList.contains('plan-undo'))return planUndo(board);
-    if(b.classList.contains('plan-copy')){navigator.clipboard.writeText(JSON.stringify({projects:board.projects,tasks:board.tasks},null,2)).then(()=>toast('草稿已复制')).catch(()=>toast('复制失败，请稍后重试'));return}
+    if(b.classList.contains('plan-copy')){navigator.clipboard.writeText(JSON.stringify({projects:board.projects.filter(planPending),tasks:board.tasks.filter(planPending)},null,2)).then(()=>toast('草稿已复制')).catch(()=>toast('复制失败，请稍后重试'));return}
     if(b.classList.contains('plan-reload')&&x)return planReload(board,x);
+    if(b.classList.contains('plan-accept')&&x)return planSubmit(board,[x]);
+    if(b.classList.contains('plan-reject')&&x)return planReject(board,[x]);
+    if(b.classList.contains('plan-accept-selected'))return planSubmit(board,planSelectedCards(board));
+    if(b.classList.contains('plan-reject-selected'))return planReject(board,planSelectedCards(board));
     if(x)planCheckpoint(board);
     if(b.classList.contains('plan-remove')&&x)return planRemove(board,x);
     if(b.classList.contains('plan-person')&&x){const id=b.dataset.user;x.members=x.members.includes(id)?x.members.filter(m=>m!==id):[...x.members,id];if(planOperation(x)==='update'){const old=Object.keys(x.before.members||{}).filter(id=>id!==x.owner);x.addMembers=x.members.filter(id=>!old.includes(id));x.removeMembers=old.filter(id=>!x.members.includes(id));}return planRender(board)}
     if(b.dataset.prio&&x){x.priority=b.dataset.prio;return planRender(board)}
     if(b.classList.contains('plan-add'))return planAddTask(board);
-    if(b.classList.contains('plan-cancel')){board.closed=true;board.closedNote=board.projects.concat(board.tasks).some(x=>x.state==='done')?board.closedNote:'';return planRender(board)}
+    if(b.classList.contains('plan-cancel')){board.closed=true;board.closedNote=board.closedNote||'未处理的卡片已保留';return planRender(board)}
     if(b.classList.contains('plan-reopen')){planActivate(board);return planRender(board)}
     if(b.classList.contains('plan-confirm'))planSubmit(board);
   });
 }
-function planRemove(board,x){
-  if(x.ref!=null){
-    board.projects=board.projects.filter(p=>p!==x);
-    const moved=board.tasks.filter(t=>t.project==='ref:'+x.ref);moved.forEach(t=>{t.project=''});
-    if(moved.length)toast(`它下面的 ${moved.length} 个任务改成了临时任务`);
-  }else board.tasks=board.tasks.filter(t=>t!==x);
-  planRender(board);
-}
+function planRemove(board,x){return planReject(board,[x])}
 function planAddTask(board){
   planCheckpoint(board);
-  const last=board.tasks.filter(t=>t.state!=='done'&&planOperation(t)==='create').at(-1),key='t'+(board.next++);
+  const last=board.tasks.filter(t=>planPending(t)&&planOperation(t)==='create').at(-1),key='t'+(board.next++);
   board.tasks.push({key,name:'',desc:'',project:last?.project||'',assignee:last?.assignee||'',date:last?.date||S.today,time:'09:00',duration:60,priority:'P1',state:'draft'});
   planRender(board);
   board.el.querySelector(`.plan-card[data-key="${key}"] .plan-title`)?.focus();
@@ -4155,41 +4187,41 @@ function planAddTask(board){
 /* Projects first, so tasks drafted under them can follow; each card goes
    through the normal action and keeps its own error if it is refused, so the
    user fixes that card and confirms again without redoing the rest. */
-async function planSubmit(board){
+async function planSubmit(board,items=null){
   if(board.busy||agentState.busy||agentWriteBlocked())return;
   if(board.conversationId!==undefined&&(board!==agentState.planBoard||board.conversationId!==agentState.conversationId))return;
-  const open=board.projects.concat(board.tasks).filter(x=>x.state!=='done');
-  if(open.some(x=>Object.keys(planProblems(board,x)).length)){
-    planRender(board);board.el.querySelector('[aria-invalid="true"]')?.focus();toast('请先补齐标红字段');return;
-  }
+  const candidates=planOpenCards(board).filter(x=>items===null||items.includes(x));if(!candidates.length)return;
   board.busy=true;agentState.busy=true;agentState.stop=false;agentState.paused=false;agentUpdateBusy();planRender(board);
   const results={create:0,update:0,delete:0,approval:0,failed:0};
   const submit=async(x,kind)=>{
     if(!await agentWaitForResume())return;
     const op=planOperation(x),path=kind==='project'?(op==='create'?{mode:projectMode()}:planMutationPath(x,kind)):planTaskPath(board,x);
-    if(['wait','none'].includes(path.mode))return;
-    if(kind==='task'&&x.project.startsWith('ref:')){x.error='所属的新项目还没建成';return}
+    const errors=planProblems(board,x,candidates);
+    if(Object.keys(errors).length){x.error='';results.failed++;return}
+    if(['wait','none'].includes(path.mode)){x.error=path.note||'当前不能接受这张卡片';results.failed++;return}
+    if(kind==='task'&&x.project.startsWith('ref:')){x.error='请先接受所属的新项目卡片，或将项目与任务一并选中';results.failed++;return}
+    x.state='submitting';x.error='';planRender(board);
     try{
       let changes=planChanges(x,kind);
       if(op==='create')changes=kind==='project'?{name:x.name.trim(),desc:x.desc,start:x.start,end:x.end,cycle:x.end?'range':'infinite',priority:x.priority||'P1',members:x.members,...(S.user.admin?{owner:x.owner}:{})}:{name:x.name.trim(),desc:x.desc,projectId:x.project.startsWith('id:')?x.project.slice(3):null,assignee:x.assignee,date:x.date,deadline:x.deadline||null,time:x.time,duration:Number(x.duration)||60,priority:x.priority};
       const r=await api('/api/action',{action:'work.card.apply',data:{kind,operation:op,id:x.id,revision:x.revision,changes,confirmed:true,confirm:op==='delete'?(kind==='project'?x.confirm:x.deleteConfirmed?x.before.name:''):undefined,request:path.mode==='approval',reason:x.reason,sessionId:agentState.sessionId}});
       const pending=r?.requested||r?.status==='pending'||path.mode==='approval';
-      results[pending?'approval':op]++;
-      Object.assign(x,{state:'done',error:'',result:pending?'已提交申请':op==='create'?'已创建':op==='update'?'已修改':'已删除'});board.history=[];
+      results[pending?'approval':op]++;board.history=[];
       if(kind==='project'&&op==='create')board.tasks.forEach(t=>{if(t.project==='ref:'+x.ref)t.project='id:'+r.id});
-    }catch(e){x.error=e?.message||'提交失败';results.failed++}
+      await planRetire(board,x,'done',pending?'已提交申请':op==='create'?'已创建':op==='update'?'已修改':'已删除');
+    }catch(e){x.state='draft';x.error=e?.message||'提交失败';results.failed++}
+    planRender(board);
   };
   try{
-    for(const p of board.projects.filter(p=>p.state!=='done'&&planOperation(p)!=='delete'))await submit(p,'project');
+    for(const p of board.projects.filter(p=>candidates.includes(p)&&planPending(p)&&planOperation(p)!=='delete'))await submit(p,'project');
     try{await refresh()}catch(_){}
-    for(const t of board.tasks.filter(t=>t.state!=='done'))await submit(t,'task');
-    for(const p of board.projects.filter(p=>p.state!=='done'&&planOperation(p)==='delete'))await submit(p,'project');
+    for(const t of board.tasks.filter(t=>candidates.includes(t)&&planPending(t)))await submit(t,'task');
+    for(const p of board.projects.filter(p=>candidates.includes(p)&&planPending(p)&&planOperation(p)==='delete'))await submit(p,'project');
     try{await refresh()}catch(_){}
   }finally{board.busy=false;agentState.busy=false;agentUpdateBusy()}
-  const n=planTally(board);
-  board.closedNote=[results.create?`创建了 ${results.create} 项`:'',results.update?`修改了 ${results.update} 项`:'',results.delete?`删除了 ${results.delete} 项`:'',results.approval?`提交了 ${results.approval} 个申请`:'',results.failed?`${results.failed} 项没成功，原因写在卡片上`:'',n.wait?`${n.wait} 项等审批通过后再建`:''].filter(Boolean).join('，');
-  if(!board.projects.concat(board.tasks).some(x=>x.state!=='done'))board.closed=true;
-  planRender(board);agentAppend('assistant',(board.closedNote||'没有可以提交的卡片')+'。');
+  const parts=[results.create?`创建了 ${results.create} 项`:'',results.update?`修改了 ${results.update} 项`:'',results.delete?`删除了 ${results.delete} 项`:'',results.approval?`提交了 ${results.approval} 个申请`:'',results.failed?`${results.failed} 张卡片未接受，原因留在卡片上`:''].filter(Boolean);
+  board.closedNote=parts.join('，');
+  planRender(board);agentAppend('assistant',(board.closedNote||'没有提交新的改动')+'。');
 }
 /* ---------------------------------------------------------------- 沟通区 --
    One shared room, plus a channel per project. Chat deliberately sits outside
