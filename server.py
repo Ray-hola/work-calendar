@@ -563,11 +563,11 @@ class Store:
         """Return the workspace view sent to the assistant, as JSON within budget.
 
         The full snapshot runs to several hundred thousand characters, most of
-        it deferral history and notification bodies. It used to be sliced at
-        the budget, which cut off the newest rows — the open tasks people ask
-        about — so the model never saw their ids and asked the user for one,
-        even though the page shows no ids. Open work now goes first, history is
-        trimmed by whole rows, and the result is always valid JSON.
+        it deferral history and notification bodies. Trimming the task list cut
+        off the newest rows, so the assistant could not find tasks the page
+        shows, including ones created that day. The task list is always sent
+        whole. Reports, notifications and diaries are trimmed to the budget by
+        whole rows, and the result is always valid JSON.
         """
         state = self.snapshot(user)
         week_ago = (now().date() - timedelta(days=6)).isoformat()
@@ -597,7 +597,9 @@ class Store:
         dump = lambda: json.dumps(context, ensure_ascii=False, separators=(',', ':'))
         text = dump()
         # Every list is newest/most relevant first, so trimming drops its tail.
-        for key in ('reports', 'notifications', 'diaries', 'tasks'):
+        # Tasks are never trimmed: the assistant must see each one to find the
+        # task a person names.
+        for key in ('reports', 'notifications', 'diaries'):
             while len(text) > budget and context[key]:
                 context[key] = context[key][:len(context[key]) * 3 // 4]
                 text = dump()
