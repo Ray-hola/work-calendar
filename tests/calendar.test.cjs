@@ -1207,6 +1207,45 @@ test('a day sits at the same place on the ruler for ticks and the week band', ()
   assert.equal(a.run('rulerAt(45,31)'), '100.00');
 });
 
+test('the project space lists folders on the left and opens a project with its background, people and files', () => {
+  const a=app(); const elements={};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={innerText:'',classList:{toggle(){}}}),querySelectorAll:()=>[]};
+  a.run(`S.today='2026-11-03';S.notifications=[];S.folders=[{id:'f1',name:'年度战略'},{id:'f2',name:'空文件夹'}];
+    S.users=[{id:'superadmin',admin:1,active:1},{id:'test001',active:1},{id:'test002',active:1}];
+    S.projects=[
+      {id:'p',name:'入池项目',owner:'test001',status:'active',folderId:'f1',start:'2026-11-01',end:'2026-11-11',createdAt:'2026-10-30T09:00:00+08:00',
+       members:{test001:'accepted',test002:'accepted'},background:'为什么做',staffing:{test002:'调研'}},
+      {id:'q',name:'散落项目',owner:'test001',status:'active',members:{test001:'accepted'}}];
+    S.tasks=[{id:'t',projectId:'p',name:'子任务',assignee:'test002',priority:'P1',status:'done',date:'2026-11-02',duration:90}];
+    S.files=[{id:'x',projectId:'p',name:'方案.pdf',size:2048,uploader:'test002',createdAt:'2026-11-02T10:00:00+08:00'},
+      {id:'y',projectId:'q',name:'别的.txt',size:1,uploader:'test001',createdAt:'2026-11-02T10:00:00+08:00'}];`);
+  a.run("S.user={id:'test002',admin:0};UI.space='';renderProjects()");
+  let nav=elements['#projectNav'].innerHTML;
+  assert.ok(nav.includes('年度战略')&&!nav.includes('空文件夹'), '成员只看到有自己项目的文件夹');
+  assert.ok(nav.indexOf('年度战略')<nav.indexOf('入池项目'), '项目排在自己的文件夹下');
+  assert.ok(elements['#projectGrid'].innerHTML.includes('open-space'));
+  a.run("S.user={id:'superadmin',admin:1};renderProjects()");
+  nav=elements['#projectNav'].innerHTML;
+  assert.ok(nav.includes('空文件夹')&&nav.includes('未归类')&&nav.includes('addFolderBtn'));
+  assert.ok(nav.indexOf('年度战略')<nav.indexOf('入池项目')&&nav.indexOf('入池项目')<nav.indexOf('未归类')&&nav.indexOf('未归类')<nav.indexOf('散落项目'));
+  a.run("UI.space='p';renderProjects()");
+  let space=elements['#projectSpace'].innerHTML;
+  assert.equal(elements['#projectGrid'].innerHTML, '');
+  assert.equal(elements['#projectsView h1'].textContent, '入池项目');
+  assert.ok(space.includes('id="spaceBackground"')&&space.includes('为什么做'));
+  assert.ok(space.includes('value="调研"')&&space.includes('进行中 0 · 已完成 1 · 1.5 小时'));
+  assert.ok(space.includes('第 2 / 10 天')&&space.includes('1 / 1 已完成'));
+  assert.ok(space.includes('/api/files/x')&&space.includes('2 KB')&&!space.includes('别的.txt'));
+  assert.ok(space.includes('id="spaceFolder"')&&space.includes('file-delete')&&!space.includes('open-space'));
+  a.run("S.projects[0].members.test003='accepted';S.users.push({id:'test003',active:1});S.user={id:'test003',admin:0};renderProjects()");
+  space=elements['#projectSpace'].innerHTML;
+  assert.ok(!space.includes('spaceBackground')&&space.includes('为什么做'), '协作者只读');
+  assert.ok(!space.includes('file-delete')&&!space.includes('spaceFolder'), '不能删别人的文件');
+  assert.ok(!space.includes('进行中 0 · 已完成 1'), '看不到别人的负荷');
+  a.run("S.projects[0].status='done';renderProjects()");
+  assert.equal(a.run('UI.space'), '', '项目不可见后回到全部项目');
+});
+
 function planningApp(){
   const a=app();
   a.run(source.slice(source.indexOf('const AGENT_CONFIG_KEY'),source.indexOf('const CHAT_POLL_MS')));
@@ -1285,4 +1324,43 @@ test('ArrowUp recalls the last planning request only into an empty composer',()=
   assert.equal(prevented,1);
   a.context.input.value='正在编辑';a.run('agentInputKeydown(event)');
   assert.equal(a.context.input.value,'正在编辑');
+});
+
+test('a background save receipt preserves newer edits and allows retry after a failure',async()=>{
+  const a=app(),bg={innerText:'原背景'},button={},calls=[];
+  let respond;
+  a.context.document={querySelector:s=>s==='#spaceBackground'?bg:s==='#saveBackground'?button:null,querySelectorAll:()=>[]};
+  a.context.fetch=(path,options)=>{calls.push(JSON.parse(options.body));return new Promise(resolve=>{respond=resolve})};
+  a.run("toast=()=>{};var project={id:'p'};bindProjectSpace(project)");
+  bg.innerText='版本 A';bg.oninput();const first=button.onclick();
+  assert.equal(button.disabled,true);
+  bg.innerText='版本 B';bg.oninput();
+  await button.onclick();assert.equal(calls.length,1,'保存中不发送并发请求');
+  respond({ok:true,text:async()=>'{"ok":true}'});await first;
+  assert.equal(a.run('project.background'),'版本 A');
+  assert.equal(bg.innerText,'版本 B');
+  assert.equal(button.disabled,false,'新编辑仍待保存');assert.equal(button.textContent,'保存');
+  const second=button.onclick();respond({ok:true,text:async()=>'{"ok":true}'});await second;
+  assert.equal(calls[1].data.background,'版本 B');
+  assert.equal(button.disabled,true);assert.equal(button.textContent,'已保存');
+  bg.innerText='版本 C';bg.oninput();const failed=button.onclick();
+  respond({ok:false,text:async()=>'{"error":"暂时失败"}'});await failed;
+  assert.equal(button.disabled,false);assert.equal(button.textContent,'保存');
+  assert.equal(a.run('project.background'),'版本 B');
+});
+
+test('archived attachments have a read-only navigation and achievements entry without active project actions',()=>{
+  const a=app(),elements={};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={classList:{toggle(){}}}),querySelectorAll:()=>[]};
+  a.run(`S.today='2026-11-03';S.user={id:'test001',admin:0};UI.view='projects';S.projects=[];
+    S.fileArchives=[{id:'old',name:'已交付项目',owner:'test001',status:'done'}];
+    S.files=[{id:'f',projectId:'old',name:'交付.pdf',size:20,uploader:'test001',createdAt:'2026-11-03T09:00:00+08:00'}];
+    UI.space='old';renderProjects();`);
+  assert.ok(elements['#projectNav'].innerHTML.includes('归档文件'));
+  const html=elements['#projectSpace'].innerHTML;
+  assert.ok(html.includes('/api/files/f')&&html.includes('项目文件归档'));
+  for(const action of ['spaceFileInput','file-delete','spaceBackground','spaceFolder','request-project-completion'])assert.ok(!html.includes(action),action);
+  assert.equal(a.run('visibleProjects().length'),0,'归档项目不回到进行中列表');
+  a.run("S.user={id:'superadmin',admin:1};S.achievements=[{id:'old',name:'已交付项目',status:'done',tasks:[]}];renderAchievements()");
+  assert.ok(elements['#achievementGrid'].innerHTML.includes('achievement-files'),'管理员可从成果库进入归档附件');
 });

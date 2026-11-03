@@ -39,7 +39,8 @@ const ICON_PATHS={
   'chat':'<path d="M20 13.5a2 2 0 0 1-2 2H8.5L4 19V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2Z"/>',
   'mic':'<rect x="9" y="3" width="6" height="10" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v3"/>',
   'grip':'<path d="M9 6h.01"/><path d="M15 6h.01"/><path d="M9 12h.01"/><path d="M15 12h.01"/><path d="M9 18h.01"/><path d="M15 18h.01"/>',
-  'pip':'<rect x="2.5" y="4.5" width="19" height="15" rx="2"/><rect x="12" y="11" width="7" height="6" rx="1"/>'
+  'pip':'<rect x="2.5" y="4.5" width="19" height="15" rx="2"/><rect x="12" y="11" width="7" height="6" rx="1"/>',
+  'upload':'<path d="M12 15V4"/><path d="m7 9 5-5 5 5"/><path d="M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/>'
 };
 function icon(name,extra=''){
   const body=ICON_PATHS[name]||ICON_PATHS['diamond'];
@@ -53,7 +54,7 @@ function hydrateIcons(root=document){
     el.dataset.iconReady='1';
   });
 }
-let S={user:null,users:[],tasks:[],projects:[],achievements:[],logs:[],reports:[],diaries:[],diaryStats:[],notifications:[],requests:[],editRequests:[],suggestions:[],profiles:[],today:''};
+let S={user:null,users:[],tasks:[],projects:[],folders:[],files:[],fileArchives:[],achievements:[],logs:[],reports:[],diaries:[],diaryStats:[],notifications:[],requests:[],editRequests:[],suggestions:[],profiles:[],today:''};
 /* The server always answers in JSON, but the tunnel in front of it does not:
    a request that runs past its time limit comes back as an HTML error page.
    Safari reports parsing that as "The string did not match the expected
@@ -94,7 +95,7 @@ async function refresh(){
   try{next=await getState()}catch(e){showAuth();return}
   if(S.user?.id!==next.user.id){
     if(S.user&&typeof agentResetUser==='function')agentResetUser();
-    Object.assign(UI,{view:'calendar',member:'all',filter:'all',selectedWeek:0,detailDate:null,timelineScroll:null,dayOffset:0});
+    Object.assign(UI,{space:'',view:'calendar',member:'all',filter:'all',selectedWeek:0,detailDate:null,timelineScroll:null,dayOffset:0});
   }
   /* updateChatDot is defined further down the file than the unit-test sandbox
      loads, so guard the call rather than assume it is in scope. */
@@ -543,11 +544,22 @@ function bindProjectTaskDrag(){
   });
 }
 function renderProjects(){
+  if(UI.space&&![...visibleProjects(),...(S.fileArchives||[])].some(p=>p.id===UI.space))UI.space='';
+  renderProjectNav();
+  $('#projectOverview')?.classList?.toggle('hidden',Boolean(UI.space));
+  $('#projectSpace')?.classList?.toggle('hidden',!UI.space);
+  if(UI.space){$('#projectGrid').innerHTML='';renderProjectSpace(UI.space);return}
   const admin=Boolean(S.user?.admin);
   const projects=visibleProjects();
   $('#projectsView .eyebrow').textContent=`${admin?'团队项目管理':'我的项目'} · ${projects.length} 个项目`;
   $('#projectsView h1').textContent=admin?'项目与任务管理':'我的项目与任务';
-  $('#projectGrid').innerHTML=projects.map(p=>{
+  $('#projectGrid').innerHTML=projects.map(p=>projectCardHTML(p)).join('')+tempTaskCard()||'<div class="empty-state">暂无项目</div>';
+  bindProjectCards();
+}
+/* One project's card: its people, its tasks and what its Owner can do. The
+   overview lists them all; a project's own space carries just its own. */
+function projectCardHTML(p,inSpace=false){
+    const admin=Boolean(S.user?.admin);
     const mode=projectSortMode(p),tasks=sortProjectTasks(p,S.tasks.filter(t=>t.projectId===p.id&&!t.repeatId&&!isSuperseded(t)),mode),done=tasks.filter(t=>t.status==='done').length;
     const fixed=(S.repeats||[]).filter(r=>r.projectId===p.id&&r.active!==false);
     const accepted=Object.entries(p.members||{}).filter(([,v])=>v==='accepted').map(([id])=>id),pending=Object.entries(p.members||{}).filter(([,v])=>v==='pending').map(([id])=>id);
@@ -560,6 +572,8 @@ function renderProjects(){
       +`<div class="project-node-heading"><div><div class="project-title"><h3>${escapeHTML(p.name)}`
       +`${fresh?'<span class="new-chip">新</span>':''}</h3><span class="project-status">${projectStatus(p)}</span></div>`
       +`<p>${escapeHTML(p.desc||'暂无描述')}</p></div><div class="project-node-actions">`
+      +`${inSpace?'':`<button class="ghost-btn open-space" data-space="${escapeHTML(p.id)}">${icon('folder')}项目空间`
+      +`</button>`}`
       +`${manage?`<button class="primary-btn add-project-task" data-project="${escapeHTML(p.id)}">`
       +`${icon('plus')}新建并指派任务</button><button class="secondary-btn project-settings" data-id="`
       +`${escapeHTML(p.id)}">项目设置</button>`:''}`
@@ -591,7 +605,9 @@ function renderProjects(){
       +`${escapeHTML(repeatPattern(r))} · ${escapeHTML(r.time||'09:00')} · `
       +`${escapeHTML((r.assignees||[]).map(nameOf).join('、'))}${r.end?` · 至 ${escapeHTML(r.end)}`:''}</small>`
       +`</div>`).join('')}`:''}</div></article>`;
-  }).join('')+tempTaskCard()||'<div class="empty-state">暂无项目</div>';
+}
+function bindProjectCards(){
+  $$('.open-space').forEach(b=>b.onclick=()=>openProjectSpace(b.dataset.space));
   $$('.project-node[data-fresh]:not([data-fresh=""])').forEach(card=>card.addEventListener('pointerdown',
     ()=>clearFresh([card.dataset.fresh]),{once:true}));
   $$('.add-project-task').forEach(b=>b.onclick=()=>newTask(b.dataset.project));
@@ -606,6 +622,198 @@ function renderProjects(){
   $$('.project-settings').forEach(b=>b.onclick=()=>projectSettings(b.dataset.id));
   $$('.leave-project').forEach(b=>b.onclick=()=>leaveProject(b.dataset.id));
   $$('.delete-project').forEach(b=>b.onclick=()=>deleteProject(b.dataset.id));
+}
+/* 项目空间 · 目录. Like a knowledge base's tree: projects sit in folders the
+   admins keep, and a project's Owner files it from its space. A folder closed
+   here stays closed on this browser. 全部项目 is the card overview; a project
+   opens its own space: lifecycle, background, people, tasks and files. */
+const FOLDER_CLOSED_KEY='wc-folders-closed';
+function closedFolders(){try{return new Set(JSON.parse(localStorage.getItem(FOLDER_CLOSED_KEY)||'[]'))}catch(_){return new Set()}}
+function toggleFolder(id){
+  const closed=closedFolders();closed.has(id)?closed.delete(id):closed.add(id);
+  try{localStorage.setItem(FOLDER_CLOSED_KEY,JSON.stringify([...closed]))}catch(_){}
+  renderProjectNav();
+}
+/* Members only see folders holding a project they can open; admins see all. */
+function projectFolders(){
+  const projects=visibleProjects(),ids=new Set((S.folders||[]).map(f=>f.id));
+  const folders=(S.folders||[]).map(f=>({...f,projects:projects.filter(p=>p.folderId===f.id)}))
+    .filter(f=>S.user?.admin||f.projects.length);
+  return {folders,loose:projects.filter(p=>!ids.has(p.folderId))};
+}
+function renderProjectNav(){
+  const nav=$('#projectNav');if(!nav)return;
+  const {folders,loose}=projectFolders(),closed=closedFolders(),fresh=freshRefs(),admin=Boolean(S.user?.admin);
+  const item=p=>`<button class="project-nav-item${UI.space===p.id?' is-on':''}" data-space="${escapeHTML(p.id)}"`
+    +`${UI.space===p.id?' aria-current="page"':''}><i class="project-nav-dot is-${escapeHTML(p.status||'active')}"></i>`
+    +`<span>${escapeHTML(p.name)}</span>${fresh.has(p.id)?'<em class="new-chip">新</em>':''}</button>`;
+  const folder=f=>{
+    const open=!closed.has(f.id);
+    return `<div class="project-nav-folder${open?' is-open':''}"><div class="project-nav-folder-row">`
+      +`<button class="project-nav-toggle" data-folder="${escapeHTML(f.id)}" aria-expanded="${open}">`
+      +`${icon('chevron-right','folder-caret')}${icon('folder')}<span>${escapeHTML(f.name)}</span><b>${f.projects.length}</b></button>`
+      +`${admin?`<button class="project-nav-edit" data-edit-folder="${escapeHTML(f.id)}" title="重命名或删除" aria-label="`
+      +`编辑文件夹「${escapeHTML(f.name)}」">${icon('edit')}</button>`:''}</div>`
+      +`${open?`<div class="project-nav-children">${f.projects.map(item).join('')
+      ||'<p class="project-nav-empty">还没有项目</p>'}</div>`:''}</div>`;
+  };
+  nav.innerHTML=`<div class="project-nav-head"><span>项目目录</span>${admin?`<button class="project-nav-add" `
+    +`id="addFolderBtn" title="新建文件夹" aria-label="新建文件夹">${icon('plus')}</button>`:''}</div>`
+    +`<button class="project-nav-item project-nav-all${UI.space?'':' is-on'}" data-space="">${icon('layout-grid')}`
+    +`<span>全部项目</span><b>${visibleProjects().length}</b></button>`
+    +folders.map(folder).join('')
+    +(loose.length?`${folders.length?'<div class="project-nav-label">未归类</div>':''}${loose.map(item).join('')}`:'')
+    +((S.fileArchives||[]).length?`<div class="project-nav-label">归档文件</div>${S.fileArchives.map(item).join('')}`:'');
+  $$('#projectNav [data-space]').forEach(b=>b.onclick=()=>openProjectSpace(b.dataset.space));
+  $$('#projectNav [data-folder]').forEach(b=>b.onclick=()=>toggleFolder(b.dataset.folder));
+  $$('#projectNav [data-edit-folder]').forEach(b=>b.onclick=()=>editFolder(b.dataset.editFolder));
+  const add=$('#addFolderBtn');if(add)add.onclick=()=>editFolder();
+}
+function openProjectSpace(id){
+  UI.space=id||'';if(id)clearFresh([id]);
+  if(UI.view!=='projects')switchView('projects');else renderProjects();
+  $('.main-content')?.scrollTo?.({top:0,behavior:'smooth'});
+}
+function editFolder(id){
+  const f=(S.folders||[]).find(x=>x.id===id),count=f?S.projects.filter(p=>p.folderId===f.id).length:0;
+  openModal(`<div class="eyebrow">项目目录</div><h2>${f?'编辑文件夹':'新建文件夹'}</h2><label class="form-field">文件夹名称`
+    +`<input id="folderName" maxlength="40" value="${escapeHTML(f?.name||'')}" placeholder="例如：年度战略"></label>`
+    +`${f?`<p class="muted">删除文件夹不会删除项目，里面的 ${count} 个项目会回到「未归类」。</p>`:''}`
+    +`<div class="modal-footer">${f?'<button class="ghost-btn is-danger" id="deleteFolder">删除文件夹</button>':''}`
+    +`<button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="saveFolder">`
+    +`${f?'保存':'创建'}</button></div>`);
+  $('#cancelAction').onclick=closeModal;$('#folderName').focus();
+  $('#saveFolder').onclick=async()=>{
+    const name=$('#folderName').value.trim();if(!name){toast('请填写文件夹名称');return}
+    try{await act(f?'folder.update':'folder.create',f?{id:f.id,name}:{name});closeModal()}catch(e){}
+  };
+  const drop=$('#deleteFolder');
+  if(drop)drop.onclick=async()=>{try{await act('folder.delete',{id:f.id});closeModal()}catch(e){}};
+}
+function renderProjectSpace(id){
+  const archive=(S.fileArchives||[]).find(x=>x.id===id),p=S.projects.find(x=>x.id===id)||archive,box=$('#projectSpace');if(!p||!box)return;
+  if(archive){
+    $('#projectsView .eyebrow').textContent='项目空间 · 归档文件';$('#projectsView h1').textContent=p.name;
+    box.innerHTML=`<section class="space-section"><div class="space-head"><h2>项目文件归档</h2></div>`
+      +`<p class="muted">${escapeHTML(projectStatus(p))} · Owner ${escapeHTML(nameOf(p.owner))}。附件保留供项目成员读取。</p></section>`
+      +projectFiles(p,true);return;
+  }
+  const manage=canManageProject(p),folder=(S.folders||[]).find(f=>f.id===p.folderId);
+  $('#projectsView .eyebrow').textContent=`项目空间 · ${folder?folder.name:'未归类'}`;
+  $('#projectsView h1').textContent=p.name;
+  box.innerHTML=projectLifecycle(p,manage)+projectBackground(p,manage)+projectStaffing(p,manage)
+    +`<section class="space-section space-tasks"><div class="space-head"><h2>项目任务</h2></div>${projectCardHTML(p,true)}</section>`
+    +projectFiles(p);
+  bindProjectCards();bindProjectSpace(p);
+}
+/* 项目周期: 立项 → 执行 → 结项, with how far the dates and the work have come. */
+function projectLifecycle(p,manage){
+  const created=String(p.createdAt||'').slice(0,10)||p.start,start=p.start||created,end=p.end;
+  const tasks=S.tasks.filter(t=>t.projectId===p.id&&!t.repeatId&&!isSuperseded(t)&&t.status!=='skipped');
+  const done=tasks.filter(t=>t.status==='done').length;
+  const span=end?Math.max(1,daysCount(start,end)):0,passed=span?Math.min(span,Math.max(0,daysCount(start,S.today))):0;
+  const stage=p.status==='pending'||p.status==='rejected'?0:p.status==='done'||p.status==='archived'?2:1;
+  const steps=[['立项',created],['执行',start],['结项',end||'长期']];
+  const meter=(label,value,total,text)=>`<div class="space-meter"><span>${label}</span><div class="progress wide"><i style="width:`
+    +`${total?Math.round(value/total*100):0}%"></i></div><b>${text}</b></div>`;
+  const folders=S.folders||[];
+  return `<section class="space-section space-cycle"><div class="space-steps">${steps.map(([label,day],i)=>`<div class="space-step`
+    +`${i<stage?' is-past':i===stage?' is-now':''}"><i></i><strong>${label}</strong><small>${escapeHTML(/^\d{4}-/.test(day||'')?fmt(day):day||'')}</small></div>`).join('')}</div>`
+    +`<div class="space-meters">${span?meter('时间',passed,span,`第 ${passed} / ${span} 天`):''}`
+    +`${meter('任务',done,tasks.length,`${done} / ${tasks.length} 已完成`)}</div>`
+    +`<div class="space-meta"><span>Owner · ${escapeHTML(nameOf(p.owner))}</span><span class="project-status">${projectStatus(p)}</span>`
+    +`${manage&&folders.length?`<label class="space-folder">放在<select id="spaceFolder"><option value="">未归类</option>`
+    +`${folders.map(f=>`<option value="${escapeHTML(f.id)}"${f.id===p.folderId?' selected':''}>${escapeHTML(f.name)}</option>`).join('')}`
+    +`</select></label>`:''}</div></section>`;
+}
+function projectBackground(p,manage){
+  const text=p.background||'';
+  return `<section class="space-section"><div class="space-head"><h2>项目背景</h2>${manage?'<button class="primary-btn" '
+    +'id="saveBackground" disabled>已保存</button>':''}</div>`
+    +`${manage?docEdit(text,'id="spaceBackground" data-placeholder="为什么做、要达成什么、边界在哪里"')
+    :`<div class="space-text">${text?escapeHTML(text):'<span class="muted">Owner 还没有写项目背景</span>'}</div>`}</section>`;
+}
+/* 项目人力: who is on the project and what each one carries. A member's own
+   snapshot only holds their own tasks, so others' load is shown to managers. */
+function projectStaffing(p,manage){
+  const people=Object.entries(p.members||{}).filter(([,v])=>v==='accepted').map(([id])=>id)
+    .sort((a,b)=>(b===p.owner)-(a===p.owner));
+  const tasks=S.tasks.filter(t=>t.projectId===p.id&&!isSuperseded(t)&&t.status!=='skipped');
+  const row=id=>{
+    const mine=tasks.filter(t=>t.assignee===id),open=mine.filter(t=>['todo','doing'].includes(t.status)).length;
+    const done=mine.filter(t=>t.status==='done').length,mins=mine.reduce((sum,t)=>sum+Number(t.duration||0),0),role=p.staffing?.[id]||'';
+    return `<div class="staff-row">${avatarHTML(id)}<div class="staff-name"><strong>${escapeHTML(nameOf(id))}</strong>`
+      +`<small>${id===p.owner?'Owner':'协作者'}</small></div>`
+      +`${manage?`<input class="staff-role" data-member="${escapeHTML(id)}" maxlength="200" value="${escapeHTML(role)}" `
+      +`placeholder="负责什么" aria-label="${escapeHTML(nameOf(id))} 的分工">`:`<span class="staff-role-text">${escapeHTML(role||'—')}</span>`}`
+      +`<span class="staff-load">${manage||id===S.user?.id?`进行中 ${open} · 已完成 ${done}${mins?` · ${hours(mins)} 小时`:''}`:''}</span></div>`;
+  };
+  return `<section class="space-section"><div class="space-head"><h2>项目人力 <span>${people.length}</span></h2>`
+    +`${manage&&p.status==='active'?'<button class="secondary-btn" id="spaceInvite">添加协作者</button>':''}</div>`
+    +`<div class="staff-list">${people.map(row).join('')}</div></section>`;
+}
+const fileExt=name=>(String(name).match(/\.([a-z0-9]{1,5})$/i)?.[1]||'FILE').toUpperCase();
+const fileSize=n=>n>=1048576?`${(n/1048576).toFixed(1)} MB`:n>=1024?`${Math.round(n/1024)} KB`:`${n} B`;
+const MAX_FILE_MB=20;
+function projectFiles(p,readonly=false){
+  const files=(S.files||[]).filter(f=>f.projectId===p.id).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+  const canDrop=f=>!readonly&&(S.user?.admin||p.owner===S.user?.id||f.uploader===S.user?.id);
+  const row=f=>`<div class="file-row"><span class="file-ext">${escapeHTML(fileExt(f.name))}</span><a class="file-name" href="/api/files/`
+    +`${encodeURIComponent(f.id)}" download="${escapeHTML(f.name)}">${escapeHTML(f.name)}</a><small>${escapeHTML(fileSize(f.size))} · `
+    +`${escapeHTML(nameOf(f.uploader))} · <span title="${escapeHTML(f.createdAt)}">${escapeHTML(relTime(f.createdAt))}</span></small>`
+    +`${canDrop(f)?`<button class="ghost-btn file-delete" data-file="${escapeHTML(f.id)}" aria-label="删除 ${escapeHTML(f.name)}">`
+    +`${icon('x')}</button>`:''}</div>`;
+  return `<section class="space-section space-files" id="spaceFiles"><div class="space-head"><h2>项目文件 <span>${files.length}</span></h2>`
+    +`${readonly?'':`<label class="secondary-btn space-upload">${icon('upload')}上传文件<input type="file" id="spaceFileInput" multiple hidden></label>`}</div>`
+    +`${files.length?`<div class="file-list">${files.map(row).join('')}</div>`:''}`
+    +`<p class="space-drop-hint">${readonly?'归档文件仅供下载。':`把文件拖到这里，或点「上传文件」。单个文件不超过 ${MAX_FILE_MB}MB。`}</p></section>`;
+}
+async function uploadProjectFiles(p,list){
+  const files=[...list];if(!files.length)return;
+  const big=files.find(f=>f.size>MAX_FILE_MB*1048576);if(big){toast(`「${big.name}」超过 ${MAX_FILE_MB}MB`);return}
+  toast(`正在上传 ${files.length} 个文件…`);
+  try{
+    for(const f of files){
+      const r=await fetch(`/api/files?project=${encodeURIComponent(p.id)}`,{method:'POST',credentials:'same-origin',body:f,
+        headers:{'Content-Type':f.type||'application/octet-stream','X-Work-Calendar':'1','X-File-Name':encodeURIComponent(f.name)}});
+      const x=await readJSON(r);if(!r.ok)throw new Error(x.error||`「${f.name}」上传未完成`);
+    }
+    await refresh();toast(`已上传 ${files.length} 个文件`);
+  }catch(e){toast(e.message);refresh()}
+}
+/* Background and 分工 save in place without a full refresh, so typing in one
+   field and moving to the next never loses the caret. */
+function bindProjectSpace(p){
+  const save=async(data,done)=>{try{await api('/api/action',{action:'project.space',data:{id:p.id,...data}});Object.assign(p,data);done?.();return true}catch(e){toast(e.message);return false}};
+  const bg=$('#spaceBackground'),btn=$('#saveBackground');
+  if(bg&&btn){
+    let saved=docText(bg),saving=false;
+    const sync=()=>{const dirty=docText(bg)!==saved;btn.disabled=saving||!dirty;btn.textContent=saving?'保存中…':dirty?'保存':'已保存'};
+    bg.oninput=sync;
+    btn.onclick=async()=>{
+      if(saving)return;
+      const submitted=docText(bg);saving=true;sync();
+      if(await save({background:submitted})){
+        saved=submitted;toast(docText(bg)===saved?'项目背景已保存':'已保存提交的版本，仍有未保存修改');
+      }
+      saving=false;sync();
+    };
+  }
+  $$('#projectSpace .staff-role').forEach(input=>input.onchange=()=>{
+    const staffing={};$$('#projectSpace .staff-role').forEach(x=>{if(x.value.trim())staffing[x.dataset.member]=x.value.trim()});
+    save({staffing},()=>toast('分工已保存'));
+  });
+  const folder=$('#spaceFolder');if(folder)folder.onchange=()=>act('project.space',{id:p.id,folderId:folder.value||null});
+  const invite=$('#spaceInvite');if(invite)invite.onclick=()=>inviteCollaborators(p.id);
+  const input=$('#spaceFileInput');if(input)input.onchange=()=>{uploadProjectFiles(p,input.files);input.value=''};
+  $$('#projectSpace .file-delete').forEach(b=>b.onclick=async()=>{
+    const f=S.files.find(x=>x.id===b.dataset.file);
+    if(f&&confirm(`删除「${f.name}」？删除后无法恢复。`)){try{await act('file.delete',{id:f.id})}catch(e){}}
+  });
+  const zone=$('#spaceFiles');if(!zone)return;
+  zone.ondragover=e=>{if(![...e.dataTransfer.types].includes('Files'))return;e.preventDefault();zone.classList.add('is-over')};
+  zone.ondragleave=e=>{if(!zone.contains(e.relatedTarget))zone.classList.remove('is-over')};
+  zone.ondrop=e=>{e.preventDefault();zone.classList.remove('is-over');uploadProjectFiles(p,e.dataTransfer.files)};
 }
 /* One task line under a project or the 临时任务 card. `who` is ready HTML. */
 function projectChildRow(t,who,{title='',drag='',tail=''}={}){
@@ -1466,9 +1674,10 @@ function renderAchievements(){
   if(!grid)return;
   grid.innerHTML=projects.map(p=>{
     const tasks=sortTasks(projectTasks(p)),done=tasks.filter(t=>t.status==='done').length,stages=achievementLifecycle(p,tasks);
-    return `<article class="achievement-card" data-project="${escapeHTML(p.id)}"><div class="achievement-card-head"><div><span class="achievement-kicker">已归档成果</span><h2>${escapeHTML(p.name)}</h2><p>${escapeHTML(p.desc||'暂无项目描述')}</p></div><span class="achievement-status">${projectStatus(p)}</span></div><div class="achievement-meta"><span>Owner · <b>${escapeHTML(p.owner||'—')}</b></span><span>任务完成 · <b>${done}/${tasks.length}</b></span><span>完成于 · <b>${escapeHTML(String(p.completedAt||p.end||'—').slice(0,10))}</b></span></div><div class="achievement-actions"><button class="ghost-btn open-channel-archive" data-project="${escapeHTML(p.id)}" data-name="${escapeHTML(p.name)}">沟通记录</button></div><ol class="achievement-lifecycle">${stages.map((s,i)=>`<li class="${s.at?'is-complete':''}"><i></i><span><b>${escapeHTML(s.label)}</b><small>${escapeHTML(s.at||'未记录')}${s.meta?` · ${escapeHTML(s.meta)}`:''}</small></span>${i<stages.length-1?'<em></em>':''}</li>`).join('')}</ol>${p.completionReport?`<div class="achievement-report"><span>结项报告</span><p>${escapeHTML(p.completionReport)}</p></div>`:''}<div class="achievement-actions"><button class="secondary-btn achievement-open" data-project="${escapeHTML(p.id)}">查看项目详情</button></div></article>`;
+    return `<article class="achievement-card" data-project="${escapeHTML(p.id)}"><div class="achievement-card-head"><div><span class="achievement-kicker">已归档成果</span><h2>${escapeHTML(p.name)}</h2><p>${escapeHTML(p.desc||'暂无项目描述')}</p></div><span class="achievement-status">${projectStatus(p)}</span></div><div class="achievement-meta"><span>Owner · <b>${escapeHTML(p.owner||'—')}</b></span><span>任务完成 · <b>${done}/${tasks.length}</b></span><span>完成于 · <b>${escapeHTML(String(p.completedAt||p.end||'—').slice(0,10))}</b></span></div><div class="achievement-actions">${(S.fileArchives||[]).some(x=>x.id===p.id)?`<button class="ghost-btn achievement-files" data-project="${escapeHTML(p.id)}">项目文件</button>`:''}<button class="ghost-btn open-channel-archive" data-project="${escapeHTML(p.id)}" data-name="${escapeHTML(p.name)}">沟通记录</button></div><ol class="achievement-lifecycle">${stages.map((s,i)=>`<li class="${s.at?'is-complete':''}"><i></i><span><b>${escapeHTML(s.label)}</b><small>${escapeHTML(s.at||'未记录')}${s.meta?` · ${escapeHTML(s.meta)}`:''}</small></span>${i<stages.length-1?'<em></em>':''}</li>`).join('')}</ol>${p.completionReport?`<div class="achievement-report"><span>结项报告</span><p>${escapeHTML(p.completionReport)}</p></div>`:''}<div class="achievement-actions"><button class="secondary-btn achievement-open" data-project="${escapeHTML(p.id)}">查看项目详情</button></div></article>`;
   }).join('');
   $$('#achievementGrid .achievement-open').forEach(b=>b.onclick=()=>openWorkLogDetail('',b.dataset.project,'project'));
+  $$('#achievementGrid .achievement-files').forEach(b=>b.onclick=()=>openProjectSpace(b.dataset.project));
 }
 const DAY_MS=86400000;
 const dateNumber=iso=>{
