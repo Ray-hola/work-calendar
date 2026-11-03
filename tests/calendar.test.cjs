@@ -1584,3 +1584,20 @@ test('a drop between directory rows becomes a parent and an order between the ne
   assert.deepEqual(at('project',80,90),{parent:'f',before:null,level:1,y:95,top:95},'偏右：归到文件夹里');
   assert.equal(at('folder',80,50).before,'r','文件夹落点跳过别人的子项');
 });
+
+test('AI 接入配置 offers mainstream providers, tests the connection and feeds the model picker', () => {
+  const presets = source.match(/const LLM_PRESETS=\{[\s\S]*?\n\};/)[0];
+  for (const host of ['api.openai.com/v1', 'api.anthropic.com/v1', 'generativelanguage.googleapis.com', 'api.deepseek.com', 'dashscope.aliyuncs.com'])
+    assert.ok(presets.includes(host), host);
+  const testFn = source.match(/async function agentTestConfig\(\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/action:'agent\.config\.test'/.test(testFn));
+  assert.ok(/agentModels=r\.models;agentRenderModelOptions/.test(testFn), '测试拿到的模型马上进下拉框');
+  assert.ok(/r\.ok\?[\s\S]*:r\.reason/.test(testFn), '失败时显示原因');
+  const save = source.match(/async function agentSaveConfig\(\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/models:agentModels/.test(save) && /contextChars:/.test(save));
+  assert.ok(/renderAgentModelChip\(\)/.test(save), '保存后助手顶部的模型随之更新');
+  const menu = source.match(/function agentToggleModelMenu\(open\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/action:'agent\.config\.model'/.test(menu), '顶部模型标签可以直接切换模型');
+  const preferred = new Function(source.match(/const agentPreferredModel=[^\n]*/)[0] + ';return agentPreferredModel')();
+  assert.equal(preferred(['text-embedding-3-small', 'gpt-4.1']), 'gpt-4.1');
+});
