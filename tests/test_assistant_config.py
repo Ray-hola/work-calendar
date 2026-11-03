@@ -89,7 +89,7 @@ class AssistantConfigTests(unittest.TestCase):
                                 baseUrl='https://api.example.com/v1', model='y')
         self.assertFalse(wrong_model['ok'])
         self.assertEqual(wrong_model['models'], ['x'], '列表仍然给出，方便改选')
-        self.assertIn('模型「y」不可用', wrong_model['reason'])
+        self.assertIn('模型「y」验证失败', wrong_model['reason'])
         self.assertIn('http(s)', self.probe({}, baseUrl='ftp://x')['reason'])
 
     def test_a_provider_without_a_model_list_is_checked_by_answering(self):
@@ -98,9 +98,135 @@ class AssistantConfigTests(unittest.TestCase):
         self.assertEqual(result['models'], [])
 
     def test_anthropic_keys_also_go_in_its_own_header(self):
-        self.probe({'/models': {'data': [{'id': 'claude-x'}]}}, baseUrl='https://api.anthropic.com/v1', apiKey='sk-ant-1')
+        self.probe({'/models': {'data': [{'id': 'claude-x'}]}, '/chat/completions': _chat('好')},
+                   baseUrl='https://api.anthropic.com/v1', apiKey='sk-ant-1')
         self.assertEqual(self.seen[0].get_header('X-api-key'), 'sk-ant-1')
         self.assertEqual(self.seen[0].get_header('Anthropic-version'), '2023-06-01')
+
+    def test_reasoning_models_use_compatible_probe_and_chat_parameters(self):
+        for model in ('o3', 'o4-mini', 'gpt-5', 'openai/o3'):
+            with self.subTest(model=model):
+                def chat(request):
+                    body = json.loads(request.data)
+                    self.assertNotIn('max_tokens', body)
+                    self.assertNotIn('temperature', body)
+                    if body['messages'][0].get('content') == '只回复：好':
+                        self.assertGreaterEqual(body['max_completion_tokens'], 2048)
+                    return _chat('好')
+                result = self.probe({'/models': {'data': [{'id': model}]}, '/chat/completions': chat},
+                                    baseUrl='https://api.openai.com/v1', model=model)
+                self.assertTrue(result['ok'])
+                self.store.set_llm_config(self.admin, {'baseUrl': 'https://api.openai.com/v1', 'model': model})
+                with mock.patch('server.urllib.request.urlopen', _provider({'/chat/completions': chat}, self.seen)):
+                    self.assertEqual(self.store.llm_chat(self.admin, {'messages': [{'role': 'user', 'content': '你好'}]})['content'], '好')
+        self.assertEqual(self.store.llm_payload('gpt-4.1', [], temperature=0.2, probe=True)['max_tokens'], 256)
+        self.assertEqual(self.store.llm_payload('gpt-4.1', [], temperature=0.2)['temperature'], 0.2)
+
+    def test_model_listing_alone_never_proves_a_working_connection(self):
+        before = self.store._llm_record()
+        result = self.probe({'/models': 401, '/chat/completions': 401}, provider='opencode-go',
+                            baseUrl='https://opencode.ai/zen/go/v1')
+        self.assertFalse(result['ok'])
+        self.assertIn('401', result['reason'])
+        for listing in ({'unexpected': 'body'}, {'data': []}, {'data': {'id': 'not-a-list'}}):
+            result = self.probe({'/models': listing}, baseUrl='https://api.example.com/v1')
+            self.assertFalse(result['ok'])
+            self.assertIn('模型 ID', result['reason'])
+        self.assertEqual(self.store._llm_record(), before, '验证不保存配置')
+
+    def test_a_discovered_chat_model_is_actually_verified(self):
+        result = self.probe({'/models': {'data': [{'id': 'a-embedding'}, {'id': 'chat-model'}]},
+                             '/chat/completions': _chat('好')}, baseUrl='https://api.example.com/v1')
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['testedModel'], 'chat-model')
+        self.assertEqual(json.loads(self.seen[-1].data)['model'], 'chat-model')
+        for reply in ({}, [], _chat(''), _chat([{'text': {}}]), {'choices': []}, {'choices': [{'message': {'refusal': '拒绝'}}]}):
+            with self.subTest(reply=reply):
+                result = self.probe({'/models': {'data': [{'id': 'm'}]}, '/chat/completions': reply},
+                                    baseUrl='https://api.example.com/v1', model='m')
+                self.assertFalse(result['ok'])
+                self.assertIn('没有返回有效', result['reason'])
+        result = self.probe({'/models': 404, '/chat/completions': _chat([{'type': 'text', 'text': '好'}])},
+                            baseUrl='https://api.example.com/v1', model='manual')
+        self.assertTrue(result['ok'])
+
+    def read_pages(self, who, query):
+        rows, fragments, pages = [], {}, []
+        while query is not None:
+            self.assertLess(len(pages), 30, '分页必须前进并结束')
+            text = self.store.agent_lookup(who, query)
+            self.assertLessEqual(len(text), LOOKUP_CHARS)
+            page = json.loads(text);pages.append(page)
+            for row in page['rows']:
+                if 'fragment' in row:
+                    fragment = row['fragment'];parts = fragments.setdefault(row['id'], '')
+                    self.assertEqual(fragment['offset'], len(parts))
+                    fragments[row['id']] += fragment['text']
+                    if len(fragments[row['id']]) == fragment['totalChars']:
+                        rows.append(json.loads(fragments[row['id']]))
+                else:
+                    rows.append(row)
+            query = page['next']
+        self.assertTrue(pages[-1]['complete'])
+        return rows, pages
+
+    def test_every_monthly_row_can_be_read_without_duplicates(self):
+        expected = [self.put_task(f'分页 {i:03d}', '2026-09-01', desc='字' * 700)['id'] for i in range(401)]
+        private = self.put_task('私人内容', '2026-09-01', assignee='test002')['id']
+        self.store.db.commit()
+        rows, pages = self.read_pages(self.admin, {'chunk': 'tasks:2026-09'})
+        self.assertGreater(len(pages), 1)
+        self.assertEqual([r['id'] for r in rows], expected + [private])
+        self.assertEqual(rows[0]['desc'], '字' * 700)
+        mine = self.put_task('自己的', '2026-09-01', assignee='test001')['id'];self.store.db.commit()
+        rows, _ = self.read_pages(self.member, {'chunk': 'tasks:2026-09'})
+        self.assertEqual([r['id'] for r in rows], [mine])
+        self.assertIn('分页位置无效', self.store.agent_lookup(self.admin, {'search': '分页', 'offset': -1}))
+
+    def test_brief_lookup_reads_full_edited_content_and_preserves_permissions(self):
+        brief = self.store.put('reports', {'id': 'brief:2026-09-03', 'kind': 'brief', 'date': '2026-09-03',
+            'author': 'system', 'projectId': None, 'content': {'members': [], 'projects': [], 'risks': ['旧风险']},
+            'edits': {'risks': ['人工修订的结论']}})
+        self.store.db.commit()
+        self.assertNotIn('content', self.store.snapshot(self.admin)['reports'][0])
+        rows, _ = self.read_pages(self.admin, {'chunk': 'reports:2026-09'})
+        self.assertEqual(rows[0]['content']['risks'], ['人工修订的结论'])
+        self.assertEqual(self.store.get('reports', brief['id'])['content']['risks'], ['旧风险'])
+        self.assertEqual(self.read_pages(self.member, {'chunk': 'reports:2026-09'})[0], [])
+
+    def test_oversized_reports_diaries_and_task_text_are_lossless_fragments(self):
+        text = ('长报告："引号"\\与换行\n' * 8000) + '最后一段不可丢失'
+        for table, chunk, extra in [('reports', 'reports:2026-08', {'kind': 'brief', 'projectId': None}),
+                                     ('diaries', 'diaries:2026-08', {})]:
+            row = self.store.put(table, {'date': '2026-08-01', 'author': 'superadmin', 'content': {'note': text}, **extra})
+            self.store.db.commit()
+            rows, pages = self.read_pages(self.admin, {'chunk': chunk})
+            self.assertGreater(len(pages), 1)
+            self.assertEqual(rows, [row])
+            self.assertEqual(self.read_pages(self.member, {'chunk': chunk})[0], [])
+        task = self.put_task('很长的任务', '2026-08-01', desc=text);self.store.db.commit()
+        rows, pages = self.read_pages(self.admin, {'taskIds': [task['id']]})
+        self.assertGreater(len(pages), 1);self.assertEqual(rows[0]['desc'], text)
+
+    def test_chat_follows_next_page_and_keeps_its_conversation(self):
+        for i in range(150):self.put_task(f'任务 {i}', '2026-09-01', desc='字' * 700)
+        self.store.db.commit()
+        sent = []
+        def chat(request):
+            payload = json.loads(request.data);sent.append(payload)
+            if len(sent) == 1:return _chat('<lookup>{"chunk":"tasks:2026-09"}</lookup>')
+            page = json.loads(payload['messages'][-1]['content'].split('\n')[1])
+            return _chat('<lookup>' + json.dumps(page['next']) + '</lookup>') if page['next'] else _chat('已读完所有页。')
+        with mock.patch('server.urllib.request.urlopen', _provider({'/chat/completions': chat}, self.seen)):
+            result = self.store.llm_chat(self.admin, {'sessionId': 'review-conversation', 'messages': [{'role': 'user', 'content': '读完九月任务'}]})
+        self.assertEqual(result['content'], '已读完所有页。')
+        stored = self.store.all('agent_messages')
+        self.assertEqual([m['content'] for m in stored], ['读完九月任务', '已读完所有页。'])
+        self.assertTrue(all(m['conversation'] == 'review-conversation' for m in stored))
+        replies = iter(['<lookup>{"chunk":"tasks:2026-09"}</lookup>', '目前有这些。'])
+        with mock.patch('server.urllib.request.urlopen', _provider({'/chat/completions': lambda r: _chat(next(replies))}, self.seen)):
+            result = self.store.llm_chat(self.admin, {'messages': [{'role': 'user', 'content': '再查'}]})
+        self.assertIn('不是完整结果', result['content'])
 
     def test_models_and_context_ceiling_are_saved_and_the_model_can_be_switched(self):
         with self.assertRaises(Problem):

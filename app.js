@@ -2857,6 +2857,7 @@ let agentServerConfig=null;
 let agentServerAsr=null;
 function agentIsBusy(){return agentState.busy}
 function agentResetUser(){
+  agentInvalidateConfigTest();agentModels=[];agentModelsSource=null;
   if(typeof agentCancelVoice==='function')agentCancelVoice();
   agentHalt();agentState.messages=[];agentState.lastInput='';agentState.editing=null;
   agentState.plan=false;agentState.planBoard=null;
@@ -2892,6 +2893,8 @@ function renderAgentModelChip(){
   const switchable=ready&&S.user?.admin&&(cfg.models||[]).length>1;
   el.className='agent-model '+(ready?'ready':'missing')+(switchable?' is-switch':'');
   el.setAttribute('role',switchable?'button':'status');el.tabIndex=switchable?0:-1;
+  el.setAttribute('aria-controls','agentModelMenu');
+  el.setAttribute('aria-expanded',String(!$('#agentModelMenu')?.classList.contains('hidden')));
   el.textContent=ready?(cfg.model||'已接入'):'未接入';
   el.title=ready
     ?('当前模型：'+(cfg.model||'（服务端已配置）')+(cfg.provider?' · '+cfg.provider:''))
@@ -3257,6 +3260,14 @@ const LLM_PRESETS={
 /* The models the picker offers: the last test's list, else the saved one,
    else the preset's. */
 let agentModels=[];
+let agentConfigVersion=0,agentConfigTestController=null,agentModelsSource=null;
+const agentConfigConnection=()=>JSON.stringify(['#agentProvider','#agentEndpoint','#agentApiKey'].map(id=>$(id)?.value.trim()||''));
+function agentInvalidateConfigTest(clearModels=false){
+  agentConfigVersion++;agentConfigTestController?.abort();agentConfigTestController=null;
+  const btn=$('#agentConfigTest');if(btn){btn.disabled=false;btn.removeAttribute('aria-busy')}
+  agentConfigStatus('');
+  if(clearModels){const selected=agentPickedModel();agentModels=[];agentModelsSource=null;agentRenderModelOptions(selected)}
+}
 const agentPresetModels=provider=>provider==='opencode-go'?[...(agentServerConfig?.opencodeGoModels?.length?agentServerConfig.opencodeGoModels:OPENCODE_GO_MODELS)]:[];
 /* A provider's list also carries embedding, speech and image models; the
    first chat-looking one is the better default. */
@@ -3266,6 +3277,7 @@ function agentConfigStatus(text,state=''){
   el.textContent=text||'';el.className=`agent-config-status${state?' is-'+state:''}`;
 }
 function agentSetConfigVisible(show){
+  agentInvalidateConfigTest();
   $('#agentConfig')?.classList.toggle('hidden',!show);
   if(!show)return;
   const sel=$('#agentProvider');
@@ -3276,6 +3288,7 @@ function agentSetConfigVisible(show){
   agentRenderModelOptions(c.model||'');
   $('#agentContextChars').value=String(c.contextChars??200000);
   agentConfigStatus('');agentSyncProviderUI();
+  agentModelsSource=agentConfigConnection();
 }
 function agentRenderModelOptions(selected=''){
   const select=$('#agentModelSelect'),input=$('#agentCustomModel');if(!select||!input)return;
@@ -3290,7 +3303,8 @@ const agentPickedModel=()=>{const select=$('#agentModelSelect');return select&&!
 function agentSyncProviderUI(changed=false){
   const provider=$('#agentProvider')?.value||'custom',preset=LLM_PRESETS[provider]||LLM_PRESETS.custom,endpoint=$('#agentEndpoint');
   endpoint.placeholder=preset.base||'https://api.example.com/v1';
-  if(changed){endpoint.value=preset.base;agentModels=agentPresetModels(provider);agentRenderModelOptions('');agentConfigStatus('')}
+  if(changed){agentInvalidateConfigTest();endpoint.value=preset.base;agentModels=agentPresetModels(provider);
+    $('#agentCustomModel').value='';agentRenderModelOptions('');agentModelsSource=agentConfigConnection()}
   const cfg=agentServerConfig;
   $('#agentApiKey').placeholder=cfg?.apiKeySet&&!changed?`留空表示保持原密钥（${cfg.apiKeyMasked}）`:preset.key?`例如 ${preset.key}`:'API Key（本地服务可不填）';
 }
@@ -3298,22 +3312,30 @@ function agentSyncProviderUI(changed=false){
    lists the models it offers and has the chosen one answer; the picker takes
    the list, and a failure says why. Nothing is saved until 保存. */
 async function agentTestConfig(){
+  agentInvalidateConfigTest();
   const btn=$('#agentConfigTest'),model=agentPickedModel();
   const data={provider:$('#agentProvider').value,baseUrl:$('#agentEndpoint').value.trim(),apiKey:$('#agentApiKey').value.trim(),model};
   if(!data.baseUrl&&data.provider!=='opencode-go'){agentConfigStatus('请先填写 API 地址','fail');return}
-  btn.disabled=true;agentConfigStatus('正在连接…','busy');
+  const version=agentConfigVersion,user=S.user?.id,identity=agentConfigConnection(),controller=new AbortController();
+  agentConfigTestController=controller;
+  const current=()=>version===agentConfigVersion&&user===S.user?.id&&identity===agentConfigConnection()&&model===agentPickedModel();
+  btn.disabled=true;btn.setAttribute('aria-busy','true');agentConfigStatus('正在验证模型…','busy');
   try{
-    const r=await api('/api/action',{action:'agent.config.test',data});
-    if(r.models?.length){agentModels=r.models;agentRenderModelOptions(r.models.includes(model)?model:agentPreferredModel(r.models))}
+    const r=await api('/api/action',{action:'agent.config.test',data},{signal:controller.signal});
+    if(!current()){if(version===agentConfigVersion)agentConfigStatus('');return}
+    agentModels=r.models||[];agentModelsSource=identity;
+    agentRenderModelOptions(r.testedModel||model||agentPreferredModel(agentModels));
     agentConfigStatus(r.ok?`${r.message}${r.ms?` · ${r.ms} ms`:''}`:r.reason,r.ok?'ok':'fail');
-  }catch(e){agentConfigStatus(e.message||'测试失败','fail')}
-  finally{btn.disabled=false}
+  }catch(e){if(version===agentConfigVersion){if(current()&&e.name!=='AbortError')agentConfigStatus(e.message||'测试失败','fail');else agentConfigStatus('')}}
+  finally{if(version===agentConfigVersion){agentConfigTestController=null;btn.disabled=false;btn.removeAttribute('aria-busy')}}
 }
 async function agentSaveConfig(){
   const provider=$('#agentProvider').value,endpoint=$('#agentEndpoint').value.trim()||LLM_PRESETS[provider]?.base||'',model=agentPickedModel(),apiKey=$('#agentApiKey').value.trim();
   if(!endpoint||!model){toast('请填写 API 地址和模型');return}
+  const models=agentModelsSource===agentConfigConnection()?[...agentModels]:[];
+  agentInvalidateConfigTest();
   try{
-    const data=await api('/api/action',{action:'agent.config.set',data:{provider,baseUrl:endpoint,model,apiKey,models:agentModels,
+    const data=await api('/api/action',{action:'agent.config.set',data:{provider,baseUrl:endpoint,model,apiKey,models,
       contextChars:Number($('#agentContextChars').value)}});
     agentServerConfig=data;saveAgentConfig({provider,endpoint,model});renderAgentModelChip();agentSetConfigVisible(false);
     toast('Agent API 配置已保存（密钥仅保存在服务端）');
@@ -3324,12 +3346,13 @@ async function agentSaveConfig(){
 function agentToggleModelMenu(open){
   const menu=$('#agentModelMenu'),cfg=agentServerConfig||{};if(!menu)return;
   const models=cfg.models||[],show=open??menu.classList.contains('hidden');
+  $('#agentModelChip')?.setAttribute('aria-expanded',String(Boolean(show&&S.user?.admin&&cfg.configured&&models.length>1)));
   if(!show||!S.user?.admin||!cfg.configured||models.length<2){menu.classList.add('hidden');return}
   menu.innerHTML=models.map(m=>`<button type="button" role="option" class="agent-model-opt${m===cfg.model?' is-on':''}" `
     +`aria-selected="${m===cfg.model}" data-model="${escapeHTML(m)}">${escapeHTML(m)}</button>`).join('');
   menu.classList.remove('hidden');
   menu.querySelectorAll('[data-model]').forEach(b=>b.onclick=async()=>{
-    menu.classList.add('hidden');if(b.dataset.model===cfg.model)return;
+    agentToggleModelMenu(false);if(b.dataset.model===cfg.model)return;
     try{agentServerConfig=await api('/api/action',{action:'agent.config.model',data:{model:b.dataset.model}});renderAgentModelChip();
       toast(`已切换到 ${b.dataset.model}`)}catch(e){toast(e.message)}
   });
@@ -4431,7 +4454,7 @@ function initAgentUI(){
   initAgentPanelResize();
   $('#agentBtn')?.addEventListener('click',async()=>{$('#agentPanel').classList.remove('hidden');applyAgentPanelSize();renderAgentCapability();await agentLoadOwnHistory();await agentLoadServerConfig();agentSyncPlanButton();agentInitVoice();$('#agentInput').focus()});
   $('#agentHistoryBtn')?.addEventListener('click',()=>agentToggleSessions());
-  $('#agentCloseBtn')?.addEventListener('click',()=>{agentStopVoice();$('#agentPanel').classList.add('hidden')});
+  $('#agentCloseBtn')?.addEventListener('click',()=>{agentStopVoice();agentSetConfigVisible(false);agentToggleModelMenu(false);$('#agentPanel').classList.add('hidden')});
   $('#agentStopBtn')?.addEventListener('click',()=>agentHalt('已停止，草稿和已执行记录保留。'));
   $('#agentPauseBtn')?.addEventListener('click',()=>agentTogglePause());
   $('#agentDraftToggle')?.addEventListener('click',()=>{const b=agentState.planBoard;if(b){b.closed=!b.closed;planRender(b)}});
@@ -4442,11 +4465,19 @@ function initAgentUI(){
   $('#agentConfigBtn')?.addEventListener('click',()=>agentSetConfigVisible(true));
   $('#agentConfigClose')?.addEventListener('click',()=>agentSetConfigVisible(false));
   $('#agentProvider')?.addEventListener('change',()=>agentSyncProviderUI(true));
+  for(const id of ['#agentEndpoint','#agentApiKey'])$(id)?.addEventListener('input',()=>agentInvalidateConfigTest(true));
+  $('#agentCustomModel')?.addEventListener('input',()=>agentInvalidateConfigTest());
   $('#agentConfigTest')?.addEventListener('click',agentTestConfig);
-  $('#agentModelSelect')?.addEventListener('change',()=>{const manual=$('#agentModelSelect').value==='__custom';
+  $('#agentModelSelect')?.addEventListener('change',()=>{agentInvalidateConfigTest();const manual=$('#agentModelSelect').value==='__custom';
     $('#agentCustomModel').classList.toggle('hidden',!manual);if(manual)$('#agentCustomModel').focus()});
   $('#agentModelChip')?.addEventListener('click',e=>{e.stopPropagation();agentToggleModelMenu()});
-  $('#agentModelChip')?.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();agentToggleModelMenu()}});
+  $('#agentModelChip')?.addEventListener('keydown',e=>{if(['Enter',' ','ArrowDown'].includes(e.key)){e.preventDefault();agentToggleModelMenu(true);$('#agentModelMenu [data-model]')?.focus()}});
+  $('#agentModelMenu')?.addEventListener('keydown',e=>{
+    if(e.key==='Escape'){e.preventDefault();agentToggleModelMenu(false);$('#agentModelChip')?.focus();return}
+    const options=$$('#agentModelMenu [data-model]'),index=options.indexOf(document.activeElement);
+    const next={ArrowDown:(index+1)%options.length,ArrowUp:(index-1+options.length)%options.length,Home:0,End:options.length-1}[e.key];
+    if(next!==undefined){e.preventDefault();options[next]?.focus()}
+  });
   document.addEventListener('click',e=>{if(!e.target.closest?.('.agent-model-slot'))agentToggleModelMenu(false)});
   $('#agentConfigSave')?.addEventListener('click',agentSaveConfig);
   $('#agentConfigReset')?.addEventListener('click',()=>{saveAgentConfig({});agentServerConfig=null;agentSetConfigVisible(false);toast('已清除本机 Agent 配置；如需清除服务端密钥请重新保存')});

@@ -10056,9 +10056,11 @@ select:focus {
 }
 
 .agent-model-slot {
-  position: relative;
+  position: static;
   display: inline-flex;
 }
+
+.agent-header { position: relative; }
 
 .agent-model.is-switch {
   cursor: pointer;
@@ -10072,10 +10074,11 @@ select:focus {
   position: absolute;
   z-index: 5;
   top: calc(100% + 6px);
-  right: 6px;
+  right: 12px;
   display: flex;
   flex-direction: column;
-  min-width: 200px;
+  width: 360px;
+  max-width: calc(100% - 24px);
   max-height: 300px;
   overflow-y: auto;
   padding: 4px;
@@ -10090,15 +10093,15 @@ select:focus {
 }
 
 .agent-model-opt {
+  flex: none;
   padding: 7px 10px;
   border-radius: 7px;
   font: inherit;
   font-size: 12px;
   text-align: left;
   color: var(--ink-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .agent-model-opt:hover {

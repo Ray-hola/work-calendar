@@ -1599,21 +1599,11 @@ test('a drop between directory rows becomes a parent and an order between the ne
   assert.equal(at('folder',80,50).before,'r','文件夹落点跳过别人的子项');
 });
 
-test('AI 接入配置 offers mainstream providers, tests the connection and feeds the model picker', () => {
-  const presets = source.match(/const LLM_PRESETS=\{[\s\S]*?\n\};/)[0];
-  for (const host of ['api.openai.com/v1', 'api.anthropic.com/v1', 'generativelanguage.googleapis.com', 'api.deepseek.com', 'dashscope.aliyuncs.com'])
-    assert.ok(presets.includes(host), host);
-  const testFn = source.match(/async function agentTestConfig\(\)\{[\s\S]*?\n\}/)[0];
-  assert.ok(/action:'agent\.config\.test'/.test(testFn));
-  assert.ok(/agentModels=r\.models;agentRenderModelOptions/.test(testFn), '测试拿到的模型马上进下拉框');
-  assert.ok(/r\.ok\?[\s\S]*:r\.reason/.test(testFn), '失败时显示原因');
-  const save = source.match(/async function agentSaveConfig\(\)\{[\s\S]*?\n\}/)[0];
-  assert.ok(/models:agentModels/.test(save) && /contextChars:/.test(save));
-  assert.ok(/renderAgentModelChip\(\)/.test(save), '保存后助手顶部的模型随之更新');
-  const menu = source.match(/function agentToggleModelMenu\(open\)\{[\s\S]*?\n\}/)[0];
-  assert.ok(/action:'agent\.config\.model'/.test(menu), '顶部模型标签可以直接切换模型');
-  const preferred = new Function(source.match(/const agentPreferredModel=[^\n]*/)[0] + ';return agentPreferredModel')();
-  assert.equal(preferred(['text-embedding-3-small', 'gpt-4.1']), 'gpt-4.1');
+test('AI presets include mainstream endpoints and prefer a chat model', () => {
+  const a=planningApp();
+  for(const provider of ['openai','anthropic','gemini','deepseek','dashscope'])assert.ok(a.run(`LLM_PRESETS.${provider}.base`));
+  assert.equal(a.run("agentPreferredModel(['text-embedding-3-small','gpt-4.1'])"),'gpt-4.1');
+});
 
 test('an open-ended project counts people over the two weeks around today only', () => {
   const a = app();
@@ -1737,4 +1727,86 @@ test('resizing height on a narrow screen preserves the desired width', () => {
   a.run("agentPanelSizes.history={width:840,height:730};setAgentPanelSize('history',713,582,true,'n')");
   assert.deepEqual(a.json('agentPanelSizes.history'),{width:840,height:582});
   assert.deepEqual(a.json("agentPanelDimensions('history',1440,1050)"),{width:840,height:582});
+});
+
+function configApp(){
+  const a=planningApp(),nodes={};
+  for(const id of ['agentConfig','agentConfigTest','agentProvider','agentEndpoint','agentApiKey','agentModelSelect','agentCustomModel','agentConfigStatus','agentContextChars']){
+    const classes=new Set();
+    nodes['#'+id]={value:'',options:[],disabled:false,innerHTML:'',textContent:'',className:'',
+      classList:{contains:k=>classes.has(k),add:k=>classes.add(k),remove:k=>classes.delete(k),toggle(k,on){if(on??!classes.has(k))classes.add(k);else classes.delete(k)}},
+      setAttribute(){},removeAttribute(){}};
+  }
+  a.context.document={querySelector:s=>nodes[s]||null};
+  a.context.localStorage={getItem:()=>null,setItem:()=>{}};
+  a.context.AbortController=AbortController;
+  nodes['#agentProvider'].value='custom';nodes['#agentEndpoint'].value='https://old.example/v1';
+  nodes['#agentCustomModel'].value='old-model';nodes['#agentModelSelect'].classList.add('hidden');
+  a.run("agentModels=['old-model','other-model'];agentModelsSource=agentConfigConnection()");
+  const pending=[];
+  a.context.fetch=(path,options)=>new Promise(resolve=>pending.push({options,body:JSON.parse(options.body),reply:data=>resolve({ok:true,text:async()=>JSON.stringify(data)})}));
+  return {...a,nodes,pending};
+}
+
+test('connection test responses cannot replace a changed provider, URL, key or model',async()=>{
+  for(const field of ['provider','endpoint','key','model']){
+    const a=configApp(),first=a.run('agentTestConfig()');
+    assert.equal(a.nodes['#agentConfigTest'].disabled,true);
+    if(field==='provider'){a.nodes['#agentProvider'].value='deepseek';a.run('agentSyncProviderUI(true)');a.nodes['#agentCustomModel'].value='deepseek-chat'}
+    if(field==='endpoint'){a.nodes['#agentEndpoint'].value='https://new.example/v1';a.run('agentInvalidateConfigTest(true)')}
+    if(field==='key'){a.nodes['#agentApiKey'].value='replacement';a.run('agentInvalidateConfigTest(true)')}
+    if(field==='model'){a.nodes['#agentCustomModel'].value='new-model';a.run('agentInvalidateConfigTest()')}
+    assert.equal(a.pending[0].options.signal.aborted,true);
+    const selected=a.run('agentPickedModel()');
+    a.pending[0].reply({ok:true,models:['wrong-model'],testedModel:'wrong-model',message:'旧连接成功'});await first;
+    assert.equal(a.run('agentPickedModel()'),selected,field);
+    assert.ok(!a.json('agentModels').includes('wrong-model'),field);
+    assert.equal(a.nodes['#agentConfigStatus'].textContent,'');
+  }
+});
+
+test('only the newest connection test may finish loading or update the current picker',async()=>{
+  const a=configApp(),first=a.run('agentTestConfig()'),second=a.run('agentTestConfig()');
+  a.pending[0].reply({ok:true,models:['stale'],message:'旧结果'});await first;
+  assert.equal(a.nodes['#agentConfigTest'].disabled,true,'旧请求的 finally 不能结束新请求的加载状态');
+  a.pending[1].reply({ok:true,models:['new-a','new-b'],testedModel:'new-b',message:'新模型验证成功'});await second;
+  assert.equal(a.nodes['#agentConfigTest'].disabled,false);
+  assert.equal(a.run('agentPickedModel()'),'new-b');
+  assert.deepEqual(a.json('agentModels'),['new-a','new-b']);
+  assert.equal(a.nodes['#agentConfigStatus'].textContent,'新模型验证成功');
+});
+
+test('closing or reopening the configuration invalidates pending test success and failure',async()=>{
+  for(const reopen of [false,true]){
+    const a=configApp(),pending=a.run('agentTestConfig()');
+    a.run('agentSetConfigVisible(false)');if(reopen)a.run('agentSetConfigVisible(true)');
+    a.pending[0].reply({ok:false,models:['stale'],reason:'旧密钥错误'});await pending;
+    assert.ok(!a.json('agentModels').includes('stale'));
+    assert.equal(a.nodes['#agentConfigStatus'].textContent,'');
+  }
+});
+
+test('an account change or an unannounced input change also rejects a stale test receipt',async()=>{
+  for(const change of ["S.user={id:'test001'}","document.querySelector('#agentEndpoint').value='https://other.example/v1'"]){
+    const a=configApp(),pending=a.run('agentTestConfig()');a.run(change);
+    a.pending[0].reply({ok:true,models:['stale'],message:'旧结果'});await pending;
+    assert.equal(a.nodes['#agentConfigStatus'].textContent,'');assert.ok(!a.json('agentModels').includes('stale'));
+  }
+});
+
+test('configuration save excludes model catalogues from a different connection',async()=>{
+  const a=configApp();a.nodes['#agentEndpoint'].value='https://new.example/v1';
+  const saving=a.run('agentSaveConfig()');
+  assert.deepEqual(a.pending[0].body.data.models,[]);
+  a.pending[0].reply({configured:true,model:'old-model'});await saving;
+});
+
+test('a failed model verification retains its reason and offers a retry with discovered models',async()=>{
+  const a=configApp(),first=a.run('agentTestConfig()');
+  a.pending[0].reply({ok:false,models:['working-model'],reason:'HTTP 401 · 密钥无效'});await first;
+  assert.equal(a.nodes['#agentConfigStatus'].textContent,'HTTP 401 · 密钥无效');
+  assert.ok(a.nodes['#agentConfigStatus'].className.includes('is-fail'));
+  a.nodes['#agentModelSelect'].value='working-model';const second=a.run('agentTestConfig()');
+  a.pending[1].reply({ok:true,models:['working-model'],testedModel:'working-model',message:'验证成功'});await second;
+  assert.equal(a.nodes['#agentConfigStatus'].textContent,'验证成功');
 });

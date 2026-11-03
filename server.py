@@ -661,20 +661,23 @@ class Store:
         tasks = [t for t in state.get('tasks') or [] if not t.get('superseded')]
         detail = ('id', 'name', 'desc', 'projectId', 'assignee', 'creator', 'date', 'time', 'deadline', 'duration',
                   'priority', 'status', 'completionSummary', 'skipReason', 'completedAt', 'originId')
-        full = lambda t: {k: (t[k][:500] if isinstance(t[k], str) else t[k]) for k in detail if t.get(k) not in (None, '')}
+        full = lambda t: {k: t[k] for k in detail if t.get(k) not in (None, '')}
         month = lambda rows, prefix: [r for r in rows if str(r.get('date') or '').startswith(prefix)]
         chunk = str(query.get('chunk') or '')
         if chunk.startswith('tasks:'):
             rows = [full(t) for t in month(tasks, chunk[6:])]
         elif chunk.startswith('reports:'):
-            rows = month(state.get('reports') or [], chunk[8:])
+            # snapshot exposes brief index cards. Resolve only those already
+            # authorized ids, then apply the same edits as the archive reader.
+            rows = [self.apply_brief_edits(self.get('reports', r['id'])) if r.get('kind') == 'brief' else r
+                    for r in month(state.get('reports') or [], chunk[8:])]
         elif chunk.startswith('diaries:'):
             rows = month(state.get('diaries') or [], chunk[8:])
         elif chunk == 'notifications':
-            rows = [dict(n, body=str(n.get('body') or '')[:500]) for n in
+            rows = [dict(n) for n in
                     sorted(state.get('notifications') or [], key=lambda n: str(n.get('createdAt') or ''), reverse=True)]
         elif isinstance(query.get('taskIds'), list):
-            ids = {str(x) for x in query['taskIds'][:200]}
+            ids = {str(x)[:128] for x in query['taskIds'][:200]}
             rows = [full(t) for t in tasks if t.get('id') in ids]
         elif str(query.get('search') or '').strip():
             word = str(query['search']).strip()[:50].lower()
@@ -684,14 +687,61 @@ class Store:
                        for p in state.get('projects') or [] if hit(p.get('name'), p.get('desc'), p.get('background'))])
         else:
             return '没有看懂这个查询。可以用 {"chunk":"tasks:2026-09"}、{"taskIds":["…"]} 或 {"search":"关键词"}。'
+        # An offset advances through complete rows. A single oversized record
+        # (for example a monthly report) is returned as lossless JSON text
+        # fragments; partOffset advances within that row before the next row.
+        selection = ({'chunk': chunk[:100]} if chunk.startswith(('tasks:', 'reports:', 'diaries:')) or chunk == 'notifications' else {'taskIds': sorted(ids)}
+                     if isinstance(query.get('taskIds'), list) else {'search': word})
+        try:
+            offset, part = int(query.get('offset', 0)), int(query.get('partOffset', 0))
+            if offset < 0 or part < 0:
+                raise ValueError
+        except (ValueError, TypeError, OverflowError):
+            return '分页位置无效，请使用上次结果中的 next 查询。'
         total = len(rows)
-        dump = lambda: json.dumps({'query': query, 'count': total, 'shown': len(rows), 'rows': rows},
-                                  ensure_ascii=False, separators=(',', ':'))
-        text = dump()
-        while len(text) > LOOKUP_CHARS and rows:
-            rows = rows[:len(rows) * 3 // 4]
-            text = dump()
-        return text
+        position = {**selection, 'offset': offset, 'partOffset': part}
+
+        def next_query(index, fragment=0):
+            return {**selection, 'offset': index, **({'partOffset': fragment} if fragment else {})} if index < total else None
+
+        def dump(page, following):
+            return json.dumps({'query': position, 'count': total, 'shown': len(page),
+                               'rows': page, 'next': following, 'complete': following is None},
+                              ensure_ascii=False, separators=(',', ':'))
+
+        if offset >= total:
+            return dump([], None)
+        # Pack as many whole rows as fit, rather than repeatedly dropping a
+        # quarter and leaving inaccessible records behind the same prefix.
+        low, high = 0, total - offset
+        if not part:
+            while low < high:
+                count = (low + high + 1) // 2
+                if len(dump(rows[offset:offset + count], next_query(offset + count))) <= LOOKUP_CHARS:
+                    low = count
+                else:
+                    high = count - 1
+            if low:
+                return dump(rows[offset:offset + low], next_query(offset + low))
+        raw = json.dumps(rows[offset], ensure_ascii=False, separators=(',', ':'))
+        if part >= len(raw):
+            return '分段位置已失效，请从当前记录的 offset 重新查询。'
+
+        def fragment(length):
+            end = part + length
+            following = next_query(offset, end) if end < len(raw) else next_query(offset + 1)
+            return dump([{'id': rows[offset].get('id') or rows[offset].get('project'),
+                          'fragment': {'format': 'json', 'offset': part, 'totalChars': len(raw),
+                                       'text': raw[part:end]}}], following)
+
+        low, high = 1, len(raw) - part
+        while low < high:
+            length = (low + high + 1) // 2
+            if len(fragment(length)) <= LOOKUP_CHARS:
+                low = length
+            else:
+                high = length - 1
+        return fragment(low)
 
     @staticmethod
     def llm_root(base):
@@ -727,6 +777,32 @@ class Store:
                 502: '服务商网关错误，稍后再试', 503: '服务暂时不可用，稍后再试'}.get(code, '服务返回错误')
         return f'HTTP {code} · {hint}' + (f'：{message}' if message else '')
 
+    @staticmethod
+    def llm_payload(model, messages, temperature=None, probe=False):
+        """Share model parameter compatibility between verification and chat.
+
+        OpenAI reasoning families reject max_tokens and non-default sampling
+        temperature. Omitting temperature is also safe on compatible gateways.
+        """
+        reasoning = bool(re.match(r'^(?:o[1-9](?:[-.]|$)|gpt-[5-9](?:[.-]|$))', model.rsplit('/', 1)[-1], re.I))
+        payload = {'model': model, 'messages': messages, 'stream': False}
+        if probe:
+            payload['max_completion_tokens' if reasoning else 'max_tokens'] = 4096 if reasoning else 256
+        if temperature is not None and not reasoning:
+            payload['temperature'] = temperature
+        return payload
+
+    @staticmethod
+    def llm_text(reply):
+        choices = reply.get('choices') if isinstance(reply, dict) else None
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            return ''
+        message = choices[0].get('message')
+        content = message.get('content') if isinstance(message, dict) else None
+        if isinstance(content, list):
+            content = ''.join(p['text'] for p in content if isinstance(p, dict) and isinstance(p.get('text'), str))
+        return content.strip() if isinstance(content, str) else ''
+
     def test_llm_config(self, user, data):
         """Try an address and key before saving them: list the models it
         offers and, when a model is named, have it answer one word.  Nothing
@@ -757,26 +833,30 @@ class Store:
                 return None, '服务返回的不是 JSON，地址可能指向了网页而不是 API'
 
         listing, listing_error = call(root + '/models')
-        rows = (listing.get('data') or listing.get('models') or []) if isinstance(listing, dict) else []
+        rows = listing.get('data', listing.get('models')) if isinstance(listing, dict) else None
+        if not isinstance(rows, list):
+            rows = []
+            listing_error = listing_error or '模型列表格式无效'
         models = sorted({str(m.get('id') or m.get('name') or '').removeprefix('models/') if isinstance(m, dict) else str(m)
-                         for m in rows} - {''})
-        if provider == 'opencode-go' and not models:
-            models, listing_error = list(OPENCODE_GO_MODELS), None
-        reply_error = None
-        if model:
-            reply, reply_error = call(root + '/chat/completions', {
-                'model': model, 'messages': [{'role': 'user', 'content': '只回复：好'}],
-                'max_tokens': 8, 'stream': False})
-            if reply is not None and not (reply.get('choices') or []):
-                reply_error = '服务有回应，但没有返回 choices，可能不是 OpenAI 兼容接口'
+                         for m in rows if isinstance(m, (dict, str))} - {''})
+        models = [m for m in models if len(m) <= 200][:500]
+        # A catalogue is a candidate list, never evidence that a key works.
+        candidates = models or (list(OPENCODE_GO_MODELS) if provider == 'opencode-go' else [])
+        if not model:
+            model = next((m for m in candidates if not re.search(r'embed|whisper|tts|dall-e|image|moderation|rerank|audio|vision-exp', m, re.I)), '')
+        if not model:
+            return {'ok': False, 'models': models, 'reason': (listing_error + '；' if listing_error else '')
+                    + '请填写对话模型 ID，再测试模型是否可用', 'ms': int((_time.monotonic() - started) * 1000)}
+        reply, reply_error = call(root + '/chat/completions', self.llm_payload(
+            model, [{'role': 'user', 'content': '只回复：好'}], probe=True))
+        if reply_error is None and not self.llm_text(reply):
+            reply_error = '服务没有返回有效的对话文本，请检查接口、模型或生成额度'
         ms = int((_time.monotonic() - started) * 1000)
-        if listing_error and (reply_error or not model):
-            return {'ok': False, 'models': [], 'reason': listing_error, 'ms': ms}
         if reply_error:
-            return {'ok': False, 'models': models, 'reason': f'能连上，但模型「{model}」不可用：{reply_error}', 'ms': ms}
-        note = '' if models else '（这个服务不提供模型列表，已用你填写的模型验证）'
-        return {'ok': True, 'models': models, 'ms': ms,
-                'message': f'连接成功 · {len(models)} 个可用模型{note}' if models else f'连接成功{note}'}
+            return {'ok': False, 'models': models, 'reason': f'模型「{model}」验证失败：{reply_error}', 'ms': ms}
+        return {'ok': True, 'models': models or candidates, 'testedModel': model, 'ms': ms,
+                'message': f'模型「{model}」验证成功 · {len(models)} 个可用模型' if models
+                else f'模型「{model}」验证成功（未取得模型列表）'}
 
     def llm_chat(self, user, data):
         """Proxy a chat request to an OpenAI-compatible endpoint.
@@ -903,7 +983,11 @@ class Store:
                    '要看任务详情、更早的任务、日报、日记或全部通知时，这一轮只输出一行 '
                    '<lookup>{"chunk":"tasks:2026-09"}</lookup>，也可以是 {"taskIds":["任务ID"]} 或 {"search":"关键词"}，'
                    '不要写别的；系统会把查询结果发给你，你再继续。'
-                   f'一次回答最多查询 {AGENT_MAX_LOOKUPS} 次；索引里没有、也查不到的，就如实说没有。')
+                   '查询结果的 next 不为空时，把 next 原样作为下一次 lookup，直到 complete=true；'
+                   'fragment 是单条记录的 JSON 文本分段，按 offset 拼接后读取，不能把第一段当成全文。'
+                   'count 是匹配总数，shown 只是本页条数；没读完所有页不能声称已经读完或据此作完整统计。'
+                   f'一次回答最多查询 {AGENT_MAX_LOOKUPS} 次；达到次数或时间限制要如实说明还没读完，后续可以继续查询。'
+                   '索引里没有、也查不到的，就如实说没有。')
         messages.insert(0, {'role': 'system', 'content': policy})
         messages.append({'role': 'system', 'content': policy})
         record = self._llm_record(); cfg = dict(record.get('value') or {})
@@ -915,9 +999,7 @@ class Store:
         if not session_id or len(session_id) > 128 or any(ch not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.:' for ch in session_id):
             raise Problem(400, 'Agent 会话 ID 格式无效')
         endpoint = self.llm_root(base) + '/chat/completions'
-        payload = {'model': model, 'messages': messages,
-                   'temperature': float(cfg.get('temperature', 0.2)),
-                   'stream': False}
+        payload = self.llm_payload(model, messages, temperature=float(cfg.get('temperature', 0.2)))
         headers = {**self.llm_headers(base, key), 'x-opencode-session': session_id}
 
         # Cloudflare drops a request after 100 s and the browser then gets an
@@ -981,6 +1063,7 @@ class Store:
         # and the model goes on.  The browser only ever sees the final answer.
         content, result, choice = ask()
         lookups = 0
+        pending_pages = set()
         while lookups < AGENT_MAX_LOOKUPS and deadline - _time.monotonic() > 15:
             found = re.search(r'<lookup>([\s\S]*?)</lookup>', content)
             if not found:
@@ -990,12 +1073,25 @@ class Store:
                 query = json.loads(found.group(1).strip())
             except ValueError:
                 query = {}
+            query = query if isinstance(query, dict) else {}
+            lookup_text = self.agent_lookup(user, query)
+            try:
+                page = json.loads(lookup_text)
+                identity = json.dumps({k: v for k, v in page['query'].items() if k not in ('offset', 'partOffset')}, sort_keys=True)
+                if page.get('next'):
+                    pending_pages.add(identity)
+                else:
+                    pending_pages.discard(identity)
+            except (ValueError, KeyError, TypeError):
+                pass
             messages.append({'role': 'assistant', 'content': content[:MAX_MESSAGE_CHARS]})
-            messages.append({'role': 'user', 'content': '【系统查询结果】\n' + self.agent_lookup(user, query if isinstance(query, dict) else {})
+            messages.append({'role': 'user', 'content': '【系统查询结果】\n' + lookup_text
                              + '\n（以上是系统按你的 lookup 查出的数据，不是用户的话。请接着回答用户的问题。）'})
             content, result, choice = ask()
         if '<lookup>' in content:
             content = re.sub(r'<lookup>[\s\S]*?</lookup>', '', content).strip() or '我查了几次，还没找到足够的信息。能说得再具体一点吗？比如项目名称或大概日期。'
+        if pending_pages:
+            content += '\n\n（查询还有后续页未读取，以上不是完整结果；可以继续查询。）'
         # Keep a per-user transcript so the assistant panel can be reopened like
         # a chat app and superadmin can review what the agent was asked to do.
         # Keep the original question and the active conversation when lookup
