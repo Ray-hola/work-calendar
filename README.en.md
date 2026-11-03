@@ -43,6 +43,8 @@ Most collaboration tools want your tasks, daily notes and team data in someone e
 
 **Layout and access**
 - Desktop, tablet and phone layouts.
+- Drag the right edge of the main navigation, project directory or chat channel rail to resize it, or use its arrow to collapse / expand. The narrowest desktop state keeps icons and full-name tooltips; overflowing labels fade at the end. Desktop width ranges are 72–360, 56–340 and 64–320 px respectively, with smaller effective maximums when content space is limited. Widths and previous expanded sizes are saved in the current browser and restored on reload.
+- Focus a divider to use Left / Right (Shift for larger steps), Home / End for the limits, or Enter to collapse / expand; double-click to reset its width. Esc cancels a drag. Phones retain the horizontal main navigation. The project directory on tablets and phones, and the phone channel list, collapse / expand without squeezing the content. Motion respects the system's reduced-motion preference.
 - Identity is one of three roles: superadmin, admin or member. Being a project's Owner or a collaborator only decides what one can do inside that project. The server refuses anything beyond these rights. Account management is visible to admins only: superadmin drags accounts to reorder them or move them to another role, or presses 管理 (manage) on a role to tick several accounts and disable / enable, delete, reset the password to 123456 or set the Chinese name. Account switching in the avatar menu lists only accounts that signed in on that browser.
 
 <p align="center">

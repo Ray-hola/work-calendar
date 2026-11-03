@@ -54,6 +54,154 @@ function hydrateIcons(root=document){
     el.dataset.iconReady='1';
   });
 }
+/* Navigation sizes are a local display preference. Desired widths survive
+   temporary viewport clamps; only an explicit drag/key/toggle saves a change. */
+const NAVIGATION_KEY='wc-navigation-layout-v1';
+const NAVIGATION={main:{min:72,max:360,width:248,label:'主导航',selector:'.sidebar'},
+  project:{min:56,max:340,width:220,label:'项目目录',selector:'#projectNav'},
+  chat:{min:64,max:320,width:208,label:'频道导航',selector:'.chat-side'}};
+function readNavigationLayout(){
+  let saved={};try{saved=JSON.parse(localStorage.getItem(NAVIGATION_KEY)||'{}')||{}}catch(_){}
+  return Object.fromEntries(Object.entries(NAVIGATION).map(([key,c])=>{
+    const record=saved[key]||{},valid=v=>typeof v==='number'&&Number.isFinite(v)?Math.round(Math.max(c.min,Math.min(c.max,v))):null;
+    return [key,{width:valid(record.width),expanded:valid(record.expanded)}];
+  }));
+}
+const navigationLayout=readNavigationLayout();
+let navigationDrag=null,navigationFrame=0,navigationFadeFrame=0;
+function navigationBounds(kind,viewport,available){
+  const c=NAVIGATION[kind];
+  const stacked=kind==='project'?viewport<=1180:viewport<=760;
+  const room=kind==='main'?viewport-490:!stacked&&Number.isFinite(available)?available-340:c.max;
+  const initial=viewport<=1180?{main:216,chat:184}[kind]:undefined;
+  return {min:c.min,max:Math.max(c.min,Math.min(c.max,room)),default:initial??c.width};
+}
+function navigationWidth(kind,viewport,available){
+  const b=navigationBounds(kind,viewport,available),value=navigationLayout[kind].width??b.default;
+  return Math.round(Math.max(b.min,Math.min(b.max,value)));
+}
+function navigationAvailable(kind){
+  const value=kind==='project'?$('.project-space-layout')?.clientWidth:kind==='chat'?$('.chat-room')?.clientWidth:undefined;
+  return value>0?value:undefined;
+}
+function saveNavigationLayout(){try{localStorage.setItem(NAVIGATION_KEY,JSON.stringify(navigationLayout))}catch(_){}
+}
+function setNavigationWidth(kind,value,persist=true){
+  const b=navigationBounds(kind,window.innerWidth,navigationAvailable(kind));
+  const width=Math.round(Math.max(b.min,Math.min(b.max,value)));
+  navigationLayout[kind].width=width;
+  if(width>=160)navigationLayout[kind].expanded=width;
+  applyNavigationLayout();if(persist)saveNavigationLayout();
+}
+function toggleNavigation(kind){
+  const c=NAVIGATION[kind],current=navigationWidth(kind,window.innerWidth,navigationAvailable(kind));
+  const restore=navigationLayout[kind].expanded;
+  if(current>c.min+8&&current>=160&&restore===null)navigationLayout[kind].expanded=current;
+  const initial=navigationBounds(kind,window.innerWidth,navigationAvailable(kind)).default;
+  setNavigationWidth(kind,current<=c.min+8?(restore>=160?restore:initial):c.min);
+}
+function navigationControls(kind){
+  const c=NAVIGATION[kind],id={main:'mainNavigation',project:'projectNav',chat:'chatNavigation'}[kind];
+  return `<button type="button" class="nav-collapse-toggle" data-nav-toggle="${kind}" aria-controls="${id}" `
+    +`aria-label="收起${c.label}" title="收起${c.label}">${icon('chevron-right')}</button>`;
+}
+function navigationHandle(kind){
+  const c=NAVIGATION[kind],id={main:'mainNavigation',project:'projectNav',chat:'chatNavigation'}[kind];
+  return `<div class="nav-resize-handle" data-nav-resize="${kind}" role="separator" tabindex="0" `
+    +`aria-orientation="vertical" aria-controls="${id}" aria-label="调整${c.label}宽度" `
+    +`title="拖动调整${c.label}宽度；方向键微调，Home / End 到上下限，Enter 收起或展开，双击恢复默认"></div>`;
+}
+function applyNavigationLayout(){
+  if(typeof window==='undefined'||!document.documentElement)return;
+  for(const [kind,c] of Object.entries(NAVIGATION)){
+    const host=$(c.selector);if(!host)continue;
+    const available=navigationAvailable(kind),bounds=navigationBounds(kind,window.innerWidth,available);
+    const width=navigationWidth(kind,window.innerWidth,available),collapsed=width<=c.min+8;
+    document.documentElement.style.setProperty(`--${kind}-navigation-width`,width+'px');
+    host.classList.toggle('is-nav-collapsed',collapsed);
+    host.classList.toggle('is-nav-narrow',width<168);
+    $$(`[data-nav-toggle="${kind}"]`).forEach(button=>{
+      const label=(collapsed?'展开':'收起')+c.label;
+      button.setAttribute('aria-expanded',String(!collapsed));button.setAttribute('aria-label',label);button.title=label;
+    });
+    $$(`[data-nav-resize="${kind}"]`).forEach(handle=>{
+      handle.setAttribute('aria-valuemin',bounds.min);handle.setAttribute('aria-valuemax',bounds.max);
+      handle.setAttribute('aria-valuenow',width);handle.setAttribute('aria-valuetext',collapsed?'仅图标':width+' 像素');
+    });
+  }
+  positionAccountMenu();
+  scheduleNavigationFade();
+}
+function scheduleNavigationFade(){
+  if(navigationFadeFrame)return;
+  navigationFadeFrame=requestAnimationFrame(()=>{
+    navigationFadeFrame=0;
+    $$('.nav-text,.nav-brand-name,.chat-channel-name,.chat-channel-preview,.workspace-name strong,.workspace-name small').forEach(label=>{
+      label.classList.toggle('has-nav-overflow',label.clientWidth>0&&label.scrollWidth>label.clientWidth+1);
+    });
+  });
+}
+function finishNavigationDrag(cancelled=false){
+  const drag=navigationDrag;if(!drag)return;
+  if(navigationFrame){cancelAnimationFrame(navigationFrame);navigationFrame=0}
+  if(cancelled)navigationLayout[drag.kind]={...drag.original};
+  else setNavigationWidth(drag.kind,drag.startWidth+drag.lastX-drag.startX,false);
+  navigationDrag=null;document.body.classList.remove('is-resizing-navigation');
+  try{drag.handle.releasePointerCapture(drag.pointerId)}catch(_){}
+  applyNavigationLayout();if(!cancelled)saveNavigationLayout();
+}
+function navigationResizeEnabled(kind){return window.innerWidth>(kind==='project'?1180:760)}
+function initNavigationLayout(){
+  const main=$('.sidebar'),chat=$('.chat-side');
+  if(main){
+    $('#mainNavToggle').innerHTML=navigationControls('main');main.insertAdjacentHTML('beforeend',navigationHandle('main'));
+    $$('.nav-item,.filter-link').forEach(button=>{
+      const label=button.querySelector('.nav-text');if(label){button.title=label.textContent.trim();button.setAttribute('aria-label',button.title)}
+    });
+  }
+  if(chat){
+    $('.chat-side-head').insertAdjacentHTML('beforeend',navigationControls('chat'));
+    chat.insertAdjacentHTML('beforeend',navigationHandle('chat'));
+  }
+  document.addEventListener('click',e=>{const button=e.target.closest('[data-nav-toggle]');if(button)toggleNavigation(button.dataset.navToggle)});
+  document.addEventListener('dblclick',e=>{
+    const handle=e.target.closest('[data-nav-resize]');if(!handle)return;
+    setNavigationWidth(handle.dataset.navResize,NAVIGATION[handle.dataset.navResize].width);
+  });
+  document.addEventListener('pointerdown',e=>{
+    const handle=e.target.closest('[data-nav-resize]');if(!handle||e.button!==0||!navigationResizeEnabled(handle.dataset.navResize))return;
+    const kind=handle.dataset.navResize;e.preventDefault();handle.focus();
+    navigationDrag={kind,handle,pointerId:e.pointerId,startX:e.clientX,lastX:e.clientX,
+      startWidth:navigationWidth(kind,window.innerWidth,navigationAvailable(kind)),original:{...navigationLayout[kind]}};
+    document.body.classList.add('is-resizing-navigation');
+    try{handle.setPointerCapture(e.pointerId)}catch(_){}
+  });
+  document.addEventListener('pointermove',e=>{
+    const drag=navigationDrag;if(!drag||drag.pointerId!==e.pointerId)return;drag.lastX=e.clientX;
+    if(!navigationFrame)navigationFrame=requestAnimationFrame(()=>{
+      navigationFrame=0;if(navigationDrag)setNavigationWidth(drag.kind,drag.startWidth+drag.lastX-drag.startX,false);
+    });
+  });
+  document.addEventListener('pointerup',e=>{if(navigationDrag?.pointerId===e.pointerId)finishNavigationDrag()});
+  document.addEventListener('pointercancel',e=>{if(navigationDrag?.pointerId===e.pointerId)finishNavigationDrag(true)});
+  document.addEventListener('lostpointercapture',e=>{if(navigationDrag?.pointerId===e.pointerId)finishNavigationDrag(true)});
+  document.addEventListener('keydown',e=>{
+    if(e.key==='Escape'&&navigationDrag){e.preventDefault();e.stopPropagation();finishNavigationDrag(true);return}
+    const handle=e.target.closest('[data-nav-resize]');if(!handle)return;
+    const kind=handle.dataset.navResize;if(!navigationResizeEnabled(kind))return;
+    const b=navigationBounds(kind,window.innerWidth,navigationAvailable(kind)),width=navigationWidth(kind,window.innerWidth,navigationAvailable(kind));
+    const next={ArrowLeft:width-(e.shiftKey?30:10),ArrowRight:width+(e.shiftKey?30:10),Home:b.min,End:b.max}[e.key];
+    if(next!==undefined){e.preventDefault();e.stopPropagation();setNavigationWidth(kind,next)}
+    if(e.key==='Enter'){e.preventDefault();toggleNavigation(kind)}
+  },true);
+  window.addEventListener('blur',()=>finishNavigationDrag(true));
+  window.addEventListener('scroll',()=>positionAccountMenu(),true);
+  window.addEventListener('resize',()=>{finishNavigationDrag(true);applyNavigationLayout()});
+  window.addEventListener('storage',e=>{if(e.key===NAVIGATION_KEY){Object.assign(navigationLayout,readNavigationLayout());applyNavigationLayout()}});
+  const observer=new ResizeObserver(()=>{applyNavigationLayout()});
+  for(const selector of ['.sidebar','.project-space-layout','.chat-room']){const element=$(selector);if(element)observer.observe(element)}
+  applyNavigationLayout();
+}
 let S={user:null,users:[],tasks:[],projects:[],folders:[],files:[],fileArchives:[],achievements:[],logs:[],reports:[],diaries:[],diaryStats:[],notifications:[],requests:[],editRequests:[],suggestions:[],profiles:[],today:''};
 /* The server always answers in JSON, but the tunnel in front of it does not:
    a request that runs past its time limit comes back as an HTML error page.
@@ -645,29 +793,30 @@ function renderProjectNav(){
   const nav=$('#projectNav');if(!nav)return;
   const {folders,loose}=projectFolders(),closed=closedFolders(),fresh=freshRefs(),admin=Boolean(S.user?.admin);
   const item=p=>`<button class="project-nav-item${UI.space===p.id?' is-on':''}" data-space="${escapeHTML(p.id)}"`
-    +`${UI.space===p.id?' aria-current="page"':''}><i class="project-nav-dot is-${escapeHTML(p.status||'active')}"></i>`
-    +`<span>${escapeHTML(p.name)}</span>${fresh.has(p.id)?'<em class="new-chip">新</em>':''}</button>`;
+    +` title="${escapeHTML(p.name)}" aria-label="${escapeHTML(p.name)}"${UI.space===p.id?' aria-current="page"':''}>${icon('gantt')}`
+    +`<span class="nav-text">${escapeHTML(p.name)}</span>${fresh.has(p.id)?'<em class="new-chip">新</em>':''}</button>`;
   const folder=f=>{
     const open=!closed.has(f.id);
     return `<div class="project-nav-folder${open?' is-open':''}"><div class="project-nav-folder-row">`
-      +`<button class="project-nav-toggle" data-folder="${escapeHTML(f.id)}" aria-expanded="${open}">`
-      +`${icon('chevron-right','folder-caret')}${icon('folder')}<span>${escapeHTML(f.name)}</span><b>${f.projects.length}</b></button>`
+      +`<button class="project-nav-toggle" data-folder="${escapeHTML(f.id)}" aria-expanded="${open}" title="${escapeHTML(f.name)}" aria-label="${escapeHTML(f.name)}">`
+      +`${icon('chevron-right','folder-caret')}${icon('folder')}<span class="nav-text">${escapeHTML(f.name)}</span><b>${f.projects.length}</b></button>`
       +`${admin?`<button class="project-nav-edit" data-edit-folder="${escapeHTML(f.id)}" title="重命名或删除" aria-label="`
       +`编辑文件夹「${escapeHTML(f.name)}」">${icon('edit')}</button>`:''}</div>`
       +`${open?`<div class="project-nav-children">${f.projects.map(item).join('')
       ||'<p class="project-nav-empty">还没有项目</p>'}</div>`:''}</div>`;
   };
-  nav.innerHTML=`<div class="project-nav-head"><span>项目目录</span>${admin?`<button class="project-nav-add" `
-    +`id="addFolderBtn" title="新建文件夹" aria-label="新建文件夹">${icon('plus')}</button>`:''}</div>`
-    +`<button class="project-nav-item project-nav-all${UI.space?'':' is-on'}" data-space="">${icon('layout-grid')}`
-    +`<span>全部项目</span><b>${visibleProjects().length}</b></button>`
+  nav.innerHTML=`<div class="project-nav-head"><span class="nav-text">项目目录</span>${admin?`<button class="project-nav-add" `
+    +`id="addFolderBtn" title="新建文件夹" aria-label="新建文件夹">${icon('plus')}</button>`:''}${navigationControls('project')}</div>`
+    +`<button class="project-nav-item project-nav-all${UI.space?'':' is-on'}" data-space="" title="全部项目" aria-label="全部项目">${icon('layout-grid')}`
+    +`<span class="nav-text">全部项目</span><b>${visibleProjects().length}</b></button>`
     +folders.map(folder).join('')
     +(loose.length?`${folders.length?'<div class="project-nav-label">未归类</div>':''}${loose.map(item).join('')}`:'')
-    +((S.fileArchives||[]).length?`<div class="project-nav-label">归档文件</div>${S.fileArchives.map(item).join('')}`:'');
+    +((S.fileArchives||[]).length?`<div class="project-nav-label">归档文件</div>${S.fileArchives.map(item).join('')}`:'')+navigationHandle('project');
   $$('#projectNav [data-space]').forEach(b=>b.onclick=()=>openProjectSpace(b.dataset.space));
   $$('#projectNav [data-folder]').forEach(b=>b.onclick=()=>toggleFolder(b.dataset.folder));
   $$('#projectNav [data-edit-folder]').forEach(b=>b.onclick=()=>editFolder(b.dataset.editFolder));
   const add=$('#addFolderBtn');if(add)add.onclick=()=>editFolder();
+  applyNavigationLayout();
 }
 function openProjectSpace(id){
   UI.space=id||'';if(id)clearFresh([id]);
@@ -1403,6 +1552,18 @@ function renderAccountMenu(){
   menu.innerHTML=head+mine+switchGroup+foot;
   menu.querySelectorAll('.account-menu-item[data-action]').forEach(b=>b.onclick=()=>accountMenuAction(b.dataset.action));
   menu.querySelectorAll('.account-menu-item.switch').forEach(b=>b.onclick=()=>signOutTo(b.dataset.user));
+  positionAccountMenu();
+}
+function positionAccountMenu(){
+  const menu=$('#accountMenu'),anchor=$('#workspaceSwitcher');
+  if(!menu||menu.classList.contains('hidden')||!anchor?.getBoundingClientRect||typeof window==='undefined')return;
+  const rect=anchor.getBoundingClientRect(),width=Math.min(300,window.innerWidth-24);
+  Object.assign(menu.style,{position:'fixed',width:width+'px',right:'auto',
+    maxHeight:Math.min(520,window.innerHeight*.72,window.innerHeight-24)+'px'});
+  const left=window.innerWidth<=760?rect.right-width:rect.left;
+  menu.style.left=Math.max(12,Math.min(window.innerWidth-width-12,left))+'px';
+  const below=rect.bottom+8,above=rect.top-menu.offsetHeight-8;
+  menu.style.top=Math.max(12,below+menu.offsetHeight<=window.innerHeight-12?below:above)+'px';
 }
 function accountMenuAction(action){
   toggleAccountMenu(false);
@@ -1434,6 +1595,7 @@ function toggleAccountMenu(open){
   if(next)renderAccountMenu();
   menu.classList.toggle('hidden',!next);
   btn?.setAttribute('aria-expanded',next?'true':'false');
+  if(next)positionAccountMenu();
 }
 function deleteAccount(id){
   const x=S.users.find(u=>u.id===id);
@@ -3378,7 +3540,7 @@ function renderChatChannels(){
     const meta=chatPreviews[c.id]||{};
     const time=meta.createdAt?`<time class="chat-channel-time">${escapeHTML(chatListTime(meta.createdAt))}</time>`:'';
     const badge=n?`<i class="chat-channel-badge">${n>99?'99+':n}</i>`:'';
-    return `<button type="button" role="tab" aria-selected="${c.id===chatChannel}" class="chat-channel ${c.id===chatChannel?'is-on':''}" data-channel="${escapeHTML(c.id)}">`
+    return `<button type="button" role="tab" aria-selected="${c.id===chatChannel}" class="chat-channel ${c.id===chatChannel?'is-on':''}" data-channel="${escapeHTML(c.id)}" title="${escapeHTML(c.name)}" aria-label="${escapeHTML(c.name)}${n?'，'+n+' 条未读':''}">`
       +chatChannelMark(c)
       +`<span class="chat-channel-body"><span class="chat-channel-name">${escapeHTML(c.name)}</span>`
       +`<span class="chat-channel-preview">${chatPreviewText(c.id)}</span></span>`
@@ -3394,6 +3556,7 @@ function renderChatChannels(){
     loadChat(true);
   });
   renderChatCurrent();
+  applyNavigationLayout();
 }
 /* Mentions are read back out of the text, so a hand-typed @名字 works exactly
    like one picked from the menu. */
@@ -3876,6 +4039,7 @@ function agentInitVoice(){
 
 initAgentUI();
 initChatUI();
+initNavigationLayout();
 function ensureAccountCreateButton(){
   const owner=Boolean(S.user?.role==='superadmin'),host=$('#accountsView .page-intro');if(!host)return;
   let b=$('#createAccountBtn');
