@@ -1961,9 +1961,9 @@ function weekReportDocument(week){
     +`${k}"><strong>${escapeHTML(x.name)}</strong>${bar(x.completed,x.tasks)}<span>${meta(x)}</span></div>`).join('')}`
     +`</div>`:'<p class="muted">—</p>';
   const day=d=>{const n=new Date(`${d.date}T12:00:00`),later=d.date>S.today;
-    return `<button type="button" class="week-day${d.has?'':' is-empty'}${d.date===S.today?' is-today':''}" data-date="`
+    return `<button type="button" class="week-cell${d.has?'':' is-empty'}${d.date===S.today?' is-today':''}" data-date="`
     +`${escapeHTML(d.date)}" ${d.filed?'':'disabled'} aria-label="${escapeHTML(archiveDay(d.date))}${d.has?` 完成 `
-    +`${d.completed}/${d.tasks}`:later?' 还没到':' 没有日报'}"><span class="week-day-bar"><i style="--h:`
+    +`${d.completed}/${d.tasks}`:later?' 还没到':' 没有日报'}"><span class="week-cell-bar"><i style="--h:`
     +`${(d.tasks/top*100).toFixed(1)}%;--done:${pct(d.completed,d.tasks)}%"></i></span><b>${n.getDate()}</b><small>`
     +`${WEEKDAY_SHORT[n.getDay()]}</small><em>${d.has?`${d.completed}/${d.tasks}`:later?'':'—'}</em></button>`};
   return `<article class="brief-doc week-report"><header class="brief-head"><div class="week-report-top">`
@@ -1976,7 +1976,7 @@ function weekReportDocument(week){
     +`${hours(t.load)}" data-decimals="1">${hours(t.load)}</span>h</b><span>完成工时</span></div><div><b data-count="`
     +`${w.people.length}">${w.people.length}</b><span>位成员</span></div><div><b data-count="${w.projects.length}">`
     +`${w.projects.length}</b><span>个项目</span></div></div></header>`
-    +`<section class="brief-section"><h3>每天</h3><div class="week-days">${w.days.map(day).join('')}</div></section>`
+    +`<section class="brief-section"><h3>每天</h3><div class="week-cells">${w.days.map(day).join('')}</div></section>`
     +(w.risks.length?`<section class="brief-section"><h3>本周需要关注</h3><ul class="brief-risks">${w.risks.map(r=>`<li>`
       +`<time>${escapeHTML(archiveDay(r.date))}</time>${escapeHTML(r.text)}</li>`).join('')}</ul></section>`:'')
     +`<section class="brief-section"><h3>成员本周</h3>${rows(w.people,x=>`${x.completed}/${x.tasks} · ${hours(x.load)}h`)}`
@@ -2028,7 +2028,7 @@ function bindWeekReport(week,dir){
   if(dir)doc.classList.add(dir>0?'from-next':'from-prev');
   doc.querySelectorAll('[data-week]').forEach(b=>b.onclick=()=>openWeekReport(add(week.start,Number(b.dataset.week)*7),
     Number(b.dataset.week)));
-  doc.querySelectorAll('.week-day:not([disabled])').forEach(b=>b.onclick=()=>openBrief(b.dataset.date));
+  doc.querySelectorAll('.week-cell:not([disabled])').forEach(b=>b.onclick=()=>openBrief(b.dataset.date));
   countUp(doc);
 }
 /* Fold the brief back into its folder; true when that takes over closing. */

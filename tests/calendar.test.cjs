@@ -340,7 +340,7 @@ test('日记 and 档案室 are one 档案室: members file their own days, admin
   assert.ok(/档案室 · 周报/.test(week) && !/<!doctype/.test(week), '周报在应用里直接看，不再下载');
   assert.ok(/data-count="2">2<\/span>\/<span data-count="4">4<\/span><\/b><span>完成任务/.test(week)
     && /data-count="2.0" data-decimals="1">2.0<\/span>h/.test(week), '把一周加起来');
-  assert.equal((week.match(/class="week-day[ "]/g) || []).length, 7, '每天一格，周六到周五');
+  assert.equal((week.match(/class="week-cell[ "]/g) || []).length, 7, '每天一格，周六到周五');
   assert.ok(/data-date="2026-11-01"(?![^>]*disabled)/.test(week) && /data-date="2026-11-03" disabled/.test(week),
     '有日报的那天能点开，没到的不能');
   assert.ok(/data-week="1" disabled/.test(week), '本周之后不能再往后翻');

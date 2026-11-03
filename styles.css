@@ -5295,13 +5295,13 @@ select {
   cursor: default;
 }
 
-.week-days {
+.week-cells {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 8px;
 }
 
-.week-day {
+.week-cell {
   display: grid;
   justify-items: center;
   gap: 3px;
@@ -5314,22 +5314,22 @@ select {
   transition: border-color var(--t) var(--ease), background var(--t) var(--ease), transform var(--t) var(--ease);
 }
 
-.week-day:not(:disabled):hover {
+.week-cell:not(:disabled):hover {
   border-color: var(--accent-line);
   background: var(--accent-soft);
   transform: translateY(-2px);
 }
 
-.week-day:disabled {
+.week-cell:disabled {
   cursor: default;
   opacity: .55;
 }
 
-.week-day.is-today {
+.week-cell.is-today {
   border-color: var(--accent-line);
 }
 
-.week-day-bar {
+.week-cell-bar {
   position: relative;
   width: 14px;
   height: 56px;
@@ -5339,7 +5339,7 @@ select {
   overflow: hidden;
 }
 
-.week-day-bar i {
+.week-cell-bar i {
   position: absolute;
   inset: auto 0 0;
   height: var(--h);
@@ -5354,17 +5354,17 @@ select {
   from { transform: scaleY(0); }
 }
 
-.week-day b {
+.week-cell b {
   font: 600 16px/1.1 var(--font-serif);
   color: var(--ink);
 }
 
-.week-day small {
+.week-cell small {
   font-size: 11px;
   color: var(--muted);
 }
 
-.week-day em {
+.week-cell em {
   min-height: 1.2em;
   font: 600 11px/1.2 var(--font-sans);
   font-style: normal;
@@ -8446,11 +8446,11 @@ select:focus {
 }
 
 @media (max-width: 760px) {
-  .week-days {
+  .week-cells {
     gap: 4px;
   }
 
-  .week-day {
+  .week-cell {
     padding: 8px 2px 6px;
   }
 
