@@ -1105,6 +1105,55 @@ test('已递延 lists a task deferred several times once, as the record that car
   assert.equal(a.run("deferHops(S.tasks.find(t=>t.id==='d3'))"), 2);
 });
 
+test('已递延 removes completed work from the list and count, keeps history, and restores reopened work', () => {
+  const a=app(),elements={};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={innerHTML:'',textContent:'',style:{},closest:()=>null,
+    classList:{add(){},remove(){},toggle(name,on){this[name]=on}}}),querySelectorAll:()=>[]};
+  a.run(`S.today='2026-11-03';S.user={id:'test002',admin:0};UI.member='all';UI.filter='deferred';
+    S.tasks=[
+      {id:'d1',name:'报告',assignee:'test002',status:'deferred',date:'2026-11-01',
+        superseded:true,supersededBy:'d3'},
+      {id:'d2',name:'报告',assignee:'test002',status:'deferred',date:'2026-11-02',originId:'d1',
+        superseded:true,supersededBy:'d3'},
+      {id:'d3',name:'报告',assignee:'test002',status:'todo',date:'2026-11-03',originId:'d1',
+        priority:'P1',duration:30}];renderToday();`);
+  const list=()=>elements['#todayTaskList'].innerHTML;
+  const count=()=>elements['#deferredCount'].textContent;
+  assert.ok(list().includes('data-id="d3"'));
+  assert.ok(!list().includes('data-id="d1"')&&!list().includes('data-id="d2"'));
+  assert.equal(count(),1);
+  a.run("S.tasks[2].status='done';renderToday()");
+  assert.equal(list(),'');
+  assert.equal(count(),0);
+  assert.equal(elements['#todayEmpty'].classList.hidden,false);
+  assert.deepEqual(a.json('scheduleTasks(true).map(t=>t.id)'),['d1','d2','d3']);
+  assert.equal(a.run('taskLineageIds(S.tasks[2]).size'),3);
+  a.run("UI.filter='done';renderToday()");
+  assert.ok(list().includes('data-id="d3"'),'完成记录仍能在已完成页签查看');
+  for(const state of ['todo','doing']){
+    a.run(`UI.filter='deferred';S.tasks[2].status='${state}';renderToday()`);
+    assert.ok(list().includes('data-id="d3"'),'打回后仍待处理的递延任务重新出现');
+    assert.equal(count(),1);
+  }
+  a.run("S.tasks[2].status='skipped';renderToday()");
+  assert.equal(list(),'');
+  assert.equal(count(),0);
+});
+
+test('已递延 includes only open current occurrences, including carried fixed tasks across dates', () => {
+  const a=app();
+  a.run(`S.today='2026-11-03';S.user={id:'superadmin',admin:1};UI.member='all';
+    S.tasks=['todo','doing','done','skipped','deferred','rejected','pending_approval'].map((status,i)=>({
+      id:status,assignee:i%2?'test002':'test001',status,originId:'old-'+i,fixed:true,date:'2026-11-02'}));
+    S.tasks.push({id:'superseded',assignee:'test001',status:'doing',originId:'old',superseded:true},
+      {id:'plain',assignee:'test001',status:'todo'});`);
+  assert.deepEqual(a.json('scheduleTasks().filter(isDeferredTask).map(t=>t.id)'),['todo','doing']);
+  a.run("UI.member='test002'");
+  assert.deepEqual(a.json('scheduleTasks().filter(isDeferredTask).map(t=>t.id)'),['doing']);
+  a.run("S.user={id:'test001',admin:0};UI.member='all'");
+  assert.deepEqual(a.json('scheduleTasks().filter(isDeferredTask).map(t=>t.id)'),['todo']);
+});
+
 test('new work is marked in the project space until it is opened', () => {
   const a=app();
   a.run(`S.user={id:'test002',admin:0};S.projects=[{id:'p',status:'active'}];S.tasks=[

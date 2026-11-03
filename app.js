@@ -146,10 +146,9 @@ const isArchivedTask=t=>['deferred','skipped','rejected'].includes(t.status);
 /* A deferred task is replaced by its successor: the earlier occurrence is
    history and must stay out of the active board while its logs remain reachable. */
 const isSuperseded=t=>Boolean(t&&t.superseded);
-/* 已递延 lists each deferred task once, as the record that carries it now,
-   however many times it moved. The earlier hops stay hidden behind it and
-   come back as its history in the drawer. */
-const isDeferredTask=t=>!isSuperseded(t)&&Boolean(t.originId||t.status==='deferred');
+/* 已递延 lists only unfinished work, once per current occurrence. Completing
+   it keeps originId for history, but removes it from this list and its count. */
+const isDeferredTask=t=>!isSuperseded(t)&&Boolean(t.originId)&&['todo','doing'].includes(t.status);
 const deferHops=t=>taskLineageIds(t).size-1;
 /* Every occurrence of one task shares originId/reworkOf links. Walking them
    lets the drawer show a single history for a task that was deferred or redone. */
@@ -241,7 +240,7 @@ function renderToday(){const day=displayDay(),deferredView=UI.filter==='deferred
   if(UI.filter==='open')ts=ts.filter(t=>!isArchivedTask(t)&&t.status!=='done');
   if(UI.filter==='done')ts=ts.filter(t=>t.status==='done');if(UI.filter==='P0')ts=ts.filter(t=>t.priority==='P0');
   if(UI.filter==='inprogress')ts=ts.filter(t=>t.status==='doing');if(deferredView)ts=ts.filter(isDeferredTask);
-  const emptyCopy=UI.filter==='inprogress'?['暂无进行中的任务','']:deferredView?['暂无递延记录','']:['今天没有待处理任务',''];
+  const emptyCopy=UI.filter==='inprogress'?['暂无进行中的任务','']:deferredView?['暂无未完成的递延任务','']:['今天没有待处理任务',''];
   $('#todayEmptyTitle').textContent=emptyCopy[0];$('#todayEmptyHint').textContent=emptyCopy[1];
   $('#todayTaskList').innerHTML=dailyTaskGroups(ts);$('#todayEmpty').classList.toggle('hidden',ts.length>0);
   bindTaskCards('#todayTaskList')}
