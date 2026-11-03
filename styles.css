@@ -7666,8 +7666,42 @@ body.is-dragging-account * {
 /* 规划草稿: the panel opens wider while a draft is out, and the draft is a set
    of filled-in cards the user edits in place before confirming. */
 .agent-panel.is-planning {
-  width: min(780px, calc(100vw - 32px));
+  width: min(1080px, calc(100vw - 48px));
   height: min(800px, calc(100vh - 48px));
+}
+
+.agent-workspace { display: flex; flex: 1; min-height: 0; }
+.agent-conversation { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+.agent-draft-area {
+  flex: 1.35; min-width: 0; overflow: auto; padding: 18px;
+  border-right: 1px solid var(--line); background: var(--paper);
+}
+.agent-draft-area.hidden { display: none; }
+.agent-draft-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+.agent-draft-heading strong { font: 600 20px/1.4 var(--font-serif); }
+#agentDraftCards { display: grid; gap: 16px; }
+.agent-message-tools { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; white-space: normal; }
+.agent-message-tools button { padding: 2px 0; font: inherit; font-size: 11px; color: var(--muted); }
+.agent-message-tools button:hover { color: var(--accent-dark); text-decoration: underline; }
+.plan-draft-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
+.plan-draft-tools > span { width: 100%; color: var(--muted); font-size: 11px; }
+.plan-card.needs-info { border-color: var(--danger); }
+.plan-card [aria-invalid="true"] { border-color: var(--danger); background: var(--c-coral-soft); }
+.plan-validation { margin: 0; color: var(--danger); font-size: 12px; line-height: 1.5; }
+.plan-validation:empty { display: none; }
+.agent-draft-area .plan-foot { position: sticky; bottom: -18px; padding: 12px 0; background: var(--paper); z-index: 1; }
+.agent-form { flex-wrap: wrap; }
+.agent-form #agentInput { flex-basis: 100%; }
+
+@media (max-width: 760px) {
+  .agent-panel.is-planning { width: calc(100vw - 24px); }
+  .agent-workspace { flex-direction: column; }
+  .agent-draft-area { border-right: 0; border-bottom: 1px solid var(--line); padding: 12px; }
+  .agent-panel.is-planning .agent-conversation { flex: none; }
+  .agent-panel.is-planning .agent-messages { display: none; }
+  .agent-draft-heading strong { font-size: 17px; }
+  .agent-draft-heading { margin-bottom: 12px; }
+  .agent-draft-area .plan-foot { bottom: -12px; }
 }
 
 .agent-panel {

@@ -192,7 +192,7 @@ test('every drafted card says what will happen to it before anything is sent', (
   assert.equal(a.run('board.tasks[2].date'), '2026-11-02', '过去的日期挪到今天');
   assert.deepEqual(a.json('board.tasks.map(t=>planTaskPath(board,t).mode)'), ['none','wait','direct','wait'],
     '只协作的项目不允许、新项目要先审批、临时任务直接建、待批项目里的等着');
-  assert.deepEqual(a.json('planTaskPath(board,board.tasks[2]).assignees'), ['test002'], '临时任务只能给自己');
+  assert.deepEqual(a.json('planTaskPath(board,board.tasks[2]).assignees'), ['test001','test002','test003'], '临时任务可按规则指派给成员');
   a.run(`S.user={id:'superadmin',admin:1};S.creationRules=null;board=planDraft({projects:[{ref:'P1',name:'复盘',owner:'test003',members:['test001']}],tasks:[{name:'出初稿',projectRef:'P1'}]})`);
   assert.equal(a.run('planTaskPath(board,board.tasks[0]).mode'), 'direct');
   assert.deepEqual(a.json('planTaskPath(board,board.tasks[0]).assignees'), ['test003','test001'], '管理员建的项目，Owner 和协作者都能接');
@@ -599,8 +599,9 @@ test('a malformed plan is ignored rather than half-applied', () => {
   const cards = text => { const d = splitPlan(text); return [...d.projects, ...d.tasks]; };
   assert.deepEqual(cards(PLAN('{"name":"既不是数组也没有 tasks"}')), [], '没有 projects/tasks 的对象应被忽略');
   assert.deepEqual(cards(PLAN('[{坏 JSON')), [], '坏 JSON 应被忽略');
-  assert.deepEqual(cards(PLAN('{"tasks":[{"nope":1}],"projects":[{"name":"  "}]}')), [], '没有名称的卡片应被丢掉');
+  assert.equal(cards(PLAN('{"tasks":[{"nope":1}],"projects":[{"name":"  "}]}')).length, 2, '不完整卡片保留给用户补齐');
   assert.deepEqual(cards('一段没有计划块的回复'), []);
+  assert.deepEqual(splitPlan('```json\n{"tasks":[{"name":"复盘"}]}\n```').tasks.map(t=>t.name), ['复盘'], 'JSON 围栏可恢复成卡片');
 });
 
 test('a long run is no longer cut short by the old step ceiling', async () => {
@@ -942,7 +943,7 @@ test('a planning message is labelled in the transcript and in reopened history',
   assert.ok(/agentIntentChip\(intent\)/.test(append), '发出去的那条要带意图标签');
   assert.ok(!/el\.textContent=content/.test(append), '不能再用 textContent 覆盖整个气泡');
 
-  const node = source.match(/function agentMessageNode\(m\)\{[\s\S]*?\n\}/)[0];
+  const node = liftFunction('agentMessageNode');
   assert.ok(/agentPlanIntent\(m\.content\)/.test(node),
     '重新打开历史时同样认得出来，而不是把前缀当正文显示');
 
@@ -1204,4 +1205,84 @@ test('a day sits at the same place on the ruler for ticks and the week band', ()
   assert.equal(a.run('rulerAt(30,30)'), '100.00');
   assert.equal(a.run('rulerAt(0,30)'), a.run('rulerAt(1,30)'), '月初之前的一周从 1 号画起');
   assert.equal(a.run('rulerAt(45,31)'), '100.00');
+});
+
+function planningApp(){
+  const a=app();
+  a.run(source.slice(source.indexOf('const AGENT_CONFIG_KEY'),source.indexOf('const CHAT_POLL_MS')));
+  a.run(`S.today='2026-11-03';S.user={id:'superadmin',admin:1};S.users=[
+    {id:'superadmin',admin:1,active:1},{id:'test001',active:1},{id:'test002',active:1}];
+    planRender=()=>{};agentUpdateBusy=()=>{};toast=()=>{};`);
+  return a;
+}
+
+test('incomplete AI cards preserve unknown people and projects for correction instead of silently reassigning',()=>{
+  const a=planningApp();
+  a.run(`var board=planDraft({projects:[{name:''}],tasks:[{assignee:'不存在的人',projectId:'ghost'}]});`);
+  assert.equal(a.run('board.tasks[0].name'),'');
+  assert.equal(a.run('board.tasks[0].assignee'),'');
+  assert.equal(a.run('board.tasks[0].project'),'missing:ghost');
+  const errors=a.json('planProblems(board,board.tasks[0])');
+  assert.ok(errors.name&&errors.assignee&&errors.project);
+  a.run('planCardsHTML(board)');
+  assert.equal(a.run('board.tasks[0].assignee'),'','渲染不能把未知负责人改派给第一个账户');
+  a.run("board.tasks[0].name='复盘';board.tasks[0].assignee='test001';board.tasks[0].project=''");
+  assert.deepEqual(a.json('planProblems(board,board.tasks[0])'),{});
+  a.run("board.tasks[0].date='2026-11-31';board.tasks[0].time='29:99'");
+  assert.ok(a.run('Boolean(planProblems(board,board.tasks[0]).date&&planProblems(board,board.tasks[0]).time)'));
+});
+
+test('confirming incomplete cards writes nothing; corrected cards submit once and clear undo history',async()=>{
+  const a=planningApp(),writes=[];
+  a.context.document={querySelector:()=>null};
+  a.context.fetch=async(path,options)=>{writes.push(JSON.parse(options.body));return {ok:true,text:async()=>'{"id":"created"}'}};
+  a.run(`refresh=async()=>{};agentAppend=()=>{};
+    var board={...planDraft({tasks:[{name:''}]}),el:{querySelector:()=>null},history:[]};`);
+  await a.run('planSubmit(board)');
+  assert.equal(writes.length,0);
+  a.run("planCheckpoint(board);board.tasks[0].name='整理周报';board.tasks[0].assignee='test001'");
+  await a.run('planSubmit(board)');
+  assert.equal(writes.length,1);
+  assert.equal(writes[0].action,'task.create');
+  assert.equal(a.run('board.history.length'),0,'已提交的卡片不能通过撤销变回未提交');
+  await a.run('planSubmit(board)');
+  assert.equal(writes.length,1,'已完成的卡片不重复提交');
+});
+
+test('draft undo restores edits and removals without changing server data',()=>{
+  const a=planningApp();
+  a.run(`var board={...planDraft({tasks:[{name:'原任务',assignee:'test001'}]}),history:[]};
+    planCheckpoint(board);board.tasks[0].name='新名字';planCheckpoint(board);board.tasks=[];planUndo(board);`);
+  assert.equal(a.run('board.tasks[0].name'),'新名字');
+  a.run('planUndo(board)');
+  assert.equal(a.run('board.tasks[0].name'),'原任务');
+});
+
+test('pause retains pending work until resume, and stop releases the wait without running it',async()=>{
+  const a=planningApp();
+  a.run('agentState.busy=true;agentTogglePause();var finished=false;var waiting=agentWaitForResume().then(ok=>{finished=ok})');
+  await Promise.resolve();
+  assert.equal(a.run('finished'),false);
+  a.run('agentTogglePause()');await a.run('waiting');
+  assert.equal(a.run('finished'),true);
+  a.run('agentTogglePause();waiting=agentWaitForResume();agentHalt()');
+  assert.equal(await a.run('waiting'),false);
+});
+
+test('stopping an in-flight write waits for its receipt instead of allowing a competing run',()=>{
+  const a=planningApp();
+  a.run('var cancelled=false;agentState.pendingResolve=()=>{cancelled=true};agentState.pendingExecuting=true;agentHalt()');
+  assert.equal(a.run('cancelled'),false);
+  assert.equal(a.run('agentState.stop'),true);
+});
+
+test('ArrowUp recalls the last planning request only into an empty composer',()=>{
+  const a=planningApp();let prevented=0;
+  a.context.input={value:''};a.context.event={key:'ArrowUp',currentTarget:a.context.input,preventDefault(){prevented++}};
+  a.run("imeEnter=()=>false;agentSyncPlanButton=()=>{};agentState.lastInput='✦ 安排下周复盘';agentInputKeydown(event)");
+  assert.equal(a.context.input.value,'安排下周复盘');
+  assert.equal(a.run('agentState.plan'),true);
+  assert.equal(prevented,1);
+  a.context.input.value='正在编辑';a.run('agentInputKeydown(event)');
+  assert.equal(a.context.input.value,'正在编辑');
 });

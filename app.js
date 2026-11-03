@@ -59,7 +59,7 @@ let S={user:null,users:[],tasks:[],projects:[],achievements:[],logs:[],reports:[
    Safari reports parsing that as "The string did not match the expected
    pattern", so anything that is not JSON becomes a readable message here. */
 const readJSON=async r=>{const text=await r.text();try{return text?JSON.parse(text):{}}catch(_){throw new Error([504,524].includes(r.status)?'服务响应超时，请稍后再试；给 AI 助手的需求可以拆短一点':`服务暂时不可用（HTTP ${r.status}），请稍后再试`)}};
-const api=(path,body)=>fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Work-Calendar':'1'},credentials:'same-origin',body:JSON.stringify(body)}).then(async r=>{const x=await readJSON(r);if(!r.ok)throw new Error(x.error||'操作未完成');return x});
+const api=(path,body,options={})=>fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Work-Calendar':'1'},credentials:'same-origin',body:JSON.stringify(body),...options}).then(async r=>{const x=await readJSON(r);if(!r.ok)throw new Error(x.error||'操作未完成');return x});
 /* Raw-body sibling of api() for uploads: audio is sent as-is, not as JSON. */
 const apiBlob=(path,blob)=>fetch(path,{method:'POST',headers:{'Content-Type':blob.type||'application/octet-stream','X-Work-Calendar':'1'},credentials:'same-origin',body:blob}).then(async r=>{const x=await r.json().catch(()=>({}));if(!r.ok)throw new Error(x.error||'请求未完成');return x});
 const getState=()=>fetch('/api/state',{credentials:'same-origin'}).then(async r=>{const x=await readJSON(r);if(!r.ok)throw new Error(x.error||'请登录');return x});
@@ -92,7 +92,10 @@ function rememberAccount(id){if(!id)return;try{localStorage.setItem(KNOWN_ACCOUN
 async function refresh(){
   let next;
   try{next=await getState()}catch(e){showAuth();return}
-  if(S.user?.id!==next.user.id){Object.assign(UI,{view:'calendar',member:'all',filter:'all',selectedWeek:0,detailDate:null,timelineScroll:null,dayOffset:0})}
+  if(S.user?.id!==next.user.id){
+    if(S.user&&typeof agentResetUser==='function')agentResetUser();
+    Object.assign(UI,{view:'calendar',member:'all',filter:'all',selectedWeek:0,detailDate:null,timelineScroll:null,dayOffset:0});
+  }
   /* updateChatDot is defined further down the file than the unit-test sandbox
      loads, so guard the call rather than assume it is in scope. */
   S=next;rememberAccount(S.user.id);renderAll();renderPip();if(typeof updateChatDot==='function')updateChatDot();
@@ -1208,6 +1211,8 @@ function changeOwnPassword(){
   api('/api/password',{id:S.user.id,current,password:next}).then(()=>toast('密码已更新')).catch(e=>toast(e?.message||'修改失败'));
 }
 async function signOutTo(userId){
+  if(typeof agentIsBusy==='function'&&agentIsBusy()){toast('请先停止助手，等待正在执行的操作结束后再切换账户');return}
+  if(typeof agentResetUser==='function')agentResetUser();
   toggleAccountMenu(false);
   try{await api('/api/logout',{})}catch(_){}
   showAuth();
@@ -2121,9 +2126,16 @@ const AGENT_CONFIG_KEY='work-calendar-agent-config-v1';
 const TRANSCRIBE_ENDPOINT='/api/transcribe';
 const OPENCODE_GO_ENDPOINT='https://opencode.ai/zen/go/v1/chat/completions';
 const OPENCODE_GO_MODELS=['glm-5.3-flash','glm-5.3','glm-5.2','glm-5.1','kimi-k3','kimi-k2.7-code','kimi-k2.6','longcat-2.0','deepseek-v4.1-flash','deepseek-v4-pro','deepseek-v4-flash','deepseek-v4-flash-vision-exp','mimo-v2.5','mimo-v2.5-pro','hy4-preview','hy3','grok-4.5'];
-const agentState={messages:[],busy:false,steps:0,failures:0,mode:null,lastActionKey:'',repeats:0,autoRun:false,stop:false,pendingResolve:null,plan:false,planBoard:null,sessionId:(globalThis.crypto?.randomUUID?.()||`wc-${Date.now()}-${Math.random().toString(36).slice(2)}`)};
+const agentState={messages:[],busy:false,paused:false,resume:null,controller:null,lastInput:'',editing:null,steps:0,failures:0,mode:null,lastActionKey:'',repeats:0,autoRun:false,stop:false,pendingResolve:null,plan:false,planBoard:null,sessionId:(globalThis.crypto?.randomUUID?.()||`wc-${Date.now()}-${Math.random().toString(36).slice(2)}`)};
 let agentServerConfig=null;
 let agentServerAsr=null;
+function agentIsBusy(){return agentState.busy}
+function agentResetUser(){
+  agentHalt();agentState.messages=[];agentState.lastInput='';agentState.editing=null;
+  agentState.plan=false;agentState.planBoard=null;
+  for(const id of ['#agentMessages','#agentDraftCards']){const el=$(id);if(el)el.innerHTML=''}
+  $('#agentPanel')?.classList.add('hidden');$('#agentDraftArea')?.classList.add('hidden');
+}
 function agentConfig(){
   try{return JSON.parse(localStorage.getItem(AGENT_CONFIG_KEY)||'{}')}catch(_){return {}}
 }
@@ -2188,8 +2200,51 @@ function agentAppend(role,content,kind='',intent=''){
      bubble — the stored line keeps it, the transcript does not. */
   const shown=intent==='plan'?agentPlanIntent(content).body:content;
   el.appendChild(document.createTextNode(shown));
+  if(!kind)agentMessageTools(el,{role,content},agentState.messages.length-1);
   list.appendChild(el);list.scrollTop=list.scrollHeight;
   return el;
+}
+function agentMessageTools(node,message,index){
+  if(!['user','assistant'].includes(message.role))return;
+  const tools=document.createElement('div');tools.className='agent-message-tools';
+  const button=(label,run)=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=run;tools.appendChild(b)};
+  button('复制',async()=>{try{await navigator.clipboard.writeText(message.content);toast('已复制')}catch(_){toast('复制失败，请选中文字复制')}});
+  if(index>=0){
+    if(message.role==='user')button('修改重发',()=>agentEditMessage(index));
+    button('回退到这里',()=>agentRewind(index));
+  }
+  node.appendChild(tools);
+}
+function agentEditMessage(index){
+  if(agentState.busy){toast('先暂停并停止当前执行，再修改消息');return}
+  const m=agentState.messages[index];if(m?.role!=='user')return;
+  const intent=agentPlanIntent(m.content),input=$('#agentInput');
+  agentState.editing=index;agentState.plan=intent.plan;input.value=intent.body;
+  agentSyncPlanButton();input.focus();toast('修改后发送，将从这条消息重新开始；已创建的数据保留');
+}
+function agentRewind(index){
+  if(agentState.busy){toast('先停止当前执行，再回退对话');return}
+  const m=agentState.messages[index];if(!m)return;
+  agentState.messages=agentState.messages.slice(0,index+1);
+  agentRenderTranscript($('#agentMessages'),agentState.messages);
+  agentShowStep('已回退当前对话。已执行的操作和已创建的数据保留。');
+  $('#agentInput')?.focus();
+}
+function agentPrepareMessage(text,planning=false){
+  if(agentState.editing!==null){
+    agentState.messages=agentState.messages.slice(0,agentState.editing);
+    agentState.editing=null;agentRenderTranscript($('#agentMessages'),agentState.messages);
+  }
+  agentState.lastInput=planning?AGENT_PLAN_MARK+' '+text:text;
+}
+function agentInputKeydown(e){
+  if(imeEnter(e))return;
+  const input=e.currentTarget||$('#agentInput');
+  if(e.key==='ArrowUp'&&!e.shiftKey&&!e.ctrlKey&&!e.metaKey&&!input.value){
+    const last=agentState.lastInput||[...agentState.messages].reverse().find(m=>m.role==='user'&&!m.content.startsWith('【系统回执'))?.content;
+    if(last){e.preventDefault();const intent=agentPlanIntent(last);input.value=intent.body;agentState.plan=intent.plan;agentSyncPlanButton()}
+  }
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();agentSubmit()}
 }
 /* A run that executes actions leaves a long trail of interim replies, cards
    and receipts. Once it settles the trail folds under one summary line and
@@ -2212,9 +2267,12 @@ function agentFoldTrail(anchor){
   list.scrollTop=list.scrollHeight;
 }
 function agentRenderTranscript(box,messages){
+  if(!box)return;
+  box.innerHTML='';
+  const live=box===$('#agentMessages');let turn=0;
   let trail=[];
   const flush=()=>{agentFoldRun(trail).forEach(n=>box.appendChild(n));trail=[]};
-  messages.forEach(m=>{const node=agentMessageNode(m);if(!node)return;if(m.role==='user'){flush();box.appendChild(node)}else trail.push(node)});
+  messages.forEach(m=>{const index=live&&['user','assistant'].includes(m.role)&&String(m.content||'').trim()?turn++:-1;const node=agentMessageNode(m,index);if(!node)return;if(m.role==='user'){flush();box.appendChild(node)}else trail.push(node)});
   flush();
 }
 /* Models like to prefix a task with its project's name ("项目名·任务"). The
@@ -2238,7 +2296,7 @@ function agentIntentChip(intent){
   return chip;
 }
 function agentFormatTime(iso){try{return new Date(iso).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}catch(_){return iso||''}}
-function agentMessageNode(m){
+function agentMessageNode(m,index=-1){
   /* A blank line carries nothing, and older transcripts still hold a couple
      from when an empty model reply was recorded. Rendering them is what made
      the room look broken, so every caller gets null instead. */
@@ -2262,6 +2320,7 @@ function agentMessageNode(m){
     if(draft.projects.length||draft.tasks.length){const btn=document.createElement('button');btn.type='button';btn.className='ghost-btn plan-reopen-history';btn.textContent='再打开这份草稿';btn.onclick=()=>agentPlanBoard(draft);node.appendChild(btn)}
   }
   const stamp=document.createElement('small');stamp.className='agent-time';stamp.textContent=agentFormatTime(m.createdAt);node.appendChild(stamp);
+  agentMessageTools(node,m,index);
   return node;
 }
 async function agentLoadOwnHistory(){
@@ -2278,7 +2337,7 @@ async function agentLoadOwnHistory(){
       if(card&&agentState.pendingResolve&&!card.isConnected)list.appendChild(card);
       /* An open draft is the user's unfinished work; it outlives a reload of the list. */
       const board=agentState.planBoard;
-      if(board&&!board.closed&&!board.el.isConnected)list.appendChild(board.el);
+      if(board&&!board.closed&&!board.el.isConnected)$('#agentDraftCards')?.appendChild(board.el);
     };
     if(!messages.length){agentRenderEmptyState(list);restoreCard();list.scrollTop=list.scrollHeight;return}
     /* A blank line is not a turn. One used to be stored whenever the model
@@ -2339,12 +2398,15 @@ function agentExtractText(data){
      last so a normal reply always wins. */
   return data?.choices?.[0]?.message?.reasoning_content||data?.reasoning_content||'';
 }
-async function agentRequest(messages){
+async function agentRequest(messages,planning=false){
   /* Every role uses the authenticated server proxy. The browser never sends
      an API key or chooses a model, so members cannot bypass superadmin policy
      through localStorage or a direct cross-origin request. */
-  const data=await api('/api/agent/chat',{messages,sessionId:agentState.sessionId});
-  const text=agentExtractText(data);if(!text)throw new Error('服务端 Agent 未返回文本');return String(text);
+  const controller=new AbortController();agentState.controller=controller;
+  try{
+    const data=await api('/api/agent/chat',{messages,sessionId:agentState.sessionId,planning},{signal:controller.signal});
+    const text=agentExtractText(data);if(!text)throw new Error('服务端 Agent 未返回文本');return String(text);
+  }finally{if(agentState.controller===controller)agentState.controller=null}
 }
 const AGENT_ACTION_LABELS={
   'task.create':'创建任务','task.update':'调整任务','task.delete':'删除任务','task.complete':'完成任务',
@@ -2427,15 +2489,20 @@ function agentSyncPlanButton(){
    array is read as tasks. Anything malformed is dropped, never half-used. */
 function agentSplitPlan(text){
   let projects=[],tasks=[];
-  const named=x=>Array.isArray(x)?x.filter(i=>i&&typeof i==='object'&&String(i.name||'').trim()):[];
+  const named=x=>Array.isArray(x)?x.filter(i=>i&&typeof i==='object'&&!Array.isArray(i)):[];
+  const read=body=>{
+    const parsed=JSON.parse(body.trim());
+    if(Array.isArray(parsed))tasks=named(parsed);
+    else if(parsed&&typeof parsed==='object'){projects=named(parsed.projects);tasks=named(parsed.tasks)}
+  };
   const clean=String(text||'').replace(/<plan>([\s\S]*?)<\/plan>/gi,(_,body)=>{
-    try{
-      const parsed=JSON.parse(body.trim());
-      if(Array.isArray(parsed))tasks=named(parsed);
-      else if(parsed&&typeof parsed==='object'){projects=named(parsed.projects);tasks=named(parsed.tasks)}
-    }catch(_){}
+    try{read(body)}catch(_){}
     return '';
   }).trim();
+  if(!projects.length&&!tasks.length&&!/<plan>/i.test(text)){
+    try{read(clean.replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,''))}catch(_){}
+    if(projects.length||tasks.length)return {clean:'',projects,tasks};
+  }
   return {clean,projects,tasks};
 }
 
@@ -2459,7 +2526,8 @@ const AGENT_PLAN_RULE='这次是一条规划请求：用户想安排一些事。
   +'任务放进已有项目时写 projectId，放进新项目时写 projectRef，都不写就是临时任务。'
   +'name 只写事情本身，不带项目名前缀；projectId 与账户必须是数据里真实存在的 id（账户写 id，不是中文名）；'
   +'date 不早于今天、不晚于可排期上限；用户没说的按默认补齐：负责人为点名的人，否则当前账户；日期今天；时间 09:00；时长 60；优先级 P1。'
-  +'宁可少拆几张，也不要编造不存在的项目或账户。';
+  +'缺少项目名、任务名、负责人等信息也要返回草稿卡片：未知字段用空字符串，missing 数组说明需要用户补充什么，不能因为信息不全拒绝生成。'
+  +'如果用户点名了不存在或不能确定的负责人，不要擅自改派；assignee 留空并在 missing 中注明。宁可少拆几张，也不要编造不存在的项目或账户。';
 function agentSystemPrompt(context,planning){
   /* The rule lives in the system prompt rather than wrapped around the user's
      words, so the stored transcript stays exactly what was typed. */
@@ -2483,7 +2551,9 @@ function agentRecentMessages(){
     .map(x=>({role:x.role,content:x.content}));
 }
 async function agentNext(context){
+  if(!await agentWaitForResume())return [];
   const answer=await agentRequest([{role:'system',content:agentSystemPrompt(context)},...agentRecentMessages()]);
+  if(!await agentWaitForResume())return [];
   const {clean,actions}=agentSplitActions(answer);
   if(clean)agentAppend('assistant',clean);
   return actions;
@@ -2542,23 +2612,40 @@ function agentUpdateBusy(){
   const send=$('#agentSendBtn'),stop=$('#agentStopBtn'),input=$('#agentInput');
   if(send){send.disabled=agentState.busy;send.textContent=agentState.busy?'…':'发送'}
   if(stop){stop.classList.toggle('hidden',!agentState.busy);stop.textContent=agentState.steps?`停止（已执行 ${agentState.steps} 步）`:'停止'}
+  const pause=$('#agentPauseBtn');
+  if(pause){pause.classList.toggle('hidden',!agentState.busy);pause.textContent=agentState.paused?'继续':'暂停';pause.setAttribute('aria-pressed',String(agentState.paused))}
   const mic=$('#agentMicBtn');
   if(mic){mic.disabled=agentState.busy;mic.setAttribute('aria-disabled',agentState.busy?'true':'false')}
   /* Say on the composer itself what the run is waiting for, so a paused card
      is never mistaken for a composer that ate the message. */
   if(input){
-    input.placeholder=agentState.pendingResolve?'等待确认…'
+    input.placeholder=agentState.paused?'已暂停，点「继续」保留进度接着处理…'
+      :agentState.pendingResolve?'等待确认…'
       :agentState.busy?'处理中…'
       :voice.active?'正在聆听…'
       :agentState.plan?'说说要安排什么，我来起草项目和任务卡片…'
       :'问点什么…';
   }
 }
+function agentWaitForResume(){
+  if(agentState.stop)return Promise.resolve(false);
+  if(!agentState.paused)return Promise.resolve(true);
+  return new Promise(resolve=>{agentState.resume=resolve});
+}
+function agentTogglePause(){
+  if(!agentState.busy)return;
+  agentState.paused=!agentState.paused;
+  if(!agentState.paused){const resume=agentState.resume;agentState.resume=null;resume?.(!agentState.stop)}
+  agentUpdateBusy();
+  toast(agentState.paused?'已暂停：正在发送的操作会完成，后续步骤等待继续':'继续处理');
+}
 function agentHalt(note){
   agentState.stop=true;agentState.autoRun=false;
+  agentState.controller?.abort();
+  const resume=agentState.resume;agentState.resume=null;agentState.paused=false;resume?.(false);
   const pending=agentState.pendingResolve;
   agentState.pendingResolve=null;
-  if(pending)pending({cancelled:true});
+  if(pending&&!agentState.pendingExecuting)pending({cancelled:true});
   if(note)agentAppend('assistant',note,'');
 }
 function agentRunOne(proposal){
@@ -2595,6 +2682,9 @@ function agentRunOne(proposal){
     const buttons=card.querySelector('.agent-action-buttons');
     const cancel=()=>{card.remove();agentHalt();finish({cancelled:true})};
     const execute=async()=>{
+      if(agentState.pendingExecuting)return;
+      agentState.pendingExecuting=true;
+      if(!await agentWaitForResume()){agentState.pendingExecuting=false;finish({cancelled:true});return}
       buttons.innerHTML='<span class="agent-action-done">执行中…</span>';
       const before=agentFingerprint();
       try{
@@ -2611,7 +2701,7 @@ function agentRunOne(proposal){
           `【系统回执】${label} 执行成功，返回：${summary}。`
           +`数据核对：${diff.length?diff.join('；'):'没有发现任何变化'}。`
           +`先核对这一步有没有达到预期：达到了再输出下一个动作；对不上或没生效，先修正它再继续。`);
-        finish({label,result});
+        agentState.pendingExecuting=false;finish({label,result});
       }catch(err){
         const message=err?.message||'执行失败';
         toast(message);
@@ -2624,7 +2714,7 @@ function agentRunOne(proposal){
           `【系统回执·失败】${label} 没有执行。原因：${message}。`
           +`请判断能否再补一步达成用户的目标：能就输出那个补救动作，不能就用一句话说明原因并结束。`
           +`不要重复提交同一个动作。`);
-        finish({failed:true});
+        agentState.pendingExecuting=false;finish({failed:true});
       }
     };
     buttons.innerHTML='<button class="ghost-btn agent-action-cancel">取消</button>'
@@ -2699,15 +2789,15 @@ async function agentSubmit(){
   const intent=agentPlanIntent(text);
   /* The 规划任务 switch, or a typed mark, turns this message into a draft. */
   if(intent.plan||agentState.plan){input.value='';agentState.plan=false;agentSyncPlanButton();return agentPlanSubmit(intent.body)}
-  input.value='';const asked=agentAppend('user',text);
-  agentState.autoRun=false;agentState.stop=false;agentState.steps=0;agentState.failures=0;
+  agentPrepareMessage(text);input.value='';const asked=agentAppend('user',text);
+  agentState.autoRun=false;agentState.stop=false;agentState.paused=false;agentState.steps=0;agentState.failures=0;
   agentState.mode=agentPref();agentState.lastActionKey='';agentState.repeats=0;
   agentState.pendingResolve=null;
   agentState.busy=true;agentUpdateBusy();
   try{
     await agentLoop(agentContext());
   }catch(e){
-    agentAppend('assistant',e?.message||'暂时无法连接 Agent 服务。','error');
+    if(e.name!=='AbortError')agentAppend('assistant',e?.message||'暂时无法连接 Agent 服务。','error');
   }
   agentFoldTrail(asked);
   agentState.busy=false;agentState.autoRun=false;agentState.steps=0;
@@ -2731,24 +2821,31 @@ async function agentPlanSubmit(body){
                                :'助手还在处理上一条消息，点「停止」可以打断它');
     return;
   }
-  input.value='';agentSyncPlanButton();
+  agentPrepareMessage(text,true);input.value='';agentSyncPlanButton();
   agentAppend('user',AGENT_PLAN_MARK+' '+text,'','plan');
-  agentState.busy=true;agentUpdateBusy();
+  agentState.busy=true;agentState.stop=false;agentState.paused=false;agentUpdateBusy();
   const wait=agentAppend('assistant','正在起草卡片…','agent-drafting');
   agentState.messages.pop();
   try{
-    const answer=await agentRequest([{role:'system',content:agentSystemPrompt(agentContext(),true)},...agentRecentMessages()]);
+    const answer=await agentRequest([{role:'system',content:agentSystemPrompt(agentContext(),true)},...agentRecentMessages()],true);
+    if(!await agentWaitForResume()){wait?.remove();return}
     agentState.messages.push({role:'assistant',content:answer});
     wait?.remove();
     const draft=agentSplitPlan(answer);
-    if(!draft.projects.length&&!draft.tasks.length)agentAppend('assistant',(draft.clean?draft.clean+'\n':'')+'没能起草出卡片。可以说得具体一点，比如「下周三安排一次 2 小时的季度复盘」。','error');
-    else agentPlanBoard(draft);
+    if(!draft.projects.length&&!draft.tasks.length){
+      draft.tasks=[{name:'',desc:text,assignee:'',missing:['请填写任务名称、确认负责人和日期']}];
+      draft.clean='先保留你的安排，补齐标红字段后就可以确认。';
+    }
+    agentPlanBoard(draft);
   }catch(e){
     wait?.remove();
-    agentAppend('assistant',e?.message||'暂时无法连接 Agent 服务。','error');
+    if(e.name!=='AbortError'){
+      agentPlanBoard({clean:'AI 暂时未能完成拆分，已保留你的安排，可直接编辑或稍后重试。',projects:[],tasks:[{name:'',desc:text,assignee:''}]});
+      agentAppend('assistant',e?.message||'暂时无法连接 Agent 服务。','error');
+    }
+  }finally{
+    agentState.busy=false;agentUpdateBusy();input.focus();
   }
-  agentState.busy=false;agentUpdateBusy();
-  input.focus();
 }
 const PLAN_DAY=/^\d{4}-\d{2}-\d{2}$/;
 function planDay(v,fallback){v=String(v||'');return PLAN_DAY.test(v)&&v<=DATE_HORIZON?(v<S.today?S.today:v):fallback}
@@ -2758,15 +2855,16 @@ function planUser(v){v=String(v||'').trim();if(!v)return '';const u=S.users.find
 function planDraft(raw){
   const admin=Boolean(S.user?.admin),people=S.users.filter(u=>u.active&&!u.admin).map(u=>u.id);
   const projects=(raw.projects||[]).slice(0,6).map((p,i)=>{
-    const owner=admin?(planUser(p.owner)||planUser((p.members||[])[0])||people[0]||''):S.user.id;
-    const members=[...new Set((p.members||[]).map(planUser).filter(id=>id&&id!==owner&&people.includes(id)))];
-    return {ref:String(p.ref||'P'+(i+1)),name:String(p.name).trim().slice(0,120),desc:String(p.desc||'').slice(0,2000),start:planDay(p.start,S.today),end:planDay(p.end,''),owner,members,state:'draft'};
+    const owner=admin?(p.owner?planUser(p.owner):(people[0]||'')):S.user.id;
+    const members=[...new Set((Array.isArray(p.members)?p.members:[]).map(planUser).filter(id=>id&&id!==owner&&people.includes(id)))];
+    return {ref:String(p.ref||'P'+(i+1)),name:String(p.name||'').trim().slice(0,120),desc:String(p.desc||'').slice(0,2000),start:planDay(p.start,S.today),end:planDay(p.end,''),owner,members,state:'draft'};
   });
   const tasks=(raw.tasks||[]).slice(0,30).map((t,i)=>{
     const ref=projects.find(p=>p.ref===String(t.projectRef||'')),existing=S.projects.find(p=>p.id===t.projectId);
-    const project=ref?'ref:'+ref.ref:existing?'id:'+existing.id:'';
-    const name=agentTidyTaskName('task.create',{name:String(t.name).trim().slice(0,120),projectId:existing?.id}).name;
-    return {key:'t'+i,name,desc:String(t.desc||'').slice(0,2000),project,assignee:planUser(t.assignee),date:planDay(t.date,S.today),time:/^\d{2}:\d{2}$/.test(String(t.time||''))?t.time:'09:00',duration:Math.min(1440,Math.max(1,Math.round(Number(t.duration)||60))),priority:['P0','P1','P2'].includes(t.priority)?t.priority:'P1',state:'draft'};
+    const project=ref?'ref:'+ref.ref:existing?'id:'+existing.id:(t.projectId||t.projectRef)?'missing:'+String(t.projectId||t.projectRef):'';
+    const name=agentTidyTaskName('task.create',{name:String(t.name||'').trim().slice(0,120),projectId:existing?.id}).name;
+    const assignee=t.assignee?planUser(t.assignee):(admin?'':S.user.id);
+    return {key:'t'+i,name,desc:String(t.desc||'').slice(0,2000),project,assignee,date:planDay(t.date,S.today),time:/^\d{2}:\d{2}$/.test(String(t.time||''))?t.time:'09:00',duration:Math.min(1440,Math.max(1,Math.round(Number(t.duration)||60))),priority:['P0','P1','P2'].includes(t.priority)?t.priority:'P1',state:'draft'};
   });
   return {projects,tasks,next:tasks.length};
 }
@@ -2780,7 +2878,7 @@ function planTaskPath(board,t){
     const pm=projectMode(),p=draftProject;
     if(pm==='none')return {mode:'none',assignees:[S.user.id],note:'你的规则组不能新建项目，可以改成已有项目或临时任务'};
     if(pm==='approval')return {mode:'wait',assignees:[S.user.id],note:'项目要先通过审批；这张卡会留在草稿里，通过后再建'};
-    return {mode:'direct',assignees:admin?[p.owner,...p.members].filter(Boolean):[S.user.id],note:!admin&&p.members.length?'协作者接受邀请后，才能把任务交给他们':''};
+    return {mode:'direct',assignees:[p.owner,...p.members].filter(Boolean),note:''};
   }
   if(t.project.startsWith('id:')){
     const id=t.project.slice(3),p=S.projects.find(x=>x.id===id),path=taskProjects().find(x=>x.p.id===id);
@@ -2789,7 +2887,47 @@ function planTaskPath(board,t){
     return {mode:'none',assignees:[],note:'这个项目现在不能新建任务'};
   }
   const mode=tempTaskMode();
-  return {mode,assignees:admin?people:[S.user.id],note:mode==='none'?'你的规则组不能新建临时任务':mode==='approval'?'临时任务由管理员审批':''};
+  return {mode,assignees:people,note:mode==='none'?'你的规则组不能新建临时任务':mode==='approval'?'临时任务由管理员审批':''};
+}
+function planProblems(board,x){
+  if(x.state==='done')return {};
+  const errors={};
+  if(!String(x.name||'').trim())errors.name=x.ref!=null?'请填写项目名称':'请填写任务名称';
+  const validDay=v=>PLAN_DAY.test(String(v||''))&&!Number.isNaN(Date.parse(v))&&new Date(v+'T12:00:00Z').toISOString().slice(0,10)===v;
+  if(x.ref!=null){
+    if(!S.users.some(u=>u.id===x.owner&&u.active&&!u.admin))errors.owner='请选择项目负责人';
+    if(!validDay(x.start)||x.start<S.today||x.start>DATE_HORIZON)errors.start='请选择可排期范围内的开始日期';
+    if(x.end&&(!validDay(x.end)||x.end<x.start||x.end>DATE_HORIZON))errors.end='截止日期应在开始日期之后且不超出排期范围';
+  }else{
+    const path=planTaskPath(board,x);
+    if(!x.assignee||!path.assignees.includes(x.assignee))errors.assignee='请选择可执行这项任务的负责人';
+    if(x.project.startsWith('missing:'))errors.project='未找到所属项目，请重新选择';
+    const p=x.project.startsWith('ref:')?board.projects.find(p=>'ref:'+p.ref===x.project):S.projects.find(p=>'id:'+p.id===x.project);
+    if(!validDay(x.date)||x.date<S.today||x.date>DATE_HORIZON||(p?.start&&x.date<p.start)||(p?.end&&x.date>p.end))errors.date='任务日期应在排期范围和项目周期内';
+    if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(x.time))errors.time='请填写有效时间';
+    if(!Number.isInteger(Number(x.duration))||Number(x.duration)<1||Number(x.duration)>1440)errors.duration='时长应为 1–1440 分钟';
+  }
+  return errors;
+}
+function planCheckpoint(board){
+  const copy=JSON.stringify({projects:board.projects,tasks:board.tasks,next:board.next});
+  board.history=board.history||[];
+  if(board.history.at(-1)!==copy)board.history.push(copy);
+  if(board.history.length>30)board.history.shift();
+}
+function planUndo(board){
+  if(board.busy||!board.history?.length)return;
+  Object.assign(board,JSON.parse(board.history.pop()));planRender(board);
+}
+function planMarkFields(board){
+  board.el.querySelectorAll('.plan-card').forEach(card=>{
+    const x=card.dataset.ref!=null?board.projects.find(p=>p.ref===card.dataset.ref):board.tasks.find(t=>t.key===card.dataset.key);
+    if(!x)return;
+    const errors=planProblems(board,x);
+    card.classList.toggle('needs-info',Object.keys(errors).length>0);
+    card.querySelectorAll('[data-f]').forEach(field=>{field.setAttribute('aria-invalid',String(Boolean(errors[field.dataset.f])));field.title=errors[field.dataset.f]||''});
+    const note=card.querySelector('.plan-validation');if(note)note.textContent=Object.values(errors).join('；');
+  });
 }
 const PLAN_STATE={direct:'创建',approval:'提交申请',wait:'稍后再建',none:'不能创建'};
 function planCardsHTML(board){
@@ -2799,16 +2937,18 @@ function planCardsHTML(board){
   const top=(kind,label,mode,extra='',why='')=>`<div class="plan-card-top"><span class="plan-kind">${icon(kind)}${label}</span>${extra}${chip(mode,why)}<button type="button" class="plan-remove" title="不要这张卡" aria-label="删除这张卡">${icon('x')}</button></div>`;
   const done=x=>`<article class="plan-card is-done">${icon('check')}<span>${escapeHTML(x.result)}</span><strong>${escapeHTML(x.name)}</strong></article>`;
   const note=(text,cls='plan-note')=>text?`<p class="${cls}">${escapeHTML(text)}</p>`:'';
-  const projectCard=p=>p.state==='done'?done(p):`<article class="plan-card is-project is-${pm}" data-ref="${escapeHTML(p.ref)}">${top('folder','新项目',pm,'',pm==='none'?'你的规则组不能新建项目':pm==='approval'?'提交后由管理员审批':'')}<input class="plan-title" data-f="name" value="${escapeHTML(p.name)}" maxlength="120" placeholder="项目名称" aria-label="项目名称"><textarea class="plan-desc" data-f="desc" rows="2" placeholder="项目描述（可选）" aria-label="项目描述">${escapeHTML(p.desc)}</textarea><div class="plan-grid">${admin?`<label class="is-wide">Owner<select data-f="owner">${people.map(u=>opt(u.id,nameOf(u.id),p.owner)).join('')}</select></label>`:''}<label>开始<input type="date" data-f="start" value="${escapeHTML(p.start)}" min="${S.today}" max="${DATE_HORIZON}"></label><label>截止（可空）<input type="date" data-f="end" value="${escapeHTML(p.end)}" min="${escapeHTML(p.start)}" max="${DATE_HORIZON}"></label></div><div class="plan-people"><span>${admin?'协作者':'邀请协作者'}</span>${people.filter(u=>u.id!==p.owner).map(u=>`<button type="button" class="plan-person${p.members.includes(u.id)?' is-on':''}" data-user="${escapeHTML(u.id)}" aria-pressed="${p.members.includes(u.id)}">${escapeHTML(nameOf(u.id))}</button>`).join('')||'<span class="muted">没有其他成员</span>'}</div>${note(p.error,'plan-error')}</article>`;
+  const projectCard=p=>p.state==='done'?done(p):`<article class="plan-card is-project is-${pm}" data-ref="${escapeHTML(p.ref)}">${top('folder','新项目',pm,'',pm==='none'?'你的规则组不能新建项目':pm==='approval'?'提交后由管理员审批':'')}<input class="plan-title" data-f="name" value="${escapeHTML(p.name)}" maxlength="120" placeholder="项目名称" aria-label="项目名称"><textarea class="plan-desc" data-f="desc" rows="2" placeholder="项目描述（可选）" aria-label="项目描述">${escapeHTML(p.desc)}</textarea><div class="plan-grid">${admin?`<label class="is-wide">Owner<select data-f="owner">${opt('','请选择负责人',p.owner)}${people.map(u=>opt(u.id,nameOf(u.id),p.owner)).join('')}</select></label>`:''}<label>开始<input type="date" data-f="start" value="${escapeHTML(p.start)}" min="${S.today}" max="${DATE_HORIZON}"></label><label>截止（可空）<input type="date" data-f="end" value="${escapeHTML(p.end)}" min="${escapeHTML(p.start)}" max="${DATE_HORIZON}"></label></div><div class="plan-people"><span>${admin?'协作者':'邀请协作者'}</span>${people.filter(u=>u.id!==p.owner).map(u=>`<button type="button" class="plan-person${p.members.includes(u.id)?' is-on':''}" data-user="${escapeHTML(u.id)}" aria-pressed="${p.members.includes(u.id)}">${escapeHTML(nameOf(u.id))}</button>`).join('')||'<span class="muted">没有其他成员</span>'}</div>${note(p.error,'plan-error')}</article>`;
   const taskCard=t=>{
     if(t.state==='done')return done(t);
-    const path=planTaskPath(board,t);if(!path.assignees.includes(t.assignee))t.assignee=path.assignees[0]||'';
+    const path=planTaskPath(board,t);
     const open=taskProjects(),projects=[opt('','临时任务（不挂项目）',t.project),...board.projects.filter(p=>p.state!=='done').map(p=>opt('ref:'+p.ref,'新项目 · '+(p.name||'未命名'),t.project)),...open.map(x=>opt('id:'+x.p.id,x.p.name,t.project))];
+    if(t.project.startsWith('missing:'))projects.push(opt(t.project,'请选择所属项目',t.project));
     if(t.project.startsWith('id:')&&!open.some(x=>'id:'+x.p.id===t.project))projects.push(opt(t.project,S.projects.find(x=>'id:'+x.id===t.project)?.name||'已不存在的项目',t.project));
     const prio=`<span class="plan-prio" role="radiogroup" aria-label="优先级">${['P0','P1','P2'].map(v=>`<button type="button" class="priority ${v}${t.priority===v?' is-on':''}" data-prio="${v}" aria-checked="${t.priority===v}" role="radio">${v}</button>`).join('')}</span>`;
-    return `<article class="plan-card is-${path.mode}" data-key="${escapeHTML(t.key)}">${top('calendar-check','任务',path.mode,prio,path.note)}<input class="plan-title" data-f="name" value="${escapeHTML(t.name)}" maxlength="120" placeholder="任务名称" aria-label="任务名称"><div class="plan-grid"><label class="is-wide">放在<select data-f="project">${projects.join('')}</select></label><label>负责人<select data-f="assignee"${path.assignees.length>1?'':' disabled'}>${path.assignees.map(id=>opt(id,nameOf(id),t.assignee)).join('')||opt('','—','')}</select></label><label>日期<input type="date" data-f="date" value="${escapeHTML(t.date)}" min="${S.today}" max="${DATE_HORIZON}"></label><label>时间<input type="time" data-f="time" value="${escapeHTML(t.time)}"></label><label>时长（分钟）<input type="number" data-f="duration" min="1" max="1440" value="${Number(t.duration)||60}"></label></div><textarea class="plan-desc" data-f="desc" rows="1" placeholder="补充说明（可选）" aria-label="任务说明">${escapeHTML(t.desc)}</textarea>${note(t.error,'plan-error')}</article>`;
+    return `<article class="plan-card is-${path.mode}" data-key="${escapeHTML(t.key)}">${top('calendar-check','任务',path.mode,prio,path.note)}<input class="plan-title" data-f="name" value="${escapeHTML(t.name)}" maxlength="120" placeholder="任务名称" aria-label="任务名称"><div class="plan-grid"><label class="is-wide">放在<select data-f="project">${projects.join('')}</select></label><label>负责人<select data-f="assignee">${opt('','请选择负责人',t.assignee)}${path.assignees.map(id=>opt(id,nameOf(id),t.assignee)).join('')||opt('','—','')}</select></label><label>日期<input type="date" data-f="date" value="${escapeHTML(t.date)}" min="${S.today}" max="${DATE_HORIZON}"></label><label>时间<input type="time" data-f="time" value="${escapeHTML(t.time)}"></label><label>时长（分钟）<input type="number" data-f="duration" min="1" max="1440" value="${escapeHTML(t.duration)}"></label></div><textarea class="plan-desc" data-f="desc" rows="1" placeholder="补充说明（可选）" aria-label="任务说明">${escapeHTML(t.desc)}</textarea>${note(t.error,'plan-error')}</article>`;
   };
-  return board.projects.map(projectCard).join('')+board.tasks.map(taskCard).join('');
+  return (board.projects.map(projectCard).join('')+board.tasks.map(taskCard).join(''))
+    .replaceAll('</article>','<p class="plan-validation" role="status"></p></article>');
 }
 /* How many cards would be made, asked for, held back or refused. */
 function planTally(board){
@@ -2824,26 +2964,37 @@ function planConfirmLabel(n){
   return `创建 ${n.direct} 项 · 申请 ${n.approval} 项`;
 }
 function agentPlanBoard(raw){
-  const list=$('#agentMessages');if(!list)return null;
-  const board={...planDraft(raw),note:raw.clean||'',closed:false,busy:false};
+  const list=$('#agentDraftCards')||$('#agentMessages');if(!list)return null;
+  const board={...planDraft(raw),note:raw.clean||'',closed:false,busy:false,history:[]};
   board.el=document.createElement('div');
   board.el.className='agent-message assistant plan-board';
-  agentState.planBoard=board;
-  list.appendChild(board.el);
+  planActivate(board);
   planRender(board,true);
   list.scrollTop=Math.max(0,board.el.offsetTop-12);
   return board;
 }
+function planActivate(board){
+  const previous=agentState.planBoard;
+  if(previous&&previous!==board){
+    previous.closed=true;planRender(previous);$('#agentMessages')?.appendChild(previous.el);
+  }
+  agentState.planBoard=board;board.closed=false;
+  $('#agentDraftCards')?.appendChild(board.el);
+}
 function planRender(board,entering=false){
   const el=board.el;
   $('#agentPanel')?.classList.toggle('is-planning',Boolean(agentState.planBoard&&!agentState.planBoard.closed));
-  const head=`<div class="plan-board-head">${icon('sparkles')}<strong>起草了${board.projects.length?` ${board.projects.length} 个项目、`:' '}${board.tasks.length} 个任务</strong></div>`;
+  $('#agentDraftArea')?.classList.toggle('hidden',!agentState.planBoard||agentState.planBoard.closed);
+  $('#agentDraftToggle')?.classList.toggle('hidden',!agentState.planBoard);
+  const head=`<div class="plan-board-head">${icon('sparkles')}<strong>起草了${board.projects.length?` ${board.projects.length} 个项目、`:' '}${board.tasks.length} 个任务</strong><span>${escapeHTML(board.note)}</span></div>`;
   if(board.closed){
     el.innerHTML=head+`<div class="plan-foot is-closed"><span class="plan-sum">${escapeHTML(board.closedNote||'草稿已收起，没有创建任何内容')}</span><button type="button" class="ghost-btn plan-reopen">重新打开</button></div>`;
   }else{
     const n=planTally(board),left=board.projects.concat(board.tasks).some(x=>x.state!=='done');
     const sum=[n.wait?`${n.wait} 项要等审批`:'',n.none?`${n.none} 项不能创建`:''].filter(Boolean).join(' · ');
-    el.innerHTML=head+`<div class="plan-cards${entering?' is-entering':''}">${planCardsHTML(board)}</div><div class="plan-foot"><button type="button" class="ghost-btn plan-add">${icon('plus')}加一个任务</button><span class="plan-sum">${sum}</span><button type="button" class="ghost-btn plan-cancel">${left?'先不建了':'收起'}</button><button type="button" class="primary-btn plan-confirm"${n.direct+n.approval&&!board.busy?'':' disabled'}>${board.busy?'正在创建…':planConfirmLabel(n)}</button></div>`;
+    el.innerHTML=head+`<div class="plan-draft-tools"><button type="button" class="ghost-btn plan-undo"${board.history?.length&&!board.busy?'':' disabled'}>撤销修改</button><button type="button" class="ghost-btn plan-copy">复制草稿</button><span>标红字段需要补充，确认前不会创建</span></div><div class="plan-cards${entering?' is-entering':''}">${planCardsHTML(board)}</div><div class="plan-foot"><button type="button" class="ghost-btn plan-add">${icon('plus')}加一个任务</button><span class="plan-sum">${sum}</span><button type="button" class="ghost-btn plan-cancel">${left?'收起草稿':'收起'}</button><button type="button" class="primary-btn plan-confirm"${n.direct+n.approval&&!board.busy?'':' disabled'}>${board.busy?'正在创建…':planConfirmLabel(n)}</button></div>`;
+    el.querySelectorAll('input,textarea,select').forEach(field=>{field.disabled=Boolean(board.busy)});
+    planMarkFields(board);
     if(entering)el.querySelectorAll('.plan-card').forEach((c,i)=>c.style.setProperty('--i',String(i)));
   }
   planBind(board);
@@ -2852,23 +3003,28 @@ function planRender(board,entering=false){
 function planBind(board){
   const el=board.el;if(el.dataset.bound)return;el.dataset.bound='1';
   const item=node=>{const card=node.closest('.plan-card');if(!card)return null;return card.dataset.ref!=null?board.projects.find(p=>p.ref===card.dataset.ref):board.tasks.find(t=>t.key===card.dataset.key)};
-  el.addEventListener('input',e=>{const f=e.target.dataset?.f,x=item(e.target);if(x&&['name','desc'].includes(f))x[f]=e.target.value});
+  el.addEventListener('focusin',e=>{if(item(e.target)&&!board.busy)planCheckpoint(board)});
+  el.addEventListener('input',e=>{const f=e.target.dataset?.f,x=item(e.target);if(board.busy)return;if(x&&['name','desc'].includes(f)){x[f]=e.target.value;planMarkFields(board);const undo=el.querySelector('.plan-undo');if(undo)undo.disabled=!board.history?.length}});
   el.addEventListener('change',e=>{
-    const f=e.target.dataset?.f,x=item(e.target);if(!f||!x)return;
-    x[f]=f==='duration'?Math.min(1440,Math.max(1,Math.round(Number(e.target.value)||60))):e.target.value;x.error='';
+    const f=e.target.dataset?.f,x=item(e.target);if(!f||!x||board.busy)return;
+    if(!['name','desc'].includes(f))planCheckpoint(board);
+    x[f]=f==='duration'?Number(e.target.value):e.target.value;x.error='';
     if(f==='start'&&x.end&&x.end<x.start)x.end='';
     if(f==='owner')x.members=x.members.filter(id=>id!==x.owner);
-    if(['project','owner','start'].includes(f)||(f==='name'&&x.ref!=null))planRender(board);
+    planRender(board);
   });
   el.addEventListener('click',e=>{
     const b=e.target.closest('button');if(!b||board.busy)return;
     const x=item(b);
+    if(b.classList.contains('plan-undo'))return planUndo(board);
+    if(b.classList.contains('plan-copy')){navigator.clipboard.writeText(JSON.stringify({projects:board.projects,tasks:board.tasks},null,2)).then(()=>toast('草稿已复制')).catch(()=>toast('复制失败，请稍后重试'));return}
+    if(x)planCheckpoint(board);
     if(b.classList.contains('plan-remove')&&x)return planRemove(board,x);
     if(b.classList.contains('plan-person')&&x){const id=b.dataset.user;x.members=x.members.includes(id)?x.members.filter(m=>m!==id):[...x.members,id];return planRender(board)}
     if(b.dataset.prio&&x){x.priority=b.dataset.prio;return planRender(board)}
     if(b.classList.contains('plan-add'))return planAddTask(board);
     if(b.classList.contains('plan-cancel')){board.closed=true;board.closedNote=board.projects.concat(board.tasks).some(x=>x.state==='done')?board.closedNote:'';return planRender(board)}
-    if(b.classList.contains('plan-reopen')){board.closed=false;agentState.planBoard=board;return planRender(board)}
+    if(b.classList.contains('plan-reopen')){planActivate(board);return planRender(board)}
     if(b.classList.contains('plan-confirm'))planSubmit(board);
   });
 }
@@ -2881,6 +3037,7 @@ function planRemove(board,x){
   planRender(board);
 }
 function planAddTask(board){
+  planCheckpoint(board);
   const last=board.tasks.filter(t=>t.state!=='done').at(-1),key='t'+(board.next++);
   board.tasks.push({key,name:'',desc:'',project:last?.project||'',assignee:last?.assignee||'',date:last?.date||S.today,time:'09:00',duration:60,priority:'P1',state:'draft'});
   planRender(board);
@@ -2892,27 +3049,32 @@ function planAddTask(board){
 async function planSubmit(board){
   if(board.busy||agentState.busy)return;
   const open=board.projects.concat(board.tasks).filter(x=>x.state!=='done');
-  open.forEach(x=>{if(!String(x.name||'').trim())x.error=x.ref!=null?'请填写项目名称':'请填写任务名称'});
-  if(open.some(x=>x.error&&!String(x.name||'').trim())){planRender(board);toast('有卡片还没写名称');return}
-  board.busy=true;agentState.busy=true;agentUpdateBusy();planRender(board);
+  if(open.some(x=>Object.keys(planProblems(board,x)).length)){
+    planRender(board);board.el.querySelector('[aria-invalid="true"]')?.focus();toast('请先补齐标红字段');return;
+  }
+  board.busy=true;agentState.busy=true;agentState.stop=false;agentState.paused=false;agentUpdateBusy();planRender(board);
   const made=[],asked=[],failed=[];
   if(projectMode()!=='none')for(const p of board.projects.filter(p=>p.state!=='done')){
+    if(!await agentWaitForResume())break;
     try{
       const data={name:p.name.trim(),desc:p.desc,start:p.start,end:p.end,cycle:p.end?'range':'infinite',members:p.members};
       if(S.user.admin)data.owner=p.owner;
       const r=await api('/api/action',{action:'project.create',data}),pending=r?.status==='pending';
       Object.assign(p,{state:'done',error:'',result:pending?'已提交项目申请':'已创建项目'});(pending?asked:made).push(p.name);
+      board.history=[];
       board.tasks.forEach(t=>{if(t.project==='ref:'+p.ref)t.project='id:'+r.id});
     }catch(e){p.error=e?.message||'创建失败';failed.push(p.name)}
   }
   try{await refresh()}catch(_){}
   for(const t of board.tasks.filter(t=>t.state!=='done')){
+    if(!await agentWaitForResume())break;
     if(['wait','none'].includes(planTaskPath(board,t).mode))continue;
     /* Its new project was refused just now; the task waits on that card. */
     if(t.project.startsWith('ref:')){t.error='所属的新项目还没建成';continue}
     try{
       const r=await api('/api/action',{action:'task.create',data:{name:t.name.trim(),desc:t.desc,projectId:t.project.startsWith('id:')?t.project.slice(3):null,assignee:t.assignee,date:t.date,deadline:null,time:t.time,duration:Number(t.duration)||60,priority:t.priority}});
       Object.assign(t,{state:'done',error:'',result:r?.requested?'已提交申请':'已创建'});(r?.requested?asked:made).push(t.name);
+      board.history=[];
     }catch(e){t.error=e?.message||'创建失败';failed.push(t.name)}
   }
   try{await refresh()}catch(_){}
@@ -3303,7 +3465,10 @@ function initAgentUI(){
   $('#agentBtn')?.addEventListener('click',async()=>{$('#agentPanel').classList.remove('hidden');renderAgentCapability();await agentLoadOwnHistory();await agentLoadServerConfig();agentSyncPlanButton();agentInitVoice();$('#agentInput').focus()});
   $('#agentHistoryBtn')?.addEventListener('click',()=>agentShowHistory());
   $('#agentCloseBtn')?.addEventListener('click',()=>{agentStopVoice();$('#agentPanel').classList.add('hidden')});
-  $('#agentStopBtn')?.addEventListener('click',()=>agentHalt('已停止连续执行。'));
+  $('#agentStopBtn')?.addEventListener('click',()=>agentHalt('已停止，草稿和已执行记录保留。'));
+  $('#agentPauseBtn')?.addEventListener('click',()=>agentTogglePause());
+  $('#agentDraftToggle')?.addEventListener('click',()=>{const b=agentState.planBoard;if(b){b.closed=!b.closed;planRender(b)}});
+  $('#agentDraftClose')?.addEventListener('click',()=>{const b=agentState.planBoard;if(b&&!b.busy){b.closed=true;planRender(b)}});
   $('#agentPlanBtn')?.addEventListener('click',()=>agentTogglePlan());
   $$('#agentPanel .agent-mode-opt').forEach(b=>b.addEventListener('click',()=>agentSetPref(b.dataset.mode)));
   agentRenderModeOptions();
@@ -3328,7 +3493,7 @@ function initAgentUI(){
   });
     $('#agentForm')?.addEventListener('submit',e=>{e.preventDefault();agentSubmit()});
   document.addEventListener('compositionend',()=>{imeUntil=Date.now()+80},true);
-  $('#agentInput')?.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!imeEnter(e)){e.preventDefault();agentSubmit()}});
+  $('#agentInput')?.addEventListener('keydown',agentInputKeydown);
   $('#agentInput')?.addEventListener('input',()=>agentSyncPlanButton());
   $('#agentMicBtn')?.addEventListener('click',()=>agentToggleVoice());
   renderAgentCapability();
