@@ -55,6 +55,17 @@ OPENCODE_GO_CATALOG = (
 )
 OPENCODE_GO_MODELS = tuple(x['id'] for x in OPENCODE_GO_CATALOG if x['protocol'] == 'chat')
 OPENCODE_GO_DEFAULT_MODEL = 'glm-5.3-flash'
+# How much of the workspace the assistant is given, in characters of JSON.
+# Open tasks always go whole; past work, reports and notices fill the rest.
+# 0 means no ceiling at all, for models with a very large window.
+CONTEXT_CHOICES = (80_000, 200_000, 500_000, 0)
+CONTEXT_DEFAULT = 200_000
+# Past work beyond that goes into chunks behind an index.  The model asks for
+# a chunk with <lookup>; one answer may look up this many times, and each
+# lookup returns at most LOOKUP_CHARS of JSON.
+AGENT_MAX_LOOKUPS = 4
+LOOKUP_CHARS = 60_000
+
 from datetime import date, datetime, time, timedelta
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -516,6 +527,10 @@ class Store:
             'model': str(value.get('model') or '') if is_admin else '',
             'provider': str(value.get('provider') or 'custom') if is_admin else '',
             'opencodeGoModels': list(OPENCODE_GO_MODELS) if is_admin else [],
+            # The models the last successful test found, for the model switch.
+            'models': list(value.get('models') or (OPENCODE_GO_MODELS if value.get('provider') == 'opencode-go' else [])) if is_admin else [],
+            'contextChars': self.context_budget() if is_admin else None,
+
             'apiKeySet': bool(key),
             # Never echo a short key verbatim.  For normal keys keep only the
             # final four characters so the operator can recognise which key is
@@ -547,6 +562,13 @@ class Store:
         previous = self._llm_record()
         value = dict(previous.get('value') or {})
         value.update({'baseUrl': base, 'model': model, 'provider': provider})
+        if isinstance(data.get('models'), list):
+            value['models'] = [str(m)[:200] for m in data['models'] if str(m).strip()][:500]
+        if 'contextChars' in data:
+            chars = int(data.get('contextChars'))
+            if chars not in CONTEXT_CHOICES:
+                raise Problem(400, '上下文上限无效')
+            value['contextChars'] = chars
         if 'apiKey' in data:
             key = str(data.get('apiKey') or '').strip()
             if len(key) > 500:
@@ -563,31 +585,40 @@ class Store:
         self.put('settings', record)
         return self.llm_config(user)
 
-    def agent_context(self, user, budget=80_000):
+    def context_budget(self):
+        value = (self._llm_record().get('value') or {}).get('contextChars', CONTEXT_DEFAULT)
+        return value if value in CONTEXT_CHOICES else CONTEXT_DEFAULT
+
+    def agent_context(self, user, budget=None):
         """Return the workspace view sent to the assistant, as JSON within budget.
 
-        The full snapshot runs to several hundred thousand characters, most of
-        it deferral history and notification bodies. Trimming the task list cut
-        off the newest rows, so the assistant could not find tasks the page
-        shows, including ones created that day. The task list is always sent
-        whole. Reports, notifications and diaries are trimmed to the budget by
-        whole rows, and the result is always valid JSON.
+        Open tasks always go whole, so the assistant finds any task the page
+        shows.  Finished work goes as an index — one short line per task, as
+        far back as the budget (set in AI 接入配置) allows — and `chunks` names
+        every block behind it, by month, which the model fetches with a
+        <lookup> when it needs the detail (agent_lookup).  Reports, notices and
+        diaries keep only their latest rows here.  The result is always valid
+        JSON.
         """
+        budget = self.context_budget() if budget is None else budget
         state = self.snapshot(user)
         week_ago = (now().date() - timedelta(days=6)).isoformat()
         fields = ('id', 'name', 'projectId', 'assignee', 'date', 'time', 'deadline',
                   'duration', 'priority', 'status', 'fixed')
         archived = ('done', 'deferred', 'skipped')
-        tasks = [t for t in state.get('tasks') or [] if not t.get('supersededBy')]
+        tasks = [t for t in state.get('tasks') or [] if not t.get('supersededBy') and not t.get('superseded')]
         open_tasks = [t for t in tasks if t.get('status') not in archived]
-        recent = sorted((t for t in tasks if t.get('status') in archived and str(t.get('date') or '') >= week_ago),
-                        key=lambda t: str(t.get('date') or ''), reverse=True)
+        past = sorted((t for t in tasks if t.get('status') in archived),
+                      key=lambda t: str(t.get('date') or ''), reverse=True)
         newest = lambda rows, key: sorted(rows or [], key=lambda r: str(r.get(key) or ''), reverse=True)
         notifications = [dict(n, body=str(n.get('body') or '')[:300])
                          for n in newest(state.get('notifications'), 'createdAt') if not n.get('read')][:30]
         context = {
             'today': state.get('today'), 'projects': state.get('projects'),
-            'tasks': [{k: t[k] for k in fields if t.get(k) not in (None, '')} for t in open_tasks + recent],
+            'tasks': [{k: t[k] for k in fields if t.get(k) not in (None, '')} for t in open_tasks],
+            'taskIndex': ['|'.join(str(t.get(k) or '') for k in ('id', 'name', 'projectId', 'assignee', 'date', 'status'))
+                          for t in past],
+            'chunks': self.agent_chunks(state, past),
             # The diary dashboard needs a month of per-account rows; the
             # assistant does not, and those rows once made a one-line question
             # cost 13k prompt tokens. A week answers anything it is asked.
@@ -600,14 +631,232 @@ class Store:
         }
         dump = lambda: json.dumps(context, ensure_ascii=False, separators=(',', ':'))
         text = dump()
-        # Every list is newest/most relevant first, so trimming drops its tail.
-        # Tasks are never trimmed: the assistant must see each one to find the
-        # task a person names.
-        for key in ('reports', 'notifications', 'diaries'):
-            while len(text) > budget and context[key]:
+        # Every list is newest/most relevant first, so trimming drops its tail;
+        # what falls off stays reachable through its chunk.
+        for key in ('reports', 'notifications', 'diaries', 'taskIndex'):
+            while budget and len(text) > budget and context[key]:
                 context[key] = context[key][:len(context[key]) * 3 // 4]
                 text = dump()
         return text
+
+    @staticmethod
+    def agent_chunks(state, past):
+        """The blocks the assistant can fetch: past tasks, reports and diaries
+        by month, and every notice."""
+        months = lambda rows, key: sorted({str(r.get(key) or '')[:7] for r in rows} - {''}, reverse=True)
+        count = lambda rows, key, month: sum(str(r.get(key) or '').startswith(month) for r in rows)
+        chunks = [{'id': f'tasks:{m}', 'what': f'{m} 的全部任务详情', 'count': count(past, 'date', m)}
+                  for m in months(past, 'date')]
+        for kind, label in (('reports', '日报与报告'), ('diaries', '日记')):
+            rows = state.get(kind) or []
+            chunks += [{'id': f'{kind}:{m}', 'what': f'{m} 的{label}', 'count': count(rows, 'date', m)} for m in months(rows, 'date')]
+        if state.get('notifications'):
+            chunks.append({'id': 'notifications', 'what': '全部通知', 'count': len(state['notifications'])})
+        return chunks
+
+    def agent_lookup(self, user, query):
+        """Answer one <lookup> from the assistant out of what this account may
+        see: a chunk, some tasks by id, or a keyword search."""
+        state = self.snapshot(user)
+        tasks = [t for t in state.get('tasks') or [] if not t.get('superseded')]
+        detail = ('id', 'name', 'desc', 'projectId', 'assignee', 'creator', 'date', 'time', 'deadline', 'duration',
+                  'priority', 'status', 'completionSummary', 'skipReason', 'completedAt', 'originId')
+        full = lambda t: {k: t[k] for k in detail if t.get(k) not in (None, '')}
+        month = lambda rows, prefix: [r for r in rows if str(r.get('date') or '').startswith(prefix)]
+        chunk = str(query.get('chunk') or '')
+        if chunk.startswith('tasks:'):
+            rows = [full(t) for t in month(tasks, chunk[6:])]
+        elif chunk.startswith('reports:'):
+            # snapshot exposes brief index cards. Resolve only those already
+            # authorized ids, then apply the same edits as the archive reader.
+            rows = [self.apply_brief_edits(self.get('reports', r['id'])) if r.get('kind') == 'brief' else r
+                    for r in month(state.get('reports') or [], chunk[8:])]
+        elif chunk.startswith('diaries:'):
+            rows = month(state.get('diaries') or [], chunk[8:])
+        elif chunk == 'notifications':
+            rows = [dict(n) for n in
+                    sorted(state.get('notifications') or [], key=lambda n: str(n.get('createdAt') or ''), reverse=True)]
+        elif isinstance(query.get('taskIds'), list):
+            ids = {str(x)[:128] for x in query['taskIds'][:200]}
+            rows = [full(t) for t in tasks if t.get('id') in ids]
+        elif str(query.get('search') or '').strip():
+            word = str(query['search']).strip()[:50].lower()
+            hit = lambda *texts: any(word in str(x or '').lower() for x in texts)
+            rows = ([full(t) for t in tasks if hit(t.get('name'), t.get('desc'), t.get('completionSummary'))]
+                    + [{'project': p.get('id'), 'name': p.get('name'), 'desc': p.get('desc'), 'status': p.get('status')}
+                       for p in state.get('projects') or [] if hit(p.get('name'), p.get('desc'), p.get('background'))])
+        else:
+            return '没有看懂这个查询。可以用 {"chunk":"tasks:2026-09"}、{"taskIds":["…"]} 或 {"search":"关键词"}。'
+        # An offset advances through complete rows. A single oversized record
+        # (for example a monthly report) is returned as lossless JSON text
+        # fragments; partOffset advances within that row before the next row.
+        selection = ({'chunk': chunk[:100]} if chunk.startswith(('tasks:', 'reports:', 'diaries:')) or chunk == 'notifications' else {'taskIds': sorted(ids)}
+                     if isinstance(query.get('taskIds'), list) else {'search': word})
+        try:
+            offset, part = int(query.get('offset', 0)), int(query.get('partOffset', 0))
+            if offset < 0 or part < 0:
+                raise ValueError
+        except (ValueError, TypeError, OverflowError):
+            return '分页位置无效，请使用上次结果中的 next 查询。'
+        total = len(rows)
+        position = {**selection, 'offset': offset, 'partOffset': part}
+
+        def next_query(index, fragment=0):
+            return {**selection, 'offset': index, **({'partOffset': fragment} if fragment else {})} if index < total else None
+
+        def dump(page, following):
+            return json.dumps({'query': position, 'count': total, 'shown': len(page),
+                               'rows': page, 'next': following, 'complete': following is None},
+                              ensure_ascii=False, separators=(',', ':'))
+
+        if offset >= total:
+            return dump([], None)
+        # Pack as many whole rows as fit, rather than repeatedly dropping a
+        # quarter and leaving inaccessible records behind the same prefix.
+        low, high = 0, total - offset
+        if not part:
+            while low < high:
+                count = (low + high + 1) // 2
+                if len(dump(rows[offset:offset + count], next_query(offset + count))) <= LOOKUP_CHARS:
+                    low = count
+                else:
+                    high = count - 1
+            if low:
+                return dump(rows[offset:offset + low], next_query(offset + low))
+        raw = json.dumps(rows[offset], ensure_ascii=False, separators=(',', ':'))
+        if part >= len(raw):
+            return '分段位置已失效，请从当前记录的 offset 重新查询。'
+
+        def fragment(length):
+            end = part + length
+            following = next_query(offset, end) if end < len(raw) else next_query(offset + 1)
+            return dump([{'id': rows[offset].get('id') or rows[offset].get('project'),
+                          'fragment': {'format': 'json', 'offset': part, 'totalChars': len(raw),
+                                       'text': raw[part:end]}}], following)
+
+        low, high = 1, len(raw) - part
+        while low < high:
+            length = (low + high + 1) // 2
+            if len(fragment(length)) <= LOOKUP_CHARS:
+                low = length
+            else:
+                high = length - 1
+        return fragment(low)
+
+    @staticmethod
+    def llm_root(base):
+        """The API root a configured address names, without /chat/completions."""
+        base = str(base or '').strip().rstrip('/')
+        return base[:-len('/chat/completions')] if base.endswith('/chat/completions') else base
+
+    @staticmethod
+    def llm_headers(base, key):
+        """OpenAI-style bearer auth, which every mainstream provider's
+        OpenAI-compatible endpoint takes; Anthropic's model list also wants
+        its own key header and version."""
+        headers = {'Content-Type': 'application/json', 'User-Agent': 'WorkCalendar/1.0'}
+        if key:
+            headers['Authorization'] = f'Bearer {key}'
+            if 'anthropic.com' in urllib.parse.urlparse(base).netloc:
+                headers.update({'x-api-key': key, 'anthropic-version': '2023-06-01'})
+        return headers
+
+    @staticmethod
+    def llm_failure(code, detail):
+        """Say why a provider refused, in words an operator can act on."""
+        try:
+            body = json.loads(detail)
+            error = body.get('error') if isinstance(body, dict) else None
+            message = (error.get('message') if isinstance(error, dict) else error) or body.get('message') or ''
+        except (ValueError, AttributeError):
+            message = ''
+        message = str(message or detail or '').strip()[:300]
+        hint = {400: '请求被拒绝，检查模型名称是否写对', 401: 'API Key 无效、已过期或没有填写',
+                403: 'API Key 没有权限访问这个接口或模型', 404: '地址不对：这个地址下找不到接口，Base URL 一般以 /v1 结尾',
+                408: '服务响应超时', 429: '请求太频繁或额度已用完', 500: '服务商内部错误，稍后再试',
+                502: '服务商网关错误，稍后再试', 503: '服务暂时不可用，稍后再试'}.get(code, '服务返回错误')
+        return f'HTTP {code} · {hint}' + (f'：{message}' if message else '')
+
+    @staticmethod
+    def llm_payload(model, messages, temperature=None, probe=False):
+        """Share model parameter compatibility between verification and chat.
+
+        OpenAI reasoning families reject max_tokens and non-default sampling
+        temperature. Omitting temperature is also safe on compatible gateways.
+        """
+        reasoning = bool(re.match(r'^(?:o[1-9](?:[-.]|$)|gpt-[5-9](?:[.-]|$))', model.rsplit('/', 1)[-1], re.I))
+        payload = {'model': model, 'messages': messages, 'stream': False}
+        if probe:
+            payload['max_completion_tokens' if reasoning else 'max_tokens'] = 4096 if reasoning else 256
+        if temperature is not None and not reasoning:
+            payload['temperature'] = temperature
+        return payload
+
+    @staticmethod
+    def llm_text(reply):
+        choices = reply.get('choices') if isinstance(reply, dict) else None
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            return ''
+        message = choices[0].get('message')
+        content = message.get('content') if isinstance(message, dict) else None
+        if isinstance(content, list):
+            content = ''.join(p['text'] for p in content if isinstance(p, dict) and isinstance(p.get('text'), str))
+        return content.strip() if isinstance(content, str) else ''
+
+    def test_llm_config(self, user, data):
+        """Try an address and key before saving them: list the models it
+        offers and, when a model is named, have it answer one word.  Nothing
+        is stored; an empty key means the one already saved."""
+        self.admin(user)
+        saved = dict(self._llm_record().get('value') or {})
+        provider = str(data.get('provider') or 'custom').strip()
+        base = str(data.get('baseUrl') or '').strip() or (OPENCODE_GO_BASE_URL if provider == 'opencode-go' else '')
+        parsed = urllib.parse.urlparse(base)
+        if parsed.scheme not in ('http', 'https') or not parsed.netloc:
+            return {'ok': False, 'models': [], 'reason': '请填写 http(s) 开头的 API 地址'}
+        key = str(data.get('apiKey') or '').strip() or str(saved.get('apiKey') or '')
+        root, headers = self.llm_root(base), self.llm_headers(base, key)
+        model = str(data.get('model') or '').strip()
+        started = _time.monotonic()
+
+        def call(url, body=None):
+            request = urllib.request.Request(url, data=json.dumps(body).encode() if body else None,
+                                             method='POST' if body else 'GET', headers=headers)
+            try:
+                with urllib.request.urlopen(request, timeout=20) as response:
+                    return json.loads(response.read(2_000_000).decode('utf-8')), None
+            except urllib.error.HTTPError as exc:
+                return None, self.llm_failure(exc.code, exc.read(4000).decode('utf-8', errors='replace'))
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                return None, f'连不上服务：{str(getattr(exc, "reason", exc))[:200]}'
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                return None, '服务返回的不是 JSON，地址可能指向了网页而不是 API'
+
+        listing, listing_error = call(root + '/models')
+        rows = listing.get('data', listing.get('models')) if isinstance(listing, dict) else None
+        if not isinstance(rows, list):
+            rows = []
+            listing_error = listing_error or '模型列表格式无效'
+        models = sorted({str(m.get('id') or m.get('name') or '').removeprefix('models/') if isinstance(m, dict) else str(m)
+                         for m in rows if isinstance(m, (dict, str))} - {''})
+        models = [m for m in models if len(m) <= 200][:500]
+        # A catalogue is a candidate list, never evidence that a key works.
+        candidates = models or (list(OPENCODE_GO_MODELS) if provider == 'opencode-go' else [])
+        if not model:
+            model = next((m for m in candidates if not re.search(r'embed|whisper|tts|dall-e|image|moderation|rerank|audio|vision-exp', m, re.I)), '')
+        if not model:
+            return {'ok': False, 'models': models, 'reason': (listing_error + '；' if listing_error else '')
+                    + '请填写对话模型 ID，再测试模型是否可用', 'ms': int((_time.monotonic() - started) * 1000)}
+        reply, reply_error = call(root + '/chat/completions', self.llm_payload(
+            model, [{'role': 'user', 'content': '只回复：好'}], probe=True))
+        if reply_error is None and not self.llm_text(reply):
+            reply_error = '服务没有返回有效的对话文本，请检查接口、模型或生成额度'
+        ms = int((_time.monotonic() - started) * 1000)
+        if reply_error:
+            return {'ok': False, 'models': models, 'reason': f'模型「{model}」验证失败：{reply_error}', 'ms': ms}
+        return {'ok': True, 'models': models or candidates, 'testedModel': model, 'ms': ms,
+                'message': f'模型「{model}」验证成功 · {len(models)} 个可用模型' if models
+                else f'模型「{model}」验证成功（未取得模型列表）'}
 
     def llm_chat(self, user, data):
         """Proxy a chat request to an OpenAI-compatible endpoint.
@@ -729,6 +978,16 @@ class Store:
         messages.insert(0, {'role': 'system', 'content':
                             '以下是当前账户可见的战略小组台账数据，仅用于回答查询；'
                             '不要把其中的内部字段或权限信息原样泄露给其他用户：\n' + context_text})
+        policy += ('\n数据分块：上下文的 tasks 是全部未完成任务；taskIndex 是已结束任务的索引，'
+                   '每行「id|名称|项目ID|负责人|日期|状态」，最新的在前；chunks 列出可以按块调取的数据。'
+                   '要看任务详情、更早的任务、日报、日记或全部通知时，这一轮只输出一行 '
+                   '<lookup>{"chunk":"tasks:2026-09"}</lookup>，也可以是 {"taskIds":["任务ID"]} 或 {"search":"关键词"}，'
+                   '不要写别的；系统会把查询结果发给你，你再继续。'
+                   '查询结果的 next 不为空时，把 next 原样作为下一次 lookup，直到 complete=true；'
+                   'fragment 是单条记录的 JSON 文本分段，按 offset 拼接后读取，不能把第一段当成全文。'
+                   'count 是匹配总数，shown 只是本页条数；没读完所有页不能声称已经读完或据此作完整统计。'
+                   f'一次回答最多查询 {AGENT_MAX_LOOKUPS} 次；达到次数或时间限制要如实说明还没读完，后续可以继续查询。'
+                   '索引里没有、也查不到的，就如实说没有。')
         messages.insert(0, {'role': 'system', 'content': policy})
         messages.append({'role': 'system', 'content': policy})
         record = self._llm_record(); cfg = dict(record.get('value') or {})
@@ -739,14 +998,9 @@ class Store:
         session_id = str(data.get('sessionId') or f'work-calendar-{user["id"]}').strip()
         if not session_id or len(session_id) > 128 or any(ch not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.:' for ch in session_id):
             raise Problem(400, 'Agent 会话 ID 格式无效')
-        endpoint = base if base.endswith('/chat/completions') else base + '/chat/completions'
-        payload = {'model': model, 'messages': messages,
-                   'temperature': float(cfg.get('temperature', 0.2)),
-                   'stream': False}
-        headers = {'Content-Type': 'application/json', 'User-Agent': 'WorkCalendar/1.0',
-                   'x-opencode-session': session_id}
-        if key:
-            headers['Authorization'] = f'Bearer {key}'
+        endpoint = self.llm_root(base) + '/chat/completions'
+        payload = self.llm_payload(model, messages, temperature=float(cfg.get('temperature', 0.2)))
+        headers = {**self.llm_headers(base, key), 'x-opencode-session': session_id}
 
         # Cloudflare drops a request after 100 s and the browser then gets an
         # HTML error page instead of JSON, so the whole call, retry included,
@@ -762,7 +1016,7 @@ class Store:
                 return json.loads(raw.decode('utf-8'))
             except urllib.error.HTTPError as exc:
                 detail = exc.read(4000).decode('utf-8', errors='replace')
-                raise Problem(502, f'LLM 服务返回 HTTP {exc.code}：{detail[:300]}')
+                raise Problem(502, 'LLM 服务返回 ' + self.llm_failure(exc.code, detail))
             except (urllib.error.URLError, TimeoutError) as exc:
                 raise Problem(502, f'LLM 服务连接失败：{str(exc)[:200]}')
             except (UnicodeDecodeError, json.JSONDecodeError):
@@ -772,43 +1026,81 @@ class Store:
         # only saw "服务端 Agent 未返回文本", which says nothing about why. Ask
         # once more (an empty reply is usually transient) and, if it is still
         # empty, report what actually came back instead of a blank response.
-        result = {}
-        choice = {}
-        content = ''
-        for attempt in (1, 2):
-            result = send_once()
-            choices = result.get('choices') or []
-            if not choices:
-                raise Problem(502, 'LLM 响应缺少 choices')
-            choice = choices[0]
-            message = choice.get('message') or {}
-            # Some gateways put the answer under reasoning_content, and a few
-            # return the content as a list of parts.
-            raw_content = message.get('content') or message.get('reasoning_content') or ''
-            if isinstance(raw_content, list):
-                raw_content = ''.join(str(part.get('text', '')) for part in raw_content if isinstance(part, dict))
-            content = raw_content
-            if str(content).strip():
-                break
-            if attempt == 1:
-                if deadline - _time.monotonic() < 20:
+        def ask():
+            result = {}
+            choice = {}
+            content = ''
+            for attempt in (1, 2):
+                result = send_once()
+                choices = result.get('choices') or []
+                if not choices:
+                    raise Problem(502, 'LLM 响应缺少 choices')
+                choice = choices[0]
+                message = choice.get('message') or {}
+                # Some gateways put the answer under reasoning_content, and a few
+                # return the content as a list of parts.
+                raw_content = message.get('content') or message.get('reasoning_content') or ''
+                if isinstance(raw_content, list):
+                    raw_content = ''.join(str(part.get('text', '')) for part in raw_content if isinstance(part, dict))
+                content = raw_content
+                if str(content).strip():
                     break
-                _time.sleep(0.6)
-        if not str(content).strip():
-            usage = result.get('usage') or {}
-            raise Problem(502, '模型（%s）连续两次都没有返回内容（finish_reason=%s，tokens=%s）。'
-                               '可以稍后重试，或在 AI 接入配置里换一个模型。'
-                          % (model, choice.get('finish_reason'), usage.get('total_tokens', '?')))
+                if attempt == 1:
+                    if deadline - _time.monotonic() < 20:
+                        break
+                    _time.sleep(0.6)
+            if not str(content).strip():
+                usage = result.get('usage') or {}
+                raise Problem(502, '模型（%s）连续两次都没有返回内容（finish_reason=%s，tokens=%s）。'
+                                   '可以稍后重试，或在 AI 接入配置里换一个模型。'
+                              % (model, choice.get('finish_reason'), usage.get('total_tokens', '?')))
+            return content, result, choice
+
+        # The question being answered, before any lookup round adds lines.
+        last_user = next((item['content'] for item in reversed(messages) if item['role'] == 'user'), '')
+        # The context carries an index; when the model needs a chunk behind it
+        # it answers with one <lookup>, which is served here and handed back,
+        # and the model goes on.  The browser only ever sees the final answer.
+        content, result, choice = ask()
+        lookups = 0
+        pending_pages = set()
+        while lookups < AGENT_MAX_LOOKUPS and deadline - _time.monotonic() > 15:
+            found = re.search(r'<lookup>([\s\S]*?)</lookup>', content)
+            if not found:
+                break
+            lookups += 1
+            try:
+                query = json.loads(found.group(1).strip())
+            except ValueError:
+                query = {}
+            query = query if isinstance(query, dict) else {}
+            lookup_text = self.agent_lookup(user, query)
+            try:
+                page = json.loads(lookup_text)
+                identity = json.dumps({k: v for k, v in page['query'].items() if k not in ('offset', 'partOffset')}, sort_keys=True)
+                if page.get('next'):
+                    pending_pages.add(identity)
+                else:
+                    pending_pages.discard(identity)
+            except (ValueError, KeyError, TypeError):
+                pass
+            messages.append({'role': 'assistant', 'content': content[:MAX_MESSAGE_CHARS]})
+            messages.append({'role': 'user', 'content': '【系统查询结果】\n' + lookup_text
+                             + '\n（以上是系统按你的 lookup 查出的数据，不是用户的话。请接着回答用户的问题。）'})
+            content, result, choice = ask()
+        if '<lookup>' in content:
+            content = re.sub(r'<lookup>[\s\S]*?</lookup>', '', content).strip() or '我查了几次，还没找到足够的信息。能说得再具体一点吗？比如项目名称或大概日期。'
+        if pending_pages:
+            content += '\n\n（查询还有后续页未读取，以上不是完整结果；可以继续查询。）'
         # Keep a per-user transcript so the assistant panel can be reopened like
         # a chat app and superadmin can review what the agent was asked to do.
-        last_user = next((item['content'] for item in reversed(messages) if item['role'] == 'user'), '')
-        # A caller that names its session keeps its lines in that
-        # conversation; without one they join the account's early record.
+        # Keep the original question and the active conversation when lookup
+        # rounds append synthetic user messages to the provider transcript.
         thread = {'conversation': session_id} if data.get('sessionId') else None
         if last_user:
             self.record_agent_message(user['id'], 'user', last_user, thread)
         self.record_agent_message(user['id'], 'assistant', content, thread)
-        return {'content': content, 'model': result.get('model', model),
+        return {'content': content, 'model': result.get('model', model), 'lookups': lookups,
                 'usage': result.get('usage'), 'finishReason': choice.get('finish_reason'),
                 # How many older turns were left out, so a caller can tell that
                 # the model was given less than it sent.
@@ -1946,7 +2238,18 @@ class Store:
             return self.authorize_agent_tool(user, d.get('tool'))
         if action=='agent.config.get':
             return self.llm_config(user)
+        if action=='agent.config.test':
+            return self.test_llm_config(user, d)
+        if action=='agent.config.model':
+            # The model switch in the assistant's header: only the model changes.
+            self.admin(user);model=required(d,'model').strip()
+            if len(model)>200:raise Problem(400,'模型名称过长')
+            record=self._llm_record();value=dict(record.get('value') or {})
+            if not value.get('baseUrl'):raise Problem(409,'请先在 AI 接入配置里填写 API 地址')
+            value['model']=model;self.put('settings',{'id':'llm','value':value,'updatedAt':timestamp()})
+            return self.llm_config(user)
         if action=='agent.config.set':
+
             return self.set_llm_config(user, d)
         if action=='agent.asr.get':
             return self.asr_config(user)
