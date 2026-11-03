@@ -72,11 +72,6 @@ class ScheduleAccessTests(unittest.TestCase):
 
     def test_temp_tasks_outside_projects(self):
         member = self.store.user('test001')
-        with self.assertRaises(Problem) as error:
-            self.store.action(member, 'task.create', {
-                'name': 'unauthorized', 'assignee': 'test002', 'date': self.day,
-            })
-        self.assertEqual(error.exception.status, 403)
         own = self.store.action(member, 'task.create', {
             'name': 'own errand', 'assignee': 'test001', 'date': self.day, 'duration': 20,
         })
@@ -96,6 +91,155 @@ class ScheduleAccessTests(unittest.TestCase):
         with self.assertRaises(Problem):
             self.store.action(self.admin, 'task.create', {'name': 'self', 'assignee': 'superadmin', 'date': self.day})
 
+    def test_a_diary_is_read_only_by_its_author_and_the_admins(self):
+        owner, member = self.store.user('test001'), self.store.user('test002')
+        project = self.store.action(self.admin, 'project.create', {
+            'name': 'private', 'owner': 'test001', 'members': ['test002'], 'start': self.day,
+        })
+        self.store.put('notifications', {
+            'to': 'test001', 'title': '成员日记 · test002', 'body': '旧的抄送',
+            'kind': 'diary', 'reference': 'old', 'read': False,
+        })
+        self.store.db.commit()
+        self.store.action(member, 'diary.save', {
+            'date': self.day, 'content': {'done': '联调', 'risks': '无', 'next': '上线', 'note': '有点累，想早点睡'},
+        })
+        snap = self.store.snapshot(owner)
+        self.assertFalse(snap['diaries'])
+        self.assertFalse(any('有点累' in str(n.get('body')) for n in self.store.all('notifications')))
+        with self.assertRaises(Problem):
+            self.store.action(owner, 'diary.get', {'date': self.day, 'userId': 'test002'})
+        read = self.store.action(self.admin, 'diary.get', {'date': self.day, 'userId': 'test002'})
+        self.assertEqual(read['content']['note'], '有点累，想早点睡')
+        # The project summary its Owner reads says a diary came in, not what it says.
+        content, missing = self.store.aggregate(self.store.get('projects', project['id']), self.day, now())
+        self.assertEqual(missing, [])
+        self.assertNotIn('联调', content['collaborators'])
+        # 随记 stays out of the team brief.
+        brief = self.store.compose_brief(self.day)
+        row = next(m for m in brief['content']['members'] if m['id'] == 'test002')
+        self.assertNotIn('note', row['summary'])
+        # Copies delivered before, as notices or inside old automatic summaries,
+        # are cleared the next time the store opens; the clean-up runs once.
+        old = self.store.put('reports', {
+            'kind': 'automatic', 'projectId': project['id'], 'date': self.day,
+            'content': {'collaborators': 'test002（日记）：有点累，想早点睡\ntest003：未提交'},
+        })
+        self.store.db.execute("DELETE FROM jobs WHERE id='migrate:diary-privacy'")
+        self.store.db.commit()
+        path = self.store.path; self.store.close(); self.store = Store(path, seed=False)
+        self.assertFalse(any(n.get('kind') == 'diary' for n in self.store.all('notifications')))
+        self.assertEqual(self.store.get('reports', old['id'])['content']['collaborators'],
+                         'test002：已写当日日记\ntest003：未提交')
+        self.store.put('notifications', {'to': 'test001', 'title': '迟到的抄送', 'kind': 'diary', 'read': False})
+        self.store.db.commit()
+        path = self.store.path; self.store.close(); self.store = Store(path, seed=False)
+        self.assertTrue(any(n.get('kind') == 'diary' for n in self.store.all('notifications')))
+
+    def test_member_hands_a_temp_task_to_someone_else(self):
+        giver, taker, other = (self.store.user(x) for x in ('test001', 'test002', 'test003'))
+        task = self.store.action(giver, 'task.create', {
+            'name': '帮忙核对报价', 'assignee': 'test002', 'date': self.day, 'duration': 30,
+        })
+        self.assertEqual((task['projectId'], task['creator'], task['assignee']), (None, 'test001', 'test002'))
+        notice = next(n for n in self.store.all('notifications')
+                      if n['to'] == 'test002' and n['reference'] == task['id'])
+        self.assertEqual((notice['title'], notice['fresh']), ('收到任务指派', True))
+        # Both ends see it; nobody else does.
+        self.assertIn(task['id'], {t['id'] for t in self.store.snapshot(giver)['tasks']})
+        self.assertIn(task['id'], {t['id'] for t in self.store.snapshot(taker)['tasks']})
+        self.assertNotIn(task['id'], {t['id'] for t in self.store.snapshot(other)['tasks']})
+        with self.assertRaises(Problem):
+            self.store.action(giver, 'task.create', {'name': '给管理员', 'assignee': 'superadmin', 'date': self.day})
+        # The giver adjusts and may hand it on; the taker asks the giver.
+        moved = self.store.action(giver, 'task.update', {'id': task['id'], 'duration': 45})
+        self.assertEqual(moved['duration'], 45)
+        with self.assertRaises(Problem):
+            self.store.action(taker, 'task.update', {'id': task['id'], 'duration': 10})
+        tomorrow = (date.fromisoformat(self.day) + timedelta(days=1)).isoformat()
+        req = self.store.action(taker, 'task.edit_request', {
+            'id': task['id'], 'changes': {'date': tomorrow}, 'reason': '今天排满了',
+        })
+        self.assertEqual(req['approver'], 'test001')
+        self.store.action(giver, 'task.edit_review', {'id': req['id'], 'accept': True})
+        self.assertEqual(self.store.get('tasks', task['id'])['date'], tomorrow)
+        # Progress goes back to the giver, who can also send finished work back.
+        self.store.action(taker, 'task.complete', {'id': task['id'], 'summary': '核对完了', 'actual': 30})
+        self.assertTrue(any(n['to'] == 'test001' and n['title'] == '任务已完成' for n in self.store.all('notifications')))
+        with self.assertRaises(Problem):
+            self.store.action(other, 'task.reopen', {'id': task['id'], 'reason': '不对'})
+        reopened = self.store.action(giver, 'task.reopen', {'id': task['id'], 'reason': '少了一家'})
+        self.assertEqual(reopened['status'], 'todo')
+
+    def hand_task(self, giver='test001', taker='test002'):
+        return self.store.action(self.store.user(giver), 'task.create', {
+            'name': '帮忙核对', 'assignee': taker, 'date': self.day, 'duration': 30,
+        })
+
+    def test_a_disabled_giver_leaves_edit_approval_to_superadmin(self):
+        task = self.hand_task()
+        self.store.action(self.admin, 'account.toggle', {'id': 'test001', 'active': False})
+        tomorrow = (date.fromisoformat(self.day) + timedelta(days=1)).isoformat()
+        req = self.store.action(self.store.user('test002'), 'task.edit_request', {
+            'id': task['id'], 'changes': {'date': tomorrow}, 'reason': '改期',
+        })
+        self.assertEqual(req['approver'], 'superadmin')
+
+    def test_a_one_off_task_cannot_be_moved_to_an_admin(self):
+        task = self.hand_task()
+        with self.assertRaises(Problem):
+            self.store.action(self.store.user('test002'), 'task.edit_request', {
+                'id': task['id'], 'changes': {'assignee': 'superadmin'}, 'reason': '交给管理员',
+            })
+
+    def test_an_account_with_handed_out_work_is_not_deleted(self):
+        task = self.hand_task()
+        self.store.put('tasks', {**self.personal['test001'], 'status': 'done'})
+        self.store.db.commit()
+        delete = {'id': 'test001', 'confirm': 'test001'}
+        with self.assertRaises(Problem) as error:
+            self.store.action(self.admin, 'account.delete', delete)
+        self.assertIn('临时任务', error.exception.message)
+        self.store.action(self.store.user('test002'), 'task.complete', {
+            'id': task['id'], 'summary': '完成', 'actual': 30,
+        })
+        self.store.action(self.admin, 'account.delete', delete)
+        self.assertFalse(any(u['id'] == 'test001' for u in self.store.users()))
+
+    def test_a_disabled_account_is_not_joined_until_enabled(self):
+        project = self.store.action(self.admin, 'project.create', {
+            'name': 'later', 'owner': 'test001', 'start': self.day,
+        })
+        self.store.action(self.admin, 'account.toggle', {'id': 'test003', 'active': False})
+        project = self.store.get('projects', project['id'])
+        project['members']['test003'] = 'pending'; self.store.put('projects', project)
+        self.assertEqual(self.store.invite(project), [])
+        self.assertEqual(self.store.get('projects', project['id'])['members']['test003'], 'pending')
+        self.store.action(self.admin, 'account.toggle', {'id': 'test003', 'active': True})
+        self.assertEqual(self.store.invite(self.store.get('projects', project['id'])), ['test003'])
+
+    def test_a_reopened_project_gets_back_the_work_it_closed(self):
+        project = self.store.action(self.admin, 'project.create', {
+            'name': 'reopen', 'owner': 'test001', 'members': ['test002'], 'start': self.day,
+        })
+        make = lambda name: self.store.action(self.admin, 'task.create', {
+            'name': name, 'projectId': project['id'], 'assignee': 'test002', 'date': self.day,
+        })
+        waiting, running = make('waiting'), make('running')
+        self.store.action(self.store.user('test002'), 'task.start', {'id': running['id']})
+        self.store.action(self.admin, 'project.complete', {'id': project['id']})
+        self.assertEqual(self.store.get('tasks', running['id'])['status'], 'skipped')
+        self.store.action(self.admin, 'project.update', {'id': project['id'], 'status': 'active'})
+        self.assertEqual(self.store.get('tasks', waiting['id'])['status'], 'todo')
+        self.assertEqual(self.store.get('tasks', running['id'])['status'], 'doing')
+
+    def test_the_week_report_tells_filed_days_from_composed_ones(self):
+        week = self.store.action(self.admin, 'brief.week', {'date': self.day})
+        self.assertEqual([b['filed'] for b in week['briefs'] if b['date'] == self.day], [False])
+        self.store.build_brief(self.day)
+        week = self.store.action(self.admin, 'brief.week', {'date': self.day})
+        self.assertEqual([b['filed'] for b in week['briefs'] if b['date'] == self.day], [True])
+
     def test_project_application_sets_creator_as_owner_and_owner_can_invite(self):
         applicant = self.store.user('test002')
         project = self.store.action(applicant, 'project.create', {
@@ -108,12 +252,40 @@ class ScheduleAccessTests(unittest.TestCase):
         self.assertEqual(approved['owner'], 'test002')
         self.store.action(applicant, 'project.invite', {'id': project['id'], 'members': ['test003']})
         self.store.action(applicant, 'project.invite', {'id': project['id'], 'members': ['test003']})
-        updated = self.store.get('projects', project['id'])
-        self.assertEqual(updated['members']['test003'], 'pending')
-        self.assertEqual(len([r for r in self.store.all('requests') if r['projectId'] == project['id'] and r['to'] == 'test003']), 1)
-        request = next(r for r in self.store.all('requests') if r['projectId'] == project['id'] and r['to'] == 'test003')
-        self.store.action(self.store.user('test003'), 'request.respond', {'id': request['id'], 'accept': True})
+        # Joining is automatic: no request waits in test003's inbox, one notice says so.
         self.assertEqual(self.store.get('projects', project['id'])['members']['test003'], 'accepted')
+        self.assertFalse(any(r['to'] == 'test003' and r['status'] == 'pending' for r in self.store.all('requests')))
+        joined = [n for n in self.store.all('notifications') if n['to'] == 'test003' and n['title'] == '已加入项目']
+        self.assertEqual(len(joined), 1)
+        self.assertTrue(joined[0]['fresh'])
+
+    def test_a_member_who_left_and_is_added_again_gets_their_work_back(self):
+        owner, member = self.store.user('test001'), self.store.user('test002')
+        project = self.store.action(self.admin, 'project.create', {
+            'name': 'comeback', 'owner': 'test001', 'start': self.day,
+        })
+        self.store.action(owner, 'project.invite', {'id': project['id'], 'members': ['test002']})
+        task = self.store.action(owner, 'task.create', {
+            'name': 'kept', 'projectId': project['id'], 'assignee': 'test002', 'date': self.day,
+        })
+        self.store.action(member, 'project.member.remove', {'id': project['id'], 'member': 'test002'})
+        self.assertNotIn(task['id'], {t['id'] for t in self.store.snapshot(member)['tasks']})
+        self.assertEqual(self.store.get('tasks', task['id'])['assignee'], 'test002')
+        self.store.action(owner, 'project.invite', {'id': project['id'], 'members': ['test002']})
+        self.assertIn(task['id'], {t['id'] for t in self.store.snapshot(member)['tasks']})
+
+    def test_invitations_left_waiting_from_before_are_accepted(self):
+        project = self.store.action(self.admin, 'project.create', {
+            'name': 'legacy invite', 'owner': 'test001', 'start': self.day,
+        })
+        project['members']['test003'] = 'pending'; self.store.put('projects', project)
+        request = self.store.put('requests', {
+            'projectId': project['id'], 'to': 'test003', 'status': 'pending', 'read': False,
+        })
+        self.store.db.commit()
+        self.store.snapshot(self.store.user('test003'))
+        self.assertEqual(self.store.get('projects', project['id'])['members']['test003'], 'accepted')
+        self.assertEqual(self.store.get('requests', request['id'])['status'], 'accepted')
 
     def test_invalid_project_ranges_and_unknown_account_are_rejected(self):
         with self.assertRaises(Problem):
@@ -233,16 +405,19 @@ class ScheduleAccessTests(unittest.TestCase):
             with self.assertRaises(Problem):
                 self.store.action(self.store.user(member), 'project.invite', {'id': project['id'], 'members': ['test001']})
 
-    def test_admin_assignment_resolves_pending_invite_without_allowing_stale_rejection(self):
+    def test_invite_resolves_a_waiting_request_without_allowing_stale_rejection(self):
         project = self.store.action(self.admin, 'project.create', {'name': 'pending invite', 'owner': 'test001'})
         owner = self.store.user('test001')
+        # A request from before joining became automatic is still waiting.
+        project['members']['test002'] = 'pending'; self.store.put('projects', project)
+        request = self.store.put('requests', {
+            'projectId': project['id'], 'to': 'test002', 'status': 'pending', 'read': False,
+        })
+        self.store.db.commit()
         self.store.action(owner, 'project.invite', {'id': project['id'], 'members': ['test002']})
-        request = next(r for r in self.store.all('requests') if r['projectId'] == project['id'])
-        with self.assertRaises(Problem):
-            self.store.action(owner, 'task.create', {'name': 'too early', 'projectId': project['id'], 'assignee': 'test002'})
-        self.store.action(self.admin, 'project.invite', {'id': project['id'], 'members': ['test002']})
         self.assertEqual(self.store.get('projects', project['id'])['members']['test002'], 'accepted')
         self.assertEqual(self.store.get('requests', request['id'])['status'], 'accepted')
+        self.store.action(owner, 'task.create', {'name': 'on time', 'projectId': project['id'], 'assignee': 'test002'})
         with self.assertRaises(Problem) as error:
             self.store.action(self.store.user('test002'), 'request.respond', {'id': request['id'], 'accept': False})
         self.assertEqual(error.exception.status, 409)
@@ -676,7 +851,7 @@ class CreationPolicyTests(unittest.TestCase):
         self.set_group({'project': 'direct', 'tempTask': 'direct', 'projectTask': 'none'})
         started = self.store.action(self.member('test002'), 'project.create', {'name': '组长项目', 'members': ['test003'], 'start': self.day})
         self.assertEqual((started['status'], started['owner']), ('active', 'test002'))
-        self.assertTrue(any(r['projectId'] == started['id'] and r['to'] == 'test003' for r in self.store.all('requests')))
+        self.assertEqual(started['members']['test003'], 'accepted')
         self.assertFalse(any(n['kind'] == 'approval' and n['reference'] == started['id'] for n in self.store.all('notifications')))
         # Someone in the default group still asks first.
         asked = self.store.action(self.member('test003'), 'project.create', {'name': '普通申请', 'start': self.day})
@@ -876,10 +1051,10 @@ class TaskApprovalTests(unittest.TestCase):
             with self.assertRaises(Problem):
                 self.store.action(other,'task.completion.update',{'id':task['id'],'summary':'代改'})
 
-    def test_project_completion_requires_all_tasks_and_report_then_superadmin_review(self):
+    def test_project_completion_needs_a_report_then_superadmin_review(self):
         task=self.store.action(self.admin,'task.create',{'name':'结项子任务','projectId':self.project['id'],'assignee':'test002','date':self.day})
         with self.assertRaises(Problem):
-            self.store.action(self.owner,'project.complete_request',{'id':self.project['id'],'report':'未完成报告'})
+            self.store.action(self.owner,'project.complete_request',{'id':self.project['id'],'report':''})
         self.store.action(self.member,'task.complete',{'id':task['id'],'summary':'完成','actual':20})
         p=self.store.action(self.owner,'project.complete_request',{'id':self.project['id'],'report':'全部子任务已完成，验收通过。'})
         self.assertEqual(p['status'],'pending_completion')
@@ -887,6 +1062,34 @@ class TaskApprovalTests(unittest.TestCase):
         self.assertTrue(any(n['to']=='superadmin' and n['kind']=='project_completion' for n in self.store.all('notifications')))
         self.store.action(self.admin,'project.complete_review',{'id':self.project['id'],'accept':True})
         self.assertEqual(self.store.get('projects',self.project['id'])['status'],'done')
+
+    def test_owner_may_close_a_project_early_and_open_work_closes_with_it(self):
+        open_task=self.store.action(self.admin,'task.create',{
+            'name':'还没做','projectId':self.project['id'],'assignee':'test002','date':self.day,
+        })
+        self.store.action(self.owner,'project.complete_request',{'id':self.project['id'],'report':'方向调整，提前结项。'})
+        notice=next(n for n in self.store.all('notifications')
+                    if n['to']=='superadmin' and n['kind']=='project_completion')
+        self.assertIn('仍有 1 项未完成任务',notice['body'])
+        self.store.action(self.admin,'project.complete_review',{'id':self.project['id'],'accept':True})
+        self.assertEqual(self.store.get('projects',self.project['id'])['status'],'done')
+        closed=self.store.get('tasks',open_task['id'])
+        self.assertEqual((closed['status'],closed['skipReason']),('skipped','项目已完成'))
+
+    def test_admin_completes_a_running_project_directly(self):
+        end=(date.fromisoformat(self.day)+timedelta(days=10)).isoformat()
+        self.store.action(self.admin,'project.update',{'id':self.project['id'],'end':end,'cycle':'range'})
+        task=self.store.action(self.admin,'task.create',{
+            'name':'未完成','projectId':self.project['id'],'assignee':'test002','date':self.day,
+        })
+        with self.assertRaises(Problem):
+            self.store.action(self.owner,'project.complete',{'id':self.project['id']})
+        p=self.store.action(self.admin,'project.complete',{'id':self.project['id']})
+        self.assertEqual((p['status'],p['endedEarly']),('done',True))
+        self.assertEqual(self.store.get('tasks',task['id'])['status'],'skipped')
+        self.assertTrue(any(n['to']=='test002' and n['title']=='项目已完成' for n in self.store.all('notifications')))
+        with self.assertRaises(Problem):
+            self.store.action(self.admin,'project.complete',{'id':self.project['id']})
 
     def test_project_completion_ignores_deferred_history_when_successor_is_done(self):
         """A deferred occurrence is history; its completed successor closes the project."""
