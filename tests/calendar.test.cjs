@@ -1064,8 +1064,6 @@ test('voice input writes into the composer and hides itself when unsupported', (
   assert.ok(/input\.value=settled\+\(voice\.interim\?voice\.interim:''\)/.test(render),
     '最终文本与临时识别结果分开累积，输入框不会来回抖动');
   const start = source.match(/async function agentVoiceStartRecording\(\)\{[\s\S]*?\n\}/)[0];
-  assert.ok(/voice\.base=\$\('#agentInput'\)\?\.value\|\|''/.test(start),
-    '开始录音时保留输入框里已经写好的内容');
   assert.ok(!/agentSubmit\(/.test(start), '录音只填进输入框，绝不自动发送');
   const finish = source.match(/async function agentVoiceFinishRecording\(\)\{[\s\S]*?\n\}/)[0];
   assert.ok(/apiBlob\(TRANSCRIBE_ENDPOINT,blob\)/.test(finish),
@@ -1074,6 +1072,94 @@ test('voice input writes into the composer and hides itself when unsupported', (
   assert.ok(/recognition\.stop\(\)/.test(stop), '再点一下要能结束浏览器识别');
   assert.ok(/recorder\.stop\(\)/.test(stop), '再点一下要能结束服务端录音');
 });
+
+/* Voice input keeps a copy of the composer text while it runs. A stale copy must
+   never be written back over text the user has since deleted or typed. */
+function voiceApp() {
+  const start = source.indexOf('const voice={');
+  const section = source.slice(start, source.indexOf('\ninitAgentUI();', start));
+  const input = {value: '', setSelectionRange() {}};
+  const bar = {textContent: '', classList: {toggle() {}}};
+  const context = vm.createContext({
+    $: selector => (selector === '#agentInput' ? input : selector === '#agentVoiceBar' ? bar : null),
+    agentSyncPlanButton() {}, agentUpdateBusy() {}, toast() {}, agentServerAsr: null,
+    TRANSCRIBE_ENDPOINT: '/api/transcribe', apiBlob: async () => ({text: ''}),
+    navigator: {languages: ['zh-CN']},
+    Blob: class { constructor(parts, options) { this.parts = parts; this.type = options.type; } },
+  });
+  vm.runInContext(section, context);
+  return {context, input, run: code => vm.runInContext(code, context)};
+}
+
+function fakeBrowserRecognition(instances) {
+  return class {
+    constructor() { this.onstart = this.onresult = this.onerror = this.onend = null; instances.push(this); }
+    start() {}
+    stop() { this.onend && this.onend(); }
+  };
+}
+
+test('voice input does not bring back text deleted before the next dictation', () => {
+  const a = voiceApp(), instances = [];
+  a.context.window = {SpeechRecognition: fakeBrowserRecognition(instances)};
+  a.run('agentToggleVoice()');
+  instances[0].onstart();
+  instances[0].onresult({resultIndex: 0, results: [{isFinal: true, 0: {transcript: '明天开会'}}]});
+  a.run('agentToggleVoice()');
+  assert.equal(a.input.value, '明天开会');
+  a.input.value = '';
+  a.run('agentToggleVoice()');
+  assert.equal(a.input.value, '', '删掉的文字不会因为再点一次麦克风而回来');
+});
+
+test('text typed into the box during dictation is the new starting point for recognized words', () => {
+  const a = voiceApp(), instances = [];
+  a.context.window = {SpeechRecognition: fakeBrowserRecognition(instances)};
+  a.run('agentToggleVoice()');
+  instances[0].onstart();
+  instances[0].onresult({resultIndex: 0, results: [{isFinal: true, 0: {transcript: '明天'}}]});
+  assert.equal(a.input.value, '明天');
+  a.input.value = '';
+  a.run('agentVoiceFollowEdit()');
+  instances[0].onresult({resultIndex: 1, results: [
+    {isFinal: true, 0: {transcript: '明天'}}, {isFinal: true, 0: {transcript: '开会'}}]});
+  assert.equal(a.input.value, '开会', '删掉的词不会在下一次识别结果里回来');
+});
+
+test('a server transcript is added after the box content it finds when it arrives', async () => {
+  const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+  const record = async (a, recorders) => {
+    a.context.navigator = {languages: ['zh-CN'], mediaDevices: {getUserMedia: async () => ({getTracks: () => []})}};
+    a.context.MediaRecorder = class {
+      constructor() { this.state = 'inactive'; recorders.push(this); }
+      static isTypeSupported() { return true; }
+      start() { this.state = 'recording'; }
+      stop() { this.state = 'inactive'; this.onstop(); }
+    };
+    await a.run('agentVoiceStartRecording()');
+    recorders[0].ondataavailable({data: {size: 5}});
+    a.run('agentStopVoice()');
+  };
+
+  const kept = voiceApp(), keptRecorders = [];
+  let answer;
+  kept.context.apiBlob = () => new Promise(resolve => { answer = resolve; });
+  kept.input.value = '会议纪要：';
+  await record(kept, keptRecorders);
+  answer({text: '明天开会'});
+  await tick();
+  assert.equal(kept.input.value, '会议纪要：明天开会', '录音前写好的内容保留，转写结果接在后面');
+
+  const deleted = voiceApp(), deletedRecorders = [];
+  deleted.context.apiBlob = () => new Promise(resolve => { answer = resolve; });
+  deleted.input.value = '会议纪要：';
+  await record(deleted, deletedRecorders);
+  deleted.input.value = '';
+  answer({text: '明天开会'});
+  await tick();
+  assert.equal(deleted.input.value, '明天开会', '转写时删掉的文字不会被带回来');
+});
+
 
 /* 反馈 #1：抽屉里的「调整任务指派」按钮曾与弹窗里的负责人下拉框同用
    editTaskAssignee 这个 id，保存时取到的是按钮的空值，服务端回「请重新登录」。 */

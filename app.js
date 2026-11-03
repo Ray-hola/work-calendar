@@ -4090,7 +4090,7 @@ function initAgentUI(){
     $('#agentForm')?.addEventListener('submit',e=>{e.preventDefault();agentSubmit()});
   document.addEventListener('compositionend',()=>{imeUntil=Date.now()+80},true);
   $('#agentInput')?.addEventListener('keydown',agentInputKeydown);
-  $('#agentInput')?.addEventListener('input',()=>agentSyncPlanButton());
+  $('#agentInput')?.addEventListener('input',()=>{agentSyncPlanButton();agentVoiceFollowEdit()});
   $('#agentMicBtn')?.addEventListener('click',()=>agentToggleVoice());
   renderAgentCapability();
   agentSyncPlanButton();
@@ -4135,10 +4135,25 @@ function agentVoiceRender(){
   try{input.setSelectionRange(input.value.length,input.value.length)}catch(_){}
   agentSyncPlanButton();
 }
+/* The transcript joins whatever the box holds when it arrives, so text typed or
+   deleted while recording or transcribing is neither lost nor brought back. */
 function agentVoiceAppend(text){
-  if(!text)return;
-  voice.final+=(voice.final?' ':'')+text;
-  voice.interim='';agentVoiceRender();
+  const input=$('#agentInput');
+  if(!text||!input)return;
+  input.value+=text;
+  try{input.setSelectionRange(input.value.length,input.value.length)}catch(_){}
+  agentSyncPlanButton();
+}
+/* Typing while dictating makes the box's current text the new starting point, so
+   words recognized next are added after the edit instead of over it. */
+function agentVoiceFollowEdit(){
+  if(!voice.active||voice.engine!=='browser')return;
+  const input=$('#agentInput');if(!input)return;
+  const tail=voice.interim||'';
+  const tailKept=Boolean(tail)&&input.value.endsWith(tail);
+  voice.base=tailKept?input.value.slice(0,-tail.length):input.value;
+  if(!tailKept)voice.interim='';
+  voice.final='';
 }
 function agentVoiceStart(){
   const engine=agentVoiceEngine();
@@ -4163,7 +4178,6 @@ async function agentVoiceStartRecording(){
   try{recorder=mime?new MediaRecorder(stream,{mimeType:mime}):new MediaRecorder(stream)}catch(_){recorder=new MediaRecorder(stream)}
   voice.stream=stream;voice.recorder=recorder;voice.chunks=[];voice.interim='';
   voice.engine='server';voice.active=true;voice.startedAt=Date.now();
-  voice.base=$('#agentInput')?.value||'';voice.final='';
   recorder.ondataavailable=event=>{if(event.data&&event.data.size)voice.chunks.push(event.data)};
   recorder.onstop=()=>agentVoiceFinishRecording();
   try{recorder.start()}catch(_){agentStopVoice();return}
@@ -4225,7 +4239,7 @@ function agentStopVoice(){
   if(recognition){try{recognition.stop()}catch(_){}}
   if(recorder&&recorder.state!=='inactive'){try{recorder.stop()}catch(_){}}else{
     voice.stream?.getTracks().forEach(track=>{try{track.stop()}catch(_){}});
-    voice.stream=null;agentVoiceState();agentVoiceRender();
+    voice.stream=null;agentVoiceState();
   }
   agentVoiceState();
 }
