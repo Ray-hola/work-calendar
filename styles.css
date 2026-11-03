@@ -8295,6 +8295,7 @@ body.is-dragging-account * {
 
 .agent-panel {
   position: fixed;
+  container: assistant / inline-size;
   z-index: 25;
   right: 24px;
   bottom: 24px;
@@ -10190,6 +10191,33 @@ select:focus {
 
 .agent-panel.is-reviewing .agent-composer {
   display: none;
+}
+
+.agent-panel.is-reviewing .agent-draft-area,
+.agent-panel.is-reviewing #agentDraftToggle { display: none; }
+
+/* Invisible hit areas: resizing remains available without slider chrome. */
+.agent-resize-edge { position: absolute; z-index: 6; touch-action: none; outline-offset: -3px; }
+.agent-resize-edge.edge-w { left: 0; top: 12px; bottom: 12px; width: 8px; cursor: ew-resize; }
+.agent-resize-edge.edge-n { left: 12px; right: 12px; top: 0; height: 8px; cursor: ns-resize; }
+.agent-resize-edge.edge-nw { left: 0; top: 0; width: 14px; height: 14px; cursor: nwse-resize; }
+body.is-resizing-agent { user-select: none; }
+.is-resizing-agent .agent-panel { transition: none; }
+
+/* Respond to the panel's own width as well as the browser viewport. */
+@container assistant (max-width: 760px) {
+  .agent-panel.is-planning .agent-workspace { flex-direction: column; }
+  .agent-panel.is-planning .agent-sessions { width: auto; max-height: 140px; flex: none; border-right: 0; border-bottom: 1px solid var(--line); }
+  .agent-panel.is-planning .agent-draft-area { border-right: 0; border-bottom: 1px solid var(--line); padding: 12px; }
+  .agent-panel.is-planning .agent-conversation { flex: none; }
+  .agent-panel.is-planning .agent-messages { display: none; }
+  .agent-panel.is-planning .agent-draft-heading { margin-bottom: 12px; }
+  .agent-panel.is-planning .agent-draft-heading strong { font-size: 17px; }
+  .agent-panel.is-planning .agent-draft-area .plan-foot { bottom: -12px; }
+}
+@container assistant (max-width: 560px) {
+  .agent-workspace { flex-direction: column; }
+  .agent-sessions { width: auto; max-height: 140px; flex: none; border-right: 0; border-bottom: 1px solid var(--line); }
 }
 
 /* 复制 / 修改重发 / 回退 as quiet icons that come up with the message. */

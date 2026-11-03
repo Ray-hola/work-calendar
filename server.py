@@ -869,8 +869,10 @@ class Store:
         list shows them.  Lines stored before conversations existed form one
         conversation of their own, 早期记录."""
         target = self.agent_target(user, data)
-        titles = {r.get('conversation'): r.get('title') for r in self.all('agent_conversations') if r.get('user') == target}
-        groups = {}
+        metadata = {r['conversation']: r for r in self.all('agent_conversations') if r.get('user') == target}
+        groups = {thread: {'id': thread, 'title': '', 'count': 0,
+                          'createdAt': r.get('createdAt', r.get('updatedAt', '')),
+                          'updatedAt': r.get('updatedAt', '')} for thread, r in metadata.items()}
         last = {}
         for seq, m in enumerate(self.all('agent_messages')):
             if m.get('user') != target:
@@ -878,15 +880,15 @@ class Store:
             thread = m.get('conversation') or AGENT_LEGACY_CONVERSATION
             last[thread] = seq
             g = groups.setdefault(thread, {'id': thread, 'title': '', 'count': 0, 'createdAt': m.get('createdAt', ''), 'updatedAt': ''})
-            g['updatedAt'] = m.get('createdAt', '') or g['updatedAt']
+            g['updatedAt'] = max(m.get('createdAt', ''), g['updatedAt'])
             if m.get('role') in ('user', 'assistant'):
                 g['count'] += 1
             if not g['title'] and m.get('role') == 'user':
                 g['title'] = re.sub(r'^[✦\s]+', '', str(m.get('content') or '')).strip().split('\n')[0][:40]
         for thread, g in groups.items():
-            g['title'] = titles.get(thread) or ('早期记录' if thread == AGENT_LEGACY_CONVERSATION else g['title'] or '新对话')
+            g['title'] = metadata.get(thread, {}).get('title') or ('早期记录' if thread == AGENT_LEGACY_CONVERSATION else g['title'] or '新对话')
         # Storage order breaks ties between lines stamped in the same instant.
-        return {'userId': target, 'conversations': sorted(groups.values(), key=lambda g: (g['updatedAt'], last[g['id']]), reverse=True)}
+        return {'userId': target, 'conversations': sorted(groups.values(), key=lambda g: (g['updatedAt'], last.get(g['id'], -1)), reverse=True)}
 
     def agent_history(self, user, data):
         """Return the stored assistant transcript for one account, or for one of
@@ -1958,11 +1960,15 @@ class Store:
             return self.agent_history(user, d)
         if action=='agent.conversations':
             return self.agent_conversations(user, d)
-        if action=='agent.conversation.rename':
-            thread=required(d,'conversationId');title=required(d,'title').strip()[:40]
-            if not title:raise Problem(400,'请填写对话名称')
+        if action in ('agent.conversation.create', 'agent.conversation.rename'):
+            thread=required(d,'conversationId')
+            title=required(d,'title').strip()[:40] if action.endswith('.rename') else ''
+            if action.endswith('.rename') and not title:raise Problem(400,'请填写对话名称')
             key=f'{user["id"]}:{thread}'
-            return self.put('agent_conversations',{'id':key,'user':user['id'],'conversation':thread,'title':title,'updatedAt':timestamp()})
+            previous=next((r for r in self.all('agent_conversations') if r['id']==key),None)
+            if previous and action.endswith('.create'):return previous
+            return self.put('agent_conversations',{'id':key,'user':user['id'],'conversation':thread,'title':title,
+                                                 'createdAt':(previous or {}).get('createdAt') or timestamp(),'updatedAt':timestamp()})
         if action=='agent.conversation.delete':
             target=self.agent_target(user,d);thread=required(d,'conversationId')
             with self.lock,self.db:

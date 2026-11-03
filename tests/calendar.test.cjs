@@ -1160,6 +1160,20 @@ test('a server transcript is added after the box content it finds when it arrive
   assert.equal(deleted.input.value, '明天开会', '转写时删掉的文字不会被带回来');
 });
 
+test('changing conversations cancels late browser and server speech results', async () => {
+  const a=voiceApp(),instances=[];
+  a.context.window={SpeechRecognition:fakeBrowserRecognition(instances)};
+  a.input.value='old conversation';a.run('agentVoiceStartRecognition()');
+  const ended=instances[0].onend;
+  a.run('agentCancelVoice()');a.input.value='new conversation';ended();
+  assert.equal(a.input.value,'new conversation');
+  a.run('voice.chunks=[{size:5}]');let answer;
+  a.context.apiBlob=()=>new Promise(resolve=>{answer=resolve});
+  const pending=a.run('agentVoiceFinishRecording()');
+  a.run('agentCancelVoice()');a.input.value='another conversation';answer({text:'old audio'});await pending;
+  assert.equal(a.input.value,'another conversation');
+});
+
 
 /* 反馈 #1：抽屉里的「调整任务指派」按钮曾与弹窗里的负责人下拉框同用
    editTaskAssignee 这个 id，保存时取到的是按钮的空值，服务端回「请重新登录」。 */
@@ -1620,8 +1634,91 @@ test('the assistant keeps conversations in a side list and its message tools are
     assert.ok(tools.includes(`button('${name}','${label}'`), label);
   assert.ok(!/agentShowHistory/.test(source), '不再弹出单独的工作记录卡片');
   assert.ok(/agentHistoryBtn'\)\?\.addEventListener\('click',\(\)=>agentToggleSessions\(\)\)/.test(source));
-  const history = source.match(/async function agentLoadOwnHistory\(\)\{[\s\S]*?\n\}/)[0];
-  assert.ok(/conversationId:agentState\.conversationId/.test(history), '只载入当前这段对话');
   const use = source.match(/function agentUseConversation\(id\)\{[\s\S]*?\n\}/)[0];
   assert.ok(/agentState\.sessionId=id==='legacy'\?null:id/.test(use), '早期记录不带会话 ID，服务端照旧归档');
+});
+
+test('a late conversation history response cannot overwrite a newer selection', async () => {
+  const a=planningApp(),list={innerHTML:'',scrollTop:0,scrollHeight:0};
+  a.context.document={querySelector:s=>s==='#agentMessages'?list:null};
+  const pending={};
+  a.context.fetch=(url,options)=>new Promise(resolve=>{
+    pending[JSON.parse(options.body).data.conversationId]=data=>resolve({ok:true,text:async()=>JSON.stringify(data)});
+  });
+  a.run("agentRenderTranscript=()=>{};agentRenderEmptyState=()=>{};agentState.conversationId='B'");
+  const older=a.run('agentLoadOwnHistory()');
+  a.run("agentState.conversationId='A'");
+  const newer=a.run('agentLoadOwnHistory()');
+  pending.A({messages:[{role:'user',content:'A only'}]});await newer;
+  pending.B({messages:[{role:'user',content:'B only'}]});await older;
+  assert.deepEqual(a.json('agentState.messages'),[{role:'user',content:'A only'}]);
+  assert.equal(a.run('agentState.historyLoading'),false);
+});
+
+test('draft cards and unsent input belong to their own conversation', () => {
+  const a=planningApp(),input={value:'unsent A'},cards={innerHTML:'',appendChild:()=>{}};
+  a.context.document={querySelector:s=>s==='#agentInput'?input:s==='#agentDraftCards'?cards:null};
+  a.run("agentSyncDraftLayout=()=>{};agentSyncPlanButton=()=>{};agentState.conversationId='A';var boardA={el:{},tasks:[{name:'A task'}]};agentState.planBoard=boardA;agentState.plan=true;agentUseConversation('B')");
+  assert.equal(a.run('agentState.planBoard'),null);assert.equal(input.value,'');
+  a.run("var boardB={el:{}};agentState.planBoard=boardB");input.value='unsent B';
+  a.run("agentUseConversation('A')");
+  assert.equal(a.run('agentState.planBoard===boardA'),true);assert.equal(input.value,'unsent A');
+  assert.equal(a.run('agentState.plan'),true);
+  a.run("agentUseConversation('B')");assert.equal(a.run('agentState.planBoard===boardB'),true);assert.equal(input.value,'unsent B');
+});
+
+test('read-only or loading assistant states cannot submit plans or messages', async () => {
+  const a=planningApp(),input={value:'create a task'};
+  a.context.document={querySelector:s=>s==='#agentInput'?input:null};
+  let writes=0;a.context.fetch=async()=>{writes++;return {ok:true,text:async()=>'{}'}};
+  a.run("var board=planDraft({tasks:[{name:'old task',assignee:'test001'}]});agentState.viewing='test001'");
+  await a.run('planSubmit(board)');await a.run('agentSubmit()');await a.run("agentPlanSubmit('create')");
+  a.run('agentState.viewing=null;agentState.historyLoading=true');
+  await a.run('planSubmit(board)');await a.run('agentSubmit()');
+  assert.equal(writes,0);assert.equal(input.value,'create a task');
+});
+
+test('a late delete receipt cannot clear another account with the same conversation id', async () => {
+  const a=planningApp(),list={innerHTML:'other account transcript'};
+  a.context.document={querySelector:s=>s==='#agentMessages'?list:null};
+  let finish;a.context.fetch=()=>new Promise(resolve=>{finish=()=>resolve({ok:true,text:async()=>'{}'})});
+  a.run("agentState.conversationId='own';agentState.viewing='test001';agentState.viewConversation='legacy';agentRenderSessions=()=>{}");
+  const deletion=a.run("agentDeleteConversation('legacy','test001')");
+  a.run("agentState.viewing='test002';agentState.viewConversation='legacy'");finish();await deletion;
+  assert.equal(list.innerHTML,'other account transcript');assert.equal(a.run('agentState.viewConversation'),'legacy');
+});
+
+test('every project staffing figure uses the displayed window', () => {
+  const a=app();
+  a.run("S.today='2026-11-03';S.user={id:'test001'};S.users=[{id:'test001'}];S.tasks=[{id:'far',projectId:'p',assignee:'test001',date:'2026-12-03',duration:60,status:'todo'}]");
+  const html=a.run("projectStaffing({id:'p',owner:'test001',status:'active',members:{test001:'accepted'}},true)");
+  assert.ok(html.includes('近两周'));assert.ok(html.includes('进行中 0 · 已完成 0'));assert.ok(!html.includes('1 小时'));
+});
+
+test('assistant dimensions clamp to the viewport without overwriting desired sizes', () => {
+  const a=app();
+  a.run('agentPanelSizes.chat={width:600,height:700};agentPanelSizes.plan={width:1100,height:820}');
+  assert.deepEqual(a.json("agentPanelDimensions('chat',800,500)"),{width:600,height:452});
+  assert.deepEqual(a.json("agentPanelDimensions('chat',1440,1050)"),{width:600,height:700});
+  assert.deepEqual(a.json("agentPanelDimensions('plan',390,900)"),{width:366,height:820});
+  assert.deepEqual(a.json('agentPanelSizes.plan'),{width:1100,height:820});
+  assert.equal(a.run("agentPanelBounds('history-plan',1440,1050).minWidth"),980);
+});
+
+test('assistant size storage rejects corrupt or unavailable preferences', () => {
+  const a=app();
+  for(const value of ['{broken','null',JSON.stringify({chat:{width:'600',height:500},plan:{width:-1,height:600}})]){
+    a.context.localStorage={getItem:()=>value};assert.deepEqual(a.json('readAgentPanelSizes()'),{});
+  }
+  a.context.localStorage={getItem:()=>{throw new Error('denied')}};assert.deepEqual(a.json('readAgentPanelSizes()'),{});
+  a.context.localStorage={getItem:()=>JSON.stringify({chat:{width:600,height:700}})};
+  assert.deepEqual(a.json('readAgentPanelSizes()'),{chat:{width:600,height:700}});
+});
+
+test('resizing height on a narrow screen preserves the desired width', () => {
+  const a=app();a.context.window={innerWidth:761,innerHeight:650};a.context.document={};
+  a.context.localStorage={setItem:()=>{}};
+  a.run("agentPanelSizes.history={width:840,height:730};setAgentPanelSize('history',713,582,true,'n')");
+  assert.deepEqual(a.json('agentPanelSizes.history'),{width:840,height:582});
+  assert.deepEqual(a.json("agentPanelDimensions('history',1440,1050)"),{width:840,height:582});
 });

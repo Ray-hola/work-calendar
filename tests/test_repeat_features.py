@@ -202,6 +202,25 @@ class RepeatFeatureTests(unittest.TestCase):
         self.assertEqual(self.store.action(self.member, 'agent.history', {})['messages'], [])
         self.assertEqual(len(self.store.action(self.admin, 'agent.history', {})['messages']), 2)
 
+    def test_empty_conversation_is_persistent_renameable_and_deleteable(self):
+        self.store.action(self.member, 'agent.conversation.create', {'conversationId': 'empty'})
+        listing = self.store.action(self.member, 'agent.conversations', {})['conversations']
+        self.assertEqual([(c['id'], c['title'], c['count']) for c in listing], [('empty', '新对话', 0)])
+        self.store.action(self.member, 'agent.conversation.rename', {'conversationId': 'empty', 'title': '空白规划'})
+        self.store.action(self.member, 'agent.conversation.create', {'conversationId': 'empty'})
+        self.assertEqual(self.store.action(self.member, 'agent.conversations', {})['conversations'][0]['title'], '空白规划')
+        with self.assertRaises(Problem):
+            self.store.action(self.store.user('test002'), 'agent.conversations', {'userId': 'test001'})
+        self.store.action(self.member, 'agent.conversation.delete', {'conversationId': 'empty'})
+        self.assertEqual(self.store.action(self.member, 'agent.conversations', {})['conversations'], [])
+
+    def test_new_conversation_uses_first_message_until_explicitly_renamed(self):
+        self.store.action(self.member, 'agent.conversation.create', {'conversationId': 'auto'})
+        self.store.record_agent_message('test001', 'user', '安排下周复盘', {'conversation': 'auto'})
+        self.store.db.commit()
+        listing = self.store.action(self.member, 'agent.conversations', {})['conversations']
+        self.assertEqual([(c['title'], c['count']) for c in listing], [('安排下周复盘', 1)])
+
     def test_llm_config_is_admin_only_and_key_is_masked(self):
         with self.assertRaises(Problem):
             self.store.action(self.member, 'agent.config.set', {
