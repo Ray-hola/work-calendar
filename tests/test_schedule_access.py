@@ -1495,7 +1495,42 @@ class ProjectSpaceTests(unittest.TestCase):
         self.assertIsNone(self.store.get('projects', project['id'])['folderId'])
         self.assertEqual(self.store.all('folders'), [])
 
+    def test_dragging_in_the_directory_moves_and_orders_items(self):
+        owner, other = self.store.user('test001'), self.store.user('test002')
+        project = self.store.action(self.admin, 'project.create', {
+            'name': 'drag', 'owner': 'test001', 'members': ['test002'], 'start': self.day, 'cycle': 'infinite',
+        })
+        folder = self.store.action(self.admin, 'folder.create', {'name': '归档'})
+        # The Owner drops their project into a folder at a chosen spot.
+        self.store.action(owner, 'nav.move', {'kind': 'project', 'id': project['id'], 'folderId': folder['id'], 'order': 1.5})
+        saved = self.store.get('projects', project['id'])
+        self.assertEqual((saved['folderId'], saved['navOrder']), (folder['id'], 1.5))
+        # Back to the root.
+        self.store.action(owner, 'nav.move', {'kind': 'project', 'id': project['id'], 'order': -3})
+        self.assertIsNone(self.store.get('projects', project['id'])['folderId'])
+        # A collaborator cannot move it, and only admins move folders.
+        with self.assertRaises(Problem):
+            self.store.action(other, 'nav.move', {'kind': 'project', 'id': project['id'], 'order': 0})
+        with self.assertRaises(Problem):
+            self.store.action(owner, 'nav.move', {'kind': 'folder', 'id': folder['id'], 'order': 0})
+        self.store.action(self.admin, 'nav.move', {'kind': 'folder', 'id': folder['id'], 'order': 7})
+        self.assertEqual(self.store.get('folders', folder['id'])['navOrder'], 7)
+        for bad in ({'order': 'nan'}, {'order': 'inf'}, {'order': 0, 'folderId': 'missing'}):
+            with self.assertRaises((Problem, ValueError)):
+                self.store.action(owner, 'nav.move', {'kind': 'project', 'id': project['id'], **bad})
+
+        for bad in ({}, {'order': None}, {'order': 'bad'}, {'order': True},
+                    {'order': 10**1000}, {'kind': 'unknown', 'order': 0}):
+            with self.assertRaises(Problem) as rejected:
+                self.store.action(owner, 'nav.move', {'kind': 'project', 'id': project['id'], **bad})
+            self.assertEqual(rejected.exception.status, 400)
+        with self.assertRaises(Problem):
+            self.store.action(self.admin, 'nav.move', {
+                'kind': 'folder', 'id': folder['id'], 'folderId': folder['id'], 'order': 0,
+            })
+
     def test_project_files_follow_project_access(self):
+
         owner, member, outsider = [self.store.user(x) for x in ('test001', 'test002', 'test003')]
         project = self.store.action(self.admin, 'project.create', {
             'name': 'files', 'owner': 'test001', 'members': ['test002'], 'start': self.day, 'cycle': 'infinite',

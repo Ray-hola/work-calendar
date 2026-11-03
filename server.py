@@ -2252,7 +2252,26 @@ class Store:
                 if p.get('folderId')==f['id']:p['folderId']=None;self.put('projects',p)
             self.db.execute('DELETE FROM folders WHERE id=?',(f['id'],))
             return {'id':f['id'],'deleted':True}
+        if action=='nav.move':
+            # Dragging in 项目目录: a place is a parent (a folder, or the root
+            # for None) plus an order number among that parent's items.  Folders
+            # sit only at the root; a project goes either level.
+            if d.get('kind') not in ('folder','project') or isinstance(d.get('order'),bool):
+                raise Problem(400,'位置无效')
+            try:order=float(d.get('order'))
+            except (TypeError,ValueError,OverflowError):raise Problem(400,'位置无效')
+            if order!=order or abs(order)==float('inf'):raise Problem(400,'位置无效')
+            if d.get('kind')=='folder':
+                if d.get('folderId'):raise Problem(400,'文件夹只能放在根目录')
+                self.admin(user);f=self.get('folders',d.get('id'));f['navOrder']=order
+                return self.put('folders',f)
+            p=self.get('projects',d.get('id'));self.project_owner(user,p)
+            folder=d.get('folderId') or None
+            if folder:self.get('folders',folder)
+            p['folderId']=folder;p['navOrder']=order
+            return self.put('projects',p)
         if action=='project.space':
+
             # 项目空间: the background, who does what and the folder.  Kept apart
             # from project.update so a project still waiting for approval can be
             # written up before it starts.

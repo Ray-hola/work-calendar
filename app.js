@@ -40,6 +40,8 @@ const ICON_PATHS={
   'mic':'<rect x="9" y="3" width="6" height="10" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v3"/>',
   'grip':'<path d="M9 6h.01"/><path d="M15 6h.01"/><path d="M9 12h.01"/><path d="M15 12h.01"/><path d="M9 18h.01"/><path d="M15 18h.01"/>',
   'pip':'<rect x="2.5" y="4.5" width="19" height="15" rx="2"/><rect x="12" y="11" width="7" height="6" rx="1"/>',
+  'folder-open':'<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>',
+  'file':'<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5Z"/><path d="M14 2v6h6"/>',
   'upload':'<path d="M12 15V4"/><path d="m7 9 5-5 5 5"/><path d="M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/>'
 };
 function icon(name,extra=''){
@@ -81,7 +83,7 @@ function navigationWidth(kind,viewport,available){
   return Math.round(Math.max(b.min,Math.min(b.max,value)));
 }
 function navigationAvailable(kind){
-  const value=kind==='project'?$('.project-space-layout')?.clientWidth:kind==='chat'?$('.chat-room')?.clientWidth:undefined;
+  const value=kind==='project'?$('#projectsView')?.clientWidth:kind==='chat'?$('.chat-room')?.clientWidth:undefined;
   return value>0?value:undefined;
 }
 function saveNavigationLayout(){try{localStorage.setItem(NAVIGATION_KEY,JSON.stringify(navigationLayout))}catch(_){}
@@ -199,7 +201,7 @@ function initNavigationLayout(){
   window.addEventListener('resize',()=>{finishNavigationDrag(true);applyNavigationLayout()});
   window.addEventListener('storage',e=>{if(e.key===NAVIGATION_KEY){Object.assign(navigationLayout,readNavigationLayout());applyNavigationLayout()}});
   const observer=new ResizeObserver(()=>{applyNavigationLayout()});
-  for(const selector of ['.sidebar','.project-space-layout','.chat-room']){const element=$(selector);if(element)observer.observe(element)}
+  for(const selector of ['.sidebar','#projectsView','.chat-room']){const element=$(selector);if(element)observer.observe(element)}
   applyNavigationLayout();
 }
 let S={user:null,users:[],tasks:[],projects:[],folders:[],files:[],fileArchives:[],achievements:[],logs:[],reports:[],diaries:[],diaryStats:[],notifications:[],requests:[],editRequests:[],suggestions:[],profiles:[],today:''};
@@ -243,7 +245,7 @@ async function refresh(){
   try{next=await getState()}catch(e){showAuth();return}
   if(S.user?.id!==next.user.id){
     if(S.user&&typeof agentResetUser==='function')agentResetUser();
-    Object.assign(UI,{space:'',view:'calendar',member:'all',filter:'all',selectedWeek:0,detailDate:null,timelineScroll:null,dayOffset:0});
+    Object.assign(UI,{space:'',folder:'',view:'calendar',member:'all',filter:'all',selectedWeek:0,detailDate:null,timelineScroll:null,dayOffset:0});
   }
   /* updateChatDot is defined further down the file than the unit-test sandbox
      loads, so guard the call rather than assume it is in scope. */
@@ -697,12 +699,33 @@ function renderProjects(){
   $('#projectOverview')?.classList?.toggle('hidden',Boolean(UI.space));
   $('#projectSpace')?.classList?.toggle('hidden',!UI.space);
   if(UI.space){$('#projectGrid').innerHTML='';renderProjectSpace(UI.space);return}
-  const admin=Boolean(S.user?.admin);
-  const projects=visibleProjects();
-  $('#projectsView .eyebrow').textContent=`${admin?'团队项目管理':'我的项目'} · ${projects.length} 个项目`;
-  $('#projectsView h1').textContent=admin?'项目与任务管理':'我的项目与任务';
-  $('#projectGrid').innerHTML=projects.map(p=>projectCardHTML(p)).join('')+tempTaskCard()||'<div class="empty-state">暂无项目</div>';
+  const admin=Boolean(S.user?.admin),folder=UI.folder&&(S.folders||[]).find(f=>f.id===UI.folder);
+  if(!folder)UI.folder='';
+  const pool=visibleProjects().filter(p=>!folder||p.folderId===folder.id),mode=folderSortMode();
+  const projects=mode==='nav'?navSequence().filter(p=>pool.includes(p)):sortFolderProjects(pool,mode);
+  $('#projectsView .eyebrow').textContent=folder?`项目目录 · ${projects.length} 个项目`
+    :`${admin?'团队项目管理':'我的项目'} · ${projects.length} 个项目`;
+  $('#projectsView h1').textContent=folder?folder.name:admin?'项目与任务管理':'我的项目与任务';
+  $('#projectToolbar').innerHTML=projects.length>1?`<label class="project-sort">排序<select id="projectSort">`
+    +`${Object.entries(FOLDER_SORTS).map(([k,v])=>`<option value="${k}"${k===mode?' selected':''}>${v}</option>`).join('')}</select></label>`:'';
+  const sort=$('#projectSort');if(sort)sort.onchange=()=>{setFolderSortMode(sort.value);renderProjects()};
+  $('#projectGrid').innerHTML=projects.map(p=>projectCardHTML(p)).join('')+(folder?'':tempTaskCard())
+    ||`<div class="empty-state">${folder?'这个文件夹还没有项目，把左侧的项目拖进来':'暂无项目'}</div>`;
   bindProjectCards();
+}
+/* A folder (or 全部项目) lists its project cards in directory order or by one
+   of these; the choice is kept per browser. */
+const FOLDER_SORT_KEY='wc-folder-sort';
+const FOLDER_SORTS={nav:'目录顺序',name:'按名称',end:'按截止日期',progress:'按完成度',created:'最近创建'};
+function folderSortMode(){let v;try{v=localStorage.getItem(FOLDER_SORT_KEY)}catch(_){}return FOLDER_SORTS[v]?v:'nav'}
+function setFolderSortMode(v){try{localStorage.setItem(FOLDER_SORT_KEY,v)}catch(_){}}
+function sortFolderProjects(list,mode){
+  const progress=p=>{const t=S.tasks.filter(x=>x.projectId===p.id&&!x.repeatId&&!isSuperseded(x)&&x.status!=='skipped');
+    return t.length?t.filter(x=>x.status==='done').length/t.length:0};
+  const by={name:(a,b)=>String(a.name).localeCompare(String(b.name),'zh-CN'),
+    end:(a,b)=>String(a.end||'9999').localeCompare(String(b.end||'9999')),
+    progress:(a,b)=>progress(b)-progress(a),created:(a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||''))}[mode];
+  return [...list].sort(by);
 }
 /* One project's card: its people, its tasks and what its Owner can do. The
    overview lists them all; a project's own space carries just its own. */
@@ -716,12 +739,11 @@ function projectCardHTML(p,inSpace=false){
     const drag=manage&&mode==='manual'&&tasks.length>1,byId=new Map(S.tasks.map(t=>[t.id,t]));
     const sorter=tasks.length>1?`<select class="project-task-sort" data-project="${escapeHTML(p.id)}" aria-label="任务排序">${Object.entries(PROJECT_SORTS).map(([k,v])=>`<option value="${k}" ${k===mode?'selected':''}>${v}</option>`).join('')}</select>`:'';
     const fresh=freshRefs().has(p.id),joined=p.status==='active'&&!manage&&(p.members||{})[S.user.id]==='accepted';
-    return `<article class="project-card project-node${fresh?' is-new':''}" data-fresh="${fresh?escapeHTML(p.id):''}">`
-      +`<div class="project-node-heading"><div><div class="project-title"><h3>${escapeHTML(p.name)}`
-      +`${fresh?'<span class="new-chip">新</span>':''}</h3><span class="project-status">${projectStatus(p)}</span></div>`
+    return `<article class="project-card project-node${fresh?' is-new':''}" data-fresh="${fresh?escapeHTML(p.id):''}"`
+      +`${inSpace?'':` data-project="${escapeHTML(p.id)}"`}>`
+      +`<div class="project-node-heading"><div><div class="project-title"><h3>${inSpace?'':`<button type="button" class="project-title-link" data-open-project="${escapeHTML(p.id)}">`}${escapeHTML(p.name)}`
+      +`${fresh?'<span class="new-chip">新</span>':''}${inSpace?'':'</button>'}</h3><span class="project-status">${projectStatus(p)}</span></div>`
       +`<p>${escapeHTML(p.desc||'暂无描述')}</p></div><div class="project-node-actions">`
-      +`${inSpace?'':`<button class="ghost-btn open-space" data-space="${escapeHTML(p.id)}">${icon('folder')}项目空间`
-      +`</button>`}`
       +`${manage?`<button class="primary-btn add-project-task" data-project="${escapeHTML(p.id)}">`
       +`${icon('plus')}新建并指派任务</button><button class="secondary-btn project-settings" data-id="`
       +`${escapeHTML(p.id)}">项目设置</button>`:''}`
@@ -755,7 +777,9 @@ function projectCardHTML(p,inSpace=false){
       +`</div>`).join('')}`:''}</div></article>`;
 }
 function bindProjectCards(){
-  $$('.open-space').forEach(b=>b.onclick=()=>openProjectSpace(b.dataset.space));
+  $$('.project-title-link').forEach(button=>button.onclick=()=>openProjectSpace(button.dataset.openProject));
+  $$('#projectGrid .project-card[data-project]').forEach(card=>card.onclick=e=>{
+    if(!e.target.closest('button,a,input,select,textarea,label,.project-child-row'))openProjectSpace(card.dataset.project)});
   $$('.project-node[data-fresh]:not([data-fresh=""])').forEach(card=>card.addEventListener('pointerdown',
     ()=>clearFresh([card.dataset.fresh]),{once:true}));
   $$('.add-project-task').forEach(b=>b.onclick=()=>newTask(b.dataset.project));
@@ -771,55 +795,255 @@ function bindProjectCards(){
   $$('.leave-project').forEach(b=>b.onclick=()=>leaveProject(b.dataset.id));
   $$('.delete-project').forEach(b=>b.onclick=()=>deleteProject(b.dataset.id));
 }
-/* 项目空间 · 目录. Like a knowledge base's tree: projects sit in folders the
-   admins keep, and a project's Owner files it from its space. A folder closed
-   here stays closed on this browser. 全部项目 is the card overview; a project
-   opens its own space: lifecycle, background, people, tasks and files. */
+/* 项目空间 · 目录. Like a knowledge base's tree: folders (kept by admins) and
+   projects share one ordered root, and a folder holds projects. Whoever may
+   move a row can drag it; its place is a parent plus an order number between
+   its new neighbours (navSlot). A row never moved falls back to its creation
+   time, folders ahead of projects, so the tree reads the same for everyone.
+   A folder closed here stays closed on this browser. */
 const FOLDER_CLOSED_KEY='wc-folders-closed';
 function closedFolders(){try{return new Set(JSON.parse(localStorage.getItem(FOLDER_CLOSED_KEY)||'[]'))}catch(_){return new Set()}}
-function toggleFolder(id){
-  const closed=closedFolders();closed.has(id)?closed.delete(id):closed.add(id);
+function setFolderClosed(id,shut){
+  const closed=closedFolders();shut?closed.add(id):closed.delete(id);
   try{localStorage.setItem(FOLDER_CLOSED_KEY,JSON.stringify([...closed]))}catch(_){}
-  renderProjectNav();
 }
+function toggleFolder(id){setFolderClosed(id,!closedFolders().has(id));renderProjectNav()}
+const NAV_GAP=1024;
+const navOrder=(x,kind)=>Number.isFinite(x.navOrder)?x.navOrder:(Date.parse(x.createdAt||'')/1000||0)+(kind==='project'?1e10:0);
+const byNavOrder=(a,b)=>a.order-b.order||String(a.item.name).localeCompare(String(b.item.name),'zh-CN');
 /* Members only see folders holding a project they can open; admins see all. */
-function projectFolders(){
+function projectTree(){
   const projects=visibleProjects(),ids=new Set((S.folders||[]).map(f=>f.id));
-  const folders=(S.folders||[]).map(f=>({...f,projects:projects.filter(p=>p.folderId===f.id)}))
-    .filter(f=>S.user?.admin||f.projects.length);
-  return {folders,loose:projects.filter(p=>!ids.has(p.folderId))};
+  const node=p=>({kind:'project',id:p.id,item:p,order:navOrder(p,'project')});
+  const folders=(S.folders||[]).map(f=>({kind:'folder',id:f.id,item:f,order:navOrder(f,'folder'),
+    children:projects.filter(p=>p.folderId===f.id).map(node).sort(byNavOrder)}))
+    .filter(f=>S.user?.admin||f.children.length);
+  return [...folders,...projects.filter(p=>!ids.has(p.folderId)).map(node)].sort(byNavOrder);
 }
+const navSequence=()=>projectTree().flatMap(n=>n.kind==='folder'?n.children.map(c=>c.item):[n.item]);
+const navScope=(tree,parent)=>parent?tree.find(n=>n.kind==='folder'&&n.id===parent)?.children||[]:tree;
+/* The order number that puts a row in `parent` (a folder id, or null for the
+   root) just before `before` (null: at the end). */
+function navSlot(tree,dragId,parent,before){
+  const scope=navScope(tree,parent).filter(n=>n.id!==dragId);
+  const i=before&&scope.some(n=>n.id===before)?scope.findIndex(n=>n.id===before):scope.length;
+  const prev=scope[i-1]?.order,next=scope[i]?.order;
+  return prev==null&&next==null?0:prev==null?next-NAV_GAP:next==null?prev+NAV_GAP:(prev+next)/2;
+}
+/* What a drop at `t` changes: null when the row would land where it already is. */
+function navPlan(tree,kind,id,t){
+  const node=tree.flatMap(n=>[n,...(n.children||[])]).find(n=>n.id===id);if(!node)return null;
+  const parent=t.into||t.parent||null,before=t.into?null:t.before||null;
+  const from=kind==='project'&&tree.some(n=>n.kind==='folder'&&n.id===node.item.folderId)?node.item.folderId:null;
+  if(parent===from){
+    const ids=navScope(tree,parent).map(n=>n.id),rest=ids.filter(x=>x!==id),i=before?rest.indexOf(before):-1;
+    rest.splice(i<0?rest.length:i,0,id);if(rest.join()===ids.join())return null;
+  }
+  return {kind,id,folderId:parent,order:navSlot(tree,id,parent,before)};
+}
+const canDragNav=(kind,item)=>kind==='folder'?Boolean(S.user?.admin):canManageProject(item);
+const navClickBlocked=()=>Date.now()-(UI.navDropAt||0)<350;
 function renderProjectNav(){
-  const nav=$('#projectNav');if(!nav)return;
-  const {folders,loose}=projectFolders(),closed=closedFolders(),fresh=freshRefs(),admin=Boolean(S.user?.admin);
-  const item=p=>`<button class="project-nav-item${UI.space===p.id?' is-on':''}" data-space="${escapeHTML(p.id)}"`
-    +` title="${escapeHTML(p.name)}" aria-label="${escapeHTML(p.name)}"${UI.space===p.id?' aria-current="page"':''}>${icon('gantt')}`
-    +`<span class="nav-text">${escapeHTML(p.name)}</span>${fresh.has(p.id)?'<em class="new-chip">新</em>':''}</button>`;
-  const folder=f=>{
-    const open=!closed.has(f.id);
-    return `<div class="project-nav-folder${open?' is-open':''}"><div class="project-nav-folder-row">`
-      +`<button class="project-nav-toggle" data-folder="${escapeHTML(f.id)}" aria-expanded="${open}" title="${escapeHTML(f.name)}" aria-label="${escapeHTML(f.name)}">`
-      +`${icon('chevron-right','folder-caret')}${icon('folder')}<span class="nav-text">${escapeHTML(f.name)}</span><b>${f.projects.length}</b></button>`
+  const nav=$('#projectNav');if(!nav||UI.navDrag)return;
+  const tree=projectTree(),closed=closedFolders(),fresh=freshRefs(),admin=Boolean(S.user?.admin);
+  const drag=(kind,item)=>canDragNav(kind,item)?' data-drag="1"':'';
+  const project=(n,level,parent='')=>{
+    const p=n.item,on=UI.space===p.id;
+    return `<button class="project-nav-item nav-row${on?' is-on':''}" data-kind="project" data-id="${escapeHTML(p.id)}" `
+      +`data-level="${level}" data-parent="${escapeHTML(parent)}" data-space="${escapeHTML(p.id)}"${drag('project',p)}`
+      +` title="${escapeHTML(p.name)}" aria-label="${escapeHTML(p.name)}"${on?' aria-current="page"':''}>${icon('gantt')}`
+      +`<span class="nav-text">${escapeHTML(p.name)}</span>${fresh.has(p.id)?'<em class="new-chip">新</em>':''}</button>`;
+  };
+  const folder=n=>{
+    const f=n.item,open=!closed.has(f.id),on=UI.folder===f.id&&!UI.space;
+    return `<div class="project-nav-folder-row nav-row${open?' is-open':''}${on?' is-on':''}" data-kind="folder" `
+      +`data-id="${escapeHTML(f.id)}" data-level="0"${drag('folder',f)}><button class="project-nav-caret" data-folder="`
+      +`${escapeHTML(f.id)}" aria-expanded="${open}" aria-label="${open?'收起':'展开'}「${escapeHTML(f.name)}」">`
+      +`${icon('chevron-right')}</button><button class="project-nav-toggle" data-open-folder="${escapeHTML(f.id)}"`
+      +` title="${escapeHTML(f.name)}" aria-label="${escapeHTML(f.name)}"${on?' aria-current="page"':''}><span class="nav-folder-icon">${icon('folder','is-shut')}${icon('folder-open','is-open')}</span>`
+      +`<span class="nav-text">${escapeHTML(f.name)}</span><b>${n.children.length}</b></button>`
       +`${admin?`<button class="project-nav-edit" data-edit-folder="${escapeHTML(f.id)}" title="重命名或删除" aria-label="`
       +`编辑文件夹「${escapeHTML(f.name)}」">${icon('edit')}</button>`:''}</div>`
-      +`${open?`<div class="project-nav-children">${f.projects.map(item).join('')
-      ||'<p class="project-nav-empty">还没有项目</p>'}</div>`:''}</div>`;
+      +`${open?n.children.map(c=>project(c,1,f.id)).join('')||'<p class="project-nav-empty">还没有项目</p>':''}`;
   };
   nav.innerHTML=`<div class="project-nav-head"><span class="nav-text">项目目录</span>${admin?`<button class="project-nav-add" `
     +`id="addFolderBtn" title="新建文件夹" aria-label="新建文件夹">${icon('plus')}</button>`:''}${navigationControls('project')}</div>`
-    +`<button class="project-nav-item project-nav-all${UI.space?'':' is-on'}" data-space="" title="全部项目" aria-label="全部项目">${icon('layout-grid')}`
+    +`<button class="project-nav-item project-nav-all${UI.space||UI.folder?'':' is-on'}" data-space="" title="全部项目" aria-label="全部项目">${icon('layout-grid')}`
     +`<span class="nav-text">全部项目</span><b>${visibleProjects().length}</b></button>`
-    +folders.map(folder).join('')
-    +(loose.length?`${folders.length?'<div class="project-nav-label">未归类</div>':''}${loose.map(item).join('')}`:'')
-    +((S.fileArchives||[]).length?`<div class="project-nav-label">归档文件</div>${S.fileArchives.map(item).join('')}`:'')+navigationHandle('project');
-  $$('#projectNav [data-space]').forEach(b=>b.onclick=()=>openProjectSpace(b.dataset.space));
-  $$('#projectNav [data-folder]').forEach(b=>b.onclick=()=>toggleFolder(b.dataset.folder));
+    +`<div class="project-nav-tree" id="projectNavTree">${tree.map(n=>n.kind==='folder'?folder(n):project(n,0)).join('')}</div>`
+    +((S.fileArchives||[]).length?`<div class="project-nav-label">归档文件</div>${S.fileArchives.map(p=>project({item:p},0)
+      .replace(' nav-row','').replace(' data-drag="1"','')).join('')}`:'')+navigationHandle('project');
+  $$('#projectNav [data-space]').forEach(b=>b.onclick=()=>{if(!navClickBlocked())openProjectSpace(b.dataset.space)});
+  $$('#projectNav [data-folder]').forEach(b=>b.onclick=()=>{if(!navClickBlocked())toggleFolder(b.dataset.folder)});
+  $$('#projectNav [data-open-folder]').forEach(b=>b.onclick=()=>{if(!navClickBlocked())openFolderView(b.dataset.openFolder)});
   $$('#projectNav [data-edit-folder]').forEach(b=>b.onclick=()=>editFolder(b.dataset.editFolder));
   const add=$('#addFolderBtn');if(add)add.onclick=()=>editFolder();
+  $$('#projectNavTree .nav-row[data-drag]').forEach(row=>row.addEventListener('pointerdown',e=>{
+    if(e.button===0&&e.pointerType!=='touch'&&!e.target.closest('.project-nav-edit'))startNavDrag(row,e);
+  }));
   applyNavigationLayout();
 }
+/* Where a drop at (x, y) would go. Over the middle of a folder a project goes
+   into it; between rows it takes that gap, and where a gap could be either
+   inside a folder or at the root, the pointer's x decides: right is inside. */
+function navTarget(treeEl,kind,x,y){
+  const rows=[...treeEl.querySelectorAll('.nav-row:not(.is-lifted)')],box=treeEl.getBoundingClientRect();
+  if(kind==='project'){
+    const into=rows.find(r=>{if(r.dataset.kind!=='folder')return false;const b=r.getBoundingClientRect();
+      return y>b.top+b.height*.26&&y<b.bottom-b.height*.26});
+    if(into)return {into:into.dataset.id,row:into};
+  }
+  const level=r=>r?Number(r.dataset.level):0;
+  let g=rows.findIndex(r=>{const b=r.getBoundingClientRect();return y<b.top+b.height/2});if(g<0)g=rows.length;
+  if(kind==='folder')while(g<rows.length&&level(rows[g])===1)g++;
+  const above=rows[g-1],below=rows[g];
+  const canIn=kind==='project'&&above&&(above.dataset.kind==='folder'||level(above)===1),canRoot=!below||level(below)===0;
+  const nested=canIn&&(!canRoot||x>box.left+46);
+  const parent=nested?(above.dataset.kind==='folder'?above.dataset.id:above.dataset.parent):null;
+  const before=nested?(below&&level(below)===1&&below.dataset.parent===parent?below.dataset.id:null):below?.dataset.id||null;
+  const edge=above?above.getBoundingClientRect().bottom+1:below?below.getBoundingClientRect().top-1:box.top;
+  return {parent,before,level:nested?1:0,y:edge,top:edge-box.top};
+}
+const NAV_TENSION=22;
+const navReducedMotion=()=>typeof matchMedia==='function'&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+const navAnimate=(element,frames,options)=>element.animate(frames,{...options,duration:navReducedMotion()?0:options.duration}).finished.catch(()=>{});
+function startNavDrag(row,down){
+  if(UI.navDrag||UI.navSaving)return;
+  const nav=$('#projectNav'),treeEl=$('#projectNavTree'),kind=row.dataset.kind,id=row.dataset.id;
+  const x0=down.clientX,y0=down.clientY,rect=row.getBoundingClientRect(),tree=projectTree();
+  const group=kind==='folder'?[row,...treeEl.querySelectorAll(`.nav-row[data-parent="${CSS.escape(id)}"]`)]:[row];
+  let ghost=null,line=null,target=null,raf=0,gx=rect.left,gy=rect.top,px=x0,py=y0,tilt=0;
+  const off=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);
+    window.removeEventListener('pointercancel',cancel);window.removeEventListener('keydown',key);window.removeEventListener('blur',blur);
+    try{row.releasePointerCapture(down.pointerId)}catch(_){}
+  };
+  const updateTarget=()=>{
+    const nb=nav.getBoundingClientRect(),tb=treeEl.getBoundingClientRect();
+    target=px>=nb.left&&px<=nb.right&&py>=Math.max(nb.top,tb.top)&&py<=nb.bottom?navTarget(treeEl,kind,px,py):null;
+    treeEl.querySelectorAll('.is-drop').forEach(r=>r!==target?.row&&r.classList.remove('is-drop'));
+    if(!target){line.classList.remove('is-on');return}
+    if(target.into){target.row.classList.add('is-drop');line.classList.remove('is-on');return}
+    line.classList.add('is-on');line.classList.toggle('is-nested',target.level===1);
+    line.style.transform=`translateY(${target.top}px)`;
+  };
+  const lift=()=>{
+    UI.navDrag=true;row.classList.remove('is-tense');row.style.transform='';
+    ghost=row.cloneNode(true);ghost.classList.add('nav-ghost');ghost.classList.remove('is-on','is-drop');ghost.removeAttribute('data-level');
+    ghost.insertAdjacentHTML('beforeend',`<span class="nav-ghost-file">${icon('file')}</span>`);
+    Object.assign(ghost.style,{left:`${rect.left}px`,top:`${rect.top}px`,width:`${rect.width}px`,height:`${rect.height}px`});
+    document.body.appendChild(ghost);navCrumbs(rect);
+    try{row.setPointerCapture(down.pointerId)}catch(_){}
+    group.forEach(el=>{el.style.height=`${el.offsetHeight}px`;el.offsetHeight;el.classList.add('is-lifted')});
+    line=document.createElement('i');line.className='nav-drop-line';treeEl.appendChild(line);
+    document.body.classList.add('nav-dragging');
+    /* The row follows with a little weight and leans into the motion; near a
+       slot it is drawn toward it, so the last few pixels snap. */
+    const step=()=>{
+      let tx=px-(x0-rect.left),ty=py-(y0-rect.top);
+      if(target&&!target.into){const d=target.y-rect.height/2-ty,pull=Math.max(0,1-Math.abs(d)/36);ty+=d*pull*.55}
+      const rate=navReducedMotion()?1:.32,vx=(tx-gx)*rate;gx+=vx;gy+=(ty-gy)*rate;
+      tilt=navReducedMotion()?0:tilt+(Math.max(-4,Math.min(4,vx*.4))-tilt)*.2;
+      ghost.style.transform=`translate(${gx-rect.left}px,${gy-rect.top}px) rotate(${tilt}deg)`;
+      const nb=nav.getBoundingClientRect();
+      if(py<nb.top+28)nav.scrollTop-=6;else if(py>nb.bottom-28)nav.scrollTop+=6;
+      updateTarget();
+      raf=requestAnimationFrame(step);
+    };
+    raf=requestAnimationFrame(step);
+  };
+  const move=e=>{
+    if(e.pointerId!==down.pointerId)return;
+    px=e.clientX;py=e.clientY;const dx=px-x0,dy=py-y0,dist=Math.hypot(dx,dy);
+    if(!ghost){
+      if(dist<NAV_TENSION){
+        /* Still rooted: it gives a little, less the harder it is pulled. */
+        const k=.24*(1-dist/NAV_TENSION*.45);row.classList.add('is-tense');
+        row.style.transform=`translate(${dx*k}px,${dy*k}px) scale(${1+dist/NAV_TENSION*.025})`;return;
+      }
+      lift();
+    }
+    e.preventDefault();
+    updateTarget();
+  };
+  const finish=()=>{cancelAnimationFrame(raf);line?.remove();document.body.classList.remove('nav-dragging');UI.navDropAt=Date.now()};
+  const settleBack=async()=>{
+    finish();
+    await navAnimate(ghost,[{transform:ghost.style.transform},{transform:'translate(0,0) rotate(0)',scale:1}],
+      {duration:300,easing:'cubic-bezier(.3,1.4,.5,1)',fill:'forwards'});
+    ghost.remove();group.forEach(el=>{el.classList.remove('is-lifted');el.style.height=''});UI.navDrag=false;
+    renderProjectNav();
+  };
+  const up=async e=>{
+    if(e.pointerId!==down.pointerId)return;
+    off();
+    if(!ghost){row.classList.remove('is-tense');row.style.transform='';return}
+    px=e.clientX;py=e.clientY;updateTarget();
+    const t=target,plan=t&&navPlan(tree,kind,id,t);
+    if(!plan){settleBack();return}
+    finish();
+    const into=t.into&&t.row;
+    if(into){
+      /* It folds into a small file and drops into the open folder, which shuts on it. */
+      const glyph=into.querySelector('.nav-folder-icon').getBoundingClientRect();
+      const sx=gx-rect.left+(x0-rect.left)-15,sy=gy-rect.top;
+      ghost.classList.add('is-filing');
+      await navAnimate(ghost,[{width:`${rect.width}px`,transform:ghost.style.transform},
+        {width:'30px',transform:`translate(${sx}px,${sy}px)`,borderRadius:'7px'}],
+        {duration:150,easing:'ease-out',fill:'forwards'});
+      const now=ghost.getBoundingClientRect();
+      await navAnimate(ghost,[{opacity:1},{transform:`translate(${sx+glyph.left+glyph.width/2-now.left-now.width/2}px,`
+        +`${sy+glyph.top+glyph.height/2-now.top-now.height/2}px) scale(.3)`,opacity:.15}],
+        {duration:300,easing:'cubic-bezier(.55,0,.75,.35)',fill:'forwards'});
+    }else{
+      const box=treeEl.getBoundingClientRect(),left=box.left+(t.level?22:0);
+      await navAnimate(ghost,[{transform:ghost.style.transform},{transform:`translate(${left-rect.left}px,${t.y-rect.top}px) rotate(0)`,
+        width:`${box.width-(t.level?22:0)}px`,scale:1}],{duration:240,easing:'cubic-bezier(.3,1.5,.5,1)',fill:'forwards'});
+    }
+    commitNavMove(plan,ghost,into);
+  };
+  const cancel=e=>{if(e&&e.pointerId!==down.pointerId)return;off();if(ghost)settleBack();else{row.classList.remove('is-tense');row.style.transform=''}};
+  const blur=()=>cancel();
+  const key=e=>{if(e.key==='Escape')cancel()};
+  window.addEventListener('pointermove',move);window.addEventListener('pointerup',up);
+  window.addEventListener('pointercancel',cancel);window.addEventListener('keydown',key);window.addEventListener('blur',blur);
+}
+/* A little soil kicked up where the row broke loose. */
+function navCrumbs(rect){
+  if(navReducedMotion())return;
+  for(let i=0;i<7;i++){
+    const c=document.createElement('i'),a=Math.PI*(1.05+i/6*.9),r=14+Math.random()*16;
+    c.className='nav-crumb';
+    Object.assign(c.style,{left:`${rect.left+rect.width*(.15+i*.115)}px`,top:`${rect.top+rect.height*.55}px`});
+    c.style.setProperty('--dx',`${Math.cos(a)*r*.6}px`);c.style.setProperty('--dy',`${Math.sin(a)*r}px`);
+    c.style.setProperty('--r',`${Math.random()*160-80}deg`);
+    document.body.appendChild(c);setTimeout(()=>c.remove(),600);
+  }
+}
+/* Applied here first so the tree redraws at once, then saved. */
+async function commitNavMove(plan,ghost,into){
+  UI.navSaving=true;
+  const item=plan.kind==='folder'?S.folders.find(f=>f.id===plan.id):S.projects.find(p=>p.id===plan.id);
+  const old={navOrder:item.navOrder,folderId:item.folderId};
+  item.navOrder=plan.order;if(plan.kind==='project')item.folderId=plan.folderId;
+  UI.navDrag=false;ghost.remove();renderProjectNav();
+  const tree=$('#projectNavTree');
+  const landed=into?tree?.querySelector(`.nav-row[data-kind="folder"][data-id="${CSS.escape(plan.folderId)}"]`)
+    :tree?.querySelector(`.nav-row[data-kind="${plan.kind}"][data-id="${CSS.escape(plan.id)}"]`);
+  landed?.classList.add(into?'is-swallow':'is-landed');
+  try{
+    await api('/api/action',{action:'nav.move',data:{kind:plan.kind,id:plan.id,order:plan.order,
+      ...(plan.kind==='project'?{folderId:plan.folderId}:{})}});
+    await refresh();
+  }catch(e){Object.assign(item,old);toast(e.message);await refresh()}
+  finally{UI.navSaving=false}
+}
+function openFolderView(id){
+  UI.folder=id;UI.space='';setFolderClosed(id,false);
+  if(UI.view!=='projects')switchView('projects');else renderProjects();
+  $('.main-content')?.scrollTo?.({top:0,behavior:'smooth'});
+}
 function openProjectSpace(id){
-  UI.space=id||'';if(id)clearFresh([id]);
+  UI.space=id||'';if(!id)UI.folder='';if(id)clearFresh([id]);
   if(UI.view!=='projects')switchView('projects');else renderProjects();
   $('.main-content')?.scrollTo?.({top:0,behavior:'smooth'});
 }
@@ -827,7 +1051,7 @@ function editFolder(id){
   const f=(S.folders||[]).find(x=>x.id===id),count=f?S.projects.filter(p=>p.folderId===f.id).length:0;
   openModal(`<div class="eyebrow">项目目录</div><h2>${f?'编辑文件夹':'新建文件夹'}</h2><label class="form-field">文件夹名称`
     +`<input id="folderName" maxlength="40" value="${escapeHTML(f?.name||'')}" placeholder="例如：年度战略"></label>`
-    +`${f?`<p class="muted">删除文件夹不会删除项目，里面的 ${count} 个项目会回到「未归类」。</p>`:''}`
+    +`${f?`<p class="muted">删除文件夹不会删除项目，里面的 ${count} 个项目会回到目录根层。</p>`:''}`
     +`<div class="modal-footer">${f?'<button class="ghost-btn is-danger" id="deleteFolder">删除文件夹</button>':''}`
     +`<button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="saveFolder">`
     +`${f?'保存':'创建'}</button></div>`);
