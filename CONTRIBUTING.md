@@ -21,7 +21,7 @@
 # Windows: .\run-windows.ps1
 ```
 
-改哪里：界面结构在 `index.html`，交互与视图在 `app.js`，样式在 `styles.css`，接口、权限、数据库和定时任务都在 `server.py`。
+改哪里：界面结构在 `index.html`，交互与视图在 `app.js`，样式在 `styles.css`，接口、权限、数据库和定时任务在 `server.py`，助手的只读 SQL 工作区与工具定义在 `agent_workspace.py`。
 
 ## 提交前检查
 

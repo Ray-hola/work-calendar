@@ -103,10 +103,13 @@ class RepeatFeatureTests(unittest.TestCase):
         proposal = {'action': 'task.create', 'data': {
             'name': 'Agent 创建的任务', 'projectId': project['id'],
             'assignee': 'test001', 'date': self.today.isoformat()}}
-        pending = self.store.action(self.admin, 'agent.execute', proposal)
-        self.assertTrue(pending['requiresConfirmation'])
+        with self.assertRaises(Problem) as error:
+            self.store.action(self.admin, 'agent.execute', {**proposal, 'confirmed': True})
+        self.assertEqual(error.exception.status, 409)
         self.assertFalse(any(t.get('name') == 'Agent 创建的任务' for t in self.store.all('tasks')))
-        applied = self.store.action(self.admin, 'agent.execute', {**proposal, 'confirmed': True})
+        with self.assertRaises(Problem):
+            self.store.action(self.admin, 'work.card.apply', {'kind':'task','operation':'create','changes':proposal['data']})
+        applied = self.store.action(self.admin, 'work.card.apply', {'kind':'task','operation':'create','changes':proposal['data'],'confirmed':True})
         self.assertEqual(applied['name'], 'Agent 创建的任务')
         self.assertTrue(any(t.get('name') == 'Agent 创建的任务' for t in self.store.all('tasks')))
         transcript = self.store.action(self.admin, 'agent.history', {})['messages']
@@ -128,7 +131,7 @@ class RepeatFeatureTests(unittest.TestCase):
         self.assertEqual(project['status'], 'active')
         caps = self.store.action(mate, 'agent.capabilities', {})
         self.assertEqual((caps['role'], caps['mode']), ('admin', 'operator'))
-        task = self.store.action(mate, 'agent.execute', {'action': 'task.create', 'data': {
+        task = self.store.action(mate, 'work.card.apply', {'kind':'task','operation':'create','changes': {
             'name': 'admin task', 'projectId': project['id'], 'assignee': 'test001',
             'date': self.today.isoformat()}, 'confirmed': True})
         self.assertEqual(task['name'], 'admin task')
@@ -257,7 +260,7 @@ class RepeatFeatureTests(unittest.TestCase):
 
     def test_agent_execute_requires_confirmation_and_member_cannot_write(self):
         pending = self.store.action(self.admin, 'agent.execute', {
-            'action': 'task.create', 'data': {'name': '待确认'}})
+            'action': 'repeat.create', 'data': {'name': '待确认固定安排'}})
         self.assertTrue(pending['requiresConfirmation'])
         with self.assertRaises(Problem):
             self.store.action(self.member, 'agent.execute', {

@@ -1010,12 +1010,14 @@ test('规划任务 is a switch on the composer: it drafts what is typed, or the 
 
 /* The draft is created through the ordinary actions, under the user's own
    rules, never through the assistant's agent.execute. */
-test('a confirmed draft is created through the normal actions, projects first', () => {
-  const submit = source.match(/async function planSubmit\(board\)\{[\s\S]*?\n\}/)[0];
-  assert.ok(!/agent\.execute/.test(submit), '起草的卡片由用户自己提交，不走 agent.execute');
-  assert.ok(submit.indexOf("action:'project.create'") < submit.indexOf("action:'task.create'"), '先建项目，任务才能挂上去');
-  assert.ok(/t\.project='id:'\+r\.id/.test(submit), '挂在新项目下的任务改指向真正建出来的项目');
-  assert.ok(/\['wait','none'\]\.includes\(planTaskPath\(board,t\)\.mode\)/.test(submit), '等审批或不允许的卡片不提交');
+test('confirmed management cards submit through one route, projects before their tasks',async()=>{
+  const a=planningApp(),writes=[];a.context.document={querySelector:()=>null};
+  a.context.fetch=async(path,options)=>{const body=JSON.parse(options.body);writes.push(body);return {ok:true,text:async()=>'{"id":"new-project","status":"active"}'}};
+  a.run(`refresh=async()=>{S.projects=[{id:'new-project',name:'项目',status:'active',owner:'test001',members:{test001:'accepted'}}]};agentAppend=()=>{};var board={...planDraft({projects:[{ref:'P1',name:'项目',owner:'test001'}],tasks:[{name:'任务',projectRef:'P1',assignee:'test001'}]}),el:{querySelector:()=>null},history:[]};`);
+  await a.run('planSubmit(board)');
+  assert.deepEqual(writes.map(x=>[x.action,x.data.kind,x.data.operation]),[['work.card.apply','project','create'],['work.card.apply','task','create']]);
+  assert.equal(writes[1].data.changes.projectId,'new-project');
+  assert.ok(writes.every(x=>x.data.confirmed));
 });
 
 test('a planning message is labelled in the transcript and in reopened history', () => {
@@ -1465,7 +1467,9 @@ test('confirming incomplete cards writes nothing; corrected cards submit once an
   a.run("planCheckpoint(board);board.tasks[0].name='整理周报';board.tasks[0].assignee='test001'");
   await a.run('planSubmit(board)');
   assert.equal(writes.length,1);
-  assert.equal(writes[0].action,'task.create');
+  assert.equal(writes[0].action,'work.card.apply');
+  assert.equal(writes[0].data.kind,'task');
+  assert.equal(writes[0].data.operation,'create');
   assert.equal(a.run('board.history.length'),0,'已提交的卡片不能通过撤销变回未提交');
   await a.run('planSubmit(board)');
   assert.equal(writes.length,1,'已完成的卡片不重复提交');
@@ -1809,4 +1813,119 @@ test('a failed model verification retains its reason and offers a retry with dis
   a.nodes['#agentModelSelect'].value='working-model';const second=a.run('agentTestConfig()');
   a.pending[1].reply({ok:true,models:['working-model'],testedModel:'working-model',message:'验证成功'});await second;
   assert.equal(a.nodes['#agentConfigStatus'].textContent,'验证成功');
+});
+
+test('retrieval badges show compact outcomes without displaying query text or data',()=>{
+  const a=planningApp(),children=[];
+  a.context.document={createElement:()=>({})};a.context.node={appendChild:n=>children.push(n)};
+  a.run("agentToolSummary(node,[{name:'workspace_schema',ok:true},{name:'workspace_query',ok:false,sql:'private SQL'},{name:'business_action',ok:true}])");
+  assert.equal(children.length,1);assert.equal(children[0].textContent,'查询资料 · 2 次 · 1 次未成功');
+  assert.ok(!JSON.stringify(children).includes('private SQL'));
+});
+
+test('stored tool metadata is never replayed as model conversation data',()=>{
+  const a=planningApp();
+  a.run("agentState.messages=[{role:'assistant',content:'查到了',tools:[{name:'workspace_query',ok:true,rows:20}]}]");
+  assert.deepEqual(a.json('agentRecentMessages()'),[{role:'assistant',content:'查到了'}]);
+});
+
+function mutationTask(overrides={}){
+  return {operation:'update',id:'existing',revision:'version-1',before:{name:'原任务',desc:'保留说明',assignee:'test001',date:'2026-11-01',deadline:'2026-11-05',time:'10:30',duration:30,priority:'P1',status:'doing',projectId:null,creator:'test001',fixed:false},...overrides};
+}
+test('editing an existing card preserves past dates and sends only changed fields with the reviewed version',async()=>{
+  const a=planningApp(),writes=[];a.context.document={querySelector:()=>null};
+  a.context.fetch=async(path,o)=>{writes.push(JSON.parse(o.body));return {ok:true,text:async()=>'{"id":"existing"}'}};
+  a.context.raw=mutationTask({name:'拟修改名称'});a.run(`refresh=async()=>{};agentAppend=()=>{};var board={...planDraft({tasks:[raw]}),el:{querySelector:()=>null},history:[]};`);
+  assert.equal(a.run('board.tasks[0].date'),'2026-11-01');
+  assert.deepEqual(a.json('planChanges(board.tasks[0],"task")'),{name:'拟修改名称'});
+  assert.deepEqual(a.json('planProblems(board,board.tasks[0])'),{});
+  await a.run('planSubmit(board)');
+  assert.equal(writes[0].action,'work.card.apply');assert.equal(writes[0].data.revision,'version-1');
+  assert.deepEqual(writes[0].data.changes,{name:'拟修改名称'});
+  await a.run('planSubmit(board)');assert.equal(writes.length,1);
+});
+test('delete cards cannot submit before human confirmation and never use automatic action execution',async()=>{
+  const a=planningApp(),writes=[];a.context.document={querySelector:()=>null};
+  a.context.fetch=async(path,o)=>{writes.push(JSON.parse(o.body));return {ok:true,text:async()=>'{"deleted":true}'}};
+  a.context.raw=mutationTask({operation:'delete'});
+  a.run(`refresh=async()=>{};agentAppend=()=>{};agentState.mode='auto';var board={...planDraft({tasks:[raw]}),el:{querySelector:()=>null},history:[]};`);
+  await a.run('planSubmit(board)');assert.equal(writes.length,0);
+  a.run('board.tasks[0].deleteConfirmed=true');await a.run('planSubmit(board)');
+  assert.equal(writes.length,1);assert.equal(writes[0].data.operation,'delete');assert.equal(writes[0].data.confirm,'原任务');
+  assert.ok(!a.run('planCardsHTML({...planDraft({tasks:[raw]})})').includes('<pre'));
+});
+test('project deletion shows impact and requires the full original name, independent of editable titles',()=>{
+  const a=planningApp();a.run(`var board=planDraft({projects:[{operation:'delete',id:'p',revision:'r',before:{name:'重要项目',owner:'test001'},impact:{tasks:12,files:3,repeats:2}}]});`);
+  assert.ok(a.run('planProblems(board,board.projects[0]).confirm'));
+  a.run("board.projects[0].confirm='重要';board.projects[0].name='重要'");
+  assert.ok(a.run('planProblems(board,board.projects[0]).confirm'));
+  a.run("board.projects[0].confirm='重要项目'");assert.deepEqual(a.json('planProblems(board,board.projects[0])'),{});
+  const html=a.run('planCardsHTML(board)');assert.ok(html.includes('12 项任务')&&html.includes('3 个附件')&&html.includes('2 条固定安排'));
+});
+test('a member change card follows approval rights and requires a reason instead of rewriting task ownership',()=>{
+  const a=planningApp();a.context.raw=mutationTask({name:'申请修改',before:{...mutationTask().before,creator:'test002'}});
+  a.run(`S.user={id:'test001',admin:0};var board=planDraft({tasks:[raw]});`);
+  assert.equal(a.run('planTaskPath(board,board.tasks[0]).mode'),'approval');
+  assert.ok(a.run('planProblems(board,board.tasks[0]).reason'));
+  a.run("board.tasks[0].reason='原安排需调整'");assert.deepEqual(a.json('planProblems(board,board.tasks[0])'),{});
+});
+test('failed card retry does not replay completed cards; duplicate targets are rejected before writes',async()=>{
+  const a=planningApp(),writes=[];a.context.document={querySelector:()=>null};
+  a.context.fetch=async(path,o)=>{const b=JSON.parse(o.body);writes.push(b);if(b.data.id==='b'&&writes.filter(x=>x.data.id==='b').length===1)return {ok:false,text:async()=>'{"error":"目标已变化"}'};return {ok:true,text:async()=>'{"id":"ok"}'}};
+  a.context.raw=mutationTask({name:'改名'});a.run(`refresh=async()=>{};agentAppend=()=>{};var board={...planDraft({tasks:[{...raw,id:'a'},{...raw,id:'b'}]}),el:{querySelector:()=>null},history:[]};`);
+  await a.run('planSubmit(board)');assert.equal(a.run('board.tasks[0].state'),'done');assert.equal(a.run('board.tasks[1].state'),'draft');
+  await a.run('planSubmit(board)');assert.deepEqual(writes.map(x=>x.data.id),['a','b','b']);
+  a.run('board=planDraft({tasks:[raw,{...raw,operation:"delete"}]})');
+  assert.ok(a.run('planProblems(board,board.tasks[0]).target'));
+});
+
+test('accepting one card ignores unrelated invalid cards and leaves their fields untouched',async()=>{
+  const a=planningApp(),writes=[];a.context.document={querySelector:()=>null};
+  a.context.fetch=async(path,o)=>{writes.push(JSON.parse(o.body));return {ok:true,text:async()=>'{"id":"accepted"}'}};
+  a.run(`refresh=async()=>{};agentAppend=()=>{};var board={...planDraft({tasks:[{name:'接受这一张',assignee:'test001'},{name:'',assignee:''},{name:'保留这一张',assignee:'test002'}]}),el:{querySelector:()=>null},history:[]};var untouched=JSON.stringify(board.tasks.slice(1));`);
+  await a.run('planSubmit(board,[board.tasks[0]])');
+  assert.equal(writes.length,1);assert.equal(writes[0].data.changes.name,'接受这一张');
+  assert.equal(a.run('JSON.stringify(board.tasks.slice(1))'),a.run('untouched'));
+  assert.equal(a.run('planOpenCards(board).length'),2);assert.ok(!a.run('board.closed'));
+  const html=a.run('planCardsHTML(board)');assert.ok(!html.includes('接受这一张'));assert.ok(html.includes('plan-accept')&&html.includes('plan-reject')&&html.includes('data-plan-select'));
+});
+test('multiselect accepts only selected cards and keeps a failed selection available for retry',async()=>{
+  const a=planningApp(),writes=[];a.context.document={querySelector:()=>null};
+  a.context.fetch=async(path,o)=>{const b=JSON.parse(o.body);writes.push(b);if(b.data.changes.name==='B'&&writes.filter(x=>x.data.changes.name==='B').length===1)return {ok:false,text:async()=>'{"error":"暂时失败"}'};return {ok:true,text:async()=>'{"id":"ok"}'}};
+  a.run(`refresh=async()=>{};agentAppend=()=>{};var board={...planDraft({tasks:['A','B','C'].map(name=>({name,assignee:'test001'}))}),el:{querySelector:()=>null},history:[]};board.tasks[0].selected=true;board.tasks[1].selected=true;`);
+  await a.run('planSubmit(board,planSelectedCards(board))');
+  assert.deepEqual(writes.map(x=>x.data.changes.name),['A','B']);
+  assert.equal(a.run('planSelectedCards(board)[0].name'),'B');assert.equal(a.run('board.tasks[2].state'),'draft');
+  await a.run('planSubmit(board,planSelectedCards(board))');
+  assert.deepEqual(writes.map(x=>x.data.changes.name),['A','B','B']);assert.equal(a.run('planOpenCards(board)[0].name'),'C');
+});
+test('rejecting a project is local, preserves dependent task data and can be undone',async()=>{
+  const a=planningApp();let writes=0;a.context.fetch=async()=>{writes++;throw Error('must not write')};
+  a.run(`var board={...planDraft({projects:[{ref:'P1',name:'新项目',owner:'test001'}],tasks:[{name:'待处理任务',assignee:'test001',projectRef:'P1'}]}),el:{},history:[]};var beforeTask=JSON.stringify(board.tasks[0]);`);
+  await a.run('planReject(board,[board.projects[0]])');
+  assert.equal(writes,0);assert.equal(a.run('board.projects[0].state'),'rejected');
+  assert.equal(a.run('JSON.stringify(board.tasks[0])'),a.run('beforeTask'));
+  assert.equal(a.run('planTaskPath(board,board.tasks[0]).mode'),'none');
+  assert.ok(a.run('planCardsHTML(board)').includes('原新项目已拒绝'));
+  a.run('planUndo(board)');assert.equal(a.run('board.projects[0].state'),'draft');
+});
+test('a child accepted alone never implicitly accepts its project; selected dependencies submit in order',async()=>{
+  const a=planningApp(),writes=[];a.context.document={querySelector:()=>null};
+  a.context.fetch=async(path,o)=>{const b=JSON.parse(o.body);writes.push(b);return {ok:true,text:async()=>'{"id":"project-created","status":"active"}'}};
+  a.run(`agentAppend=()=>{};refresh=async()=>{S.projects=[{id:'project-created',name:'新项目',owner:'test001',status:'active',members:{test001:'accepted'}}]};var board={...planDraft({projects:[{ref:'P1',name:'新项目',owner:'test001'}],tasks:[{name:'子任务',assignee:'test001',projectRef:'P1'}]}),el:{},history:[]};`);
+  await a.run('planSubmit(board,[board.tasks[0]])');assert.equal(writes.length,0);assert.equal(a.run('board.projects[0].state'),'draft');
+  await a.run('planSubmit(board,[board.tasks[0],board.projects[0]])');
+  assert.deepEqual(writes.map(x=>x.data.kind),['project','task']);assert.equal(writes[1].data.changes.projectId,'project-created');
+});
+test('accept-all processes valid cards and retains invalid cards instead of blocking the entire group',async()=>{
+  const a=planningApp(),writes=[];a.context.document={querySelector:()=>null};
+  a.context.fetch=async(path,o)=>{writes.push(JSON.parse(o.body));return {ok:true,text:async()=>'{"id":"made"}'}};
+  a.run(`refresh=async()=>{};agentAppend=()=>{};var board={...planDraft({tasks:[{name:'',assignee:''},{name:'有效卡',assignee:'test001'}]}),el:{},history:[]};`);
+  await a.run('planSubmit(board)');assert.equal(writes.length,1);assert.equal(a.run('planOpenCards(board).length'),1);assert.equal(a.run('board.tasks[0].state'),'draft');assert.ok(a.run('planProblems(board,board.tasks[0]).name'));assert.equal(a.run('planConfirmLabel()'),'全部接受');
+});
+test('a visual exit failure cannot turn an already accepted card back into a retryable card',async()=>{
+  const a=planningApp(),writes=[];a.context.document={querySelector:()=>null};
+  a.context.fetch=async(path,o)=>{writes.push(JSON.parse(o.body));return {ok:true,text:async()=>'{"id":"made"}'}};
+  a.run(`refresh=async()=>{};agentAppend=()=>{};var board={...planDraft({tasks:[{name:'动画不能影响业务',assignee:'test001'}]}),el:{querySelectorAll:()=>[{dataset:{key:'t0'},animate:()=>{throw Error('animation unavailable')}}]},history:[]};`);
+  await a.run('planSubmit(board)');assert.equal(a.run('board.tasks[0].state'),'done');await a.run('planSubmit(board)');assert.equal(writes.length,1);
 });

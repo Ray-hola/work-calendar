@@ -1,4 +1,4 @@
-# Only the four runtime files go into the image. data/ holds accounts and the
+# Only the five runtime files go into the image. data/ holds accounts and the
 # database, so it must never reach the build context.
 .git
 .github
