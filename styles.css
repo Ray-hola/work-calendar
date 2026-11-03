@@ -5225,7 +5225,11 @@ select {
   padding-right: 8px;
   border-radius: 2px;
   background: var(--line);
-  transition: left .42s cubic-bezier(.34, 1.4, .64, 1), width .42s cubic-bezier(.34, 1.4, .64, 1), background-color .2s, height .2s var(--ease-out);
+  transition:
+    left .42s cubic-bezier(.34, 1.4, .64, 1),
+    width .42s cubic-bezier(.34, 1.4, .64, 1),
+    background-color .2s,
+    height .2s var(--ease-out);
 }
 
 .archive-cabinet.show-week .ruler-week {
@@ -5250,8 +5254,11 @@ select {
 }
 
 .week-report > *:nth-child(2) { animation-delay: 60ms; }
+
 .week-report > *:nth-child(3) { animation-delay: 120ms; }
+
 .week-report > *:nth-child(4) { animation-delay: 180ms; }
+
 .week-report > *:nth-child(n + 5) { animation-delay: 240ms; }
 
 .week-report.from-next {
@@ -8442,9 +8449,11 @@ select:focus {
   .week-days {
     gap: 4px;
   }
+
   .week-day {
     padding: 8px 2px 6px;
   }
+
   .week-row {
     grid-template-columns: minmax(0, 6em) minmax(0, 1fr) auto;
     gap: 10px;

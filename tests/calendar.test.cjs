@@ -321,7 +321,8 @@ test('日记 and 档案室 are one 档案室: members file their own days, admin
   assert.deepEqual(cards, [['2026-10-30','diary','manual'],['2026-10-31','diary','auto'],['2026-11-02','diary','draft']], '只有自己的，今天总在');
   assert.deepEqual(a.json("diaryContent('test002','2026-11-02')"), {done:'✓ 联调', risks:'写文档（未完成）', next:'上线'}, '没写过的一天按当天工作套好模板');
   const page = a.run("diaryDocument('2026-11-02')");
-  assert.ok(/<h3>随记<\/h3><div class="doc-edit"[^>]*data-field="note" data-placeholder="[^"]+"><\/div>/.test(page), '三块之外还有一块空白随记');
+  assert.ok(/<h3>随记<\/h3><div class="doc-edit"[^>]*data-field="note" data-placeholder="[^"]+"><\/div>/.test(page),
+    '三块之外还有一块空白随记');
   assert.ok(page.indexOf('随记') > page.indexOf('明日计划') && page.indexOf('随记') < page.indexOf('工作日志'));
   a.run("S.diaries.push({author:'test002',date:'2026-11-01',content:{done:'x',note:'今天想清楚了一件事'}})");
   assert.ok(/data-field="note"[^>]*>今天想清楚了一件事</.test(a.run("diaryDocument('2026-11-01')")), '写过的随记原样回来');
@@ -334,11 +335,14 @@ test('日记 and 档案室 are one 档案室: members file their own days, admin
   assert.ok(/data-scope="members" data-id="test002" data-field="done">联调/.test(editable) && /data-scope="projects" data-id="p" data-field="progress">/.test(editable), '每一块都能改，空的也能补');
   assert.ok(/已改/.test(editable));
   assert.ok(!/contenteditable/.test(a.run(`briefDocument(${JSON.stringify(brief)})`)), '导出和只读时是原样');
-  const week = a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',briefs:[${JSON.stringify(brief)},${JSON.stringify({...brief,date:'2026-11-02'})}]})`);
+  const week = a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',briefs:[${JSON.stringify(brief)},`
+    +`${JSON.stringify({...brief,date:'2026-11-02'})}]})`);
   assert.ok(/档案室 · 周报/.test(week) && !/<!doctype/.test(week), '周报在应用里直接看，不再下载');
-  assert.ok(/data-count="2">2<\/span>\/<span data-count="4">4<\/span><\/b><span>完成任务/.test(week) && /data-count="2.0" data-decimals="1">2.0<\/span>h/.test(week), '把一周加起来');
+  assert.ok(/data-count="2">2<\/span>\/<span data-count="4">4<\/span><\/b><span>完成任务/.test(week)
+    && /data-count="2.0" data-decimals="1">2.0<\/span>h/.test(week), '把一周加起来');
   assert.equal((week.match(/class="week-day[ "]/g) || []).length, 7, '每天一格，周六到周五');
-  assert.ok(/data-date="2026-11-01"(?![^>]*disabled)/.test(week) && /data-date="2026-11-03" disabled/.test(week), '有日报的那天能点开，没到的不能');
+  assert.ok(/data-date="2026-11-01"(?![^>]*disabled)/.test(week) && /data-date="2026-11-03" disabled/.test(week),
+    '有日报的那天能点开，没到的不能');
   assert.ok(/data-week="1" disabled/.test(week), '本周之后不能再往后翻');
   assert.ok(/<time>11月1日 · 周日<\/time>要定版/.test(week), '本周需要关注带上日期');
   assert.ok(/王二<\/strong><span class="week-meter"><i style="--w:50%">/.test(week), '成员本周的完成比例');
@@ -357,7 +361,9 @@ test('a running project offers 完成项目 to its Owner and the admins, finishe
   const a=app(); const elements={};
   const el=s=>elements[s]||(elements[s]={innerHTML:'',textContent:'',classList:{toggle(){}}});
   a.context.document={querySelector:el,querySelectorAll:()=>[]};
-  a.run(`S.user={id:'test001',admin:0};S.users=[];S.projects=[{id:'p',name:'项目',owner:'test001',status:'active',members:{test001:'accepted',test002:'accepted'}}];S.tasks=[{id:'t1',projectId:'p',name:'已完成',assignee:'test001',status:'done'}];renderProjects()`);
+  a.run(`S.user={id:'test001',admin:0};S.users=[];S.projects=[{id:'p',name:'项目',owner:'test001',status:'active',
+    members:{test001:'accepted',test002:'accepted'}}];
+    S.tasks=[{id:'t1',projectId:'p',name:'已完成',assignee:'test001',status:'done'}];renderProjects()`);
   assert.ok(elements['#projectGrid'].innerHTML.includes('request-project-completion'));
   a.run("S.tasks[0].status='doing';renderProjects()");
   assert.ok(/request-project-completion[^>]*>.*完成项目/.test(elements['#projectGrid'].innerHTML), '没做完也能提前完成');
@@ -371,12 +377,16 @@ test('project completion request opens a required report form before submitting'
   const a=app(); const elements={};
   const el=s=>elements[s]||(elements[s]={innerHTML:'',value:'',classList:{remove(){},add(){},toggle(){}},addEventListener(){}});
   a.context.document={querySelector:el,querySelectorAll:()=>[]};
-  a.run(`S.today='2026-11-02';S.user={id:'test001',admin:0};S.projects=[{id:'p',name:'项目',owner:'test001',status:'active',end:'2026-11-30'}];S.tasks=[{id:'t',projectId:'p',name:'收尾',status:'done'},{id:'u',projectId:'p',name:'还在做',status:'doing'}];requestProjectCompletion('p')`);
+  a.run(`S.today='2026-11-02';S.user={id:'test001',admin:0};
+    S.projects=[{id:'p',name:'项目',owner:'test001',status:'active',end:'2026-11-30'}];
+    S.tasks=[{id:'t',projectId:'p',name:'收尾',status:'done'},{id:'u',projectId:'p',name:'还在做',status:'doing'}];
+    requestProjectCompletion('p')`);
   const html=elements['#modalContent'].innerHTML;
   assert.ok(html.includes('projectCompletionReport')&&html.includes('maxlength="10000"')&&html.includes('提交结项审批'));
   assert.ok(html.includes('提前完成项目')&&/还有 1 项任务没完成/.test(html)&&html.includes('还在做'), '提前结项时说清楚剩下什么');
   a.run("S.user={id:'superadmin',admin:1};requestProjectCompletion('p')");
-  assert.ok(/>完成项目<\/button>/.test(elements['#modalContent'].innerHTML)&&elements['#modalContent'].innerHTML.includes('可留空'), '管理员直接完成');
+  const adminForm=elements['#modalContent'].innerHTML;
+  assert.ok(/>完成项目<\/button>/.test(adminForm)&&adminForm.includes('可留空'), '管理员直接完成');
 });
 
 test('achievement lifecycle includes completed project milestones and task ratio', () => {
@@ -1087,7 +1097,8 @@ test('已递延 lists a task deferred several times once, as the record that car
   const a=app();
   a.run(`S.user={id:'test002',admin:0};S.projects=[];UI.member='all';S.logs=[];S.tasks=[
     {id:'d1',name:'报告',assignee:'test002',status:'deferred',date:'2026-10-30',superseded:true,supersededBy:'d3'},
-    {id:'d2',name:'报告',assignee:'test002',status:'deferred',date:'2026-10-31',originId:'d1',superseded:true,supersededBy:'d3'},
+    {id:'d2',name:'报告',assignee:'test002',status:'deferred',date:'2026-10-31',originId:'d1',
+      superseded:true,supersededBy:'d3'},
     {id:'d3',name:'报告',assignee:'test002',status:'todo',date:'2026-11-01',originId:'d1'},
     {id:'plain',name:'别的',assignee:'test002',status:'todo',date:'2026-11-01'}];`);
   assert.deepEqual(a.json('scheduleTasks().filter(isDeferredTask).map(t=>t.id)'), ['d3']);
@@ -1099,17 +1110,19 @@ test('new work is marked in the project space until it is opened', () => {
   a.run(`S.user={id:'test002',admin:0};S.projects=[{id:'p',status:'active'}];S.tasks=[
     {id:'t',projectId:'p',assignee:'test002'},{id:'t2',projectId:'p',assignee:'test002',originId:'t'}];S.notifications=[
     {id:'n1',fresh:true,read:false,reference:'p'},{id:'n2',fresh:true,read:false,reference:'t'},
-    {id:'n3',fresh:true,read:true,reference:'old'},{id:'n4',read:false,reference:'t'},{id:'n5',fresh:true,read:false,reference:'gone'}];`);
+    {id:'n3',fresh:true,read:true,reference:'old'},{id:'n4',read:false,reference:'t'},
+    {id:'n5',fresh:true,read:false,reference:'gone'}];`);
   assert.deepEqual(a.json('[...freshRefs()].sort()'), ['p','t'], '读过的、普通通知、已删除的都不算');
-  assert.equal(a.run("isFreshTask(S.tasks[1])"), true, '递延后的那条也带着标记');
-  a.run("S.notifications[1].read=true");
-  assert.equal(a.run("isFreshTask(S.tasks[1])"), false);
+  assert.equal(a.run('isFreshTask(S.tasks[1])'), true, '递延后的那条也带着标记');
+  a.run('S.notifications[1].read=true');
+  assert.equal(a.run('isFreshTask(S.tasks[1])'), false);
 });
 
 test('a temp task handed to someone shows for both people in the project space', () => {
   const a=app(); const elements={};
   a.context.document={querySelector:s=>elements[s]||(elements[s]={}),querySelectorAll:()=>[]};
-  a.run(`S.today='2026-11-02';S.projects=[];S.notifications=[];S.users=[{id:'test001',active:1},{id:'test002',active:1}];S.tasks=[
+  a.run(`S.today='2026-11-02';S.projects=[];S.notifications=[];
+    S.users=[{id:'test001',active:1},{id:'test002',active:1}];S.tasks=[
     {id:'h',name:'核对报价',creator:'test001',assignee:'test002',priority:'P1',status:'todo',date:'2026-11-02'},
     {id:'own',name:'自己的',creator:'test002',assignee:'test002',priority:'P1',status:'todo',date:'2026-11-02'}];`);
   a.run("S.user={id:'test002',admin:0};renderProjects()");
@@ -1118,7 +1131,28 @@ test('a temp task handed to someone shows for both people in the project space',
   a.run("S.user={id:'test001',admin:0};renderProjects()");
   html=elements['#projectGrid'].innerHTML;
   assert.ok(/我派出的 <span>1<\/span>/.test(html)&&html.includes('给 test002'));
-  assert.equal(a.run("handedOut(S.tasks[0])"), true);
+  assert.equal(a.run('handedOut(S.tasks[0])'), true);
   a.run("S.users.push({id:'superadmin',admin:1})");
-  assert.equal(a.run("editApprover(S.tasks[0])"), 'test001', '接到的人申请修改，由派任务的人批');
+  assert.equal(a.run('editApprover(S.tasks[0])'), 'test001', '接到的人申请修改，由派任务的人批');
+  a.run('S.users[0].active=0');
+  assert.equal(a.run('editApprover(S.tasks[0])'), 'superadmin', '派任务的人停用后由 superadmin 批');
+});
+
+test('the week report counts days put together on the spot, but only filed days open', () => {
+  const a=app();
+  a.run(`S.today='2026-11-02'`);
+  const days=a.json(`weekSummary({start:'2026-10-31',briefs:[
+    {date:'2026-10-31',filed:true,content:{totals:{tasks:4,completed:3}}},
+    {date:'2026-11-01',content:{totals:{tasks:1,completed:1}}},
+    {date:'2026-11-02',filed:false,content:{totals:{tasks:2,completed:1}}}]}).days.slice(0,4)`);
+  assert.deepEqual(days.map(d=>[d.has,d.filed,d.tasks]), [[true,true,4],[true,true,1],[true,false,2],[false,false,0]]);
+  assert.equal(a.json(`weekSummary({start:'2026-10-31',briefs:[]}).totals.tasks`), 0);
+});
+
+test('a day sits at the same place on the ruler for ticks and the week band', () => {
+  const a=app();
+  assert.equal(a.run('rulerAt(1,30)'), '0.00');
+  assert.equal(a.run('rulerAt(30,30)'), '100.00');
+  assert.equal(a.run('rulerAt(0,30)'), a.run('rulerAt(1,30)'), '月初之前的一周从 1 号画起');
+  assert.equal(a.run('rulerAt(45,31)'), '100.00');
 });

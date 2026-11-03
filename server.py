@@ -170,6 +170,7 @@ TASK_STATUS_LABELS = {'todo': '待开始', 'doing': '进行中', 'done': '已完
 
 
 def status_label(value):
+    """Chinese label for a task status, or the raw value when it has none."""
     return TASK_STATUS_LABELS.get(value, value)
 
 
@@ -261,11 +262,7 @@ class Store:
                 }
             }, ensure_ascii=False)))
             self.db.commit()
-        # Diaries used to be copied to project Owners as notices. They are
-        # private to their author now, so copies already delivered go too.
-        for row in self.db.execute('SELECT id,data FROM notifications').fetchall():
-            if json.loads(row['data']).get('kind') == 'diary':
-                self.db.execute('DELETE FROM notifications WHERE id=?', (row['id'],))
+        self.forget_delivered_diaries()
         self.db.commit()
         self.initial_passwords = {}
         if seed and not self.users():
@@ -273,6 +270,29 @@ class Store:
 
     def close(self):
         self.db.close()
+
+    def forget_delivered_diaries(self):
+        """Diaries used to reach project Owners, as notices and inside the
+        automatic project summaries. They are private to their author now, so
+        what was already delivered is cleared, once per database."""
+        job = 'migrate:diary-privacy'
+        if self.db.execute('SELECT 1 FROM jobs WHERE id=?', (job,)).fetchone():
+            return
+        for row in self.db.execute('SELECT id,data FROM notifications').fetchall():
+            if json.loads(row['data']).get('kind') == 'diary':
+                self.db.execute('DELETE FROM notifications WHERE id=?', (row['id'],))
+        for row in self.db.execute('SELECT id,data FROM reports').fetchall():
+            report = json.loads(row['data'])
+            content = report.get('content')
+            if report.get('kind') != 'automatic' or not isinstance(content, dict):
+                continue
+            text = str(content.get('collaborators') or '')
+            if '（日记）：' not in text:
+                continue
+            lines = [re.sub(r'^(.*?)（日记）：.*$', r'\1：已写当日日记', line) for line in text.split('\n')]
+            content['collaborators'] = '\n'.join(lines)
+            self.db.execute('UPDATE reports SET data=? WHERE id=?', (json.dumps(report, ensure_ascii=False), row['id']))
+        self.db.execute('INSERT INTO jobs VALUES (?,?)', (job, timestamp()))
 
     def all(self, table):
         assert table in TABLES
@@ -879,6 +899,8 @@ class Store:
                 raise Problem(401, '请重新登录')
 
     def notify(self, to, title, body, kind='task', reference=None, channel=None, fresh=False):
+        """File a notice for `to`. `fresh` marks new work handed to them, which
+        the project space shows with a red dot until it is opened."""
         if not any(u['id']==to for u in self.users()):raise Problem(404,'通知接收账户不存在')
         record={'to':to, 'title':title, 'body':body, 'kind':kind, 'reference':reference, 'read':False, 'createdAt':timestamp()}
         # Only chat notices name a room; a task notice keeps its old shape so
@@ -985,11 +1007,20 @@ class Store:
         p['status']='done';p['completedBy']=user['id'];p['completedAt']=timestamp()
         if p.get('end') and p['end']>now().date().isoformat():p['endedEarly']=True
         for t in self.open_project_tasks(p['id']):
-            t['status']='skipped';t['skipReason']='项目已完成'
+            before=t['status']
+            t['status']='skipped';t['skipReason']='项目已完成';t['statusBefore']=before
             self.put('tasks',t)
-            self.put('logs',{'taskId':t['id'],'actor':user['id'],'kind':'skip','reason':'项目已完成','createdAt':timestamp(),'date':now().date().isoformat()})
+            self.put('logs',{'taskId':t['id'],'actor':user['id'],'kind':'skip','reason':'项目已完成','before':before,
+                             'createdAt':timestamp(),'date':now().date().isoformat()})
         self.trim_project_repeats(p,'项目已结束')
         self.put('projects',p)
+
+    def reopen_project_tasks(self, p):
+        """A finished project set running again gets back the work it closed."""
+        for t in self.all('tasks'):
+            if t.get('projectId')!=p['id'] or t.get('status')!='skipped' or t.get('skipReason')!='项目已完成':continue
+            t['status']=t.pop('statusBefore',None) or 'todo';t['skipReason']=''
+            self.put('tasks',t)
 
     def can_view_task(self, user, t):
         if not t.get('projectId'):
@@ -1017,8 +1048,10 @@ class Store:
             creator = task.get('creator')
             if creator and creator == task.get('assignee'):
                 return None
-            # A member who handed the task out settles changes to it, as an Owner would.
-            return creator if creator and not self.user(creator)['admin'] else 'superadmin'
+            # A member who handed the task out settles changes to it, as an Owner
+            # would; once they are disabled or gone, superadmin does.
+            giver = next((u for u in self.users() if u['id'] == creator and u['active']), None)
+            return creator if giver and not giver['admin'] else 'superadmin'
         project = self.get('projects', pid)
         return 'superadmin' if task.get('assignee') == project.get('owner') else project.get('owner')
 
@@ -1042,7 +1075,8 @@ class Store:
             result['duration'] = duration(changes['duration'])
         if 'assignee' in changes:
             result['assignee'] = str(changes['assignee']).strip()
-            self.user(result['assignee'])
+            if self.user(result['assignee'])['admin'] and not task.get('projectId'):
+                raise Problem(400, '管理员账号不执行任务，临时任务请指派给成员')
         if 'priority' in changes:
             result['priority'] = str(changes['priority'])
             if result['priority'] not in ('P0', 'P1', 'P2'):
@@ -1105,21 +1139,29 @@ class Store:
                           'nextTaskId': copy['id'], 'date': now().date().isoformat(), 'createdAt': timestamp()})
         return copy
 
+    def _join_member(self, project, member, request_fields, title, body):
+        """Put `member` on the project, settle their open invitation and tell them."""
+        project['members'][member]='accepted'
+        for r in self.all('requests'):
+            if r['projectId']==project['id'] and r['to']==member and r['status']=='pending':
+                r.update(status='accepted',read=True,**request_fields);self.put('requests',r)
+        for n in self.all('notifications'):
+            if n['to']==member and n['kind']=='request' and n.get('reference')==project['id'] and not n.get('read'):
+                n['read']=True;self.put('notifications',n)
+        self.notify(member,title,body,'project',project['id'],fresh=True)
+
     def invite(self, project):
         """Join everyone still marked as invited. Nobody has to accept: a
         member who does not want the work leaves the project from inside it,
-        and their tasks and records stay there for when they come back."""
-        joined=[]
-        for member, status in project['members'].items():
-            if status != 'pending':continue
-            project['members'][member]='accepted';joined.append(member)
-            for r in self.all('requests'):
-                if r['projectId']==project['id'] and r['to']==member and r['status']=='pending':
-                    r.update(status='accepted',read=True,auto=True);self.put('requests',r)
-            for n in self.all('notifications'):
-                if n['to']==member and n['kind']=='request' and n.get('reference')==project['id'] and not n.get('read'):
-                    n['read']=True;self.put('notifications',n)
-            self.notify(member,'已加入项目',f'{self.display_name(project["owner"])} 已将你加入「{project["name"]}」，项目任务会出现在你的日程里；不想参与可以在项目里退出。','project',project['id'],fresh=True)
+        and their tasks and records stay there for when they come back. A
+        disabled account stays invited until it is enabled again."""
+        joined=[];active={u['id'] for u in self.users() if u['active']}
+        for member, status in list(project['members'].items()):
+            if status != 'pending' or member not in active:continue
+            body=(f'{self.display_name(project["owner"])} 已将你加入「{project["name"]}」，'
+                  '项目任务会出现在你的日程里；不想参与可以在项目里退出。')
+            self._join_member(project,member,{'auto':True},'已加入项目',body)
+            joined.append(member)
         if joined:self.put('projects',project)
         return joined
 
@@ -1187,14 +1229,9 @@ class Store:
         for member in dict.fromkeys(members):
             self.user(member)
             if project['members'].get(member)=='accepted':continue
-            project['members'][member]='accepted';changed.append(member)
-            for r in self.all('requests'):
-                if r['projectId']==project['id'] and r['to']==member and r['status']=='pending':
-                    r.update(status='accepted',read=True,resolvedBy=user['id']);self.put('requests',r)
-            for n in self.all('notifications'):
-                if n['to']==member and n['kind']=='request' and n.get('reference')==project['id']:
-                    n['read']=True;self.put('notifications',n)
-            self.notify(member,'项目协作指派',f'superadmin 已将你加入「{project["name"]}」，已直接生效，可查看分配给你的项目任务。','project',project['id'],fresh=True)
+            body=f'superadmin 已将你加入「{project["name"]}」，已直接生效，可查看分配给你的项目任务。'
+            self._join_member(project,member,{'resolvedBy':user['id']},'项目协作指派',body)
+            changed.append(member)
         if changed and project['owner']!=user['id']:
             self.notify(project['owner'],'项目协作者已调整',f'superadmin 为「{project["name"]}」添加协作者：'+ '、'.join(changed)+'。','project',project['id'])
         self.put('projects',project)
@@ -1252,7 +1289,9 @@ class Store:
 
     def make_task(self, user, data, collaborator=False, announce=True):
         task=self.put('tasks',self.build_task(user,data,collaborator))
-        if announce and task['assignee']!=user['id']:self.notify(task['assignee'],'收到任务指派',f'{user["id"]} 指派「{task["name"]}」，安排日期 {task["date"]}。','task',task['id'],fresh=True)
+        if announce and task['assignee']!=user['id']:
+            self.notify(task['assignee'],'收到任务指派',f'{user["id"]} 指派「{task["name"]}」，安排日期 {task["date"]}。',
+                        'task',task['id'],fresh=True)
         if collaborator:
             p=self.get('projects',task['projectId'])
             if p['owner']!=task['assignee']:self.notify(p['owner'],'协作者新建任务',f'{user["id"]} 在「{p["name"]}」新建「{task["name"]}」，安排日期 {task["date"]}。','task',task['id'])
@@ -1929,12 +1968,16 @@ class Store:
             active_repeats=[r for r in self.all('repeats') if r.get('active') and target in (r.get('assignees') or [])]
             pending_suggestions=[s for s in self.all('suggestions') if s.get('status')=='pending' and s.get('assignee')==target]
             pending_edits=[e for e in self.all('edit_requests') if e.get('status')=='pending' and e.get('requester')==target]
+            # One-off work this account handed to someone else still has it as approver.
+            handed=[t for t in self.all('tasks') if not t.get('projectId') and t.get('creator')==target
+                    and t.get('assignee')!=target and t.get('status') not in terminal_tasks]
             blockers=[]
             if owned:blockers.append(f'仍负责 {len(owned)} 个进行中的项目（'+ '、'.join(owned[:5]) +'）')
             if assigned:blockers.append(f'仍有 {len(assigned)} 项未完成任务')
             if active_repeats:blockers.append(f'仍在 {len(active_repeats)} 条固定任务规则中')
             if pending_suggestions:blockers.append(f'有 {len(pending_suggestions)} 条待处理的分配建议')
             if pending_edits:blockers.append(f'有 {len(pending_edits)} 条待审批的任务修改申请')
+            if handed:blockers.append(f'派给别人的 {len(handed)} 项临时任务还没完成')
             if blockers:
                 raise Problem(409,'请先转交该账户的职责后再删除：'+ '；'.join(blockers))
             with self.lock,self.db:
@@ -1976,7 +2019,9 @@ class Store:
             p=self.put('projects',{'name':required(d,'name'),'desc':str(d.get('desc','')),'owner':owner,'creator':user['id'],'members':members,'status':'active' if direct else 'pending','priority':priority,'priorityLocked':False,'cycle':cycle,'start':start,'end':end,'createdAt':created_at, **({'activatedAt':created_at,'approvedBy':user['id']} if direct else {})})
             if user['admin']:
                 self.assign_members(user,p,[m for m in members if m!=owner])
-                if owner!=user['id']:self.notify(owner,'项目 Owner 指派',f'superadmin 指定你负责「{p["name"]}」，可在项目下创建和分配任务。','project',p['id'],fresh=True)
+                if owner!=user['id']:
+                    self.notify(owner,'项目 Owner 指派',f'superadmin 指定你负责「{p["name"]}」，可在项目下创建和分配任务。',
+                                'project',p['id'],fresh=True)
             elif direct:self.invite(p)
             else:self.notify('superadmin','项目审批申请',f'{user["id"]} 申请创建「{p["name"]}」。','approval',p['id'])
             return p
@@ -2048,7 +2093,10 @@ class Store:
             open_tasks=self.open_project_tasks(p['id'])
             p['status']='pending_completion';p['completionReport']=report;p['completionRequestedBy']=user['id'];p['completionRequestedAt']=timestamp();self.put('projects',p)
             left=f'\n仍有 {len(open_tasks)} 项未完成任务，结项后不再继续。' if open_tasks else ''
-            self.notify('superadmin','项目完成待审批',f'{user["id"]} 申请将项目「{p["name"]}」结项，请审批。{left}\n结项报告：{report}','project_completion',p['id']);return p
+            self.notify('superadmin','项目完成待审批',
+                        f'{user["id"]} 申请将项目「{p["name"]}」结项，请审批。{left}\n结项报告：{report}',
+                        'project_completion',p['id'])
+            return p
         if action=='project.complete_review':
             self.admin(user);p=self.get('projects',d['id'])
             if p['status']!='pending_completion':raise Problem(409,'该项目没有待审批的完成申请')
@@ -2153,11 +2201,13 @@ class Store:
                 stranded=[t for t in self.all('tasks') if t.get('projectId')==p['id'] and not t.get('repeatId') and t.get('status') in ('todo','doing') and (t['date']<p['start'] or (p['end'] and (t.get('deadline') or t['date'])>p['end']))]
                 if stranded:raise Problem(400,f'还有 {len(stranded)} 项未完成任务落在新周期外（如「{stranded[0]["name"]}」），请先调整这些任务的日期')
             self.put('projects',p)
+            if old.get('status') in ('done','archived') and p['status']=='active':self.reopen_project_tasks(p)
             if p['status'] in ('done','archived') or (p['start'],p['end'])!=(old.get('start'),old.get('end')):
                 self.trim_project_repeats(p,'项目已结束' if p['status'] in ('done','archived') else '项目周期已调整')
                 if p['status']=='active':self.materialize(now().date(), CALENDAR_END)
             if p['owner']!=old['owner']:
-                self.notify(p['owner'],'项目 Owner 指派',f'{user["id"]} 将「{p["name"]}」交给你负责，可在项目下创建和分配任务。','project',p['id'],fresh=True)
+                self.notify(p['owner'],'项目 Owner 指派',f'{user["id"]} 将「{p["name"]}」交给你负责，可在项目下创建和分配任务。',
+                            'project',p['id'],fresh=True)
                 self.notify(old['owner'],'项目 Owner 变更',f'{user["id"]} 已将「{p["name"]}」的 Owner 改为 {p["owner"]}，你仍是项目协作者。','project',p['id'])
             elif p['name']!=old['name'] or (p['start'],p['end'])!=(old.get('start'),old.get('end')):
                 for member,state in (p.get('members') or {}).items():
@@ -2203,7 +2253,9 @@ class Store:
                 task.update(creator=req['requester'],approvedBy=user['id']);self.put('tasks',task)
                 req.update(status='approved',taskId=task['id'],reviewedBy=user['id'],reviewedAt=timestamp())
                 self.notify(req['requester'],'任务申请已通过',f'「{task["name"]}」已加入日程，安排日期 {task["date"]}。','task',task['id'])
-                if task['assignee']!=req['requester']:self.notify(task['assignee'],'收到任务指派',f'{req["requester"]} 申请、{user["id"]} 批准的「{task["name"]}」，安排日期 {task["date"]}。','task',task['id'],fresh=True)
+                if task['assignee']!=req['requester']:
+                    body=f'{req["requester"]} 申请、{user["id"]} 批准的「{task["name"]}」，安排日期 {task["date"]}。'
+                    self.notify(task['assignee'],'收到任务指派',body,'task',task['id'],fresh=True)
             else:
                 req.update(status='rejected',reason=required(d,'reason'),reviewedBy=user['id'],reviewedAt=timestamp())
                 self.notify(req['requester'],'任务申请被驳回',f'「{draft["name"]}」被驳回：{req["reason"]}','task_request_result',req['id'])
@@ -2356,7 +2408,8 @@ class Store:
                 p=self.get('projects',t['projectId'])
                 if p['owner']!=user['id']:self.notify(p['owner'],'项目任务进度',f'{user["id"]} 将「{t["name"]}」记录为 {t["status"]}。'+json.dumps(log,ensure_ascii=False),'progress',t['id'])
             elif action!='task.complete' and t.get('creator') not in (None,user['id']):
-                self.notify(t['creator'],'临时任务进度',f'{user["id"]} 将「{t["name"]}」记录为 {status_label(t["status"])}。','progress',t['id'])
+                self.notify(t['creator'],'临时任务进度',f'{user["id"]} 将「{t["name"]}」记录为 {status_label(t["status"])}。',
+                            'progress',t['id'])
             return t
         if action=='task.completion.update':
             # The assignee corrects what they recorded; the task stays done.
@@ -2648,7 +2701,11 @@ class Store:
                 ds=(start+timedelta(days=i)).isoformat()
                 if ds>today:break
                 row=self.db.execute('SELECT data FROM reports WHERE id=?',(f'brief:{ds}',)).fetchone()
-                brief=json.loads(row['data']) if row else self.compose_brief(ds)
+                if row:
+                    brief={**json.loads(row['data']),'filed':True}
+                else:
+                    brief=self.compose_brief(ds)
+                    if brief:brief['filed']=False
                 if brief:briefs.append(self.apply_brief_edits(brief))
             return {'start':start.isoformat(),'end':(start+timedelta(days=6)).isoformat(),'briefs':briefs}
         if action=='inbox.delete':
@@ -2833,8 +2890,8 @@ class Store:
                 # The automatic summary names collaborators by account and dumps
                 # raw JSON; the brief is read by a person, so spell it out.
                 lines=[f'{self.display_name(r["author"])}：{self.brief_text(r.get("content"))}' for r in own]
-                lines+=[f'{self.display_name(m)}（日记）：{self.brief_text(self.diary_digest(m,day)["content"])}' for m in expected
-                        if m in diaries and not any(r.get('author')==m for r in own)]
+                lines+=[f'{self.display_name(m)}（日记）：{self.brief_text(self.diary_digest(m,day)["content"])}'
+                        for m in expected if m in diaries and not any(r.get('author')==m for r in own)]
                 content['collaborators']='\n'.join(lines) or '暂无已提交的协作进度'
             projects.append({'id':p['id'],'name':p['name'],'owner':p.get('owner'),'ownerName':self.display_name(p.get('owner')),
                              'source':'owner' if owner_report else 'auto','content':owner_report['content'] if owner_report else content,
