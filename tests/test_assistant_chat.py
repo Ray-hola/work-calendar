@@ -146,6 +146,28 @@ class AssistantChatTests(unittest.TestCase):
         self.assertIn(target['id'], [t['id'] for t in context['tasks']], '进行中的任务和它的 id 必须在上下文里')
         self.assertFalse(any(t['name'].startswith('历史任务') for t in context['tasks']), '已被接替的递延记录不必再给模型')
 
+    def test_the_whole_task_list_reaches_the_model(self):
+        """Feedback #3: a task created today was cut from the tail of the list,
+        so the assistant reported that the project had no tasks. Every open task
+        must reach the model, even when the rest of the workspace is over budget."""
+        day = __import__('datetime').date.today().isoformat()
+        for i in range(600):
+            self.store.put('tasks', {'name': '排期任务 %d ' % i + '细则' * 50, 'date': day, 'duration': 30,
+                                     'assignee': 'superadmin', 'projectId': None, 'priority': 'P1',
+                                     'status': 'todo', 'fixed': False})
+        for i in range(200):
+            self.store.put('notifications', {'to': 'superadmin', 'title': '日报', 'body': 'x' * 2000,
+                                             'kind': 'task', 'read': False, 'createdAt': '2026-10-%02dT08:00:00' % (i % 28 + 1)})
+        target = self.store.put('tasks', {'name': '今天新建的任务', 'date': day, 'duration': 60,
+                                          'assignee': 'superadmin', 'projectId': None, 'priority': 'P1',
+                                          'status': 'todo', 'fixed': False})
+        self.store.db.commit()
+        text = self.store.agent_context(self.admin)
+        context = json.loads(text)
+        ids = [t['id'] for t in context['tasks']]
+        self.assertEqual(len(ids), 601, '任务列表必须整份发给模型，不能被裁掉')
+        self.assertIn(target['id'], ids, '最新建的任务也必须在上下文里')
+
     def test_the_policy_forbids_asking_for_task_ids_and_project_prefixes(self):
         self.ask()
         policy = _Stub.seen[-1]['messages'][0]['content']
