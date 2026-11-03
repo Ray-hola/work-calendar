@@ -100,6 +100,31 @@ class AssistantChatTests(unittest.TestCase):
         self.assertLess(len(json.dumps(context, ensure_ascii=False)), 25000,
                         '上下文不应无节制增长')
 
+    def test_planning_returns_drafts_even_when_required_information_is_missing(self):
+        self.store.llm_chat(self.admin, {
+            'planning': True,
+            'messages': [{'role': 'user', 'content': '安排一个复盘，负责人还没确定'}],
+        })
+        policy = _Stub.seen[-1]['messages'][-1]['content']
+        self.assertIn('<plan>', policy)
+        self.assertIn('missing', policy)
+        self.assertIn('留空', policy)
+        self.assertNotIn('可用动作名', policy, '规划不能被执行模式的动作协议覆盖')
+
+    def test_planning_does_not_grant_a_member_write_capabilities(self):
+        self.store.create_user('planner', 'test-only-password')
+        member = self.store.user('planner')
+        before = self.store.agent_capabilities(member)
+        self.store.llm_chat(member, {
+            'planning': True,
+            'messages': [{'role': 'user', 'content': '帮我规划一个任务'}],
+        })
+        self.assertIn('<plan>', _Stub.seen[-1]['messages'][-1]['content'])
+        self.assertEqual(self.store.agent_capabilities(member), before)
+        with self.assertRaises(Problem):
+            self.store.execute_agent_action(member, {'action': 'task.create', 'confirmed': True,
+                                                    'data': {'name': '不能直接执行'}})
+
     def test_open_tasks_survive_a_large_history(self):
         """反馈 #2：上下文曾被按字符截断，最新的待办任务正好落在被截掉的尾部，
         模型看不到任务 id，只好让用户提供页面上根本不显示的 ID。"""

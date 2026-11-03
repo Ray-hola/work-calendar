@@ -647,8 +647,16 @@ class Store:
         # Keep the permission contract in the model context as a second line of
         # defence; actual mutations still go through Store.action authorization.
         caps = self.agent_capabilities(user)
-        operator = caps['mode'] == 'operator'
-        if user.get('admin'):
+        planning = data.get('planning') is True
+        operator = caps['mode'] == 'operator' and not planning
+        if planning:
+            policy = ('你是「战略小组台账」的规划助手。只起草项目和任务卡片，不能执行操作，也不要输出 <action>。'
+                      '即使信息不全，也必须返回 <plan>{"projects":[],"tasks":[{"name":"","assignee":"","date":"",'
+                      '"desc":"用户要安排的事"}]}</plan> 格式的草稿；可以拆成多个项目和任务。'
+                      '已知信息填入对应字段，缺少名称或无法确定的负责人留空，放入 missing 数组提醒用户补充；'
+                      '不要编造账户或项目，不要因缺少信息只回复无法生成。'
+                      '采用调用方提供的计划字段格式和当前账户创建规则；卡片由用户修改并确认后通过正常接口创建。')
+        elif user.get('admin'):
             policy = ('你是「战略小组台账」助手。当前账户是 superadmin，可协助查询并提出管理操作；'
                       '任何创建、指派、调整或审批都必须先向用户展示拟执行内容并等待明确确认。')
         elif operator:
