@@ -1529,7 +1529,34 @@ class ProjectSpaceTests(unittest.TestCase):
                 'kind': 'folder', 'id': folder['id'], 'folderId': folder['id'], 'order': 0,
             })
 
+    def test_open_ended_projects_count_people_over_two_weeks(self):
+        owner = self.store.user('test001')
+        today = now().date()
+        day = lambda n: (today + timedelta(days=n)).isoformat()
+        open_ended = self.store.action(self.admin, 'project.create', {
+            'name': 'long', 'owner': 'test001', 'members': ['test002'], 'start': day(-60), 'cycle': 'infinite',
+        })
+        bounded = self.store.action(self.admin, 'project.create', {
+            'name': 'short', 'owner': 'test001', 'members': ['test002'], 'start': day(-60), 'end': day(30), 'cycle': 'range',
+        })
+        def task(offset, **extra):
+            self.store.put('tasks', {'name': f't{offset}', 'date': day(offset), 'duration': 60, 'assignee': 'test002',
+                                     'projectId': bounded['id'], 'priority': 'P1', 'status': 'todo', 'fixed': False,
+                                     'type': '通用', **extra})
+        task(-30); task(-3); task(5); task(20); task(-20, deadline=day(-1))
+        task(2, status='skipped')
+        self.store.db.commit()
+        loads = self.store.action(owner, 'project.member_loads', {'id': open_ended['id']})
+        self.assertEqual((loads['start'], loads['end']), (day(-6), day(7)))
+        # -3, 5 and the task running from -20 to -1; not -30, 20 or the skipped one.
+        self.assertEqual((loads['counts']['test002'], loads['minutes']['test002']), (3, 180))
+        whole = self.store.action(owner, 'project.member_loads', {'id': bounded['id']})
+        self.assertEqual((whole['start'], whole['end'], whole['counts']['test002']), (day(-60), day(30), 5))
+        # 当前工作量 leaves out plans beyond next week.
+        self.assertEqual(self.store.profile('test002')['minutes'], 4 * 60)
+
     def test_project_files_follow_project_access(self):
+
 
         owner, member, outsider = [self.store.user(x) for x in ('test001', 'test002', 'test003')]
         project = self.store.action(self.admin, 'project.create', {
