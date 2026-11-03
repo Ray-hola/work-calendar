@@ -90,7 +90,7 @@
 
 * {
   box-sizing: border-box;
-  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-width: none;
 }
 
 body {
@@ -143,23 +143,9 @@ select {
 }
 
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--line-strong);
-  border: 3px solid var(--paper);
-  border-radius: 99px;
-  transition: background var(--t) var(--ease);
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--muted);
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 ::selection {
@@ -1175,13 +1161,6 @@ select {
   position: absolute; top: 0; bottom: 0; right: 0; width: 8px; z-index: 5;
   cursor: col-resize; touch-action: none; outline-offset: -2px;
 }
-.nav-resize-handle::after {
-  content: ''; position: absolute; top: 18px; bottom: 18px; left: 3px; width: 2px;
-  border-radius: 2px; background: var(--line-strong); opacity: .25;
-  transition: opacity var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
-}
-.nav-resize-handle:hover::after,
-.nav-resize-handle:focus-visible::after { opacity: 1; background: var(--accent); }
 .is-resizing-navigation { cursor: col-resize; user-select: none; }
 .is-resizing-navigation .sidebar,
 .is-resizing-navigation .project-space-layout,
@@ -4380,8 +4359,6 @@ select {
   overflow: auto;
   max-height: calc(100vh - 300px);
   min-height: 300px;
-  scrollbar-color: var(--line-strong) var(--surface-sunk);
-  scrollbar-width: auto;
   overscroll-behavior-x: contain;
   outline-offset: 4px;
   border: 0;
@@ -7571,9 +7548,6 @@ body.is-dragging-account * {
   padding: 18px 20px;
 }
 
-.chat-log::-webkit-scrollbar-thumb {
-  border-color: var(--surface);
-}
 
 .chat-day {
   align-self: center;
@@ -9120,7 +9094,6 @@ select:focus {
   }
   .week-board {
     overflow-x: auto;
-    scrollbar-width: thin;
   }
   .week-grid {
     min-width: 1050px;
