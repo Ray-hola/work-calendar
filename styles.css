@@ -1609,6 +1609,26 @@ select {
   box-shadow: none;
 }
 
+/* New work waiting in the project space: a red dot that hops now and then
+   until every new project and task in there has been opened. */
+.nav-new-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 0 2px var(--rail);
+  animation: navDotHop 2.2s var(--ease) infinite;
+}
+
+@keyframes navDotHop {
+  0%, 46%, 100% { transform: none; }
+  14% { transform: translateY(-5px); }
+  28% { transform: none; }
+  37% { transform: translateY(-2px); }
+}
+
 /* 7 · Masthead · topbar and page heads ----------------------------------------- */
 
 .topbar {
@@ -3605,6 +3625,69 @@ select {
   padding: 0 10px 0 6px;
 }
 
+/* New to you: the project gets a 新 chip and each new task a red dot in place
+   of its number, until it is opened. */
+.new-chip {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 3px 6px;
+  border-radius: 99px;
+  vertical-align: 3px;
+  font: 600 10px/1 var(--font-sans);
+  color: var(--surface);
+  background: var(--danger);
+  animation: wcPop var(--t) var(--ease-spring) both;
+  transition: opacity var(--t) var(--ease), transform var(--t) var(--ease);
+}
+
+.project-node.is-seen .new-chip {
+  opacity: 0;
+  transform: scale(.6);
+}
+
+.project-child-row.is-new::before {
+  content: '';
+  justify-self: center;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--danger);
+  animation: notifyPulse 2.4s var(--ease) infinite;
+  transition: opacity var(--t) var(--ease), transform var(--t) var(--ease);
+}
+
+.project-child-row.is-new.is-seen::before {
+  opacity: 0;
+  transform: scale(0);
+}
+
+/* Handed-out 临时任务 name the other person, which needs a wider column. */
+.temp-task-node .project-task-open {
+  grid-template-columns: 34px minmax(0, 1fr) 96px 64px 56px 14px;
+}
+
+.temp-task-node .child-assignee {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* What closing a project early leaves undone, said before it happens. */
+.project-close-note {
+  display: grid;
+  gap: 4px;
+  margin: 4px 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--warn-line);
+  border-radius: 10px;
+  background: var(--warn-soft);
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.project-close-note strong {
+  color: var(--p1-ink);
+}
+
 /* 12 · Timeline ---------------------------------------------------------------- */
 
 .timeline-toolbar {
@@ -5056,6 +5139,20 @@ select {
   color: var(--faint);
 }
 
+/* 随记 is a page left blank to write on, so it reads as room to write in. */
+.diary-note .doc-edit {
+  min-height: calc(1.7em * 4 + 4px);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+
+.diary-note .doc-edit:focus {
+  box-shadow: 0 0 0 1.5px var(--accent-line);
+}
+
+.diary-note .doc-edit:empty::before {
+  content: attr(data-placeholder);
+}
+
 .notice-fields.is-editable dd {
   min-width: 0;
 }
@@ -5114,6 +5211,215 @@ select {
   .brief-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+/* The week a 周报 covers: a band on the ruler behind the ticks, and while the
+   周报 button is in reach those folders' tabs light up in the box. */
+.ruler-week {
+  position: absolute;
+  bottom: -3px;
+  left: var(--from, 0%);
+  width: calc(var(--to, 0%) - var(--from, 0%));
+  height: 3px;
+  margin-left: -4px;
+  padding-right: 8px;
+  border-radius: 2px;
+  background: var(--line);
+  transition: left .42s cubic-bezier(.34, 1.4, .64, 1), width .42s cubic-bezier(.34, 1.4, .64, 1), background-color .2s, height .2s var(--ease-out);
+}
+
+.archive-cabinet.show-week .ruler-week {
+  height: 24px;
+  background: var(--accent-soft-2);
+}
+
+.archive-file.in-week .file-tab {
+  transition: background-color .2s, border-color .2s, color .2s;
+}
+
+.archive-cabinet.show-week .archive-file.in-week:not(.is-picked) .file-tab {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+/* 周报, read in place. Sections rise one after another, the day bars grow
+   from the baseline and the meters fill; paging slides from that side. */
+.week-report > * {
+  animation: ledgerRise .48s var(--ease-out) both;
+}
+
+.week-report > *:nth-child(2) { animation-delay: 60ms; }
+.week-report > *:nth-child(3) { animation-delay: 120ms; }
+.week-report > *:nth-child(4) { animation-delay: 180ms; }
+.week-report > *:nth-child(n + 5) { animation-delay: 240ms; }
+
+.week-report.from-next {
+  animation: weekFromNext .32s var(--ease-out) both;
+}
+
+.week-report.from-prev {
+  animation: weekFromPrev .32s var(--ease-out) both;
+}
+
+.week-report-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.week-report-top .eyebrow {
+  margin: 0;
+}
+
+.week-report-nav {
+  display: flex;
+  gap: 2px;
+}
+
+.week-report-nav .icon-btn {
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+}
+
+.week-report-nav .icon-btn:disabled {
+  opacity: .35;
+  cursor: default;
+}
+
+.week-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.week-day {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  padding: 10px 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-sunk);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: border-color var(--t) var(--ease), background var(--t) var(--ease), transform var(--t) var(--ease);
+}
+
+.week-day:not(:disabled):hover {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  transform: translateY(-2px);
+}
+
+.week-day:disabled {
+  cursor: default;
+  opacity: .55;
+}
+
+.week-day.is-today {
+  border-color: var(--accent-line);
+}
+
+.week-day-bar {
+  position: relative;
+  width: 14px;
+  height: 56px;
+  margin-bottom: 4px;
+  border-radius: 4px;
+  background: var(--line-soft);
+  overflow: hidden;
+}
+
+.week-day-bar i {
+  position: absolute;
+  inset: auto 0 0;
+  height: var(--h);
+  border-radius: 4px;
+  background: linear-gradient(to top, var(--accent) var(--done), var(--accent-line) var(--done));
+  transform-origin: bottom;
+  animation: weekBarGrow .6s var(--ease-out) both;
+  animation-delay: 260ms;
+}
+
+@keyframes weekBarGrow {
+  from { transform: scaleY(0); }
+}
+
+.week-day b {
+  font: 600 16px/1.1 var(--font-serif);
+  color: var(--ink);
+}
+
+.week-day small {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.week-day em {
+  min-height: 1.2em;
+  font: 600 11px/1.2 var(--font-sans);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-dark);
+}
+
+.week-report .brief-risks time {
+  margin-right: 10px;
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.week-rows {
+  display: grid;
+  gap: 2px;
+}
+
+.week-row {
+  display: grid;
+  grid-template-columns: minmax(0, 9em) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line-soft);
+  font-size: 13px;
+}
+
+.week-row strong {
+  overflow: hidden;
+  font: 600 14px/1.4 var(--font-serif);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.week-row > span:last-child {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.week-meter {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line-soft);
+  overflow: hidden;
+}
+
+.week-meter i {
+  display: block;
+  width: var(--w);
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  transform-origin: left;
+  animation: weekMeterFill .7s var(--ease-out) both;
+  animation-delay: calc(320ms + var(--k, 0) * 40ms);
+}
+
+@keyframes weekMeterFill {
+  from { transform: scaleX(0); }
 }
 
 /* 14 · Summary · diary and notebooks ------------------------------------------- */
@@ -8133,6 +8439,16 @@ select:focus {
 }
 
 @media (max-width: 760px) {
+  .week-days {
+    gap: 4px;
+  }
+  .week-day {
+    padding: 8px 2px 6px;
+  }
+  .week-row {
+    grid-template-columns: minmax(0, 6em) minmax(0, 1fr) auto;
+    gap: 10px;
+  }
   .view {
     padding: 26px 16px 64px;
   }

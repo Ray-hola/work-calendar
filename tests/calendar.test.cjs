@@ -218,8 +218,7 @@ test('project tree places task actions under the parent and distinguishes admin 
     assert.ok(html.indexOf('Example project')<html.indexOf('Child task'));
     assert.equal(html.includes('assign-project-task'),id!=='test002');
     assert.equal(html.includes('add-project-task'),id!=='test002');
-    assert.equal(html.includes('直接添加协作者'),id==='superadmin');
-    assert.equal(html.includes('邀请协作者'),id==='test001');
+    assert.equal(html.includes('添加协作者'),id!=='test002', 'Owner 和管理员都是直接加人，不再发邀请');
   }
 });
 
@@ -321,6 +320,11 @@ test('日记 and 档案室 are one 档案室: members file their own days, admin
   const cards = a.json('archiveCards().map(c=>[c.date,c.kind,c.source])').sort();
   assert.deepEqual(cards, [['2026-10-30','diary','manual'],['2026-10-31','diary','auto'],['2026-11-02','diary','draft']], '只有自己的，今天总在');
   assert.deepEqual(a.json("diaryContent('test002','2026-11-02')"), {done:'✓ 联调', risks:'写文档（未完成）', next:'上线'}, '没写过的一天按当天工作套好模板');
+  const page = a.run("diaryDocument('2026-11-02')");
+  assert.ok(/<h3>随记<\/h3><div class="doc-edit"[^>]*data-field="note" data-placeholder="[^"]+"><\/div>/.test(page), '三块之外还有一块空白随记');
+  assert.ok(page.indexOf('随记') > page.indexOf('明日计划') && page.indexOf('随记') < page.indexOf('工作日志'));
+  a.run("S.diaries.push({author:'test002',date:'2026-11-01',content:{done:'x',note:'今天想清楚了一件事'}})");
+  assert.ok(/data-field="note"[^>]*>今天想清楚了一件事</.test(a.run("diaryDocument('2026-11-01')")), '写过的随记原样回来');
   assert.ok(/今天 · 11月2日/.test(a.run("archiveFile(archiveCards().find(c=>c.date==='2026-11-02'),0)")));
   a.run("S.user={id:'superadmin',admin:1}");
   assert.deepEqual(a.json('archiveCards().map(c=>c.date)'), ['2026-11-01'], '管理员的档案是团队日报');
@@ -330,11 +334,14 @@ test('日记 and 档案室 are one 档案室: members file their own days, admin
   assert.ok(/data-scope="members" data-id="test002" data-field="done">联调/.test(editable) && /data-scope="projects" data-id="p" data-field="progress">/.test(editable), '每一块都能改，空的也能补');
   assert.ok(/已改/.test(editable));
   assert.ok(!/contenteditable/.test(a.run(`briefDocument(${JSON.stringify(brief)})`)), '导出和只读时是原样');
-  const week = a.run(`weekArchiveHTML({start:'2026-10-31',end:'2026-11-06',briefs:[${JSON.stringify(brief)},${JSON.stringify({...brief,date:'2026-11-02'})}]})`);
-  assert.ok(week.startsWith('<!doctype html>') && /周档案/.test(week), '导出的是一份独立的网页');
-  assert.ok(/<b>2\/4<\/b><span>完成任务<\/span>/.test(week) && /<b>2.0h<\/b>/.test(week), '封面把一周加起来');
-  assert.equal((week.match(/<article class="brief-doc">/g) || []).length, 3, '封面加每天一份日报');
-  assert.ok(/11月1日 · 周日　要定版/.test(week), '本周需要关注带上日期');
+  const week = a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',briefs:[${JSON.stringify(brief)},${JSON.stringify({...brief,date:'2026-11-02'})}]})`);
+  assert.ok(/档案室 · 周报/.test(week) && !/<!doctype/.test(week), '周报在应用里直接看，不再下载');
+  assert.ok(/data-count="2">2<\/span>\/<span data-count="4">4<\/span><\/b><span>完成任务/.test(week) && /data-count="2.0" data-decimals="1">2.0<\/span>h/.test(week), '把一周加起来');
+  assert.equal((week.match(/class="week-day[ "]/g) || []).length, 7, '每天一格，周六到周五');
+  assert.ok(/data-date="2026-11-01"(?![^>]*disabled)/.test(week) && /data-date="2026-11-03" disabled/.test(week), '有日报的那天能点开，没到的不能');
+  assert.ok(/data-week="1" disabled/.test(week), '本周之后不能再往后翻');
+  assert.ok(/<time>11月1日 · 周日<\/time>要定版/.test(week), '本周需要关注带上日期');
+  assert.ok(/王二<\/strong><span class="week-meter"><i style="--w:50%">/.test(week), '成员本周的完成比例');
 });
 
 test('inbox renders edit approval action for the request approver, including superadmin', () => {
@@ -346,56 +353,30 @@ test('inbox renders edit approval action for the request approver, including sup
   assert.ok(html.includes('approve-edit-request'));
 });
 
-test('project completion is available to owner only after every child task is done', () => {
-  const a=app();
-  a.run(`S.user={id:'test001',admin:0};S.users=[];S.projects=[{id:'p',name:'项目',owner:'test001',status:'active',members:{test001:'accepted'}}];S.tasks=[{id:'t1',projectId:'p',name:'已完成',assignee:'test001',status:'done'}];`);
-  assert.equal(a.run('projectTasksComplete(S.projects[0])'),true);
-  a.run("S.tasks[0].status='todo'");
-  assert.equal(a.run('projectTasksComplete(S.projects[0])'),false);
-  a.run("S.tasks=[]");
-  assert.equal(a.run('projectTasksComplete(S.projects[0])'),false);
-  // Fixed-task occurrences recur until the project ends, so they never hold up closeout.
-  a.run("S.tasks=[{id:'t1',projectId:'p',name:'已完成',assignee:'test001',status:'done'},{id:'repeat:r:test001:2026-12-01',repeatId:'r',projectId:'p',name:'周会',assignee:'test001',status:'todo',fixed:true}]");
-  assert.equal(a.run('projectTasksComplete(S.projects[0])'),true);
-});
-
-test('project completion ignores deferred history when the carried task is done', () => {
-  const a=app();
-  a.run(`S.user={id:'test001',admin:0};S.projects=[{id:'p',name:'项目',owner:'test001',status:'active'}];S.tasks=[
-    {id:'t1',projectId:'p',name:'递延前',assignee:'test002',status:'deferred',date:'2026-09-12'},
-    {id:'t2',projectId:'p',name:'递延后',assignee:'test002',status:'done',date:'2026-09-13',originId:'t1'}];`);
-  assert.equal(a.run('projectTasksComplete(S.projects[0])'),true);
-  a.run("S.tasks[1].status='doing'");
-  assert.equal(a.run('projectTasksComplete(S.projects[0])'),false);
-});
-
-test('project completion uses the latest occurrence when automatic carries share one origin', () => {
-  const a=app();
-  a.run(`S.user={id:'test001',admin:0};S.projects=[{id:'p',name:'项目',owner:'test001',status:'active'}];S.tasks=[
-    {id:'t1',projectId:'p',status:'deferred',date:'2026-09-11'},
-    {id:'t2',projectId:'p',status:'deferred',date:'2026-09-12',originId:'t1'},
-    {id:'t3',projectId:'p',status:'done',date:'2026-09-13',originId:'t1'}];`);
-  assert.equal(a.run('projectTasksComplete(S.projects[0])'),true);
-});
-
-test('owner project card exposes a report based completion request only when ready', () => {
+test('a running project offers 完成项目 to its Owner and the admins, finished or not', () => {
   const a=app(); const elements={};
   const el=s=>elements[s]||(elements[s]={innerHTML:'',textContent:'',classList:{toggle(){}}});
   a.context.document={querySelector:el,querySelectorAll:()=>[]};
-  a.run(`S.user={id:'test001',admin:0};S.users=[];S.projects=[{id:'p',name:'项目',owner:'test001',status:'active',members:{test001:'accepted'}}];S.tasks=[{id:'t1',projectId:'p',name:'已完成',assignee:'test001',status:'done'}];renderProjects()`);
+  a.run(`S.user={id:'test001',admin:0};S.users=[];S.projects=[{id:'p',name:'项目',owner:'test001',status:'active',members:{test001:'accepted',test002:'accepted'}}];S.tasks=[{id:'t1',projectId:'p',name:'已完成',assignee:'test001',status:'done'}];renderProjects()`);
   assert.ok(elements['#projectGrid'].innerHTML.includes('request-project-completion'));
   a.run("S.tasks[0].status='doing';renderProjects()");
-  assert.ok(!elements['#projectGrid'].innerHTML.includes('request-project-completion'));
-  assert.ok(!elements['#projectGrid'].innerHTML.includes('完成全部子任务后可结项'), '未满足条件时只是不显示按钮，不再放说明文字');
+  assert.ok(/request-project-completion[^>]*>.*完成项目/.test(elements['#projectGrid'].innerHTML), '没做完也能提前完成');
+  a.run("S.user={id:'test002',admin:0};renderProjects()");
+  assert.ok(!elements['#projectGrid'].innerHTML.includes('request-project-completion'), '协作者没有这个按钮');
+  a.run("S.user={id:'superadmin',admin:1};renderProjects()");
+  assert.ok(elements['#projectGrid'].innerHTML.includes('request-project-completion'));
 });
 
 test('project completion request opens a required report form before submitting', () => {
   const a=app(); const elements={};
   const el=s=>elements[s]||(elements[s]={innerHTML:'',value:'',classList:{remove(){},add(){},toggle(){}},addEventListener(){}});
   a.context.document={querySelector:el,querySelectorAll:()=>[]};
-  a.run(`S.user={id:'test001',admin:0};S.projects=[{id:'p',name:'项目',owner:'test001',status:'active'}];S.tasks=[{id:'t',projectId:'p',status:'done'}];requestProjectCompletion('p')`);
+  a.run(`S.today='2026-11-02';S.user={id:'test001',admin:0};S.projects=[{id:'p',name:'项目',owner:'test001',status:'active',end:'2026-11-30'}];S.tasks=[{id:'t',projectId:'p',name:'收尾',status:'done'},{id:'u',projectId:'p',name:'还在做',status:'doing'}];requestProjectCompletion('p')`);
   const html=elements['#modalContent'].innerHTML;
   assert.ok(html.includes('projectCompletionReport')&&html.includes('maxlength="10000"')&&html.includes('提交结项审批'));
+  assert.ok(html.includes('提前完成项目')&&/还有 1 项任务没完成/.test(html)&&html.includes('还在做'), '提前结项时说清楚剩下什么');
+  a.run("S.user={id:'superadmin',admin:1};requestProjectCompletion('p')");
+  assert.ok(/>完成项目<\/button>/.test(elements['#modalContent'].innerHTML)&&elements['#modalContent'].innerHTML.includes('可留空'), '管理员直接完成');
 });
 
 test('achievement lifecycle includes completed project milestones and task ratio', () => {
@@ -1100,4 +1081,44 @@ test('a finished task offers its assignee an edit and its Owner a send-back', ()
   a.run("S.tasks[0].status='done';S.projects[0].status='done'");
   const closed = drawer({id: 'test002', admin: 0});
   assert.ok(!closed.includes('reopenTask'));
+});
+
+test('已递延 lists a task deferred several times once, as the record that carries it now', () => {
+  const a=app();
+  a.run(`S.user={id:'test002',admin:0};S.projects=[];UI.member='all';S.logs=[];S.tasks=[
+    {id:'d1',name:'报告',assignee:'test002',status:'deferred',date:'2026-10-30',superseded:true,supersededBy:'d3'},
+    {id:'d2',name:'报告',assignee:'test002',status:'deferred',date:'2026-10-31',originId:'d1',superseded:true,supersededBy:'d3'},
+    {id:'d3',name:'报告',assignee:'test002',status:'todo',date:'2026-11-01',originId:'d1'},
+    {id:'plain',name:'别的',assignee:'test002',status:'todo',date:'2026-11-01'}];`);
+  assert.deepEqual(a.json('scheduleTasks().filter(isDeferredTask).map(t=>t.id)'), ['d3']);
+  assert.equal(a.run("deferHops(S.tasks.find(t=>t.id==='d3'))"), 2);
+});
+
+test('new work is marked in the project space until it is opened', () => {
+  const a=app();
+  a.run(`S.user={id:'test002',admin:0};S.projects=[{id:'p',status:'active'}];S.tasks=[
+    {id:'t',projectId:'p',assignee:'test002'},{id:'t2',projectId:'p',assignee:'test002',originId:'t'}];S.notifications=[
+    {id:'n1',fresh:true,read:false,reference:'p'},{id:'n2',fresh:true,read:false,reference:'t'},
+    {id:'n3',fresh:true,read:true,reference:'old'},{id:'n4',read:false,reference:'t'},{id:'n5',fresh:true,read:false,reference:'gone'}];`);
+  assert.deepEqual(a.json('[...freshRefs()].sort()'), ['p','t'], '读过的、普通通知、已删除的都不算');
+  assert.equal(a.run("isFreshTask(S.tasks[1])"), true, '递延后的那条也带着标记');
+  a.run("S.notifications[1].read=true");
+  assert.equal(a.run("isFreshTask(S.tasks[1])"), false);
+});
+
+test('a temp task handed to someone shows for both people in the project space', () => {
+  const a=app(); const elements={};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={}),querySelectorAll:()=>[]};
+  a.run(`S.today='2026-11-02';S.projects=[];S.notifications=[];S.users=[{id:'test001',active:1},{id:'test002',active:1}];S.tasks=[
+    {id:'h',name:'核对报价',creator:'test001',assignee:'test002',priority:'P1',status:'todo',date:'2026-11-02'},
+    {id:'own',name:'自己的',creator:'test002',assignee:'test002',priority:'P1',status:'todo',date:'2026-11-02'}];`);
+  a.run("S.user={id:'test002',admin:0};renderProjects()");
+  let html=elements['#projectGrid'].innerHTML;
+  assert.ok(/派给我的 <span>1<\/span>/.test(html)&&html.includes('由 test001')&&!html.includes('自己的'));
+  a.run("S.user={id:'test001',admin:0};renderProjects()");
+  html=elements['#projectGrid'].innerHTML;
+  assert.ok(/我派出的 <span>1<\/span>/.test(html)&&html.includes('给 test002'));
+  assert.equal(a.run("handedOut(S.tasks[0])"), true);
+  a.run("S.users.push({id:'superadmin',admin:1})");
+  assert.equal(a.run("editApprover(S.tasks[0])"), 'test001', '接到的人申请修改，由派任务的人批');
 });
