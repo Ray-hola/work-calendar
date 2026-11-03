@@ -1223,11 +1223,14 @@ test('the project space lists folders on the left and opens a project with its b
   let nav=elements['#projectNav'].innerHTML;
   assert.ok(nav.includes('年度战略')&&!nav.includes('空文件夹'), '成员只看到有自己项目的文件夹');
   assert.ok(nav.indexOf('年度战略')<nav.indexOf('入池项目'), '项目排在自己的文件夹下');
-  assert.ok(elements['#projectGrid'].innerHTML.includes('open-space'));
+  assert.ok(elements['#projectGrid'].innerHTML.includes('data-project="p"'), '点卡片进入项目空间');
+  assert.ok(!nav.includes('data-drag'), '协作者不能拖');
   a.run("S.user={id:'superadmin',admin:1};renderProjects()");
   nav=elements['#projectNav'].innerHTML;
-  assert.ok(nav.includes('空文件夹')&&nav.includes('未归类')&&nav.includes('addFolderBtn'));
-  assert.ok(nav.indexOf('年度战略')<nav.indexOf('入池项目')&&nav.indexOf('入池项目')<nav.indexOf('未归类')&&nav.indexOf('未归类')<nav.indexOf('散落项目'));
+  assert.ok(nav.includes('空文件夹')&&nav.includes('addFolderBtn')&&nav.includes('data-drag'));
+  assert.ok(nav.indexOf('空文件夹')<nav.indexOf('年度战略')&&nav.indexOf('年度战略')<nav.indexOf('入池项目')&&nav.indexOf('入池项目')<nav.indexOf('散落项目'),
+    '文件夹和散落的项目同在根上，文件夹默认在前');
+  assert.ok(/data-id="p" data-level="1" data-parent="f1"/.test(nav)&&/data-id="q" data-level="0"/.test(nav));
   a.run("UI.space='p';renderProjects()");
   let space=elements['#projectSpace'].innerHTML;
   assert.equal(elements['#projectGrid'].innerHTML, '');
@@ -1363,4 +1366,55 @@ test('archived attachments have a read-only navigation and achievements entry wi
   assert.equal(a.run('visibleProjects().length'),0,'归档项目不回到进行中列表');
   a.run("S.user={id:'superadmin',admin:1};S.achievements=[{id:'old',name:'已交付项目',status:'done',tasks:[]}];renderAchievements()");
   assert.ok(elements['#achievementGrid'].innerHTML.includes('achievement-files'),'管理员可从成果库进入归档附件');
+});
+
+test('a folder lists its projects in a chosen order', () => {
+  const a=app(); const elements={};
+  const store={};a.context.localStorage={getItem:k=>store[k]??null,setItem:(k,v)=>{store[k]=String(v)}};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={innerText:'',classList:{toggle(){}}}),querySelectorAll:()=>[]};
+  a.run(`S.today='2026-11-03';S.notifications=[];S.folders=[{id:'f',name:'战略'}];S.user={id:'superadmin',admin:1};
+    S.users=[{id:'superadmin',admin:1,active:1},{id:'test001',active:1}];S.tasks=[];
+    const base={owner:'test001',status:'active',folderId:'f',members:{test001:'accepted'}};
+    S.projects=[{...base,id:'b',name:'乙',navOrder:2,end:'2026-12-01',createdAt:'2026-10-01T00:00:00+08:00'},
+      {...base,id:'a',name:'甲',navOrder:1,end:'2026-12-20',createdAt:'2026-10-05T00:00:00+08:00'},
+      {...base,id:'c',name:'丙',navOrder:3,folderId:null,createdAt:'2026-10-09T00:00:00+08:00'}];
+    UI.space='';UI.folder='f';renderProjects();`);
+  const order=()=>[...elements['#projectGrid'].innerHTML.matchAll(/<article class="project-card[^>]*data-project="(\w)"/g)].map(m=>m[1]).join('');
+  assert.equal(elements['#projectsView h1'].textContent,'战略');
+  assert.equal(order(),'ab','目录顺序，只含本文件夹');
+  assert.ok(elements['#projectToolbar'].innerHTML.includes('按截止日期'));
+  a.run("setFolderSortMode('end');renderProjects()");
+  assert.equal(order(),'ba');
+  a.run("setFolderSortMode('created');renderProjects()");
+  assert.equal(order(),'ab');
+  a.run("setFolderSortMode('nav');UI.folder='';renderProjects()");
+  assert.equal(order(),'abc','全部项目按目录从上到下');
+  assert.ok(elements['#projectNav'].innerHTML.includes('全部项目'));
+});
+
+test('a drop between directory rows becomes a parent and an order between the new neighbours', () => {
+  const a=app();
+  a.run(`S.user={id:'superadmin',admin:1};S.folders=[{id:'f',name:'F',navOrder:10},{id:'g',name:'G',navOrder:30}];
+    const base={owner:'test001',status:'active',members:{test001:'accepted'}};
+    S.projects=[{...base,id:'p1',name:'p1',folderId:'f',navOrder:1},{...base,id:'p2',name:'p2',folderId:'f',navOrder:2},
+      {...base,id:'r',name:'r',navOrder:20}];`);
+  const plan=t=>a.json(`navPlan(projectTree(),${JSON.stringify(t.kind||'project')},${JSON.stringify(t.id)},${JSON.stringify(t.at)})`);
+  assert.deepEqual(a.json('projectTree().map(n=>n.id)'),['f','r','g']);
+  assert.equal(plan({id:'r',at:{parent:null,before:'g'}}),null,'放回原处不算移动');
+  assert.deepEqual(plan({id:'r',at:{parent:null,before:'f'}}),{kind:'project',id:'r',folderId:null,order:10-1024});
+  assert.deepEqual(plan({id:'r',at:{parent:'f',before:'p2'}}),{kind:'project',id:'r',folderId:'f',order:1.5});
+  assert.deepEqual(plan({id:'r',at:{into:'g'}}),{kind:'project',id:'r',folderId:'g',order:0},'空文件夹');
+  assert.deepEqual(plan({id:'p1',at:{into:'f'}}),{kind:'project',id:'p1',folderId:'f',order:2+1024},'进文件夹排到最后');
+  assert.deepEqual(plan({kind:'folder',id:'g',at:{parent:null,before:'r'}}),{kind:'folder',id:'g',folderId:null,order:15});
+  // Pointer to place: rows are 32px tall from y=0; the tree starts at x=0.
+  a.run(`var rows=[['folder','f',0,''],['project','p1',1,'f'],['project','p2',1,'f'],['project','r',0,''],['folder','g',0,'']]
+    .map(([kind,id,level,parent],i)=>({dataset:{kind,id,level:String(level),parent},getBoundingClientRect:()=>({top:i*32,bottom:i*32+30,height:30})}));
+    var tree={querySelectorAll:()=>rows,getBoundingClientRect:()=>({left:0,top:0})};`);
+  const at=(kind,x,y)=>a.json(`(({row,...t})=>t)(navTarget(tree,'${kind}',${x},${y}))`);
+  assert.deepEqual(at('project',10,15),{into:'f'},'悬在文件夹中间就放进去');
+  assert.equal(at('folder',10,10).before,'f','文件夹不会进文件夹');
+  assert.deepEqual(at('project',10,50),{parent:'f',before:'p2',level:1,y:63,top:63},'文件夹中间只能在里面');
+  assert.deepEqual(at('project',10,90),{parent:null,before:'r',level:0,y:95,top:95},'文件夹下方偏左：和文件夹平级');
+  assert.deepEqual(at('project',80,90),{parent:'f',before:null,level:1,y:95,top:95},'偏右：归到文件夹里');
+  assert.equal(at('folder',80,50).before,'r','文件夹落点跳过别人的子项');
 });
