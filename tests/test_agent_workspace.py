@@ -158,7 +158,7 @@ class AgentWorkspaceTests(unittest.TestCase):
         self.assertEqual([m['tool_call_id'] for m in second if m['role']=='tool'],['bad','schema'])
 
     def test_business_tool_prepares_one_confirmable_action_without_executing_it(self):
-        result=self.chat(calls(tool('business_action', {'action':'task.create','data':{'name':'准备创建'}},'write')))
+        result=self.chat(calls(tool('business_action', {'action':'repeat.create','data':{'name':'准备固定安排'}},'write')))
         self.assertIn('<action>',result['content']);self.assertIn('请确认',result['content'])
         self.assertEqual(self.store.all('tasks'),[])
         for user,planning in [(self.member,False),(self.admin,True)]:

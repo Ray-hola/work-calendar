@@ -953,15 +953,16 @@ class CreationPolicyTests(unittest.TestCase):
         self.assertEqual(caps['mode'], 'operator')
         self.assertIn('task.create', caps['requiresConfirmation'])
         self.assertNotIn('account.manage', caps['tools'])
-        made = self.store.action(lead, 'agent.execute', {'action': 'task.create', 'confirmed': True, 'data': {
+        made = self.store.action(lead, 'work.card.apply', {'kind':'task','operation':'create','confirmed':True,'changes': {
             'name': '助手代建', 'assignee': 'test002', 'date': self.day}})
         self.assertEqual((made['name'], made['assignee']), ('助手代建', 'test002'))
         # It still acts with the member's own rights, nothing more.
-        for payload in ({'action': 'task.create', 'data': {'name': 'x', 'projectId': self.project['id'], 'assignee': 'test002', 'date': self.day}},
-                        {'action': 'account.create', 'data': {'username': 'test009', 'password': 'password-long'}}):
-            with self.subTest(action=payload['action']), self.assertRaises(Problem) as error:
-                self.store.action(lead, 'agent.execute', {**payload, 'confirmed': True})
-            self.assertEqual(error.exception.status, 403)
+        with self.assertRaises(Problem) as error:
+            self.store.action(lead, 'work.card.apply', {'kind':'task','operation':'create','confirmed':True,'changes':{'name':'x','projectId':self.project['id'],'assignee':'test002','date':self.day}})
+        self.assertEqual(error.exception.status, 403)
+        with self.assertRaises(Problem) as error:
+            self.store.action(lead, 'agent.execute', {'action':'account.create','confirmed':True,'data':{'username':'test009','password':'password-long'}})
+        self.assertEqual(error.exception.status, 403)
 
 
 class AccountPageTests(unittest.TestCase):

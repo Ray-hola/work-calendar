@@ -10381,3 +10381,17 @@ body.is-resizing-agent { user-select: none; }
 
 /* Quiet evidence of on-demand retrieval, without exposing SQL in the chat. */
 .agent-query-summary { display: block; margin-top: 9px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+
+.plan-card.is-delete { border-color: var(--danger); background: var(--c-coral-soft); }
+.plan-target { margin: 0; overflow-wrap: anywhere; font-size: 12px; color: var(--ink-2); }
+.plan-delete-impact { margin: 0; color: var(--danger-ink); font-size: 12px; line-height: 1.6; }
+.plan-delete-confirm, .plan-change-reason { display: grid; gap: 6px; font-size: 12px; }
+.plan-delete-confirm:has(input[type="checkbox"]) { display: flex; align-items: start; }
+.plan-delete-confirm input:not([type="checkbox"]), .plan-change-reason textarea { width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 7px; padding: 7px; background: var(--surface); color: var(--ink); font: inherit; }
+.plan-diff { display: grid; gap: 6px; padding: 8px; background: var(--surface-sunk); border-radius: 8px; font-size: 11px; line-height: 1.5; }
+.plan-diff > div { display: grid; grid-template-columns: 70px minmax(0,1fr); gap: 2px 8px; overflow-wrap: anywhere; }
+.plan-diff > div > span { grid-row: span 2; color: var(--muted); }
+.plan-diff del { color: var(--muted); }
+.plan-diff strong { color: var(--ink); font-weight: 500; }
+.plan-diff p { margin: 0; color: var(--muted); }
+.plan-reload { justify-self: start; font-size: 11px; }

@@ -66,6 +66,11 @@ def tools(actions):
               function('workspace_read', '按表与 ID 读取完整记录或指定字段。长文本按 nextOffset 连续读取，不必把整月资料都放进上下文。',
                        {'table': {'type': 'string', 'enum': list(TABLES)}, 'id': text, 'field': text,
                         'offset': {'type': 'integer', 'minimum': 0}}, ['table', 'id'])]
+    card = {'type': 'object', 'properties': {'operation': {'type': 'string', 'enum': ['create', 'update', 'delete']},
+            'id': text}, 'additionalProperties': True}
+    result.append(function('work_cards', '统一起草任务和项目的创建、修改、删除卡片。修改/删除须先查询真实 id；字段直接放在卡片对象上，只传要改的字段。此工具只起草，等待用户在卡片里编辑并确认；不能自动执行。',
+                           {'projects': {'type': 'array', 'items': card, 'maxItems': 6},
+                            'tasks': {'type': 'array', 'items': card, 'maxItems': 30}}))
     if actions:
         result.append(function('business_action', '准备一项业务修改，交给页面已有确认与执行流程。这里只提出操作，不代表操作已执行；一次只提出一项。',
                                {'action': {'type': 'string', 'enum': actions}, 'data': {'type': 'object'}}, ['action', 'data']))
