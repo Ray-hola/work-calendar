@@ -90,7 +90,7 @@
 
 * {
   box-sizing: border-box;
-  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-width: none;
 }
 
 body {
@@ -143,23 +143,9 @@ select {
 }
 
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--line-strong);
-  border: 3px solid var(--paper);
-  border-radius: 99px;
-  transition: background var(--t) var(--ease);
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--muted);
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 ::selection {
@@ -1129,7 +1115,7 @@ select {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  width: 248px;
+  width: var(--main-navigation-width, 248px);
   position: sticky;
   top: 0;
   height: 100vh;
@@ -1139,6 +1125,66 @@ select {
   background: var(--paper);
   border-right: 0;
   padding: 22px 12px 16px 14px;
+  transition: width var(--t) var(--ease-out), padding var(--t) var(--ease-out);
+}
+
+.sidebar-top { display: flex; align-items: flex-start; gap: 2px; }
+.sidebar-top .brand { flex: 1; min-width: 0; }
+.nav-brand-name { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; }
+#mainNavToggle { flex: none; padding-top: 3px; }
+.workspace-name { flex: 1; min-width: 0; overflow: hidden; }
+.workspace-name strong,
+.workspace-name small { overflow: hidden; white-space: nowrap; }
+.nav-item .nav-text,
+.filter-link .nav-text,
+.project-nav-item .nav-text,
+.project-nav-toggle .nav-text,
+.project-nav-head .nav-text {
+  flex: 1; min-width: 0; width: auto; overflow: hidden; white-space: nowrap;
+  text-overflow: clip; text-align: left; font-size: inherit;
+  transition: opacity var(--t-fast) var(--ease);
+}
+.has-nav-overflow {
+  text-overflow: clip !important;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent);
+}
+.nav-collapse-toggle {
+  flex: none; display: grid; place-items: center; width: 26px; height: 26px;
+  padding: 4px; border-radius: 7px; color: var(--muted);
+  transition: color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+.nav-collapse-toggle:hover { color: var(--accent-dark); background: var(--rail-hover); }
+.nav-collapse-toggle .icon { width: 15px; height: 15px; transform: rotate(180deg); transition: transform var(--t) var(--ease); }
+.is-nav-collapsed .nav-collapse-toggle .icon { transform: none; }
+.nav-resize-handle {
+  position: absolute; top: 0; bottom: 0; right: 0; width: 8px; z-index: 5;
+  cursor: col-resize; touch-action: none; outline-offset: -2px;
+}
+.is-resizing-navigation { cursor: col-resize; user-select: none; }
+.is-resizing-navigation .sidebar,
+.is-resizing-navigation #projectsView,
+.is-resizing-navigation .chat-side { transition: none !important; }
+
+@media (min-width: 761px) {
+  .sidebar.is-nav-narrow .sidebar-footer,
+  .sidebar.is-nav-narrow .section-label { display: none; }
+  .sidebar.is-nav-collapsed { padding-left: 8px; padding-right: 8px; }
+  .sidebar.is-nav-narrow .sidebar-top { flex-direction: column-reverse; align-items: center; gap: 10px; }
+  .sidebar.is-nav-narrow .brand { flex-direction: column; gap: 8px; padding-left: 0; padding-right: 0; }
+  .sidebar.is-nav-narrow .brand-chat { margin: 0; }
+  .sidebar.is-nav-narrow .nav-brand-name,
+  .sidebar.is-nav-narrow .chevron { display: none; }
+  .sidebar.is-nav-collapsed .workspace-name,
+  .sidebar.is-nav-collapsed .chevron,
+  .sidebar.is-nav-collapsed .section-label,
+  .sidebar.is-nav-collapsed .nav-item b,
+  .sidebar.is-nav-collapsed .filter-link b { display: none; }
+  .sidebar.is-nav-collapsed .workspace-switcher { justify-content: center; padding: 8px 4px; }
+  .sidebar.is-nav-collapsed .nav-item,
+  .sidebar.is-nav-collapsed .filter-link { justify-content: center; gap: 0; padding: 0 8px; }
+  .sidebar.is-nav-collapsed .nav-text { flex: 0; width: 0; opacity: 0; }
+  .sidebar.is-nav-collapsed .nav-new-dot { position: absolute; right: 6px; top: 6px; }
 }
 
 .brand {
@@ -1206,6 +1252,7 @@ select {
 .nav-list {
   display: grid;
   gap: 2px;
+  min-width: 0;
 }
 
 .nav-item,
@@ -1214,6 +1261,7 @@ select {
   align-items: center;
   text-align: left;
   width: 100%;
+  min-width: 0;
   transition: background var(--t) var(--ease), color var(--t) var(--ease), border-color var(--t) var(--ease), box-shadow var(--t) var(--ease), transform var(--t) var(--ease);
   position: relative;
   height: 38px;
@@ -3691,7 +3739,8 @@ select {
 /* 11b · 项目空间 — the directory rail at the far left, the page beside it ---- */
 #projectsView.active-view {
   display: grid;
-  grid-template-columns: 236px minmax(0, 1fr);
+  grid-template-columns: var(--project-navigation-width, 220px) minmax(0, 1fr);
+  transition: grid-template-columns var(--t) var(--ease-out);
   max-width: none;
   margin: 0;
   padding: 0;
@@ -3708,6 +3757,9 @@ select {
 .project-space-main {
   min-width: 0;
 }
+
+.project-title-link { font: inherit; color: inherit; text-align: left; padding: 0; }
+.project-title-link:hover { color: var(--accent-dark); }
 
 .projects-view .project-node-actions {
   min-width: 0;
@@ -3731,6 +3783,27 @@ select {
   overflow-y: auto;
   padding: 22px 10px 24px;
   overscroll-behavior: contain;
+  min-width: 0;
+}
+
+
+@media (min-width: 1181px) {
+  .project-nav.is-nav-narrow .project-nav-add,
+  .project-nav.is-nav-narrow .project-nav-edit,
+  .project-nav.is-nav-narrow .project-nav-empty,
+  .project-nav.is-nav-narrow .project-nav-label,
+  .project-nav.is-nav-narrow .project-nav-caret,
+  .project-nav.is-nav-narrow b { display: none; }
+  .project-nav.is-nav-collapsed .nav-text { flex: 0; width: 0; opacity: 0; }
+  .project-nav.is-nav-collapsed .project-nav-head { justify-content: center; padding-left: 0; padding-right: 0; }
+  .project-nav.is-nav-narrow .new-chip {
+    position: absolute; right: 2px; top: 3px; width: 6px; min-width: 0; height: 6px;
+    padding: 0; border-radius: 50%; font-size: 0;
+  }
+  .project-nav.is-nav-collapsed .project-nav-item,
+  .project-nav.is-nav-collapsed .project-nav-toggle { justify-content: center; gap: 0; padding-left: 4px; padding-right: 4px; }
+  .project-nav.is-nav-narrow .nav-row[data-level="1"] { width: 100%; margin-left: 0; }
+  .project-nav.is-nav-narrow .nav-row[data-level="1"]::before { display: none; }
 }
 
 .project-nav-head {
@@ -3742,6 +3815,7 @@ select {
   font-weight: 600;
   letter-spacing: .06em;
   color: var(--muted);
+  gap: 4px;
 }
 
 .project-nav-add,
@@ -3794,6 +3868,7 @@ select {
   font-size: 13px;
   text-align: left;
   cursor: pointer;
+  position: relative;
   transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
 }
 
@@ -4339,9 +4414,14 @@ body.nav-dragging * {
   align-items: center;
   gap: 6px;
   margin-left: auto;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .space-folder select {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1;
   font: inherit;
   padding: 4px 8px;
   border: 1px solid var(--line);
@@ -4515,6 +4595,8 @@ body.nav-dragging * {
     max-height: 260px;
     padding: 14px 12px;
   }
+  .project-nav > .nav-resize-handle { display: none; }
+  .project-nav.is-nav-collapsed > :not(.project-nav-head) { display: none; }
 }
 
 @media (max-width: 760px) {
@@ -4585,8 +4667,6 @@ body.nav-dragging * {
   overflow: auto;
   max-height: calc(100vh - 300px);
   min-height: 300px;
-  scrollbar-color: var(--line-strong) var(--surface-sunk);
-  scrollbar-width: auto;
   overscroll-behavior-x: contain;
   outline-offset: 4px;
   border: 0;
@@ -7776,9 +7856,6 @@ body.is-dragging-account * {
   padding: 18px 20px;
 }
 
-.chat-log::-webkit-scrollbar-thumb {
-  border-color: var(--surface);
-}
 
 .chat-day {
   align-self: center;
@@ -8045,7 +8122,7 @@ body.is-dragging-account * {
    the conversation that owns it. */
 .chat-side {
   flex: none;
-  width: 208px;
+  width: var(--chat-navigation-width, 208px);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
@@ -8053,6 +8130,21 @@ body.is-dragging-account * {
   background: transparent;
   border-right: 1px solid var(--line-soft);
   padding: 14px 12px 14px 0;
+  position: relative;
+  transition: width var(--t) var(--ease-out);
+}
+
+.chat-side-head { display: flex; align-items: center; justify-content: space-between; gap: 4px; padding-bottom: 8px; }
+.chat-side-head .chat-side-title { min-width: 0; flex: 1; padding-bottom: 0; overflow: hidden; white-space: nowrap; }
+.chat-side-head .nav-collapse-toggle { margin-right: 4px; }
+@media (min-width: 761px) {
+  .chat-side.is-nav-collapsed .chat-side-title,
+  .chat-side.is-nav-collapsed .chat-channel-time { display: none; }
+  .chat-side.is-nav-collapsed .chat-side-head { justify-content: center; }
+  .chat-side.is-nav-collapsed .chat-channel { position: relative; justify-content: center; gap: 0; padding: 8px 4px; }
+  .chat-side.is-nav-collapsed .chat-channel-body { flex: 0; width: 0; opacity: 0; overflow: hidden; }
+  .chat-side.is-nav-collapsed .chat-channel-side { position: absolute; right: 0; top: 1px; }
+  .chat-side.is-nav-collapsed .chat-channel-badge { min-width: 14px; height: 14px; line-height: 14px; padding: 0 3px; font-size: 9px; }
 }
 
 .chat-side-title {
@@ -9292,7 +9384,7 @@ select:focus {
 
 @media (max-width: 1180px) {
   .sidebar {
-    width: 216px;
+    width: var(--main-navigation-width, 216px);
     padding: 20px 10px 14px 12px;
   }
   /* The assistant keeps its glyph; 新建项目 lives on the projects page. */
@@ -9310,7 +9402,6 @@ select:focus {
   }
   .week-board {
     overflow-x: auto;
-    scrollbar-width: thin;
   }
   .week-grid {
     min-width: 1050px;
@@ -9333,11 +9424,15 @@ select:focus {
     grid-template-columns: 1fr;
   }
   .chat-side {
-    width: 184px;
+    width: var(--chat-navigation-width, 184px);
   }
 }
 
 @media (max-width: 760px) {
+  #mainNavToggle,
+  .sidebar > .nav-resize-handle,
+  .chat-side > .nav-resize-handle { display: none; }
+  .sidebar-top { display: block; }
   .week-cells {
     gap: 4px;
   }
@@ -9718,6 +9813,9 @@ select:focus {
     overflow-y: hidden;
     border-bottom: 1px solid var(--line);
   }
+  .chat-side-head { flex: none; padding: 0 4px; }
+  .chat-side.is-nav-collapsed .chat-channels { display: none; }
+  .chat-side.is-nav-collapsed .chat-side-title { display: block; }
   .chat-side-title,
   .chat-channel-preview {
     display: none;

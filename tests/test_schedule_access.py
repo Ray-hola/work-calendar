@@ -1519,6 +1519,16 @@ class ProjectSpaceTests(unittest.TestCase):
             with self.assertRaises((Problem, ValueError)):
                 self.store.action(owner, 'nav.move', {'kind': 'project', 'id': project['id'], **bad})
 
+        for bad in ({}, {'order': None}, {'order': 'bad'}, {'order': True},
+                    {'order': 10**1000}, {'kind': 'unknown', 'order': 0}):
+            with self.assertRaises(Problem) as rejected:
+                self.store.action(owner, 'nav.move', {'kind': 'project', 'id': project['id'], **bad})
+            self.assertEqual(rejected.exception.status, 400)
+        with self.assertRaises(Problem):
+            self.store.action(self.admin, 'nav.move', {
+                'kind': 'folder', 'id': folder['id'], 'folderId': folder['id'], 'order': 0,
+            })
+
     def test_project_files_follow_project_access(self):
 
         owner, member, outsider = [self.store.user(x) for x in ('test001', 'test002', 'test003')]

@@ -56,6 +56,154 @@ function hydrateIcons(root=document){
     el.dataset.iconReady='1';
   });
 }
+/* Navigation sizes are a local display preference. Desired widths survive
+   temporary viewport clamps; only an explicit drag/key/toggle saves a change. */
+const NAVIGATION_KEY='wc-navigation-layout-v1';
+const NAVIGATION={main:{min:72,max:360,width:248,label:'主导航',selector:'.sidebar'},
+  project:{min:56,max:340,width:220,label:'项目目录',selector:'#projectNav'},
+  chat:{min:64,max:320,width:208,label:'频道导航',selector:'.chat-side'}};
+function readNavigationLayout(){
+  let saved={};try{saved=JSON.parse(localStorage.getItem(NAVIGATION_KEY)||'{}')||{}}catch(_){}
+  return Object.fromEntries(Object.entries(NAVIGATION).map(([key,c])=>{
+    const record=saved[key]||{},valid=v=>typeof v==='number'&&Number.isFinite(v)?Math.round(Math.max(c.min,Math.min(c.max,v))):null;
+    return [key,{width:valid(record.width),expanded:valid(record.expanded)}];
+  }));
+}
+const navigationLayout=readNavigationLayout();
+let navigationDrag=null,navigationFrame=0,navigationFadeFrame=0;
+function navigationBounds(kind,viewport,available){
+  const c=NAVIGATION[kind];
+  const stacked=kind==='project'?viewport<=1180:viewport<=760;
+  const room=kind==='main'?viewport-490:!stacked&&Number.isFinite(available)?available-340:c.max;
+  const initial=viewport<=1180?{main:216,chat:184}[kind]:undefined;
+  return {min:c.min,max:Math.max(c.min,Math.min(c.max,room)),default:initial??c.width};
+}
+function navigationWidth(kind,viewport,available){
+  const b=navigationBounds(kind,viewport,available),value=navigationLayout[kind].width??b.default;
+  return Math.round(Math.max(b.min,Math.min(b.max,value)));
+}
+function navigationAvailable(kind){
+  const value=kind==='project'?$('#projectsView')?.clientWidth:kind==='chat'?$('.chat-room')?.clientWidth:undefined;
+  return value>0?value:undefined;
+}
+function saveNavigationLayout(){try{localStorage.setItem(NAVIGATION_KEY,JSON.stringify(navigationLayout))}catch(_){}
+}
+function setNavigationWidth(kind,value,persist=true){
+  const b=navigationBounds(kind,window.innerWidth,navigationAvailable(kind));
+  const width=Math.round(Math.max(b.min,Math.min(b.max,value)));
+  navigationLayout[kind].width=width;
+  if(width>=160)navigationLayout[kind].expanded=width;
+  applyNavigationLayout();if(persist)saveNavigationLayout();
+}
+function toggleNavigation(kind){
+  const c=NAVIGATION[kind],current=navigationWidth(kind,window.innerWidth,navigationAvailable(kind));
+  const restore=navigationLayout[kind].expanded;
+  if(current>c.min+8&&current>=160&&restore===null)navigationLayout[kind].expanded=current;
+  const initial=navigationBounds(kind,window.innerWidth,navigationAvailable(kind)).default;
+  setNavigationWidth(kind,current<=c.min+8?(restore>=160?restore:initial):c.min);
+}
+function navigationControls(kind){
+  const c=NAVIGATION[kind],id={main:'mainNavigation',project:'projectNav',chat:'chatNavigation'}[kind];
+  return `<button type="button" class="nav-collapse-toggle" data-nav-toggle="${kind}" aria-controls="${id}" `
+    +`aria-label="收起${c.label}" title="收起${c.label}">${icon('chevron-right')}</button>`;
+}
+function navigationHandle(kind){
+  const c=NAVIGATION[kind],id={main:'mainNavigation',project:'projectNav',chat:'chatNavigation'}[kind];
+  return `<div class="nav-resize-handle" data-nav-resize="${kind}" role="separator" tabindex="0" `
+    +`aria-orientation="vertical" aria-controls="${id}" aria-label="调整${c.label}宽度" `
+    +`title="拖动调整${c.label}宽度；方向键微调，Home / End 到上下限，Enter 收起或展开，双击恢复默认"></div>`;
+}
+function applyNavigationLayout(){
+  if(typeof window==='undefined'||!document.documentElement)return;
+  for(const [kind,c] of Object.entries(NAVIGATION)){
+    const host=$(c.selector);if(!host)continue;
+    const available=navigationAvailable(kind),bounds=navigationBounds(kind,window.innerWidth,available);
+    const width=navigationWidth(kind,window.innerWidth,available),collapsed=width<=c.min+8;
+    document.documentElement.style.setProperty(`--${kind}-navigation-width`,width+'px');
+    host.classList.toggle('is-nav-collapsed',collapsed);
+    host.classList.toggle('is-nav-narrow',width<168);
+    $$(`[data-nav-toggle="${kind}"]`).forEach(button=>{
+      const label=(collapsed?'展开':'收起')+c.label;
+      button.setAttribute('aria-expanded',String(!collapsed));button.setAttribute('aria-label',label);button.title=label;
+    });
+    $$(`[data-nav-resize="${kind}"]`).forEach(handle=>{
+      handle.setAttribute('aria-valuemin',bounds.min);handle.setAttribute('aria-valuemax',bounds.max);
+      handle.setAttribute('aria-valuenow',width);handle.setAttribute('aria-valuetext',collapsed?'仅图标':width+' 像素');
+    });
+  }
+  positionAccountMenu();
+  scheduleNavigationFade();
+}
+function scheduleNavigationFade(){
+  if(navigationFadeFrame)return;
+  navigationFadeFrame=requestAnimationFrame(()=>{
+    navigationFadeFrame=0;
+    $$('.nav-text,.nav-brand-name,.chat-channel-name,.chat-channel-preview,.workspace-name strong,.workspace-name small').forEach(label=>{
+      label.classList.toggle('has-nav-overflow',label.clientWidth>0&&label.scrollWidth>label.clientWidth+1);
+    });
+  });
+}
+function finishNavigationDrag(cancelled=false){
+  const drag=navigationDrag;if(!drag)return;
+  if(navigationFrame){cancelAnimationFrame(navigationFrame);navigationFrame=0}
+  if(cancelled)navigationLayout[drag.kind]={...drag.original};
+  else setNavigationWidth(drag.kind,drag.startWidth+drag.lastX-drag.startX,false);
+  navigationDrag=null;document.body.classList.remove('is-resizing-navigation');
+  try{drag.handle.releasePointerCapture(drag.pointerId)}catch(_){}
+  applyNavigationLayout();if(!cancelled)saveNavigationLayout();
+}
+function navigationResizeEnabled(kind){return window.innerWidth>(kind==='project'?1180:760)}
+function initNavigationLayout(){
+  const main=$('.sidebar'),chat=$('.chat-side');
+  if(main){
+    $('#mainNavToggle').innerHTML=navigationControls('main');main.insertAdjacentHTML('beforeend',navigationHandle('main'));
+    $$('.nav-item,.filter-link').forEach(button=>{
+      const label=button.querySelector('.nav-text');if(label){button.title=label.textContent.trim();button.setAttribute('aria-label',button.title)}
+    });
+  }
+  if(chat){
+    $('.chat-side-head').insertAdjacentHTML('beforeend',navigationControls('chat'));
+    chat.insertAdjacentHTML('beforeend',navigationHandle('chat'));
+  }
+  document.addEventListener('click',e=>{const button=e.target.closest('[data-nav-toggle]');if(button)toggleNavigation(button.dataset.navToggle)});
+  document.addEventListener('dblclick',e=>{
+    const handle=e.target.closest('[data-nav-resize]');if(!handle)return;
+    setNavigationWidth(handle.dataset.navResize,NAVIGATION[handle.dataset.navResize].width);
+  });
+  document.addEventListener('pointerdown',e=>{
+    const handle=e.target.closest('[data-nav-resize]');if(!handle||e.button!==0||!navigationResizeEnabled(handle.dataset.navResize))return;
+    const kind=handle.dataset.navResize;e.preventDefault();handle.focus();
+    navigationDrag={kind,handle,pointerId:e.pointerId,startX:e.clientX,lastX:e.clientX,
+      startWidth:navigationWidth(kind,window.innerWidth,navigationAvailable(kind)),original:{...navigationLayout[kind]}};
+    document.body.classList.add('is-resizing-navigation');
+    try{handle.setPointerCapture(e.pointerId)}catch(_){}
+  });
+  document.addEventListener('pointermove',e=>{
+    const drag=navigationDrag;if(!drag||drag.pointerId!==e.pointerId)return;drag.lastX=e.clientX;
+    if(!navigationFrame)navigationFrame=requestAnimationFrame(()=>{
+      navigationFrame=0;if(navigationDrag)setNavigationWidth(drag.kind,drag.startWidth+drag.lastX-drag.startX,false);
+    });
+  });
+  document.addEventListener('pointerup',e=>{if(navigationDrag?.pointerId===e.pointerId)finishNavigationDrag()});
+  document.addEventListener('pointercancel',e=>{if(navigationDrag?.pointerId===e.pointerId)finishNavigationDrag(true)});
+  document.addEventListener('lostpointercapture',e=>{if(navigationDrag?.pointerId===e.pointerId)finishNavigationDrag(true)});
+  document.addEventListener('keydown',e=>{
+    if(e.key==='Escape'&&navigationDrag){e.preventDefault();e.stopPropagation();finishNavigationDrag(true);return}
+    const handle=e.target.closest('[data-nav-resize]');if(!handle)return;
+    const kind=handle.dataset.navResize;if(!navigationResizeEnabled(kind))return;
+    const b=navigationBounds(kind,window.innerWidth,navigationAvailable(kind)),width=navigationWidth(kind,window.innerWidth,navigationAvailable(kind));
+    const next={ArrowLeft:width-(e.shiftKey?30:10),ArrowRight:width+(e.shiftKey?30:10),Home:b.min,End:b.max}[e.key];
+    if(next!==undefined){e.preventDefault();e.stopPropagation();setNavigationWidth(kind,next)}
+    if(e.key==='Enter'){e.preventDefault();toggleNavigation(kind)}
+  },true);
+  window.addEventListener('blur',()=>finishNavigationDrag(true));
+  window.addEventListener('scroll',()=>positionAccountMenu(),true);
+  window.addEventListener('resize',()=>{finishNavigationDrag(true);applyNavigationLayout()});
+  window.addEventListener('storage',e=>{if(e.key===NAVIGATION_KEY){Object.assign(navigationLayout,readNavigationLayout());applyNavigationLayout()}});
+  const observer=new ResizeObserver(()=>{applyNavigationLayout()});
+  for(const selector of ['.sidebar','#projectsView','.chat-room']){const element=$(selector);if(element)observer.observe(element)}
+  applyNavigationLayout();
+}
 let S={user:null,users:[],tasks:[],projects:[],folders:[],files:[],fileArchives:[],achievements:[],logs:[],reports:[],diaries:[],diaryStats:[],notifications:[],requests:[],editRequests:[],suggestions:[],profiles:[],today:''};
 /* The server always answers in JSON, but the tunnel in front of it does not:
    a request that runs past its time limit comes back as an HTML error page.
@@ -593,8 +741,8 @@ function projectCardHTML(p,inSpace=false){
     const fresh=freshRefs().has(p.id),joined=p.status==='active'&&!manage&&(p.members||{})[S.user.id]==='accepted';
     return `<article class="project-card project-node${fresh?' is-new':''}" data-fresh="${fresh?escapeHTML(p.id):''}"`
       +`${inSpace?'':` data-project="${escapeHTML(p.id)}"`}>`
-      +`<div class="project-node-heading"><div><div class="project-title"><h3>${escapeHTML(p.name)}`
-      +`${fresh?'<span class="new-chip">新</span>':''}</h3><span class="project-status">${projectStatus(p)}</span></div>`
+      +`<div class="project-node-heading"><div><div class="project-title"><h3>${inSpace?'':`<button type="button" class="project-title-link" data-open-project="${escapeHTML(p.id)}">`}${escapeHTML(p.name)}`
+      +`${fresh?'<span class="new-chip">新</span>':''}${inSpace?'':'</button>'}</h3><span class="project-status">${projectStatus(p)}</span></div>`
       +`<p>${escapeHTML(p.desc||'暂无描述')}</p></div><div class="project-node-actions">`
       +`${manage?`<button class="primary-btn add-project-task" data-project="${escapeHTML(p.id)}">`
       +`${icon('plus')}新建并指派任务</button><button class="secondary-btn project-settings" data-id="`
@@ -629,6 +777,7 @@ function projectCardHTML(p,inSpace=false){
       +`</div>`).join('')}`:''}</div></article>`;
 }
 function bindProjectCards(){
+  $$('.project-title-link').forEach(button=>button.onclick=()=>openProjectSpace(button.dataset.openProject));
   $$('#projectGrid .project-card[data-project]').forEach(card=>card.onclick=e=>{
     if(!e.target.closest('button,a,input,select,textarea,label,.project-child-row'))openProjectSpace(card.dataset.project)});
   $$('.project-node[data-fresh]:not([data-fresh=""])').forEach(card=>card.addEventListener('pointerdown',
@@ -702,8 +851,8 @@ function renderProjectNav(){
     const p=n.item,on=UI.space===p.id;
     return `<button class="project-nav-item nav-row${on?' is-on':''}" data-kind="project" data-id="${escapeHTML(p.id)}" `
       +`data-level="${level}" data-parent="${escapeHTML(parent)}" data-space="${escapeHTML(p.id)}"${drag('project',p)}`
-      +`${on?' aria-current="page"':''}><i class="project-nav-dot is-${escapeHTML(p.status||'active')}"></i>`
-      +`<span>${escapeHTML(p.name)}</span>${fresh.has(p.id)?'<em class="new-chip">新</em>':''}</button>`;
+      +` title="${escapeHTML(p.name)}" aria-label="${escapeHTML(p.name)}"${on?' aria-current="page"':''}>${icon('gantt')}`
+      +`<span class="nav-text">${escapeHTML(p.name)}</span>${fresh.has(p.id)?'<em class="new-chip">新</em>':''}</button>`;
   };
   const folder=n=>{
     const f=n.item,open=!closed.has(f.id),on=UI.folder===f.id&&!UI.space;
@@ -711,19 +860,19 @@ function renderProjectNav(){
       +`data-id="${escapeHTML(f.id)}" data-level="0"${drag('folder',f)}><button class="project-nav-caret" data-folder="`
       +`${escapeHTML(f.id)}" aria-expanded="${open}" aria-label="${open?'收起':'展开'}「${escapeHTML(f.name)}」">`
       +`${icon('chevron-right')}</button><button class="project-nav-toggle" data-open-folder="${escapeHTML(f.id)}"`
-      +`${on?' aria-current="page"':''}><span class="nav-folder-icon">${icon('folder','is-shut')}${icon('folder-open','is-open')}</span>`
-      +`<span>${escapeHTML(f.name)}</span><b>${n.children.length}</b></button>`
+      +` title="${escapeHTML(f.name)}" aria-label="${escapeHTML(f.name)}"${on?' aria-current="page"':''}><span class="nav-folder-icon">${icon('folder','is-shut')}${icon('folder-open','is-open')}</span>`
+      +`<span class="nav-text">${escapeHTML(f.name)}</span><b>${n.children.length}</b></button>`
       +`${admin?`<button class="project-nav-edit" data-edit-folder="${escapeHTML(f.id)}" title="重命名或删除" aria-label="`
       +`编辑文件夹「${escapeHTML(f.name)}」">${icon('edit')}</button>`:''}</div>`
       +`${open?n.children.map(c=>project(c,1,f.id)).join('')||'<p class="project-nav-empty">还没有项目</p>':''}`;
   };
-  nav.innerHTML=`<div class="project-nav-head"><span>项目目录</span>${admin?`<button class="project-nav-add" `
-    +`id="addFolderBtn" title="新建文件夹" aria-label="新建文件夹">${icon('plus')}</button>`:''}</div>`
-    +`<button class="project-nav-item project-nav-all${UI.space||UI.folder?'':' is-on'}" data-space="">${icon('layout-grid')}`
-    +`<span>全部项目</span><b>${visibleProjects().length}</b></button>`
+  nav.innerHTML=`<div class="project-nav-head"><span class="nav-text">项目目录</span>${admin?`<button class="project-nav-add" `
+    +`id="addFolderBtn" title="新建文件夹" aria-label="新建文件夹">${icon('plus')}</button>`:''}${navigationControls('project')}</div>`
+    +`<button class="project-nav-item project-nav-all${UI.space||UI.folder?'':' is-on'}" data-space="" title="全部项目" aria-label="全部项目">${icon('layout-grid')}`
+    +`<span class="nav-text">全部项目</span><b>${visibleProjects().length}</b></button>`
     +`<div class="project-nav-tree" id="projectNavTree">${tree.map(n=>n.kind==='folder'?folder(n):project(n,0)).join('')}</div>`
     +((S.fileArchives||[]).length?`<div class="project-nav-label">归档文件</div>${S.fileArchives.map(p=>project({item:p},0)
-      .replace(' nav-row','').replace(' data-drag="1"','')).join('')}`:'');
+      .replace(' nav-row','').replace(' data-drag="1"','')).join('')}`:'')+navigationHandle('project');
   $$('#projectNav [data-space]').forEach(b=>b.onclick=()=>{if(!navClickBlocked())openProjectSpace(b.dataset.space)});
   $$('#projectNav [data-folder]').forEach(b=>b.onclick=()=>{if(!navClickBlocked())toggleFolder(b.dataset.folder)});
   $$('#projectNav [data-open-folder]').forEach(b=>b.onclick=()=>{if(!navClickBlocked())openFolderView(b.dataset.openFolder)});
@@ -732,6 +881,7 @@ function renderProjectNav(){
   $$('#projectNavTree .nav-row[data-drag]').forEach(row=>row.addEventListener('pointerdown',e=>{
     if(e.button===0&&e.pointerType!=='touch'&&!e.target.closest('.project-nav-edit'))startNavDrag(row,e);
   }));
+  applyNavigationLayout();
 }
 /* Where a drop at (x, y) would go. Over the middle of a folder a project goes
    into it; between rows it takes that gap, and where a gap could be either
@@ -755,19 +905,34 @@ function navTarget(treeEl,kind,x,y){
   return {parent,before,level:nested?1:0,y:edge,top:edge-box.top};
 }
 const NAV_TENSION=22;
+const navReducedMotion=()=>typeof matchMedia==='function'&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+const navAnimate=(element,frames,options)=>element.animate(frames,{...options,duration:navReducedMotion()?0:options.duration}).finished.catch(()=>{});
 function startNavDrag(row,down){
+  if(UI.navDrag||UI.navSaving)return;
   const nav=$('#projectNav'),treeEl=$('#projectNavTree'),kind=row.dataset.kind,id=row.dataset.id;
   const x0=down.clientX,y0=down.clientY,rect=row.getBoundingClientRect(),tree=projectTree();
   const group=kind==='folder'?[row,...treeEl.querySelectorAll(`.nav-row[data-parent="${CSS.escape(id)}"]`)]:[row];
   let ghost=null,line=null,target=null,raf=0,gx=rect.left,gy=rect.top,px=x0,py=y0,tilt=0;
   const off=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);
-    window.removeEventListener('pointercancel',cancel);window.removeEventListener('keydown',key)};
+    window.removeEventListener('pointercancel',cancel);window.removeEventListener('keydown',key);window.removeEventListener('blur',blur);
+    try{row.releasePointerCapture(down.pointerId)}catch(_){}
+  };
+  const updateTarget=()=>{
+    const nb=nav.getBoundingClientRect(),tb=treeEl.getBoundingClientRect();
+    target=px>=nb.left&&px<=nb.right&&py>=Math.max(nb.top,tb.top)&&py<=nb.bottom?navTarget(treeEl,kind,px,py):null;
+    treeEl.querySelectorAll('.is-drop').forEach(r=>r!==target?.row&&r.classList.remove('is-drop'));
+    if(!target){line.classList.remove('is-on');return}
+    if(target.into){target.row.classList.add('is-drop');line.classList.remove('is-on');return}
+    line.classList.add('is-on');line.classList.toggle('is-nested',target.level===1);
+    line.style.transform=`translateY(${target.top}px)`;
+  };
   const lift=()=>{
     UI.navDrag=true;row.classList.remove('is-tense');row.style.transform='';
     ghost=row.cloneNode(true);ghost.classList.add('nav-ghost');ghost.classList.remove('is-on','is-drop');ghost.removeAttribute('data-level');
     ghost.insertAdjacentHTML('beforeend',`<span class="nav-ghost-file">${icon('file')}</span>`);
     Object.assign(ghost.style,{left:`${rect.left}px`,top:`${rect.top}px`,width:`${rect.width}px`,height:`${rect.height}px`});
     document.body.appendChild(ghost);navCrumbs(rect);
+    try{row.setPointerCapture(down.pointerId)}catch(_){}
     group.forEach(el=>{el.style.height=`${el.offsetHeight}px`;el.offsetHeight;el.classList.add('is-lifted')});
     line=document.createElement('i');line.className='nav-drop-line';treeEl.appendChild(line);
     document.body.classList.add('nav-dragging');
@@ -776,15 +941,18 @@ function startNavDrag(row,down){
     const step=()=>{
       let tx=px-(x0-rect.left),ty=py-(y0-rect.top);
       if(target&&!target.into){const d=target.y-rect.height/2-ty,pull=Math.max(0,1-Math.abs(d)/36);ty+=d*pull*.55}
-      const vx=(tx-gx)*.32;gx+=vx;gy+=(ty-gy)*.32;tilt+=(Math.max(-4,Math.min(4,vx*.4))-tilt)*.2;
+      const rate=navReducedMotion()?1:.32,vx=(tx-gx)*rate;gx+=vx;gy+=(ty-gy)*rate;
+      tilt=navReducedMotion()?0:tilt+(Math.max(-4,Math.min(4,vx*.4))-tilt)*.2;
       ghost.style.transform=`translate(${gx-rect.left}px,${gy-rect.top}px) rotate(${tilt}deg)`;
       const nb=nav.getBoundingClientRect();
       if(py<nb.top+28)nav.scrollTop-=6;else if(py>nb.bottom-28)nav.scrollTop+=6;
+      updateTarget();
       raf=requestAnimationFrame(step);
     };
     raf=requestAnimationFrame(step);
   };
   const move=e=>{
+    if(e.pointerId!==down.pointerId)return;
     px=e.clientX;py=e.clientY;const dx=px-x0,dy=py-y0,dist=Math.hypot(dx,dy);
     if(!ghost){
       if(dist<NAV_TENSION){
@@ -795,22 +963,21 @@ function startNavDrag(row,down){
       lift();
     }
     e.preventDefault();
-    target=navTarget(treeEl,kind,px,py);
-    treeEl.querySelectorAll('.is-drop').forEach(r=>r!==target.row&&r.classList.remove('is-drop'));
-    if(target.into){target.row.classList.add('is-drop');line.classList.remove('is-on');return}
-    line.classList.add('is-on');line.classList.toggle('is-nested',target.level===1);
-    line.style.transform=`translateY(${target.top}px)`;
+    updateTarget();
   };
   const finish=()=>{cancelAnimationFrame(raf);line?.remove();document.body.classList.remove('nav-dragging');UI.navDropAt=Date.now()};
   const settleBack=async()=>{
     finish();
-    await ghost.animate([{transform:ghost.style.transform},{transform:'translate(0,0) rotate(0)',scale:1}],
-      {duration:300,easing:'cubic-bezier(.3,1.4,.5,1)',fill:'forwards'}).finished.catch(()=>{});
+    await navAnimate(ghost,[{transform:ghost.style.transform},{transform:'translate(0,0) rotate(0)',scale:1}],
+      {duration:300,easing:'cubic-bezier(.3,1.4,.5,1)',fill:'forwards'});
     ghost.remove();group.forEach(el=>{el.classList.remove('is-lifted');el.style.height=''});UI.navDrag=false;
+    renderProjectNav();
   };
-  const up=async()=>{
+  const up=async e=>{
+    if(e.pointerId!==down.pointerId)return;
     off();
     if(!ghost){row.classList.remove('is-tense');row.style.transform='';return}
+    px=e.clientX;py=e.clientY;updateTarget();
     const t=target,plan=t&&navPlan(tree,kind,id,t);
     if(!plan){settleBack();return}
     finish();
@@ -820,27 +987,29 @@ function startNavDrag(row,down){
       const glyph=into.querySelector('.nav-folder-icon').getBoundingClientRect();
       const sx=gx-rect.left+(x0-rect.left)-15,sy=gy-rect.top;
       ghost.classList.add('is-filing');
-      await ghost.animate([{width:`${rect.width}px`,transform:ghost.style.transform},
+      await navAnimate(ghost,[{width:`${rect.width}px`,transform:ghost.style.transform},
         {width:'30px',transform:`translate(${sx}px,${sy}px)`,borderRadius:'7px'}],
-        {duration:150,easing:'ease-out',fill:'forwards'}).finished.catch(()=>{});
+        {duration:150,easing:'ease-out',fill:'forwards'});
       const now=ghost.getBoundingClientRect();
-      await ghost.animate([{opacity:1},{transform:`translate(${sx+glyph.left+glyph.width/2-now.left-now.width/2}px,`
+      await navAnimate(ghost,[{opacity:1},{transform:`translate(${sx+glyph.left+glyph.width/2-now.left-now.width/2}px,`
         +`${sy+glyph.top+glyph.height/2-now.top-now.height/2}px) scale(.3)`,opacity:.15}],
-        {duration:300,easing:'cubic-bezier(.55,0,.75,.35)',fill:'forwards'}).finished.catch(()=>{});
+        {duration:300,easing:'cubic-bezier(.55,0,.75,.35)',fill:'forwards'});
     }else{
       const box=treeEl.getBoundingClientRect(),left=box.left+(t.level?22:0);
-      await ghost.animate([{transform:ghost.style.transform},{transform:`translate(${left-rect.left}px,${t.y-rect.top}px) rotate(0)`,
-        width:`${box.width-(t.level?22:0)}px`,scale:1}],{duration:240,easing:'cubic-bezier(.3,1.5,.5,1)',fill:'forwards'}).finished.catch(()=>{});
+      await navAnimate(ghost,[{transform:ghost.style.transform},{transform:`translate(${left-rect.left}px,${t.y-rect.top}px) rotate(0)`,
+        width:`${box.width-(t.level?22:0)}px`,scale:1}],{duration:240,easing:'cubic-bezier(.3,1.5,.5,1)',fill:'forwards'});
     }
     commitNavMove(plan,ghost,into);
   };
-  const cancel=()=>{off();if(ghost)settleBack();else{row.classList.remove('is-tense');row.style.transform=''}};
+  const cancel=e=>{if(e&&e.pointerId!==down.pointerId)return;off();if(ghost)settleBack();else{row.classList.remove('is-tense');row.style.transform=''}};
+  const blur=()=>cancel();
   const key=e=>{if(e.key==='Escape')cancel()};
   window.addEventListener('pointermove',move);window.addEventListener('pointerup',up);
-  window.addEventListener('pointercancel',cancel);window.addEventListener('keydown',key);
+  window.addEventListener('pointercancel',cancel);window.addEventListener('keydown',key);window.addEventListener('blur',blur);
 }
 /* A little soil kicked up where the row broke loose. */
 function navCrumbs(rect){
+  if(navReducedMotion())return;
   for(let i=0;i<7;i++){
     const c=document.createElement('i'),a=Math.PI*(1.05+i/6*.9),r=14+Math.random()*16;
     c.className='nav-crumb';
@@ -852,6 +1021,7 @@ function navCrumbs(rect){
 }
 /* Applied here first so the tree redraws at once, then saved. */
 async function commitNavMove(plan,ghost,into){
+  UI.navSaving=true;
   const item=plan.kind==='folder'?S.folders.find(f=>f.id===plan.id):S.projects.find(p=>p.id===plan.id);
   const old={navOrder:item.navOrder,folderId:item.folderId};
   item.navOrder=plan.order;if(plan.kind==='project')item.folderId=plan.folderId;
@@ -864,7 +1034,8 @@ async function commitNavMove(plan,ghost,into){
     await api('/api/action',{action:'nav.move',data:{kind:plan.kind,id:plan.id,order:plan.order,
       ...(plan.kind==='project'?{folderId:plan.folderId}:{})}});
     await refresh();
-  }catch(e){Object.assign(item,old);toast(e.message);refresh()}
+  }catch(e){Object.assign(item,old);toast(e.message);await refresh()}
+  finally{UI.navSaving=false}
 }
 function openFolderView(id){
   UI.folder=id;UI.space='';setFolderClosed(id,false);
@@ -880,7 +1051,7 @@ function editFolder(id){
   const f=(S.folders||[]).find(x=>x.id===id),count=f?S.projects.filter(p=>p.folderId===f.id).length:0;
   openModal(`<div class="eyebrow">项目目录</div><h2>${f?'编辑文件夹':'新建文件夹'}</h2><label class="form-field">文件夹名称`
     +`<input id="folderName" maxlength="40" value="${escapeHTML(f?.name||'')}" placeholder="例如：年度战略"></label>`
-    +`${f?`<p class="muted">删除文件夹不会删除项目，里面的 ${count} 个项目会回到「未归类」。</p>`:''}`
+    +`${f?`<p class="muted">删除文件夹不会删除项目，里面的 ${count} 个项目会回到目录根层。</p>`:''}`
     +`<div class="modal-footer">${f?'<button class="ghost-btn is-danger" id="deleteFolder">删除文件夹</button>':''}`
     +`<button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="saveFolder">`
     +`${f?'保存':'创建'}</button></div>`);
@@ -1605,6 +1776,18 @@ function renderAccountMenu(){
   menu.innerHTML=head+mine+switchGroup+foot;
   menu.querySelectorAll('.account-menu-item[data-action]').forEach(b=>b.onclick=()=>accountMenuAction(b.dataset.action));
   menu.querySelectorAll('.account-menu-item.switch').forEach(b=>b.onclick=()=>signOutTo(b.dataset.user));
+  positionAccountMenu();
+}
+function positionAccountMenu(){
+  const menu=$('#accountMenu'),anchor=$('#workspaceSwitcher');
+  if(!menu||menu.classList.contains('hidden')||!anchor?.getBoundingClientRect||typeof window==='undefined')return;
+  const rect=anchor.getBoundingClientRect(),width=Math.min(300,window.innerWidth-24);
+  Object.assign(menu.style,{position:'fixed',width:width+'px',right:'auto',
+    maxHeight:Math.min(520,window.innerHeight*.72,window.innerHeight-24)+'px'});
+  const left=window.innerWidth<=760?rect.right-width:rect.left;
+  menu.style.left=Math.max(12,Math.min(window.innerWidth-width-12,left))+'px';
+  const below=rect.bottom+8,above=rect.top-menu.offsetHeight-8;
+  menu.style.top=Math.max(12,below+menu.offsetHeight<=window.innerHeight-12?below:above)+'px';
 }
 function accountMenuAction(action){
   toggleAccountMenu(false);
@@ -1636,6 +1819,7 @@ function toggleAccountMenu(open){
   if(next)renderAccountMenu();
   menu.classList.toggle('hidden',!next);
   btn?.setAttribute('aria-expanded',next?'true':'false');
+  if(next)positionAccountMenu();
 }
 function deleteAccount(id){
   const x=S.users.find(u=>u.id===id);
@@ -3580,7 +3764,7 @@ function renderChatChannels(){
     const meta=chatPreviews[c.id]||{};
     const time=meta.createdAt?`<time class="chat-channel-time">${escapeHTML(chatListTime(meta.createdAt))}</time>`:'';
     const badge=n?`<i class="chat-channel-badge">${n>99?'99+':n}</i>`:'';
-    return `<button type="button" role="tab" aria-selected="${c.id===chatChannel}" class="chat-channel ${c.id===chatChannel?'is-on':''}" data-channel="${escapeHTML(c.id)}">`
+    return `<button type="button" role="tab" aria-selected="${c.id===chatChannel}" class="chat-channel ${c.id===chatChannel?'is-on':''}" data-channel="${escapeHTML(c.id)}" title="${escapeHTML(c.name)}" aria-label="${escapeHTML(c.name)}${n?'，'+n+' 条未读':''}">`
       +chatChannelMark(c)
       +`<span class="chat-channel-body"><span class="chat-channel-name">${escapeHTML(c.name)}</span>`
       +`<span class="chat-channel-preview">${chatPreviewText(c.id)}</span></span>`
@@ -3596,6 +3780,7 @@ function renderChatChannels(){
     loadChat(true);
   });
   renderChatCurrent();
+  applyNavigationLayout();
 }
 /* Mentions are read back out of the text, so a hand-typed @名字 works exactly
    like one picked from the menu. */
@@ -4078,6 +4263,7 @@ function agentInitVoice(){
 
 initAgentUI();
 initChatUI();
+initNavigationLayout();
 function ensureAccountCreateButton(){
   const owner=Boolean(S.user?.role==='superadmin'),host=$('#accountsView .page-intro');if(!host)return;
   let b=$('#createAccountBtn');

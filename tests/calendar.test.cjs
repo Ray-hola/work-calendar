@@ -12,6 +12,86 @@ function app() {
   return {context, run: code => vm.runInContext(code, context), json: code => JSON.parse(vm.runInContext(`JSON.stringify(${code})`, context))};
 }
 
+test('directory drop animation respects reduced motion without skipping completion', async () => {
+  const a=app(),durations=[];
+  a.context.matchMedia=()=>({matches:true});
+  a.context.target={animate:(frames,options)=>{
+    durations.push(options.duration);return {finished:Promise.resolve()};
+  }};
+  await a.run("navAnimate(target,[{opacity:0},{opacity:1}],{duration:300,fill:'forwards'})");
+  a.context.matchMedia=()=>({matches:false});
+  await a.run("navAnimate(target,[{opacity:0},{opacity:1}],{duration:300})");
+  assert.deepEqual(durations,[0,300]);
+});
+
+test('navigation preferences reject malformed storage and sanitize untrusted widths', () => {
+  const a = app();
+  a.context.localStorage = {getItem: () => JSON.stringify({
+    main:{width:999,expanded:'250'}, project:{width:-1,expanded:220.4}, chat:{width:'64',expanded:308}
+  })};
+  assert.deepEqual(a.json('readNavigationLayout()'), {
+    main:{width:360,expanded:null}, project:{width:56,expanded:220}, chat:{width:null,expanded:308}
+  });
+  for (const value of ['{broken', 'null', 'false', '[]']) {
+    a.context.localStorage.getItem = () => value;
+    assert.deepEqual(a.json('readNavigationLayout()'), {
+      main:{width:null,expanded:null}, project:{width:null,expanded:null}, chat:{width:null,expanded:null}
+    });
+  }
+  a.context.localStorage.getItem = () => {throw new Error('Storage denied')};
+  assert.equal(a.run('readNavigationLayout().main.width'), null);
+});
+
+test('navigation widths preserve content space and restore desired widths after viewport clamps', () => {
+  const a = app();
+  assert.equal(a.run("navigationWidth('main',1440)"),248);
+  assert.equal(a.run("navigationWidth('main',1180)"),216);
+  assert.equal(a.run("navigationWidth('chat',1180)"),184);
+  a.run('navigationLayout.main.width=350;navigationLayout.project.width=300');
+  assert.equal(a.run("navigationWidth('main',800)"),310);
+  assert.equal(a.run("navigationWidth('main',1440)"),350);
+  assert.equal(a.run("navigationWidth('project',1440,600)"),260);
+  assert.equal(a.run("navigationWidth('project',1440,1100)"),300);
+  assert.equal(a.run('navigationLayout.project.width'),300);
+});
+
+test('stacked navigation can expand on tablet and phone without a side-by-side content reserve', () => {
+  const a = app();
+  a.run('navigationLayout.project.width=280;navigationLayout.chat.width=278');
+  assert.equal(a.run("navigationWidth('project',1181,390)"),56);
+  assert.equal(a.run("navigationWidth('project',1180,390)"),280);
+  assert.equal(a.run("navigationWidth('project',390,340)"),280);
+  assert.equal(a.run("navigationWidth('chat',761,390)"),64);
+  assert.equal(a.run("navigationWidth('chat',760,340)"),278);
+});
+
+test('collapsing restores the last useful expanded width even when browser storage is blocked', () => {
+  const a = app();
+  a.context.window = {innerWidth:1440};
+  a.context.document = {querySelector:()=>null};
+  const writes=[];
+  a.context.localStorage = {setItem:(key,value)=>writes.push(JSON.parse(value))};
+  a.run("setNavigationWidth('main',330);toggleNavigation('main')");
+  assert.equal(a.run('navigationLayout.main.width'),72);
+  assert.equal(a.run('navigationLayout.main.expanded'),330);
+  a.run("toggleNavigation('main');setNavigationWidth('main',140);toggleNavigation('main');toggleNavigation('main')");
+  assert.equal(a.run('navigationLayout.main.width'),330);
+  assert.ok(writes.length>0);
+  a.context.localStorage.setItem = () => {throw new Error('Storage denied')};
+  a.run("setNavigationWidth('chat',999);toggleNavigation('chat');toggleNavigation('chat')");
+  assert.equal(a.run('navigationLayout.chat.width'),320);
+});
+
+test('the first collapse on tablet remembers the responsive default width', () => {
+  const a = app();
+  a.context.window = {innerWidth:1024};
+  a.context.document = {querySelector:()=>null};
+  a.context.localStorage = {setItem:()=>{}};
+  a.run("toggleNavigation('main');toggleNavigation('main');toggleNavigation('chat');toggleNavigation('chat')");
+  assert.equal(a.run('navigationLayout.main.width'),216);
+  assert.equal(a.run('navigationLayout.chat.width'),184);
+});
+
 test('admin scope includes all assignees and fixed/personal/project tasks; selecting a member narrows it', () => {
   const a = app();
   a.run(`S.user={id:'superadmin',admin:1};S.tasks=[
