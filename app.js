@@ -2857,7 +2857,7 @@ let agentServerConfig=null;
 let agentServerAsr=null;
 function agentIsBusy(){return agentState.busy}
 function agentResetUser(){
-  agentInvalidateConfigTest();agentModels=[];agentModelsSource=null;
+  agentInvalidateConfigTest();agentModels=[];agentModelsSource=null;agentState.lastTools=[];agentState.lastMessageId=null;
   if(typeof agentCancelVoice==='function')agentCancelVoice();
   agentHalt();agentState.messages=[];agentState.lastInput='';agentState.editing=null;
   agentState.plan=false;agentState.planBoard=null;
@@ -2927,7 +2927,10 @@ function agentRenderEmptyState(list){
   });
 }
 function agentAppend(role,content,kind='',intent=''){
-  agentState.messages.push({role,content});
+  const tools=role==='assistant'&&!kind?(agentState.lastTools||[]):[];
+  const messageId=role==='assistant'&&!kind?agentState.lastMessageId:null;
+  if(role==='assistant'&&!kind){agentState.lastTools=[];agentState.lastMessageId=null;}
+  agentState.messages.push({role,content,...(tools.length?{tools}:{}),...(messageId?{id:messageId}:{})});
   const list=$('#agentMessages');if(!list)return;
   const el=document.createElement('div');
   el.className=`agent-message ${role==='user'?'user':'assistant'} ${kind}`.trim();
@@ -2937,9 +2940,18 @@ function agentAppend(role,content,kind='',intent=''){
      bubble — the stored line keeps it, the transcript does not. */
   const shown=intent==='plan'?agentPlanIntent(content).body:content;
   el.appendChild(document.createTextNode(shown));
+  agentToolSummary(el,tools);
   if(!kind)agentMessageTools(el,{role,content},agentState.messages.length-1);
   list.appendChild(el);list.scrollTop=list.scrollHeight;
   return el;
+}
+function agentToolSummary(node,tools){
+  const reads=(tools||[]).filter(t=>['workspace_schema','workspace_query','workspace_read'].includes(t.name));
+  if(!reads.length)return;
+  const label=document.createElement('small');label.className='agent-query-summary';
+  const errors=reads.filter(t=>!t.ok).length;
+  label.textContent=`查询资料 · ${reads.length} 次${errors?' · '+errors+' 次未成功':''}`;
+  label.title='查询范围遵循当前账户权限';node.appendChild(label);
 }
 function agentMessageTools(node,message,index){
   if(!['user','assistant'].includes(message.role))return;
@@ -3061,7 +3073,7 @@ function agentMessageNode(m,index=-1){
     if(draft.projects.length||draft.tasks.length){const btn=document.createElement('button');btn.type='button';btn.className='ghost-btn plan-reopen-history';btn.textContent='再打开这份草稿';btn.onclick=()=>agentPlanBoard(draft);node.appendChild(btn)}
   }
   const stamp=document.createElement('small');stamp.className='agent-time';stamp.textContent=agentFormatTime(m.createdAt);node.appendChild(stamp);
-  agentMessageTools(node,m,index);
+  agentToolSummary(node,m.tools);agentMessageTools(node,m,index);
   return node;
 }
 /* Each history load belongs to its requested account/conversation. A late
@@ -3083,7 +3095,7 @@ async function agentLoadOwnHistory(){
     if(!active()||thread!==agentState.conversationId)return;
     const messages=data.messages||[],list=$('#agentMessages');if(!list)return;
     const turns=messages.filter(m=>(m.role==='user'||m.role==='assistant')&&String(m.content||'').trim());
-    agentState.messages=turns.map(m=>({role:m.role,content:m.content}));
+    agentState.messages=turns.map(m=>({role:m.role,content:m.content,...(m.id?{id:m.id}:{}),...(Array.isArray(m.tools)&&m.tools.length?{tools:m.tools}:{})}));
     if(messages.length)agentRenderTranscript(list,messages);else agentRenderEmptyState(list);
     const card=agentState.pendingCard;
     if(card&&agentState.pendingResolve&&!card.isConnected)list.appendChild(card);
@@ -3286,7 +3298,7 @@ function agentSetConfigVisible(show){
   sel.value=provider;$('#agentEndpoint').value=c.baseUrl||c.endpoint||LLM_PRESETS[provider].base;$('#agentApiKey').value='';
   agentModels=c.models?.length?[...c.models]:agentPresetModels(provider);
   agentRenderModelOptions(c.model||'');
-  $('#agentContextChars').value=String(c.contextChars??200000);
+  $('#agentContextChars').value=String(c.contextChars??32000);
   agentConfigStatus('');agentSyncProviderUI();
   agentModelsSource=agentConfigConnection();
 }
@@ -3388,9 +3400,12 @@ async function agentRequest(messages,planning=false){
   /* Every role uses the authenticated server proxy. The browser never sends
      an API key or chooses a model, so members cannot bypass superadmin policy
      through localStorage or a direct cross-origin request. */
+  agentState.lastTools=[];agentState.lastMessageId=null;
   const controller=new AbortController();agentState.controller=controller;
   try{
-    const data=await api('/api/agent/chat',{messages,sessionId:agentState.sessionId,planning},{signal:controller.signal});
+    const parentMessageId=[...agentState.messages].reverse().find(m=>m.role==='assistant'&&m.id)?.id;
+    const data=await api('/api/agent/chat',{messages,sessionId:agentState.sessionId,planning,parentMessageId},{signal:controller.signal});
+    agentState.lastTools=Array.isArray(data.tools)?data.tools:[];agentState.lastMessageId=data.messageId||null;
     if(agentState.sessionsOpen&&!agentState.viewing)agentRenderSessions();
     const text=agentExtractText(data);if(!text)throw new Error('服务端 Agent 未返回文本');return String(text);
   }finally{if(agentState.controller===controller)agentState.controller=null}
@@ -3818,7 +3833,7 @@ async function agentPlanSubmit(body){
   try{
     const answer=await agentRequest([{role:'system',content:agentSystemPrompt(agentContext(),true)},...agentRecentMessages()],true);
     if(!await agentWaitForResume()){wait?.remove();return}
-    agentState.messages.push({role:'assistant',content:answer});
+    agentState.messages.push({role:'assistant',content:answer,tools:agentState.lastTools||[],...(agentState.lastMessageId?{id:agentState.lastMessageId}:{})});agentState.lastTools=[];agentState.lastMessageId=null;
     wait?.remove();
     const draft=agentSplitPlan(answer);
     if(!draft.projects.length&&!draft.tasks.length){

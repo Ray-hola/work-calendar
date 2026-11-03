@@ -1810,3 +1810,17 @@ test('a failed model verification retains its reason and offers a retry with dis
   a.pending[1].reply({ok:true,models:['working-model'],testedModel:'working-model',message:'验证成功'});await second;
   assert.equal(a.nodes['#agentConfigStatus'].textContent,'验证成功');
 });
+
+test('retrieval badges show compact outcomes without displaying query text or data',()=>{
+  const a=planningApp(),children=[];
+  a.context.document={createElement:()=>({})};a.context.node={appendChild:n=>children.push(n)};
+  a.run("agentToolSummary(node,[{name:'workspace_schema',ok:true},{name:'workspace_query',ok:false,sql:'private SQL'},{name:'business_action',ok:true}])");
+  assert.equal(children.length,1);assert.equal(children[0].textContent,'查询资料 · 2 次 · 1 次未成功');
+  assert.ok(!JSON.stringify(children).includes('private SQL'));
+});
+
+test('stored tool metadata is never replayed as model conversation data',()=>{
+  const a=planningApp();
+  a.run("agentState.messages=[{role:'assistant',content:'查到了',tools:[{name:'workspace_query',ok:true,rows:20}]}]");
+  assert.deepEqual(a.json('agentRecentMessages()'),[{role:'assistant',content:'查到了'}]);
+});

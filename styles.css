@@ -10378,3 +10378,6 @@ body.is-resizing-agent { user-select: none; }
     border-bottom: 1px solid var(--line);
   }
 }
+
+/* Quiet evidence of on-demand retrieval, without exposing SQL in the chat. */
+.agent-query-summary { display: block; margin-top: 9px; color: var(--muted); font-size: 11px; line-height: 1.5; }

@@ -4,7 +4,7 @@
 
 ## Docker
 
-仓库根目录的 `Dockerfile` 只打包 `server.py`、`app.js`、`index.html`、`styles.css` 四个文件，数据写在容器的 `/app/data`。从仓库根目录启动：
+仓库根目录的 `Dockerfile` 只打包 `server.py`、`agent_workspace.py`、`app.js`、`index.html`、`styles.css` 五个运行文件，数据写在容器的 `/app/data`。从仓库根目录启动：
 
 ```bash
 docker compose -f deploy/docker-compose.example.yml up -d --build
