@@ -98,14 +98,18 @@ MAX_TRANSCRIPT_CHARS = 40_000
 # anywhere the operator did not choose.  The upload bound is deliberately much
 # larger than the generic 200KB JSON door because a minute of speech is audio,
 # not text; it is enforced per-route below.
+# Assistant lines stored before conversations existed carry no conversation id;
+# the side list shows them together under this one.
+AGENT_LEGACY_CONVERSATION = 'legacy'
 TRANSCRIBE_PATH = '/api/transcribe'
+
 MAX_AUDIO_BYTES = 8_000_000
 # Project files (项目空间 · 项目文件).  The bytes live in their own table so a
 # snapshot never carries them; only the list of files travels with the state.
 # Like the audio route, the bound is raised per-route in do_POST.
 FILES_PATH = '/api/files'
 MAX_FILE_BYTES = 20_000_000
-TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'task_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages', 'messages', 'folders', 'files')
+TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'task_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages', 'messages', 'folders', 'files', 'agent_conversations')
 
 # Who may start what.  superadmin sorts members into rule groups (规则组, kept
 # apart from the superadmin/admin/member roles); each group says, for a new
@@ -798,9 +802,12 @@ class Store:
         # Keep a per-user transcript so the assistant panel can be reopened like
         # a chat app and superadmin can review what the agent was asked to do.
         last_user = next((item['content'] for item in reversed(messages) if item['role'] == 'user'), '')
+        # A caller that names its session keeps its lines in that
+        # conversation; without one they join the account's early record.
+        thread = {'conversation': session_id} if data.get('sessionId') else None
         if last_user:
-            self.record_agent_message(user['id'], 'user', last_user)
-        self.record_agent_message(user['id'], 'assistant', content)
+            self.record_agent_message(user['id'], 'user', last_user, thread)
+        self.record_agent_message(user['id'], 'assistant', content, thread)
         return {'content': content, 'model': result.get('model', model),
                 'usage': result.get('usage'), 'finishReason': choice.get('finish_reason'),
                 # How many older turns were left out, so a caller can tell that
@@ -825,8 +832,9 @@ class Store:
             return {'requiresConfirmation': True, 'action': action, 'tool': tool}
         payload = data.get('data') if isinstance(data.get('data'), dict) else {}
         result = self._action(user, action, payload)
+        thread = str(data.get('sessionId') or '')[:128]
         self.record_agent_message(user['id'], 'action', f'已执行：{action}', {
-            'action': action, 'data': payload})
+            'action': action, 'data': payload, **({'conversation': thread} if thread else {})})
         return result
 
     def record_agent_message(self, user_id, role, content, extra=None):
@@ -849,12 +857,46 @@ class Store:
             record.update(extra)
         return self.put('agent_messages', record)
 
-    def agent_history(self, user, data):
-        """Return the stored assistant transcript for one account."""
+    def agent_target(self, user, data):
+        """Whose assistant record a call reads: one's own, or anyone's for admins."""
         target = str(data.get('userId') or user['id'])
         if target != user['id']:
             self.admin(user)
-        rows = [m for m in self.all('agent_messages') if m.get('user') == target]
+        return target
+
+    def agent_conversations(self, user, data):
+        """The account's conversations, newest first, as the assistant's side
+        list shows them.  Lines stored before conversations existed form one
+        conversation of their own, 早期记录."""
+        target = self.agent_target(user, data)
+        metadata = {r['conversation']: r for r in self.all('agent_conversations') if r.get('user') == target}
+        groups = {thread: {'id': thread, 'title': '', 'count': 0,
+                          'createdAt': r.get('createdAt', r.get('updatedAt', '')),
+                          'updatedAt': r.get('updatedAt', '')} for thread, r in metadata.items()}
+        last = {}
+        for seq, m in enumerate(self.all('agent_messages')):
+            if m.get('user') != target:
+                continue
+            thread = m.get('conversation') or AGENT_LEGACY_CONVERSATION
+            last[thread] = seq
+            g = groups.setdefault(thread, {'id': thread, 'title': '', 'count': 0, 'createdAt': m.get('createdAt', ''), 'updatedAt': ''})
+            g['updatedAt'] = max(m.get('createdAt', ''), g['updatedAt'])
+            if m.get('role') in ('user', 'assistant'):
+                g['count'] += 1
+            if not g['title'] and m.get('role') == 'user':
+                g['title'] = re.sub(r'^[✦\s]+', '', str(m.get('content') or '')).strip().split('\n')[0][:40]
+        for thread, g in groups.items():
+            g['title'] = metadata.get(thread, {}).get('title') or ('早期记录' if thread == AGENT_LEGACY_CONVERSATION else g['title'] or '新对话')
+        # Storage order breaks ties between lines stamped in the same instant.
+        return {'userId': target, 'conversations': sorted(groups.values(), key=lambda g: (g['updatedAt'], last.get(g['id'], -1)), reverse=True)}
+
+    def agent_history(self, user, data):
+        """Return the stored assistant transcript for one account, or for one of
+        its conversations when `conversationId` names it."""
+        target = self.agent_target(user, data)
+        thread = data.get('conversationId')
+        rows = [m for m in self.all('agent_messages') if m.get('user') == target and
+                (not thread or (m.get('conversation') or AGENT_LEGACY_CONVERSATION) == thread)]
         # all() already returns rows in insertion (rowid) order, which is the
         # chronological transcript even when several records share a timestamp.
         return {'userId': target, 'messages': rows[-400:]}
@@ -1368,6 +1410,21 @@ class Store:
                 self.make_task(admin,{'name':name,'desc':'内置测试任务，可以实际完成、递延或调整负责人。','assignee':assignee,'priority':priority,'duration':mins,'type':kind,'projectId':p['id'],'date':day})
             self.audit('system','seed','创建四个核验账户与示例项目')
 
+    def week_start(self):
+        """The team's first day of the week; Saturday until someone picks another."""
+        row=self.db.execute("SELECT data FROM settings WHERE id='week_start'").fetchone()
+        value=json.loads(row['data']).get('value') if row else None
+        return value if isinstance(value,int) and 0<=value<=6 else 6
+
+    def load_window(self, p):
+        """The days a project's 人力 numbers cover: its own period, or for a
+        project without an end the last week and the coming one, so an
+        open-ended project does not pile up its whole history."""
+        if p.get('end'):
+            return p.get('start') or p['end'], p['end']
+        today=now().date()
+        return (today-timedelta(days=6)).isoformat(), (today+timedelta(days=7)).isoformat()
+
     def profile(self, user_id):
         completed=[l for l in self.all('logs') if l['kind']=='complete' and l['actor']==user_id]
         tasks=[t for t in self.all('tasks') if t['assignee']==user_id]
@@ -1376,7 +1433,12 @@ class Store:
         kinds={}
         for l in completed:kinds[l.get('type','通用')]=kinds.get(l.get('type','通用'),0)+1
         deferred=[l for l in self.all('logs') if l['kind']=='defer' and l['actor']==user_id]
-        pending=sum(t['duration'] for t in tasks if t['status'] in ('todo','doing'))
+        # 当前工作量: open work due by the end of next week, overdue included,
+        # each deferred lineage once; far-off plans do not weigh on today.
+        horizon=(now().date()+timedelta(days=7)).isoformat()
+        pending=sum(int(t.get('duration',0) or 0) for t in self._lineage_leaves(tasks)
+                    if t['status'] in ('todo','doing') and str(t.get('date',''))<=horizon)
+
         return {'user':user_id,'completed':len(completed),'ratio':ratio,'efficiency':'待观察' if ratio is None else ('良好' if ratio<=1 else '正常' if ratio<=1.5 else '需要关注'),'suitable':[k for k,v in kinds.items() if v>=3],'minutes':pending,'load':'低' if pending<240 else '中' if pending<=480 else '高','deferrals':len(deferred),'sources':completed+deferred,'corrections':[c for c in self.all('corrections') if c['user']==user_id]}
 
     def advance_due_tasks(self, at=None):
@@ -1446,7 +1508,8 @@ class Store:
             owned={p['id'] for p in projects if p['owner']==user['id']}
             task_requests=[r for r in self.all('task_requests') if user['admin'] or r.get('requester')==user['id'] or r.get('projectId') in owned]
             automation=next((x.get('value',{}) for x in self.all('settings') if x.get('id')=='automation'),{})
-            return {'user':user,'users':self.users(),'today':now().date().isoformat(),'projects':projects,'folders':folders,'fileArchives':file_archives,'files':[f for f in all_files if f.get('projectId') in file_pids],'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees'] or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':[n for n in self.all('notifications') if n['to']==user['id'] and '12:00 初稿' not in str(n.get('title',''))], 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'taskRequests':task_requests, 'creationRules':self.creation_rules(user), 'creationPolicy':self.creation_policy() if user.get('role')=='superadmin' else None, 'accountOrder':next((x.get('value') or [] for x in self.all('settings') if x.get('id')=='account_order'),[]) if user['admin'] else [], 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or self.get('projects',s['projectId'])['owner']==user['id'])], 'chat':self.chat_summary(user),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.all('audit')[-60:] if user['admin'] else []}
+            return {'user':user,'users':self.users(),'today':now().date().isoformat(),'weekStart':self.week_start(),'projects':projects,
+'folders':folders,'fileArchives':file_archives,'files':[f for f in all_files if f.get('projectId') in file_pids],'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees'] or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':[n for n in self.all('notifications') if n['to']==user['id'] and '12:00 初稿' not in str(n.get('title',''))], 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'taskRequests':task_requests, 'creationRules':self.creation_rules(user), 'creationPolicy':self.creation_policy() if user.get('role')=='superadmin' else None, 'accountOrder':next((x.get('value') or [] for x in self.all('settings') if x.get('id')=='account_order'),[]) if user['admin'] else [], 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or self.get('projects',s['projectId'])['owner']==user['id'])], 'chat':self.chat_summary(user),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.all('audit')[-60:] if user['admin'] else []}
 
     def diary_statistics(self, viewer, start=None, end=None):
         """Return daily completion/load summaries for the diary dashboard.
@@ -1895,6 +1958,26 @@ class Store:
             return self.execute_agent_action(user, d)
         if action=='agent.history':
             return self.agent_history(user, d)
+        if action=='agent.conversations':
+            return self.agent_conversations(user, d)
+        if action in ('agent.conversation.create', 'agent.conversation.rename'):
+            thread=required(d,'conversationId')
+            title=required(d,'title').strip()[:40] if action.endswith('.rename') else ''
+            if action.endswith('.rename') and not title:raise Problem(400,'请填写对话名称')
+            key=f'{user["id"]}:{thread}'
+            previous=next((r for r in self.all('agent_conversations') if r['id']==key),None)
+            if previous and action.endswith('.create'):return previous
+            return self.put('agent_conversations',{'id':key,'user':user['id'],'conversation':thread,'title':title,
+                                                 'createdAt':(previous or {}).get('createdAt') or timestamp(),'updatedAt':timestamp()})
+        if action=='agent.conversation.delete':
+            target=self.agent_target(user,d);thread=required(d,'conversationId')
+            with self.lock,self.db:
+                for message in self.all('agent_messages'):
+                    if message.get('user')==target and (message.get('conversation') or AGENT_LEGACY_CONVERSATION)==thread:
+                        self.db.execute('DELETE FROM agent_messages WHERE id=?',(message['id'],))
+                self.db.execute('DELETE FROM agent_conversations WHERE id=?',(f'{target}:{thread}',))
+            self.audit(user['id'],'agent.conversation.delete',{'target':target,'conversation':thread})
+            return {'deleted':True,'conversationId':thread}
         if action=='agent.history.clear':
             target=str(d.get('userId') or user['id'])
             if target!=user['id']:
@@ -1903,6 +1986,9 @@ class Store:
                 for message in self.all('agent_messages'):
                     if message.get('user')==target:
                         self.db.execute('DELETE FROM agent_messages WHERE id=?',(message['id'],))
+                for row in self.all('agent_conversations'):
+                    if row.get('user')==target:
+                        self.db.execute('DELETE FROM agent_conversations WHERE id=?',(row['id'],))
             self.audit(user['id'],'agent.history.clear',{'target':target})
             return {'cleared':True,'userId':target}
         if action=='account.profile':
@@ -2042,6 +2128,9 @@ class Store:
                 self.db.execute('DELETE FROM sessions WHERE user_id=?',(target,))
                 for message in self.all('agent_messages'):
                     if message.get('user')==target:self.db.execute('DELETE FROM agent_messages WHERE id=?',(message['id'],))
+                for row in self.all('agent_conversations'):
+                    if row.get('user')==target:self.db.execute('DELETE FROM agent_conversations WHERE id=?',(row['id'],))
+
                 for diary in self.all('diaries'):
                     if diary.get('author')==target:self.db.execute('DELETE FROM diaries WHERE id=?',(diary['id'],))
                 for notice in self.all('notifications'):
@@ -2215,18 +2304,21 @@ class Store:
             p=self.get('projects',d['id']);self.project_owner(user,p)
             if p['status']!='active':raise Problem(409,'只能查看进行中项目的成员负载')
             # A task being planned asks about its own dates; the invite dialog
-            # asks about the whole project period.
-            start=valid_date(d['start']) if d.get('start') else (p.get('start') or '0000-01-01')
-            end=valid_date(d['end']) if d.get('end') else (p.get('end') or '9999-12-31')
+            # asks about the project's 人力 window (load_window).
+            window=self.load_window(p)
+            start=valid_date(d['start']) if d.get('start') else window[0]
+            end=valid_date(d['end']) if d.get('end') else window[1]
             if end<start:raise Problem(400,'结束日期不能早于开始日期')
             active={u['id'] for u in self.users() if u.get('active') and not u.get('admin')}
             counts={member:0 for member in active if member!=p.get('owner')}
             minutes={member:0 for member in active}
-            for task in self.all('tasks'):
+            # One deferred task is one piece of work: only the newest record of
+            # each lineage counts, and it counts on every day it spans.
+            for task in self._lineage_leaves(self.all('tasks')):
                 member=task.get('assignee');day=task.get('date','')
-                if member in counts and start<=day<=end:counts[member]+=1
-                if member not in minutes or task.get('status') in ('skipped','deferred') or task.get('supersededBy'):continue
-                if day<=end and (task.get('deadline') or day)>=start:minutes[member]+=int(task.get('duration',0) or 0)
+                if task.get('status') in ('skipped','deferred') or not (day<=end and (task.get('deadline') or day)>=start):continue
+                if member in counts:counts[member]+=1
+                if member in minutes:minutes[member]+=int(task.get('duration',0) or 0)
             return {'projectId':p['id'],'counts':counts,'minutes':minutes,'start':start,'end':end}
         if action=='project.reorder':
             # The manual order is stored per task lineage (its oldest record),
@@ -2254,6 +2346,12 @@ class Store:
                 if p.get('folderId')==f['id']:p['folderId']=None;self.put('projects',p)
             self.db.execute('DELETE FROM folders WHERE id=?',(f['id'],))
             return {'id':f['id'],'deleted':True}
+        if action=='week_start.update':
+            # The team's first day of the week, 0 = 周日 … 6 = 周六 (as JavaScript
+            # counts them).  Everyone's week view and 周报 follow it.
+            self.admin(user);value=int(d.get('day'))
+            if not 0<=value<=6:raise Problem(400,'一周的开始日无效')
+            return self.put('settings',{'id':'week_start','value':value,'updatedAt':timestamp(),'by':user['id']})
         if action=='nav.move':
             # Dragging in 项目目录: a place is a parent (a folder, or the root
             # for None) plus an order number among that parent's items.  Folders
@@ -2806,12 +2904,12 @@ class Store:
             self.audit(user['id'],'brief.update',{'date':day})
             return self.apply_brief_edits(brief)
         if action=='brief.week':
-            # One week of team reports for export, Saturday to Friday like the
-            # week view: filed ones as they stand, days not filed yet assembled
-            # on the spot.
+            # One week of team reports for export, from the team's first day of
+            # the week like the week view: filed ones as they stand, days not
+            # filed yet assembled on the spot.
             self.admin(user)
             day=date.fromisoformat(valid_date(d.get('date')))
-            start=day-timedelta(days=(day.weekday()+2)%7);today=now().date().isoformat()
+            start=day-timedelta(days=(day.isoweekday()%7-self.week_start())%7);today=now().date().isoformat()
             briefs=[]
             for i in range(7):
                 ds=(start+timedelta(days=i)).isoformat()

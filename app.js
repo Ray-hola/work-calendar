@@ -42,6 +42,8 @@ const ICON_PATHS={
   'pip':'<rect x="2.5" y="4.5" width="19" height="15" rx="2"/><rect x="12" y="11" width="7" height="6" rx="1"/>',
   'folder-open':'<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>',
   'file':'<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5Z"/><path d="M14 2v6h6"/>',
+  'copy':'<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  'undo':'<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
   'upload':'<path d="M12 15V4"/><path d="m7 9 5-5 5 5"/><path d="M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/>'
 };
 function icon(name,extra=''){
@@ -204,6 +206,110 @@ function initNavigationLayout(){
   for(const selector of ['.sidebar','#projectsView','.chat-room']){const element=$(selector);if(element)observer.observe(element)}
   applyNavigationLayout();
 }
+/* Panel dimensions are browser display preferences per layout, so opening a
+   draft does not squeeze three panes into the width of a plain conversation. */
+const AGENT_SIZE_KEY='wc-agent-size-v1';
+const AGENT_PANEL_SIZES={chat:{width:390,height:590,minWidth:360,minHeight:360},
+  history:{width:700,height:650,minWidth:560,minHeight:420},
+  plan:{width:1080,height:800,minWidth:760,minHeight:500},
+  'history-plan':{width:1240,height:800,minWidth:980,minHeight:600}};
+function readAgentPanelSizes(){
+  let saved={};try{saved=JSON.parse(localStorage.getItem(AGENT_SIZE_KEY)||'{}')||{}}catch(_){}
+  return Object.fromEntries(Object.keys(AGENT_PANEL_SIZES).flatMap(mode=>{
+    const s=saved[mode];return s&&['width','height'].every(k=>typeof s[k]==='number'&&Number.isFinite(s[k])&&s[k]>0)
+      ?[[mode,{width:Math.min(8192,Math.round(s.width)),height:Math.min(8192,Math.round(s.height))}]]:[];
+  }));
+}
+const agentPanelSizes=readAgentPanelSizes();
+let agentPanelDrag=null,agentPanelFrame=0;
+function agentPanelBounds(mode,viewportWidth,viewportHeight){
+  const c=AGENT_PANEL_SIZES[mode],gap=viewportWidth<=760?12:24;
+  const maxWidth=Math.max(1,viewportWidth-gap*2),maxHeight=Math.max(1,viewportHeight-gap*2);
+  return {gap,maxWidth,maxHeight,minWidth:Math.min(c.minWidth,maxWidth),minHeight:Math.min(c.minHeight,maxHeight)};
+}
+function agentPanelDimensions(mode,viewportWidth,viewportHeight){
+  const b=agentPanelBounds(mode,viewportWidth,viewportHeight),s=agentPanelSizes[mode]||AGENT_PANEL_SIZES[mode];
+  return {width:Math.round(Math.max(b.minWidth,Math.min(b.maxWidth,s.width))),
+    height:Math.round(Math.max(b.minHeight,Math.min(b.maxHeight,s.height)))};
+}
+function agentPanelMode(){
+  const planning=Boolean(agentState.planBoard&&!agentState.planBoard.closed&&!agentState.viewing);
+  return agentState.sessionsOpen?(planning?'history-plan':'history'):(planning?'plan':'chat');
+}
+function saveAgentPanelSizes(){try{localStorage.setItem(AGENT_SIZE_KEY,JSON.stringify(agentPanelSizes))}catch(_){} }
+function applyAgentPanelSize(){
+  if(typeof window==='undefined'||!document.documentElement)return;
+  const panel=$('#agentPanel');if(!panel)return;
+  const mode=agentPanelMode();
+  if(agentPanelDrag&&agentPanelDrag.mode!==mode){finishAgentPanelResize(true);return}
+  const b=agentPanelBounds(mode,window.innerWidth,window.innerHeight),size=agentPanelDimensions(mode,window.innerWidth,window.innerHeight);
+  Object.assign(panel.style,{width:size.width+'px',height:size.height+'px',right:b.gap+'px',bottom:b.gap+'px'});
+  panel.querySelectorAll('[data-agent-resize]').forEach(h=>{
+    const width=h.dataset.agentResize==='w',both=h.dataset.agentResize==='nw';
+    h.setAttribute('aria-label',both?`调整助手宽高，当前 ${size.width} × ${size.height} 像素`:width?'调整助手宽度':'调整助手高度');
+    if(!both){h.setAttribute('aria-valuemin',width?b.minWidth:b.minHeight);h.setAttribute('aria-valuemax',width?b.maxWidth:b.maxHeight);h.setAttribute('aria-valuenow',width?size.width:size.height)}
+  });
+}
+function setAgentPanelSize(mode,width,height,persist=true,axes='nw'){
+  const b=agentPanelBounds(mode,window.innerWidth,window.innerHeight);
+  const previous=agentPanelSizes[mode]||AGENT_PANEL_SIZES[mode];
+  agentPanelSizes[mode]={width:axes.includes('w')?Math.round(Math.max(b.minWidth,Math.min(b.maxWidth,width))):previous.width,
+    height:axes.includes('n')?Math.round(Math.max(b.minHeight,Math.min(b.maxHeight,height))):previous.height};
+  applyAgentPanelSize();if(persist)saveAgentPanelSizes();
+}
+function finishAgentPanelResize(cancelled=false){
+  const d=agentPanelDrag;if(!d)return;
+  if(agentPanelFrame){cancelAnimationFrame(agentPanelFrame);agentPanelFrame=0}
+  agentPanelDrag=null;
+  if(cancelled){if(d.original)agentPanelSizes[d.mode]=d.original;else delete agentPanelSizes[d.mode]}
+  else setAgentPanelSize(d.mode,d.width+(d.edge.includes('w')?d.x-d.lastX:0),d.height+(d.edge.includes('n')?d.y-d.lastY:0),false,d.edge);
+  document.body.classList.remove('is-resizing-agent');
+  try{d.handle.releasePointerCapture(d.pointerId)}catch(_){}
+  applyAgentPanelSize();if(!cancelled)saveAgentPanelSizes();
+}
+function initAgentPanelResize(){
+  const panel=$('#agentPanel');if(!panel)return;
+  for(const [edge,label] of [['w','宽度'],['n','高度'],['nw','宽高']]){
+    panel.insertAdjacentHTML('beforeend',`<div class="agent-resize-edge edge-${edge}" data-agent-resize="${edge}" tabindex="0" `
+      +`role="${edge==='nw'?'button':'separator'}"${edge==='nw'?'':` aria-orientation="${edge==='w'?'vertical':'horizontal'}"`} `
+      +`aria-controls="agentPanel" aria-label="调整助手${label}" title="拖动调整助手${label}，方向键微调，Shift 加速，Home 恢复默认，End 到上限，双击恢复默认尺寸"></div>`);
+  }
+  panel.addEventListener('pointerdown',e=>{
+    const handle=e.target.closest('[data-agent-resize]');if(!handle||e.button!==0||agentPanelDrag)return;
+    e.preventDefault();handle.focus();const mode=agentPanelMode(),size=agentPanelDimensions(mode,window.innerWidth,window.innerHeight);
+    agentPanelDrag={mode,handle,edge:handle.dataset.agentResize,pointerId:e.pointerId,x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY,
+      ...size,original:agentPanelSizes[mode]?{...agentPanelSizes[mode]}:null};
+    document.body.classList.add('is-resizing-agent');try{handle.setPointerCapture(e.pointerId)}catch(_){}
+  });
+  window.addEventListener('pointermove',e=>{
+    const d=agentPanelDrag;if(!d||d.pointerId!==e.pointerId)return;d.lastX=e.clientX;d.lastY=e.clientY;
+    if(!agentPanelFrame)agentPanelFrame=requestAnimationFrame(()=>{
+      agentPanelFrame=0;if(agentPanelDrag===d)setAgentPanelSize(d.mode,d.width+(d.edge.includes('w')?d.x-d.lastX:0),d.height+(d.edge.includes('n')?d.y-d.lastY:0),false,d.edge);
+    });
+  });
+  window.addEventListener('pointerup',e=>{if(agentPanelDrag?.pointerId===e.pointerId){agentPanelDrag.lastX=e.clientX;agentPanelDrag.lastY=e.clientY;finishAgentPanelResize()}});
+  for(const event of ['pointercancel','lostpointercapture'])window.addEventListener(event,e=>{if(agentPanelDrag?.pointerId===e.pointerId)finishAgentPanelResize(true)});
+  window.addEventListener('blur',()=>finishAgentPanelResize(true));
+  window.addEventListener('resize',()=>{finishAgentPanelResize(true);applyAgentPanelSize()});
+  window.addEventListener('storage',e=>{if(e.key===AGENT_SIZE_KEY){for(const key of Object.keys(agentPanelSizes))delete agentPanelSizes[key];Object.assign(agentPanelSizes,readAgentPanelSizes());applyAgentPanelSize()}});
+  window.addEventListener('keydown',e=>{if(e.key==='Escape'&&agentPanelDrag){e.preventDefault();e.stopPropagation();finishAgentPanelResize(true)}},true);
+  panel.addEventListener('dblclick',e=>{if(e.target.closest('[data-agent-resize]')){delete agentPanelSizes[agentPanelMode()];applyAgentPanelSize();saveAgentPanelSizes()}});
+  panel.addEventListener('keydown',e=>{
+    const handle=e.target.closest('[data-agent-resize]');if(!handle)return;
+    const edge=handle.dataset.agentResize,mode=agentPanelMode(),size=agentPanelDimensions(mode,window.innerWidth,window.innerHeight),b=agentPanelBounds(mode,window.innerWidth,window.innerHeight),c=AGENT_PANEL_SIZES[mode],step=e.shiftKey?30:10;
+    let {width,height}=size,used=true;
+    if(edge.includes('w')&&e.key==='ArrowLeft')width+=step;
+    else if(edge.includes('w')&&e.key==='ArrowRight')width-=step;
+    else if(edge.includes('n')&&e.key==='ArrowUp')height+=step;
+    else if(edge.includes('n')&&e.key==='ArrowDown')height-=step;
+    else if(e.key==='Home'){if(edge.includes('w'))width=c.width;if(edge.includes('n'))height=c.height}
+    else if(e.key==='End'){if(edge.includes('w'))width=b.maxWidth;if(edge.includes('n'))height=b.maxHeight}
+    else if(e.key==='Enter'){width=c.width;height=c.height}
+    else used=false;
+    if(used){e.preventDefault();e.stopPropagation();setAgentPanelSize(mode,width,height,true,e.key==='Enter'?'nw':edge)}
+  });
+  applyAgentPanelSize();
+}
 let S={user:null,users:[],tasks:[],projects:[],folders:[],files:[],fileArchives:[],achievements:[],logs:[],reports:[],diaries:[],diaryStats:[],notifications:[],requests:[],editRequests:[],suggestions:[],profiles:[],today:''};
 /* The server always answers in JSON, but the tunnel in front of it does not:
    a request that runs past its time limit comes back as an HTML error page.
@@ -217,7 +323,10 @@ const getState=()=>fetch('/api/state',{credentials:'same-origin'}).then(async r=
 const fmt=iso=>{const d=new Date(`${iso}T12:00:00`);return `${d.getMonth()+1}月${d.getDate()}日`};
 const wd=iso=>['周日','周一','周二','周三','周四','周五','周六'][new Date(`${iso}T12:00:00`).getDay()];
 const add=(iso,n)=>{const d=new Date(`${iso}T12:00:00`);d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)};
-const weekStart=iso=>{const d=new Date(`${iso}T12:00:00`);d.setDate(d.getDate()-(d.getDay()+1)%7);return d.toISOString().slice(0,10)};
+/* The team's first day of the week (0 = 周日 … 6 = 周六), set in 系统设置;
+   Saturday until an admin picks another. */
+const weekStartDay=()=>Number.isInteger(S.weekStart)&&S.weekStart>=0&&S.weekStart<=6?S.weekStart:6;
+const weekStart=iso=>{const d=new Date(`${iso}T12:00:00`);d.setDate(d.getDate()-(d.getDay()-weekStartDay()+7)%7);return d.toISOString().slice(0,10)};
 const DATE_HORIZON='2027-04-30';
 const displayDay=()=>{const day=add(S.today,UI.dayOffset||0);return day>DATE_HORIZON?DATE_HORIZON:day};
 const week=off=>{const start=add(weekStart(S.today),off*7);return Array.from({length:7},(_,i)=>add(start,i))};
@@ -1111,17 +1220,19 @@ function projectBackground(p,manage){
 function projectStaffing(p,manage){
   const people=Object.entries(p.members||{}).filter(([,v])=>v==='accepted').map(([id])=>id)
     .sort((a,b)=>(b===p.owner)-(a===p.owner));
-  const tasks=S.tasks.filter(t=>t.projectId===p.id&&!isSuperseded(t)&&t.status!=='skipped');
+  const tasks=S.tasks.filter(t=>t.projectId===p.id&&!isSuperseded(t)&&t.status!=='skipped'),period=loadWindow(p);
+  const inPeriod=t=>t.date<=period[1]&&taskEnd(t)>=period[0];
   const row=id=>{
-    const mine=tasks.filter(t=>t.assignee===id),open=mine.filter(t=>['todo','doing'].includes(t.status)).length;
-    const done=mine.filter(t=>t.status==='done').length,mins=mine.reduce((sum,t)=>sum+Number(t.duration||0),0),role=p.staffing?.[id]||'';
+    const mine=tasks.filter(t=>t.assignee===id),open=mine.filter(t=>['todo','doing'].includes(t.status)&&inPeriod(t)).length;
+    const done=mine.filter(t=>t.status==='done'&&inPeriod(t)).length,mins=memberLoad(id,period,tasks).mins,role=p.staffing?.[id]||'';
     return `<div class="staff-row">${avatarHTML(id)}<div class="staff-name"><strong>${escapeHTML(nameOf(id))}</strong>`
       +`<small>${id===p.owner?'Owner':'协作者'}</small></div>`
       +`${manage?`<input class="staff-role" data-member="${escapeHTML(id)}" maxlength="200" value="${escapeHTML(role)}" `
       +`placeholder="负责什么" aria-label="${escapeHTML(nameOf(id))} 的分工">`:`<span class="staff-role-text">${escapeHTML(role||'—')}</span>`}`
       +`<span class="staff-load">${manage||id===S.user?.id?`进行中 ${open} · 已完成 ${done}${mins?` · ${hours(mins)} 小时`:''}`:''}</span></div>`;
   };
-  return `<section class="space-section"><div class="space-head"><h2>项目人力 <span>${people.length}</span></h2>`
+  return `<section class="space-section"><div class="space-head"><h2>项目人力 <span>${people.length}</span>`
+    +`<small class="space-window">${escapeHTML(loadWindowLabel(p))}</small></h2>`
     +`${manage&&p.status==='active'?'<button class="secondary-btn" id="spaceInvite">添加协作者</button>':''}</div>`
     +`<div class="staff-list">${people.map(row).join('')}</div></section>`;
 }
@@ -1306,11 +1417,11 @@ function inviteCollaborators(projectId){
   openModal(`<div class="eyebrow">${escapeHTML(p.name)} · ${admin?'管理员直接指派':'Owner 添加协作者'}</div><h2>添加协作者</h2>`
     +`<fieldset class="member-checkboxes" id="currentMembers"><legend>当前协作者（${current.length}）</legend>`
     +`${current.map(id=>`<div class="member-row"><strong>${escapeHTML(nameOf(id))}</strong><small>`
-    +`${escapeHTML(id)} · 时间范围内 <b>${memberTaskCount(id,p)}</b> 项任务</small>`
+    +`${escapeHTML(id)} · ${escapeHTML(loadWindowLabel(p))} <b>${memberTaskCount(id,p)}</b> 项任务</small>`
     +`<button type="button" class="ghost-btn remove-member" data-member="${escapeHTML(id)}">移出</button>`
     +`</div>`).join('')||'<p class="muted">还没有协作者</p>'}</fieldset><div class="member-checkboxes">`
     +`${candidates.map(u=>`<label><input type="checkbox" name="inviteMember" value="${escapeHTML(u.id)}"> <strong>`
-    +`${escapeHTML(u.id)}</strong><small>成员 · 时间范围内 <b data-member-load="${escapeHTML(u.id)}">`
+    +`${escapeHTML(u.id)}</strong><small>成员 · ${escapeHTML(loadWindowLabel(p))} <b data-member-load="${escapeHTML(u.id)}">`
     +`${memberTaskCount(u.id,p)}</b> 项任务</small></label>`).join('')||'<p class="muted">暂无可添加成员</p>'}</div>`
     +`<div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button>`
     +`<button class="primary-btn" id="confirmInvite" ${candidates.length?'':'disabled'}>添加并通知</button></div>`);
@@ -1330,7 +1441,8 @@ function inviteCollaborators(projectId){
       closeModal();toast('已移出 '+nameOf(who)+'，他的沟通区里不再有这个工作区');
     }catch(e){}
   });
-  api('/api/action',{action:'project.member_loads',data:{id:projectId}}).then(result=>{
+  const [loadStart,loadEnd]=loadWindow(p);
+  api('/api/action',{action:'project.member_loads',data:{id:projectId,start:loadStart,end:loadEnd}}).then(result=>{
     if($('#modalBackdrop')?.classList.contains('hidden'))return;
     for(const [id,total] of Object.entries(result.counts||{})){const el=$$('[data-member-load]').find(node=>node.dataset.memberLoad===id);if(el)el.textContent=total}
   }).catch(()=>{});
@@ -1590,7 +1702,20 @@ function renderSettings(){
   const admin=Boolean(S.user?.admin);
   $('#settingsView .automation-card')?.classList.toggle('hidden',!admin);
   $('#runAutomationBtn')?.classList.toggle('hidden',!admin);
+  renderWeekStartSetting();
   renderCreationPolicy();
+}
+function renderWeekStartSetting(){
+  const box=$('#weekStartCard');if(!box)return;
+  box.classList.toggle('hidden',!S.user?.admin);if(!S.user?.admin)return;
+  const order=[1,2,3,4,5,6,0],day=weekStartDay();
+  box.innerHTML=`<div><span class="eyebrow">周视图</span><h2>每周从哪天开始</h2><p class="muted">周视图、档案室的周范围和本周周报都从这一天算起，`
+    +`全员生效。</p></div><div class="rule-seg week-start-seg" role="radiogroup" aria-label="每周开始日">${order.map(d=>`<button type="button" `
+    +`class="rule-opt${d===day?' is-on':''}" role="radio" aria-checked="${d===day}" data-day="${d}">${WEEKDAY_SHORT[d]}</button>`).join('')}</div>`;
+  box.querySelectorAll('[data-day]').forEach(b=>b.onclick=async()=>{
+    const next=Number(b.dataset.day);if(next===weekStartDay())return;
+    try{await act('week_start.update',{day:next});toast(`每周改为从${WEEKDAY_SHORT[next]}开始`)}catch(e){}
+  });
 }
 /* Groups that exist read as a list, one row each; a group is made or changed
    on a card (editRuleGroup). */
@@ -1860,7 +1985,7 @@ function newTask(projectId,initialDate){
      task's own dates, across every project, not their whole backlog. */
   const span=()=>{const start=$('#taskDate').value||S.today,end=$('#taskDeadline').value;return [start,end&&end>start?end:start]};
   const hours=mins=>Math.round(mins/60*10)/10;
-  const load=(id,[start,end])=>{const ts=S.tasks.filter(t=>t.assignee===id&&!['skipped','deferred'].includes(t.status)&&!isSuperseded(t)&&t.date<=end&&taskEnd(t)>=start);return {count:ts.length,mins:serverMinutes&&id in serverMinutes?serverMinutes[id]:ts.reduce((n,t)=>n+Number(t.duration||0),0)}};
+  const load=(id,period)=>{const mine=memberLoad(id,period);return {count:mine.count,mins:serverMinutes&&id in serverMinutes?serverMinutes[id]:mine.mins}};
   /* A member holds only their own tasks, so another person's load is unknown
      outside the projects they run; it is left out rather than shown as 0. */
   const known=id=>admin||id===S.user.id||Boolean(serverMinutes&&id in serverMinutes);
@@ -2013,11 +2138,17 @@ function scheduleTasks(includeHistory){
   if(!S.user?.admin)return visible.filter(t=>t.assignee===S.user.id);
   return UI.member!=='all'?visible.filter(t=>t.assignee===UI.member):visible;
 }
-function memberTaskCount(userId,project){
-  if(!project)return 0;
-  const start=project.start||'0000-01-01',end=project.end||'9999-12-31';
-  return S.tasks.filter(t=>t.assignee===userId&&t.date>=start&&t.date<=end&&!isSuperseded(t)).length;
+/* 人力 numbers cover a project's own dates; one without an end counts only the
+   last week and the coming one, not its whole open-ended history. */
+function loadWindow(p){return p?.end?[p.start||p.end,p.end]:[add(S.today,-6),add(S.today,7)]}
+function loadWindowLabel(p){const [start,end]=loadWindow(p);return p?.end?'项目周期内':`近两周（${fmt(start)}–${fmt(end)}）`}
+/* What someone carries over [start, end]: every task touching those days, less
+   what was skipped or handed on by a deferral. */
+function memberLoad(id,[start,end],tasks=S.tasks){
+  const ts=tasks.filter(t=>t.assignee===id&&!['skipped','deferred'].includes(t.status)&&!isSuperseded(t)&&t.date<=end&&taskEnd(t)>=start);
+  return {count:ts.length,mins:ts.reduce((n,t)=>n+Number(t.duration||0),0)};
 }
+function memberTaskCount(userId,project){return project?memberLoad(userId,loadWindow(project)).count:0}
 function renderScheduleScope(){
   const visible=Boolean(S.user?.admin&&['today','calendar','dayDetail'].includes(UI.view));
   $('#scheduleScope').classList.toggle('hidden',!visible);
@@ -2536,7 +2667,7 @@ function openTodayArchive(){
   pickArchive(S.today,true);
   openDiaryArchive(S.today,$(`#archiveCabinet .archive-file[data-date="${S.today}"]`));
 }
-/* 周报: one week of team briefs, Saturday to Friday like the week view, added
+/* 周报: one week of team briefs, from the team's first weekday like the week view, added
    up and read in place. It opens over the archive box: the stats count up,
    each day's bar rises, and the arrows slide to the week before or after. A
    day opens that day's brief. */
@@ -2721,13 +2852,18 @@ const AGENT_CONFIG_KEY='work-calendar-agent-config-v1';
 const TRANSCRIBE_ENDPOINT='/api/transcribe';
 const OPENCODE_GO_ENDPOINT='https://opencode.ai/zen/go/v1/chat/completions';
 const OPENCODE_GO_MODELS=['glm-5.3-flash','glm-5.3','glm-5.2','glm-5.1','kimi-k3','kimi-k2.7-code','kimi-k2.6','longcat-2.0','deepseek-v4.1-flash','deepseek-v4-pro','deepseek-v4-flash','deepseek-v4-flash-vision-exp','mimo-v2.5','mimo-v2.5-pro','hy4-preview','hy3','grok-4.5'];
-const agentState={messages:[],busy:false,paused:false,resume:null,controller:null,lastInput:'',editing:null,steps:0,failures:0,mode:null,lastActionKey:'',repeats:0,autoRun:false,stop:false,pendingResolve:null,plan:false,planBoard:null,sessionId:(globalThis.crypto?.randomUUID?.()||`wc-${Date.now()}-${Math.random().toString(36).slice(2)}`)};
+const agentState={messages:[],busy:false,paused:false,resume:null,controller:null,lastInput:'',editing:null,steps:0,failures:0,mode:null,lastActionKey:'',repeats:0,autoRun:false,stop:false,pendingResolve:null,plan:false,planBoard:null,conversationDrafts:new Map(),historyLoad:0,historyLoading:false,historyError:false,sessionRender:0,sessionId:(globalThis.crypto?.randomUUID?.()||`wc-${Date.now()}-${Math.random().toString(36).slice(2)}`)};
 let agentServerConfig=null;
 let agentServerAsr=null;
 function agentIsBusy(){return agentState.busy}
 function agentResetUser(){
+  if(typeof agentCancelVoice==='function')agentCancelVoice();
   agentHalt();agentState.messages=[];agentState.lastInput='';agentState.editing=null;
   agentState.plan=false;agentState.planBoard=null;
+  agentState.historyLoad++;agentState.sessionRender++;agentState.historyLoading=false;agentState.historyError=false;
+  agentState.conversationDrafts.clear();
+  agentState.conversationId=null;agentState.viewing=null;agentState.viewConversation=null;agentToggleSessions(false);
+  agentSyncReview();
   for(const id of ['#agentMessages','#agentDraftCards']){const el=$(id);if(el)el.innerHTML=''}
   $('#agentPanel')?.classList.add('hidden');$('#agentDraftArea')?.classList.add('hidden');
 }
@@ -2802,11 +2938,15 @@ function agentAppend(role,content,kind='',intent=''){
 function agentMessageTools(node,message,index){
   if(!['user','assistant'].includes(message.role))return;
   const tools=document.createElement('div');tools.className='agent-message-tools';
-  const button=(label,run)=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=run;tools.appendChild(b)};
-  button('复制',async()=>{try{await navigator.clipboard.writeText(message.content);toast('已复制')}catch(_){toast('复制失败，请选中文字复制')}});
+  const button=(name,label,run)=>{const b=document.createElement('button');b.type='button';b.className='agent-tool-btn';
+    b.innerHTML=icon(name);b.title=label;b.setAttribute('aria-label',label);b.onclick=()=>run(b);tools.appendChild(b)};
+  button('copy','复制',async b=>{
+    try{await navigator.clipboard.writeText(message.content);b.innerHTML=icon('check');b.classList.add('is-done');
+      setTimeout(()=>{b.innerHTML=icon('copy');b.classList.remove('is-done')},1400)}catch(_){toast('复制失败，请选中文字复制')}
+  });
   if(index>=0){
-    if(message.role==='user')button('修改重发',()=>agentEditMessage(index));
-    button('回退到这里',()=>agentRewind(index));
+    if(message.role==='user')button('edit','修改重发',()=>agentEditMessage(index));
+    button('undo','回退到这里',()=>agentRewind(index));
   }
   node.appendChild(tools);
 }
@@ -2864,7 +3004,7 @@ function agentFoldTrail(anchor){
 function agentRenderTranscript(box,messages){
   if(!box)return;
   box.innerHTML='';
-  const live=box===$('#agentMessages');let turn=0;
+  const live=box===$('#agentMessages')&&!agentState.viewing;let turn=0;
   let trail=[];
   const flush=()=>{agentFoldRun(trail).forEach(n=>box.appendChild(n));trail=[]};
   messages.forEach(m=>{const index=live&&['user','assistant'].includes(m.role)&&String(m.content||'').trim()?turn++:-1;const node=agentMessageNode(m,index);if(!node)return;if(m.role==='user'){flush();box.appendChild(node)}else trail.push(node)});
@@ -2918,42 +3058,182 @@ function agentMessageNode(m,index=-1){
   agentMessageTools(node,m,index);
   return node;
 }
+/* Each history load belongs to its requested account/conversation. A late
+   response must never replace a newer selection or become its model context. */
 async function agentLoadOwnHistory(){
+  if(agentState.viewing||agentState.busy)return;
+  const version=++agentState.historyLoad,user=S.user?.id;
+  const active=()=>version===agentState.historyLoad&&S.user?.id===user&&!agentState.viewing;
+  agentState.historyLoading=true;agentState.historyError=false;agentUpdateBusy();
+  const list=$('#agentMessages');if(list)list.innerHTML='<p class="muted agent-sessions-empty">正在加载对话…</p>';
   try{
-    const data=await api('/api/action',{action:'agent.history',data:{}});
+    if(!agentState.conversationId){
+      const latest=(await api('/api/action',{action:'agent.conversations',data:{}})).conversations?.[0]?.id;
+      if(!active())return;
+      agentUseConversation(latest||agentNewConversationId());
+    }
+    const thread=agentState.conversationId;
+    const data=await api('/api/action',{action:'agent.history',data:{conversationId:thread}});
+    if(!active()||thread!==agentState.conversationId)return;
     const messages=data.messages||[],list=$('#agentMessages');if(!list)return;
-    list.innerHTML='';
-    /* A card still waiting for a click is not part of the stored transcript,
-       so rebuilding the list used to erase it while the run kept waiting on
-       it — the run stayed busy forever and every later message was dropped in
-       silence. Attach it back rather than losing the run. */
-    const restoreCard=()=>{
-      const card=agentState.pendingCard;
-      if(card&&agentState.pendingResolve&&!card.isConnected)list.appendChild(card);
-      /* An open draft is the user's unfinished work; it outlives a reload of the list. */
-      const board=agentState.planBoard;
-      if(board&&!board.closed&&!board.el.isConnected)$('#agentDraftCards')?.appendChild(board.el);
-    };
-    if(!messages.length){agentRenderEmptyState(list);restoreCard();list.scrollTop=list.scrollHeight;return}
-    /* A blank line is not a turn. One used to be stored whenever the model
-       came back empty, and replaying it made the server refuse every later
-       request — the transcript must never carry it forward. */
     const turns=messages.filter(m=>(m.role==='user'||m.role==='assistant')&&String(m.content||'').trim());
     agentState.messages=turns.map(m=>({role:m.role,content:m.content}));
-    agentRenderTranscript(list,messages);
-    restoreCard();
+    if(messages.length)agentRenderTranscript(list,messages);else agentRenderEmptyState(list);
+    const card=agentState.pendingCard;
+    if(card&&agentState.pendingResolve&&!card.isConnected)list.appendChild(card);
+    const board=agentState.planBoard;
+    if(board&&!board.closed&&!board.el.isConnected)$('#agentDraftCards')?.appendChild(board.el);
     list.scrollTop=list.scrollHeight;
-  }catch(_){}
+  }catch(e){
+    if(!active())return;
+    agentState.historyError=true;
+    const list=$('#agentMessages');
+    if(list){list.innerHTML=`<p class="muted agent-sessions-empty">加载失败：${escapeHTML(e.message||'请重试')}</p><button type="button" class="ghost-btn" id="agentHistoryRetry">重试</button>`;
+      $('#agentHistoryRetry').onclick=()=>agentLoadOwnHistory()}
+  }finally{if(active()){agentState.historyLoading=false;agentUpdateBusy()}}
 }
-async function agentShowHistory(){
-  const admin=Boolean(S.user?.admin);
-  openModal(`<div class="eyebrow">WORK AGENT · 工作记录</div><h2>AI 工作记录</h2>${admin?`<label class="form-field">查看账户<select id="agentHistoryUser">${S.users.map(u=>`<option value="${escapeHTML(u.id)}">${escapeHTML(u.id)}</option>`).join('')}</select></label>`:''}<div id="agentHistoryList" class="agent-history-list"></div><div class="modal-footer"><button class="secondary-btn" id="agentHistoryClear">清空记录</button><button class="primary-btn" id="agentHistoryClose">关闭</button></div>`);
-  const target=()=>$('#agentHistoryUser')?.value||S.user.id;
-  const load=async()=>{const box=$('#agentHistoryList');box.innerHTML='<p class="muted">正在加载…</p>';try{const data=await api('/api/action',{action:'agent.history',data:{userId:target()}});const msgs=data.messages||[];box.innerHTML='';if(!msgs.length){box.innerHTML='<p class="muted">该账户暂无 AI 工作记录。</p>';return}agentRenderTranscript(box,msgs)}catch(e){box.innerHTML=`<p class="muted">加载失败：${escapeHTML(e.message||'')}</p>`}};
-  $('#agentHistoryUser')?.addEventListener('change',load);
-  $('#agentHistoryClose').onclick=closeModal;
-  $('#agentHistoryClear').onclick=async()=>{if(!confirm(`确认清空 ${target()} 的 AI 工作记录？`))return;try{await api('/api/action',{action:'agent.history.clear',data:{userId:target()}});toast('记录已清空');await load()}catch(e){toast(e.message||'清空失败')}};
-  await load();
+/* 对话记录: a side list like a general agent's, opened from the header. Each
+   conversation keeps its own lines (its id is the session id the chat sends);
+   lines from before conversations existed sit under 早期记录. One may start a
+   new conversation, open, rename or delete one; admins can also read another
+   account's conversations, read-only. */
+const agentNewConversationId=()=>globalThis.crypto?.randomUUID?.()||`wc-${Date.now()}-${Math.random().toString(36).slice(2,10)}`;
+function agentUseConversation(id){
+  if(typeof agentCancelVoice==='function')agentCancelVoice();
+  const input=$('#agentInput'),previous=agentState.conversationId;
+  if(previous)agentState.conversationDrafts.set(previous,{board:agentState.planBoard,input:input?.value||'',plan:agentState.plan});
+  const saved=agentState.conversationDrafts.get(id);
+  agentState.conversationId=id;agentState.sessionId=id==='legacy'?null:id;
+  agentState.messages=[];agentState.editing=null;agentState.lastInput='';
+  agentState.planBoard=saved?.board||null;agentState.plan=Boolean(saved?.plan);
+  const cards=$('#agentDraftCards');if(cards)cards.innerHTML='';
+  if(input)input.value=saved?.input||'';
+  if(saved?.board){cards?.appendChild(saved.board.el);planRender(saved.board)}
+  agentSyncDraftLayout();agentSyncPlanButton();
+}
+function agentWriteBlocked(){
+  if(agentState.viewing){toast('正在只读查看对话，请先切回自己的账户');return true}
+  if(agentState.historyLoading||agentState.historyError){toast(agentState.historyError?'请先重试加载这段对话':'对话正在加载，请稍候');return true}
+  return false;
+}
+function agentSyncDraftLayout(){
+  const board=agentState.planBoard,show=Boolean(board&&!board.closed&&!agentState.viewing);
+  $('#agentPanel')?.classList.toggle('is-planning',show);
+  $('#agentDraftArea')?.classList.toggle('hidden',!show);
+  $('#agentDraftToggle')?.classList.toggle('hidden',!board||Boolean(agentState.viewing));
+  applyAgentPanelSize();
+}
+async function agentToggleSessions(open=!agentState.sessionsOpen){
+  agentState.sessionsOpen=open;agentState.sessionRender++;
+  $('#agentSessions')?.classList.toggle('hidden',!open);
+  $('#agentPanel')?.classList.toggle('is-browsing',open);
+  $('#agentHistoryBtn')?.setAttribute('aria-pressed',String(open));
+  applyAgentPanelSize();
+  if(open)await agentRenderSessions();
+  else if(agentState.viewing){agentState.viewing=null;agentState.viewConversation=null;agentSyncReview();await agentLoadOwnHistory()}
+}
+function agentSyncReview(){
+  const who=agentState.viewing;
+  agentSyncDraftLayout();agentUpdateBusy();
+  $('#agentPanel')?.classList.toggle('is-reviewing',Boolean(who));
+  const banner=$('#agentReviewBanner');if(banner)banner.textContent=who?`正在查看 ${nameOf(who)} 的对话，只读`:'';
+}
+async function agentRenderSessions(){
+  const box=$('#agentSessions');if(!box||!agentState.sessionsOpen)return;
+  const me=S.user?.id,target=agentState.viewing||me,mine=target===me,version=++agentState.sessionRender;
+  const active=()=>version===agentState.sessionRender&&agentState.sessionsOpen&&S.user?.id===me&&(agentState.viewing||me)===target;
+  let list=[];
+  try{list=(await api('/api/action',{action:'agent.conversations',data:{userId:target}})).conversations||[]}
+  catch(e){if(active())box.innerHTML=`<p class="muted agent-sessions-empty">加载失败：${escapeHTML(e.message||'')}</p>`;return}
+  if(!active())return;
+  const current=mine?agentState.conversationId:agentState.viewConversation;
+  /* A conversation just started has no lines yet, so it is listed by hand. */
+  if(mine&&current&&!list.some(c=>c.id===current))list.unshift({id:current,title:'新对话',count:0,updatedAt:''});
+  const row=c=>`<div class="agent-session${c.id===current?' is-on':''}" data-conv="${escapeHTML(c.id)}"><button type="button" `
+    +`class="agent-session-open"><span>${escapeHTML(c.title)}</span><small>${c.updatedAt?escapeHTML(relTime(c.updatedAt))+' · ':''}`
+    +`${c.count} 条</small></button>${mine?`<button type="button" class="agent-session-act" data-act="rename" title="重命名" `
+    +`aria-label="重命名「${escapeHTML(c.title)}」">${icon('edit')}</button>`:''}${`<button type="button" class="agent-session-act" `
+    +`data-act="delete" title="删除" aria-label="删除「${escapeHTML(c.title)}」">${icon('x')}</button>`}</div>`;
+  box.innerHTML=`<div class="agent-sessions-head"><strong>对话</strong>${mine?`<button type="button" class="agent-icon-btn" `
+    +`id="agentNewChat" title="新对话" aria-label="新对话">${icon('plus')}</button>`:''}</div>`
+    +`${S.user?.admin?`<select id="agentSessionsUser" class="agent-sessions-user" aria-label="查看账户">${S.users.map(u=>`<option `
+    +`value="${escapeHTML(u.id)}"${u.id===target?' selected':''}>${escapeHTML(nameOf(u.id))}</option>`).join('')}</select>`:''}`
+    +`<div class="agent-session-list">${list.map(row).join('')||'<p class="muted agent-sessions-empty">还没有对话</p>'}</div>`;
+  $('#agentNewChat')?.addEventListener('click',agentNewChat);
+  $('#agentSessionsUser')?.addEventListener('change',e=>{
+    if(agentState.busy){e.target.value=agentState.viewing||me;toast('先停止当前执行，再查看其他账户');return}
+    agentState.historyLoad++;agentState.historyLoading=false;agentState.historyError=false;
+    if(typeof agentCancelVoice==='function')agentCancelVoice();
+    const who=e.target.value===me?null:e.target.value;agentState.viewing=who;agentState.viewConversation=null;agentSyncReview();
+    if(!who)agentLoadOwnHistory();else{const box=$('#agentMessages');if(box)box.innerHTML='<p class="muted agent-sessions-empty">选一段对话查看</p>'}
+    agentRenderSessions();
+  });
+  box.querySelectorAll('.agent-session').forEach(el=>{
+    const id=el.dataset.conv,c=list.find(x=>x.id===id);
+    el.querySelector('.agent-session-open').onclick=()=>agentOpenConversation(id);
+    const rename=el.querySelector('[data-act="rename"]');if(rename)rename.onclick=()=>agentRenameConversation(el,c);
+    const drop=el.querySelector('[data-act="delete"]');if(drop)drop.onclick=()=>{
+      /* A second click deletes, so one stray click never does. */
+      if(!drop.dataset.armed){drop.dataset.armed='1';drop.classList.add('is-armed');drop.title='再点一次删除';
+        setTimeout(()=>{if(drop.isConnected){delete drop.dataset.armed;drop.classList.remove('is-armed');drop.title='删除'}},3000);return}
+      agentDeleteConversation(id,target);
+    };
+  });
+}
+async function agentNewChat(){
+  if(agentState.busy||agentState.viewing){toast('先停止当前执行，并切回自己的账户');return}
+  const user=S.user?.id,version=++agentState.historyLoad,id=agentNewConversationId();
+  agentState.historyLoading=true;agentUpdateBusy();
+  try{
+    await api('/api/action',{action:'agent.conversation.create',data:{conversationId:id}});
+    if(version!==agentState.historyLoad||S.user?.id!==user||agentState.viewing)return;
+    agentState.historyError=false;agentUseConversation(id);
+    const list=$('#agentMessages');if(list)agentRenderEmptyState(list);
+    await agentRenderSessions();$('#agentInput')?.focus();
+  }catch(e){if(version===agentState.historyLoad)toast(e.message)}
+  finally{if(version===agentState.historyLoad){agentState.historyLoading=false;agentUpdateBusy()}}
+}
+async function agentOpenConversation(id){
+  if(agentState.viewing){
+    const target=agentState.viewing,user=S.user?.id,version=++agentState.historyLoad;
+    agentState.viewConversation=id;
+    try{const data=await api('/api/action',{action:'agent.history',data:{userId:target,conversationId:id}});
+      if(version!==agentState.historyLoad||S.user?.id!==user||agentState.viewing!==target||agentState.viewConversation!==id)return;
+      agentRenderTranscript($('#agentMessages'),data.messages||[])}catch(e){if(version===agentState.historyLoad)toast(e.message)}
+    agentRenderSessions();return;
+  }
+  if(id===agentState.conversationId&&!agentState.historyError)return;
+  if(agentState.busy){toast('先停止当前执行，再切换对话');return}
+  agentUseConversation(id);await agentLoadOwnHistory();agentRenderSessions();
+}
+function agentRenameConversation(el,c){
+  const open=el.querySelector('.agent-session-open');
+  const input=document.createElement('input');input.className='agent-session-rename';input.maxLength=40;input.value=c.title;
+  input.setAttribute('aria-label','对话名称');open.replaceWith(input);input.focus();input.select();
+  let done=false;
+  const save=async keep=>{
+    if(done)return;done=true;const title=input.value.trim();
+    if(keep&&title&&title!==c.title){try{await api('/api/action',{action:'agent.conversation.rename',data:{conversationId:c.id,title}})}catch(e){toast(e.message)}}
+    agentRenderSessions();
+  };
+  input.onkeydown=e=>{if(imeEnter(e))return;if(e.key==='Enter'){e.preventDefault();save(true)}if(e.key==='Escape')save(false)};
+  input.onblur=()=>save(true);
+}
+async function agentDeleteConversation(id,target){
+  const owner=S.user?.id;
+  if(target===owner&&id===agentState.conversationId&&agentState.busy){toast('先停止当前执行，再删除这段对话');return}
+  try{await api('/api/action',{action:'agent.conversation.delete',data:{userId:target,conversationId:id}})}catch(e){toast(e.message);return}
+  if(S.user?.id!==owner)return;
+  const deletedOwnActive=target===owner&&id===agentState.conversationId;
+  if(target===owner){
+    if(deletedOwnActive)agentUseConversation(null);
+    agentState.conversationDrafts.delete(id);
+  }
+  if((agentState.viewing||owner)===target){
+    if(agentState.viewing&&agentState.viewConversation===id){agentState.viewConversation=null;const box=$('#agentMessages');if(box)box.innerHTML=''}
+    else if(deletedOwnActive)await agentLoadOwnHistory();
+  }
+  toast('对话已删除');agentRenderSessions();
 }
 function agentSetConfigVisible(show){
   $('#agentConfig')?.classList.toggle('hidden',!show);
@@ -3000,6 +3280,7 @@ async function agentRequest(messages,planning=false){
   const controller=new AbortController();agentState.controller=controller;
   try{
     const data=await api('/api/agent/chat',{messages,sessionId:agentState.sessionId,planning},{signal:controller.signal});
+    if(agentState.sessionsOpen&&!agentState.viewing)agentRenderSessions();
     const text=agentExtractText(data);if(!text)throw new Error('服务端 Agent 未返回文本');return String(text);
   }finally{if(agentState.controller===controller)agentState.controller=null}
 }
@@ -3060,7 +3341,7 @@ function agentPlanIntent(text){
    next message is drafted. The typed marks above still work for people who
    prefer them, and stored lines keep the mark so history can label them. */
 function agentTogglePlan(){
-  const input=$('#agentInput');if(!input||agentState.busy)return;
+  const input=$('#agentInput');if(!input||agentState.busy||agentWriteBlocked())return;
   const intent=agentPlanIntent(input.value);
   if(intent.plan){input.value=intent.body;agentState.plan=false}
   else if(!agentState.plan&&input.value.trim()){const text=input.value;input.value='';agentState.plan=false;agentSyncPlanButton();agentPlanSubmit(text);return}
@@ -3205,7 +3486,7 @@ function agentRecordStep(display,forModel){
 }
 function agentUpdateBusy(){
   const send=$('#agentSendBtn'),stop=$('#agentStopBtn'),input=$('#agentInput');
-  if(send){send.disabled=agentState.busy;send.textContent=agentState.busy?'…':'发送'}
+  if(send){send.disabled=agentState.busy||agentState.historyLoading||agentState.historyError||Boolean(agentState.viewing);send.textContent=agentState.busy?'…':agentState.historyLoading?'加载中…':'发送'}
   if(stop){stop.classList.toggle('hidden',!agentState.busy);stop.textContent=agentState.steps?`停止（已执行 ${agentState.steps} 步）`:'停止'}
   const pause=$('#agentPauseBtn');
   if(pause){pause.classList.toggle('hidden',!agentState.busy);pause.textContent=agentState.paused?'继续':'暂停';pause.setAttribute('aria-pressed',String(agentState.paused))}
@@ -3277,13 +3558,14 @@ function agentRunOne(proposal){
     const buttons=card.querySelector('.agent-action-buttons');
     const cancel=()=>{card.remove();agentHalt();finish({cancelled:true})};
     const execute=async()=>{
+      if(agentWriteBlocked()){finish({cancelled:true});return}
       if(agentState.pendingExecuting)return;
       agentState.pendingExecuting=true;
       if(!await agentWaitForResume()){agentState.pendingExecuting=false;finish({cancelled:true});return}
       buttons.innerHTML='<span class="agent-action-done">执行中…</span>';
       const before=agentFingerprint();
       try{
-        const result=await api('/api/action',{action:'agent.execute',data:{action:proposal.action,data:payload,confirmed:true}});
+        const result=await api('/api/action',{action:'agent.execute',data:{action:proposal.action,data:payload,confirmed:true,sessionId:agentState.sessionId}});
         await refresh();
         /* The ledger is read again here rather than trusting the return value:
            a step that reports success but changed nothing has to be visible to
@@ -3373,7 +3655,7 @@ async function agentLoop(context){
   return steps;
 }
 async function agentSubmit(){
-  const input=$('#agentInput'),text=input?.value.trim();if(!text)return;
+  const input=$('#agentInput'),text=input?.value.trim();if(!text||agentWriteBlocked())return;
   /* Dropping this on the floor is what made a stuck run look like it was
      eating messages: the text stayed in the box and nothing happened. */
   if(agentState.busy){
@@ -3407,6 +3689,7 @@ async function agentSubmit(){
    the normal dialogs, under the user's own rules, so this works whatever the
    assistant itself is allowed to do. */
 async function agentPlanSubmit(body){
+  if(agentWriteBlocked())return;
   const input=$('#agentInput');
   const source=body===undefined?(input?.value||''):body;
   const text=agentPlanIntent(source).body.trim();
@@ -3560,7 +3843,7 @@ function planConfirmLabel(n){
 }
 function agentPlanBoard(raw){
   const list=$('#agentDraftCards')||$('#agentMessages');if(!list)return null;
-  const board={...planDraft(raw),note:raw.clean||'',closed:false,busy:false,history:[]};
+  const board={...planDraft(raw),conversationId:agentState.conversationId,note:raw.clean||'',closed:false,busy:false,history:[]};
   board.el=document.createElement('div');
   board.el.className='agent-message assistant plan-board';
   planActivate(board);
@@ -3578,9 +3861,7 @@ function planActivate(board){
 }
 function planRender(board,entering=false){
   const el=board.el;
-  $('#agentPanel')?.classList.toggle('is-planning',Boolean(agentState.planBoard&&!agentState.planBoard.closed));
-  $('#agentDraftArea')?.classList.toggle('hidden',!agentState.planBoard||agentState.planBoard.closed);
-  $('#agentDraftToggle')?.classList.toggle('hidden',!agentState.planBoard);
+  agentSyncDraftLayout();
   const head=`<div class="plan-board-head">${icon('sparkles')}<strong>起草了${board.projects.length?` ${board.projects.length} 个项目、`:' '}${board.tasks.length} 个任务</strong><span>${escapeHTML(board.note)}</span></div>`;
   if(board.closed){
     el.innerHTML=head+`<div class="plan-foot is-closed"><span class="plan-sum">${escapeHTML(board.closedNote||'草稿已收起，没有创建任何内容')}</span><button type="button" class="ghost-btn plan-reopen">重新打开</button></div>`;
@@ -3642,7 +3923,8 @@ function planAddTask(board){
    through the normal action and keeps its own error if it is refused, so the
    user fixes that card and confirms again without redoing the rest. */
 async function planSubmit(board){
-  if(board.busy||agentState.busy)return;
+  if(board.busy||agentState.busy||agentWriteBlocked())return;
+  if(board.conversationId!==undefined&&(board!==agentState.planBoard||board.conversationId!==agentState.conversationId))return;
   const open=board.projects.concat(board.tasks).filter(x=>x.state!=='done');
   if(open.some(x=>Object.keys(planProblems(board,x)).length)){
     planRender(board);board.el.querySelector('[aria-invalid="true"]')?.focus();toast('请先补齐标红字段');return;
@@ -4058,8 +4340,9 @@ function initChatUI(){
   updateChatDot();
 }
 function initAgentUI(){
-  $('#agentBtn')?.addEventListener('click',async()=>{$('#agentPanel').classList.remove('hidden');renderAgentCapability();await agentLoadOwnHistory();await agentLoadServerConfig();agentSyncPlanButton();agentInitVoice();$('#agentInput').focus()});
-  $('#agentHistoryBtn')?.addEventListener('click',()=>agentShowHistory());
+  initAgentPanelResize();
+  $('#agentBtn')?.addEventListener('click',async()=>{$('#agentPanel').classList.remove('hidden');applyAgentPanelSize();renderAgentCapability();await agentLoadOwnHistory();await agentLoadServerConfig();agentSyncPlanButton();agentInitVoice();$('#agentInput').focus()});
+  $('#agentHistoryBtn')?.addEventListener('click',()=>agentToggleSessions());
   $('#agentCloseBtn')?.addEventListener('click',()=>{agentStopVoice();$('#agentPanel').classList.add('hidden')});
   $('#agentStopBtn')?.addEventListener('click',()=>agentHalt('已停止，草稿和已执行记录保留。'));
   $('#agentPauseBtn')?.addEventListener('click',()=>agentTogglePause());
@@ -4103,7 +4386,7 @@ function initAgentUI(){
    Web Speech API as a zero-config fallback. The transcript only lands in the
    input box where you can edit it before sending; nothing is auto-sent.
    ------------------------------------------------------------------------- */
-const voice={recorder:null,stream:null,chunks:[],recognition:null,engine:null,active:false,base:'',final:'',interim:'',lang:'',startedAt:0};
+const voice={recorder:null,stream:null,chunks:[],recognition:null,engine:null,active:false,base:'',final:'',interim:'',lang:'',startedAt:0,generation:0};
 function agentSpeechRecognition(){
   return window.SpeechRecognition||window.webkitSpeechRecognition||null;
 }
@@ -4164,6 +4447,7 @@ function agentVoiceStart(){
 }
 /* ---------- server engine: record with MediaRecorder, transcribe on upload ---------- */
 async function agentVoiceStartRecording(){
+  const generation=voice.generation;
   let stream;
   try{
     stream=await navigator.mediaDevices.getUserMedia({audio:true});
@@ -4171,6 +4455,7 @@ async function agentVoiceStartRecording(){
     toast('没有拿到麦克风权限，请在地址栏允许后重试');
     return;
   }
+  if(generation!==voice.generation){stream.getTracks().forEach(track=>track.stop());return}
   const mime=typeof MediaRecorder.isTypeSupported==='function'
     ? ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4'].find(t=>MediaRecorder.isTypeSupported(t))||''
     : '';
@@ -4184,6 +4469,7 @@ async function agentVoiceStartRecording(){
   agentVoiceState();
 }
 async function agentVoiceFinishRecording(){
+  const generation=voice.generation;
   const chunks=voice.chunks.slice();voice.chunks=[];
   voice.stream?.getTracks().forEach(track=>{try{track.stop()}catch(_){}});
   voice.stream=null;
@@ -4193,11 +4479,13 @@ async function agentVoiceFinishRecording(){
   if(bar)bar.textContent='正在转写…';
   try{
     const result=await apiBlob(TRANSCRIBE_ENDPOINT,blob);
+    if(generation!==voice.generation)return;
     agentVoiceAppend(result?.text||'');
     if(!result?.text)toast('没有识别到内容，再说一次试试');
   }catch(err){
-    toast(err?.message||'语音转写失败');
+    if(generation===voice.generation)toast(err?.message||'语音转写失败');
   }finally{
+    if(generation!==voice.generation)return;
     voice.recorder=null;agentVoiceState();
     const bar=$('#agentVoiceBar');
     if(bar)bar.textContent='正在聆听…说出来吧，说完再点一次麦克风';
@@ -4207,12 +4495,13 @@ async function agentVoiceFinishRecording(){
 function agentVoiceStartRecognition(){
   const Engine=agentSpeechRecognition();
   if(!Engine)return;
-  const recognition=new Engine();
+  const generation=voice.generation,recognition=new Engine();
   recognition.lang=agentVoiceLang();recognition.continuous=true;recognition.interimResults=true;
   voice.recognition=recognition;voice.engine='browser';
   voice.base=$('#agentInput')?.value||'';voice.final='';voice.interim='';
-  recognition.onstart=()=>{voice.active=true;agentVoiceState();agentVoiceRender()};
+  recognition.onstart=()=>{if(generation!==voice.generation)return;voice.active=true;agentVoiceState();agentVoiceRender()};
   recognition.onresult=event=>{
+    if(generation!==voice.generation)return;
     let interim='',final='';
     for(let i=event.resultIndex;i<event.results.length;i+=1){
       const result=event.results[i],text=result[0]?.transcript||'';
@@ -4222,6 +4511,7 @@ function agentVoiceStartRecognition(){
     voice.interim=interim;agentVoiceRender();
   };
   recognition.onerror=event=>{
+    if(generation!==voice.generation)return;
     const reason=event?.error||'';
     voice.active=false;voice.recognition=null;agentVoiceState();
     if(reason==='not-allowed'||reason==='service-not-allowed')toast('浏览器没有麦克风权限，请在地址栏允许后重试');
@@ -4229,6 +4519,7 @@ function agentVoiceStartRecognition(){
     else if(reason!=='aborted'&&reason!=='no-speech')toast('语音识别中断，请重试');
   };
   recognition.onend=()=>{
+    if(generation!==voice.generation)return;
     voice.active=false;voice.recognition=null;voice.interim='';agentVoiceRender();agentVoiceState();
   };
   try{recognition.start()}catch(_){voice.recognition=null}
@@ -4242,6 +4533,16 @@ function agentStopVoice(){
     voice.stream=null;agentVoiceState();
   }
   agentVoiceState();
+}
+/* Changing conversations cancels audio instead of delivering its late text
+   into the new composer. A normal Stop still transcribes in the same chat. */
+function agentCancelVoice(){
+  voice.generation++;
+  if(voice.recognition)for(const key of ['onstart','onresult','onerror','onend'])voice.recognition[key]=null;
+  if(voice.recorder){voice.recorder.onstop=null;voice.recorder.ondataavailable=null}
+  agentStopVoice();
+  voice.stream?.getTracks().forEach(track=>{try{track.stop()}catch(_){}});voice.stream=null;
+  voice.chunks=[];voice.base='';voice.final='';voice.interim='';
 }
 function agentToggleVoice(){
   if(!agentVoiceEngine())return;

@@ -164,7 +164,31 @@ class RepeatFeatureTests(unittest.TestCase):
             self.store.action(self.store.user('superadmin'), 'account.toggle', {'id': 'superadmin', 'active': False})
         self.assertTrue(self.store.user('superadmin')['admin'])
 
+    def test_agent_conversations_list_rename_and_delete(self):
+        self.store.record_agent_message('test001', 'user', '旧的一句')
+        self.store.record_agent_message('test001', 'user', '✦ 规划下周的发布', {'conversation': 'c1'})
+        self.store.record_agent_message('test001', 'assistant', '好的', {'conversation': 'c1'})
+        self.store.record_agent_message('test001', 'user', '另一个话题', {'conversation': 'c2'})
+        self.store.db.commit()
+        listed = self.store.action(self.member, 'agent.conversations', {})['conversations']
+        self.assertEqual([(c['id'], c['title'], c['count']) for c in listed],
+                         [('c2', '另一个话题', 1), ('c1', '规划下周的发布', 2), ('legacy', '早期记录', 1)])
+        only = self.store.action(self.member, 'agent.history', {'conversationId': 'c1'})['messages']
+        self.assertEqual([m['content'] for m in only], ['✦ 规划下周的发布', '好的'])
+        legacy = self.store.action(self.member, 'agent.history', {'conversationId': 'legacy'})['messages']
+        self.assertEqual([m['content'] for m in legacy], ['旧的一句'])
+        self.store.action(self.member, 'agent.conversation.rename', {'conversationId': 'c1', 'title': '发布规划'})
+        titles = {c['id']: c['title'] for c in self.store.action(self.member, 'agent.conversations', {})['conversations']}
+        self.assertEqual(titles['c1'], '发布规划')
+        with self.assertRaises(Problem):
+            self.store.action(self.member, 'agent.conversations', {'userId': 'superadmin'})
+        self.assertEqual(len(self.store.action(self.admin, 'agent.conversations', {'userId': 'test001'})['conversations']), 3)
+        self.store.action(self.member, 'agent.conversation.delete', {'conversationId': 'c1'})
+        self.assertEqual([c['id'] for c in self.store.action(self.member, 'agent.conversations', {})['conversations']], ['c2', 'legacy'])
+        self.assertEqual(self.store.all('agent_conversations'), [])
+
     def test_agent_history_is_private_and_clearable(self):
+
         self.store.record_agent_message('superadmin', 'user', '帮我建任务')
         self.store.record_agent_message('superadmin', 'assistant', '好的')
         self.store.record_agent_message('test001', 'user', '我的查询')
@@ -177,6 +201,25 @@ class RepeatFeatureTests(unittest.TestCase):
         self.store.action(self.member, 'agent.history.clear', {})
         self.assertEqual(self.store.action(self.member, 'agent.history', {})['messages'], [])
         self.assertEqual(len(self.store.action(self.admin, 'agent.history', {})['messages']), 2)
+
+    def test_empty_conversation_is_persistent_renameable_and_deleteable(self):
+        self.store.action(self.member, 'agent.conversation.create', {'conversationId': 'empty'})
+        listing = self.store.action(self.member, 'agent.conversations', {})['conversations']
+        self.assertEqual([(c['id'], c['title'], c['count']) for c in listing], [('empty', '新对话', 0)])
+        self.store.action(self.member, 'agent.conversation.rename', {'conversationId': 'empty', 'title': '空白规划'})
+        self.store.action(self.member, 'agent.conversation.create', {'conversationId': 'empty'})
+        self.assertEqual(self.store.action(self.member, 'agent.conversations', {})['conversations'][0]['title'], '空白规划')
+        with self.assertRaises(Problem):
+            self.store.action(self.store.user('test002'), 'agent.conversations', {'userId': 'test001'})
+        self.store.action(self.member, 'agent.conversation.delete', {'conversationId': 'empty'})
+        self.assertEqual(self.store.action(self.member, 'agent.conversations', {})['conversations'], [])
+
+    def test_new_conversation_uses_first_message_until_explicitly_renamed(self):
+        self.store.action(self.member, 'agent.conversation.create', {'conversationId': 'auto'})
+        self.store.record_agent_message('test001', 'user', '安排下周复盘', {'conversation': 'auto'})
+        self.store.db.commit()
+        listing = self.store.action(self.member, 'agent.conversations', {})['conversations']
+        self.assertEqual([(c['title'], c['count']) for c in listing], [('安排下周复盘', 1)])
 
     def test_llm_config_is_admin_only_and_key_is_masked(self):
         with self.assertRaises(Problem):
