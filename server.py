@@ -932,7 +932,12 @@ class Store:
             return False
         if p.get('end') and p['end'] < now().date().isoformat():
             return False
-        return bool(user['admin'] or p['owner']==user['id'] or p['creator']==user['id'] or p['members'].get(user['id'])=='accepted')
+        return self.can_read_project_files(user, p)
+
+    def can_read_project_files(self, user, p):
+        """Project participants keep read access to their archived attachments."""
+        return bool(user['admin'] or p['owner']==user['id'] or p['creator']==user['id']
+                    or p['members'].get(user['id'])=='accepted')
 
     def project_owner(self, user, p):
         if not user['admin'] and p['owner']!=user['id']:
@@ -956,7 +961,7 @@ class Store:
     def read_file(self, user, id):
         with self.lock:
             f=self.get('files',id);p=self.get('projects',f['projectId'])
-            if not self.can_view_project(user,p):raise Problem(403,'无权访问该文件')
+            if not self.can_read_project_files(user,p):raise Problem(403,'无权访问该文件')
             row=self.db.execute('SELECT data FROM file_blobs WHERE id=?',(id,)).fetchone()
             if not row:raise Problem(404,'文件内容已丢失')
             return f,bytes(row['data'])
@@ -1408,7 +1413,16 @@ class Store:
             self.advance_due_tasks()
             self.settle_legacy_task_approvals()
             self.accept_pending_invitations()
-            projects=[p for p in self.all('projects') if self.can_view_project(user,p)]
+            all_projects=self.all('projects')
+            projects=[p for p in all_projects if self.can_view_project(user,p)]
+            all_files=self.all('files')
+            file_project_ids={f.get('projectId') for f in all_files}
+            file_archives=[{k:p.get(k) for k in ('id','name','owner','status','end','completedAt','folderId')}
+                           for p in all_projects if p['id'] in file_project_ids
+                           and not self.can_view_project(user,p) and self.can_read_project_files(user,p)]
+            file_pids={p['id'] for p in projects+file_archives}
+            folder_ids={p.get('folderId') for p in projects+file_archives}
+            folders=[f for f in self.all('folders') if user['admin'] or f['id'] in folder_ids]
             all_tasks=self.all('tasks')
             superseded=self._superseded_map(all_tasks)
             tasks=[]
@@ -1430,7 +1444,7 @@ class Store:
             owned={p['id'] for p in projects if p['owner']==user['id']}
             task_requests=[r for r in self.all('task_requests') if user['admin'] or r.get('requester')==user['id'] or r.get('projectId') in owned]
             automation=next((x.get('value',{}) for x in self.all('settings') if x.get('id')=='automation'),{})
-            return {'user':user,'users':self.users(),'today':now().date().isoformat(),'projects':projects,'folders':self.all('folders'),'files':[f for f in self.all('files') if f.get('projectId') in pids],'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees'] or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':[n for n in self.all('notifications') if n['to']==user['id'] and '12:00 初稿' not in str(n.get('title',''))], 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'taskRequests':task_requests, 'creationRules':self.creation_rules(user), 'creationPolicy':self.creation_policy() if user.get('role')=='superadmin' else None, 'accountOrder':next((x.get('value') or [] for x in self.all('settings') if x.get('id')=='account_order'),[]) if user['admin'] else [], 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or self.get('projects',s['projectId'])['owner']==user['id'])], 'chat':self.chat_summary(user),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.all('audit')[-60:] if user['admin'] else []}
+            return {'user':user,'users':self.users(),'today':now().date().isoformat(),'projects':projects,'folders':folders,'fileArchives':file_archives,'files':[f for f in all_files if f.get('projectId') in file_pids],'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees'] or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':[n for n in self.all('notifications') if n['to']==user['id'] and '12:00 初稿' not in str(n.get('title',''))], 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'taskRequests':task_requests, 'creationRules':self.creation_rules(user), 'creationPolicy':self.creation_policy() if user.get('role')=='superadmin' else None, 'accountOrder':next((x.get('value') or [] for x in self.all('settings') if x.get('id')=='account_order'),[]) if user['admin'] else [], 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or self.get('projects',s['projectId'])['owner']==user['id'])], 'chat':self.chat_summary(user),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.all('audit')[-60:] if user['admin'] else []}
 
     def diary_statistics(self, viewer, start=None, end=None):
         """Return daily completion/load summaries for the diary dashboard.
@@ -2255,6 +2269,7 @@ class Store:
             return self.put('projects',p)
         if action=='file.delete':
             f=self.get('files',d.get('id'));p=self.get('projects',f['projectId'])
+            if not self.can_view_project(user,p):raise Problem(403,'归档文件仅供读取，或你已无权访问该项目')
             if not (user['admin'] or p['owner']==user['id'] or f.get('uploader')==user['id']):
                 raise Problem(403,'只有上传者、项目 Owner 或管理员可以删除文件')
             self.drop_file(f['id'])

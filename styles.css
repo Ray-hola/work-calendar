@@ -3700,6 +3700,12 @@ select {
   min-width: 0;
 }
 
+.project-space-layout .project-node-actions {
+  min-width: 0;
+  max-width: 100%;
+  flex-shrink: 1;
+}
+
 .project-nav {
   position: sticky;
   top: 12px;
@@ -4188,7 +4194,7 @@ select {
   color: var(--accent-dark);
 }
 
-@media (max-width: 760px) {
+@media (max-width: 1180px) {
   .project-space-layout {
     grid-template-columns: 1fr;
     gap: 12px;
@@ -4198,7 +4204,9 @@ select {
     position: static;
     max-height: 240px;
   }
+}
 
+@media (max-width: 760px) {
   .space-section {
     padding: 14px;
   }

@@ -54,7 +54,7 @@ function hydrateIcons(root=document){
     el.dataset.iconReady='1';
   });
 }
-let S={user:null,users:[],tasks:[],projects:[],folders:[],files:[],achievements:[],logs:[],reports:[],diaries:[],diaryStats:[],notifications:[],requests:[],editRequests:[],suggestions:[],profiles:[],today:''};
+let S={user:null,users:[],tasks:[],projects:[],folders:[],files:[],fileArchives:[],achievements:[],logs:[],reports:[],diaries:[],diaryStats:[],notifications:[],requests:[],editRequests:[],suggestions:[],profiles:[],today:''};
 /* The server always answers in JSON, but the tunnel in front of it does not:
    a request that runs past its time limit comes back as an HTML error page.
    Safari reports parsing that as "The string did not match the expected
@@ -544,7 +544,7 @@ function bindProjectTaskDrag(){
   });
 }
 function renderProjects(){
-  if(UI.space&&!visibleProjects().some(p=>p.id===UI.space))UI.space='';
+  if(UI.space&&![...visibleProjects(),...(S.fileArchives||[])].some(p=>p.id===UI.space))UI.space='';
   renderProjectNav();
   $('#projectOverview')?.classList?.toggle('hidden',Boolean(UI.space));
   $('#projectSpace')?.classList?.toggle('hidden',!UI.space);
@@ -662,7 +662,8 @@ function renderProjectNav(){
     +`<button class="project-nav-item project-nav-all${UI.space?'':' is-on'}" data-space="">${icon('layout-grid')}`
     +`<span>全部项目</span><b>${visibleProjects().length}</b></button>`
     +folders.map(folder).join('')
-    +(loose.length?`${folders.length?'<div class="project-nav-label">未归类</div>':''}${loose.map(item).join('')}`:'');
+    +(loose.length?`${folders.length?'<div class="project-nav-label">未归类</div>':''}${loose.map(item).join('')}`:'')
+    +((S.fileArchives||[]).length?`<div class="project-nav-label">归档文件</div>${S.fileArchives.map(item).join('')}`:'');
   $$('#projectNav [data-space]').forEach(b=>b.onclick=()=>openProjectSpace(b.dataset.space));
   $$('#projectNav [data-folder]').forEach(b=>b.onclick=()=>toggleFolder(b.dataset.folder));
   $$('#projectNav [data-edit-folder]').forEach(b=>b.onclick=()=>editFolder(b.dataset.editFolder));
@@ -670,7 +671,8 @@ function renderProjectNav(){
 }
 function openProjectSpace(id){
   UI.space=id||'';if(id)clearFresh([id]);
-  renderProjects();$('.main-content')?.scrollTo?.({top:0,behavior:'smooth'});
+  if(UI.view!=='projects')switchView('projects');else renderProjects();
+  $('.main-content')?.scrollTo?.({top:0,behavior:'smooth'});
 }
 function editFolder(id){
   const f=(S.folders||[]).find(x=>x.id===id),count=f?S.projects.filter(p=>p.folderId===f.id).length:0;
@@ -689,7 +691,13 @@ function editFolder(id){
   if(drop)drop.onclick=async()=>{try{await act('folder.delete',{id:f.id});closeModal()}catch(e){}};
 }
 function renderProjectSpace(id){
-  const p=S.projects.find(x=>x.id===id),box=$('#projectSpace');if(!p||!box)return;
+  const archive=(S.fileArchives||[]).find(x=>x.id===id),p=S.projects.find(x=>x.id===id)||archive,box=$('#projectSpace');if(!p||!box)return;
+  if(archive){
+    $('#projectsView .eyebrow').textContent='项目空间 · 归档文件';$('#projectsView h1').textContent=p.name;
+    box.innerHTML=`<section class="space-section"><div class="space-head"><h2>项目文件归档</h2></div>`
+      +`<p class="muted">${escapeHTML(projectStatus(p))} · Owner ${escapeHTML(nameOf(p.owner))}。附件保留供项目成员读取。</p></section>`
+      +projectFiles(p,true);return;
+  }
   const manage=canManageProject(p),folder=(S.folders||[]).find(f=>f.id===p.folderId);
   $('#projectsView .eyebrow').textContent=`项目空间 · ${folder?folder.name:'未归类'}`;
   $('#projectsView h1').textContent=p.name;
@@ -747,18 +755,18 @@ function projectStaffing(p,manage){
 const fileExt=name=>(String(name).match(/\.([a-z0-9]{1,5})$/i)?.[1]||'FILE').toUpperCase();
 const fileSize=n=>n>=1048576?`${(n/1048576).toFixed(1)} MB`:n>=1024?`${Math.round(n/1024)} KB`:`${n} B`;
 const MAX_FILE_MB=20;
-function projectFiles(p){
+function projectFiles(p,readonly=false){
   const files=(S.files||[]).filter(f=>f.projectId===p.id).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
-  const canDrop=f=>S.user?.admin||p.owner===S.user?.id||f.uploader===S.user?.id;
+  const canDrop=f=>!readonly&&(S.user?.admin||p.owner===S.user?.id||f.uploader===S.user?.id);
   const row=f=>`<div class="file-row"><span class="file-ext">${escapeHTML(fileExt(f.name))}</span><a class="file-name" href="/api/files/`
     +`${encodeURIComponent(f.id)}" download="${escapeHTML(f.name)}">${escapeHTML(f.name)}</a><small>${escapeHTML(fileSize(f.size))} · `
     +`${escapeHTML(nameOf(f.uploader))} · <span title="${escapeHTML(f.createdAt)}">${escapeHTML(relTime(f.createdAt))}</span></small>`
     +`${canDrop(f)?`<button class="ghost-btn file-delete" data-file="${escapeHTML(f.id)}" aria-label="删除 ${escapeHTML(f.name)}">`
     +`${icon('x')}</button>`:''}</div>`;
   return `<section class="space-section space-files" id="spaceFiles"><div class="space-head"><h2>项目文件 <span>${files.length}</span></h2>`
-    +`<label class="secondary-btn space-upload">${icon('upload')}上传文件<input type="file" id="spaceFileInput" multiple hidden></label></div>`
+    +`${readonly?'':`<label class="secondary-btn space-upload">${icon('upload')}上传文件<input type="file" id="spaceFileInput" multiple hidden></label>`}</div>`
     +`${files.length?`<div class="file-list">${files.map(row).join('')}</div>`:''}`
-    +`<p class="space-drop-hint">把文件拖到这里，或点「上传文件」。单个文件不超过 ${MAX_FILE_MB}MB。</p></section>`;
+    +`<p class="space-drop-hint">${readonly?'归档文件仅供下载。':`把文件拖到这里，或点「上传文件」。单个文件不超过 ${MAX_FILE_MB}MB。`}</p></section>`;
 }
 async function uploadProjectFiles(p,list){
   const files=[...list];if(!files.length)return;
@@ -776,11 +784,20 @@ async function uploadProjectFiles(p,list){
 /* Background and 分工 save in place without a full refresh, so typing in one
    field and moving to the next never loses the caret. */
 function bindProjectSpace(p){
-  const save=async(data,done)=>{try{await api('/api/action',{action:'project.space',data:{id:p.id,...data}});Object.assign(p,data);done?.()}catch(e){toast(e.message)}};
+  const save=async(data,done)=>{try{await api('/api/action',{action:'project.space',data:{id:p.id,...data}});Object.assign(p,data);done?.();return true}catch(e){toast(e.message);return false}};
   const bg=$('#spaceBackground'),btn=$('#saveBackground');
   if(bg&&btn){
-    bg.oninput=()=>{btn.disabled=false;btn.textContent='保存'};
-    btn.onclick=()=>save({background:docText(bg)},()=>{btn.disabled=true;btn.textContent='已保存';toast('项目背景已保存')});
+    let saved=docText(bg),saving=false;
+    const sync=()=>{const dirty=docText(bg)!==saved;btn.disabled=saving||!dirty;btn.textContent=saving?'保存中…':dirty?'保存':'已保存'};
+    bg.oninput=sync;
+    btn.onclick=async()=>{
+      if(saving)return;
+      const submitted=docText(bg);saving=true;sync();
+      if(await save({background:submitted})){
+        saved=submitted;toast(docText(bg)===saved?'项目背景已保存':'已保存提交的版本，仍有未保存修改');
+      }
+      saving=false;sync();
+    };
   }
   $$('#projectSpace .staff-role').forEach(input=>input.onchange=()=>{
     const staffing={};$$('#projectSpace .staff-role').forEach(x=>{if(x.value.trim())staffing[x.dataset.member]=x.value.trim()});
@@ -1657,9 +1674,10 @@ function renderAchievements(){
   if(!grid)return;
   grid.innerHTML=projects.map(p=>{
     const tasks=sortTasks(projectTasks(p)),done=tasks.filter(t=>t.status==='done').length,stages=achievementLifecycle(p,tasks);
-    return `<article class="achievement-card" data-project="${escapeHTML(p.id)}"><div class="achievement-card-head"><div><span class="achievement-kicker">已归档成果</span><h2>${escapeHTML(p.name)}</h2><p>${escapeHTML(p.desc||'暂无项目描述')}</p></div><span class="achievement-status">${projectStatus(p)}</span></div><div class="achievement-meta"><span>Owner · <b>${escapeHTML(p.owner||'—')}</b></span><span>任务完成 · <b>${done}/${tasks.length}</b></span><span>完成于 · <b>${escapeHTML(String(p.completedAt||p.end||'—').slice(0,10))}</b></span></div><div class="achievement-actions"><button class="ghost-btn open-channel-archive" data-project="${escapeHTML(p.id)}" data-name="${escapeHTML(p.name)}">沟通记录</button></div><ol class="achievement-lifecycle">${stages.map((s,i)=>`<li class="${s.at?'is-complete':''}"><i></i><span><b>${escapeHTML(s.label)}</b><small>${escapeHTML(s.at||'未记录')}${s.meta?` · ${escapeHTML(s.meta)}`:''}</small></span>${i<stages.length-1?'<em></em>':''}</li>`).join('')}</ol>${p.completionReport?`<div class="achievement-report"><span>结项报告</span><p>${escapeHTML(p.completionReport)}</p></div>`:''}<div class="achievement-actions"><button class="secondary-btn achievement-open" data-project="${escapeHTML(p.id)}">查看项目详情</button></div></article>`;
+    return `<article class="achievement-card" data-project="${escapeHTML(p.id)}"><div class="achievement-card-head"><div><span class="achievement-kicker">已归档成果</span><h2>${escapeHTML(p.name)}</h2><p>${escapeHTML(p.desc||'暂无项目描述')}</p></div><span class="achievement-status">${projectStatus(p)}</span></div><div class="achievement-meta"><span>Owner · <b>${escapeHTML(p.owner||'—')}</b></span><span>任务完成 · <b>${done}/${tasks.length}</b></span><span>完成于 · <b>${escapeHTML(String(p.completedAt||p.end||'—').slice(0,10))}</b></span></div><div class="achievement-actions">${(S.fileArchives||[]).some(x=>x.id===p.id)?`<button class="ghost-btn achievement-files" data-project="${escapeHTML(p.id)}">项目文件</button>`:''}<button class="ghost-btn open-channel-archive" data-project="${escapeHTML(p.id)}" data-name="${escapeHTML(p.name)}">沟通记录</button></div><ol class="achievement-lifecycle">${stages.map((s,i)=>`<li class="${s.at?'is-complete':''}"><i></i><span><b>${escapeHTML(s.label)}</b><small>${escapeHTML(s.at||'未记录')}${s.meta?` · ${escapeHTML(s.meta)}`:''}</small></span>${i<stages.length-1?'<em></em>':''}</li>`).join('')}</ol>${p.completionReport?`<div class="achievement-report"><span>结项报告</span><p>${escapeHTML(p.completionReport)}</p></div>`:''}<div class="achievement-actions"><button class="secondary-btn achievement-open" data-project="${escapeHTML(p.id)}">查看项目详情</button></div></article>`;
   }).join('');
   $$('#achievementGrid .achievement-open').forEach(b=>b.onclick=()=>openWorkLogDetail('',b.dataset.project,'project'));
+  $$('#achievementGrid .achievement-files').forEach(b=>b.onclick=()=>openProjectSpace(b.dataset.project));
 }
 const DAY_MS=86400000;
 const dateNumber=iso=>{
