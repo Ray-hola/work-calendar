@@ -1,6 +1,7 @@
 """Unified drafts never write; reviewed cards retain normal rights and versions."""
 import json
 import re
+import uuid
 import unittest
 import test_agent_workspace as support
 from agent_workspace import WorkspaceError
@@ -17,8 +18,9 @@ class WorkCardTests(unittest.TestCase):
         return self.store.action(user or self.admin, 'work.cards.preview', {kind+'s':[{**fields,'operation':operation}]})[kind+'s'][0]
 
     def apply(self, kind, card, user=None, **extra):
-        return self.store.action(user or self.admin, 'work.card.apply', {'kind':kind,'operation':card['operation'],
-            'id':card.get('id'),'revision':card.get('revision'),'changes':{k:v for k,v in card.items() if k not in ('before','revision','impact','id','operation')},'confirmed':True,**extra})
+        card.setdefault('cardId',uuid.uuid4().hex)
+        return self.store.action(user or self.admin, 'work.card.apply', {'kind':kind,'operation':card['operation'],'cardId':card['cardId'],
+            'id':card.get('id'),'revision':card.get('revision'),'changes':{k:v for k,v in card.items() if k not in ('before','revision','impact','id','operation','cardId')},'confirmed':True,**extra})
 
     def make_project(self):
         return self.store.action(self.admin, 'project.create', {'name':'原项目','owner':'owner','start':'2026-11-03','cycle':'infinite','members':['mate']})

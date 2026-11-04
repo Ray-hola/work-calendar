@@ -4,7 +4,7 @@ import unittest
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
-from server import Store, Problem, AGENT_WRITE_TOOLS, CALENDAR_END
+from server import Store, Problem, AGENT_WRITE_TOOLS, CALENDAR_END, now
 
 
 class RepeatFeatureTests(unittest.TestCase):
@@ -15,7 +15,7 @@ class RepeatFeatureTests(unittest.TestCase):
             self.store.create_user(uid, 'password-long', uid == 'superadmin')
         self.admin = self.store.user('superadmin')
         self.member = self.store.user('test001')
-        self.today = date.today()
+        self.today = now().date()
 
     def tearDown(self):
         self.store.close(); self.tmp.cleanup()
@@ -108,8 +108,8 @@ class RepeatFeatureTests(unittest.TestCase):
         self.assertEqual(error.exception.status, 409)
         self.assertFalse(any(t.get('name') == 'Agent 创建的任务' for t in self.store.all('tasks')))
         with self.assertRaises(Problem):
-            self.store.action(self.admin, 'work.card.apply', {'kind':'task','operation':'create','changes':proposal['data']})
-        applied = self.store.action(self.admin, 'work.card.apply', {'kind':'task','operation':'create','changes':proposal['data'],'confirmed':True})
+            self.store.action(self.admin, 'work.card.apply', {'cardId':'test-stable-card-identity','kind':'task','operation':'create','changes':proposal['data']})
+        applied = self.store.action(self.admin, 'work.card.apply', {'cardId':'test-stable-card-identity','kind':'task','operation':'create','changes':proposal['data'],'confirmed':True})
         self.assertEqual(applied['name'], 'Agent 创建的任务')
         self.assertTrue(any(t.get('name') == 'Agent 创建的任务' for t in self.store.all('tasks')))
         transcript = self.store.action(self.admin, 'agent.history', {})['messages']
@@ -131,7 +131,7 @@ class RepeatFeatureTests(unittest.TestCase):
         self.assertEqual(project['status'], 'active')
         caps = self.store.action(mate, 'agent.capabilities', {})
         self.assertEqual((caps['role'], caps['mode']), ('admin', 'operator'))
-        task = self.store.action(mate, 'work.card.apply', {'kind':'task','operation':'create','changes': {
+        task = self.store.action(mate, 'work.card.apply', {'cardId':'test-stable-card-identity','kind':'task','operation':'create','changes': {
             'name': 'admin task', 'projectId': project['id'], 'assignee': 'test001',
             'date': self.today.isoformat()}, 'confirmed': True})
         self.assertEqual(task['name'], 'admin task')
@@ -188,7 +188,7 @@ class RepeatFeatureTests(unittest.TestCase):
         self.assertEqual(len(self.store.action(self.admin, 'agent.conversations', {'userId': 'test001'})['conversations']), 3)
         self.store.action(self.member, 'agent.conversation.delete', {'conversationId': 'c1'})
         self.assertEqual([c['id'] for c in self.store.action(self.member, 'agent.conversations', {})['conversations']], ['c2', 'legacy'])
-        self.assertEqual(self.store.all('agent_conversations'), [])
+        self.assertTrue(all(r.get('deleted') for r in self.store.all('agent_conversations')))
 
     def test_agent_history_is_private_and_clearable(self):
 

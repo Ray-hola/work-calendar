@@ -261,7 +261,7 @@ test('rule groups live in 系统设置: a list of groups, each made or changed o
 
 test('every drafted card says what will happen to it before anything is sent', () => {
   const a=app();
-  a.run(['PLAN_DAY','planDay','planUser','agentTidyTaskName','planDraft','planTaskPath'].map(liftFunction).join('\n'));
+  a.run(['PLAN_DAY','planDay','planUser','agentNewConversationId','agentTidyTaskName','planDraft','planTaskPath'].map(liftFunction).join('\n'));
   a.run(`S.today='2026-11-02';S.user={id:'test002',admin:0};S.users=[{id:'superadmin',admin:1,active:1},{id:'test001',active:1,displayName:'林一'},{id:'test002',active:1},{id:'test003',active:1}];
     S.projects=[{id:'p',name:'甲',owner:'test001',status:'active',members:{test001:'accepted',test002:'accepted'}},{id:'w',name:'待批',owner:'test002',status:'pending',members:{test002:'accepted'}}];
     S.creationRules={project:'approval',tempTask:'direct',projectTask:'none'};
@@ -1067,8 +1067,8 @@ test('voice input writes into the composer and hides itself when unsupported', (
     '最终文本与临时识别结果分开累积，输入框不会来回抖动');
   const start = source.match(/async function agentVoiceStartRecording\(\)\{[\s\S]*?\n\}/)[0];
   assert.ok(!/agentSubmit\(/.test(start), '录音只填进输入框，绝不自动发送');
-  const finish = source.match(/async function agentVoiceFinishRecording\(\)\{[\s\S]*?\n\}/)[0];
-  assert.ok(/apiBlob\(TRANSCRIBE_ENDPOINT,blob\)/.test(finish),
+  const finish = source.match(/async function agentVoiceFinishRecording\([^)]*\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/apiBlob\(TRANSCRIBE_ENDPOINT,blob[,)]/.test(finish),
     '音频以原始 body 上传到 /api/transcribe，而不是当 JSON 塞进对话接口');
   const stop = source.match(/function agentStopVoice\(\)\{[\s\S]*?\n\}/)[0];
   assert.ok(/recognition\.stop\(\)/.test(stop), '再点一下要能结束浏览器识别');
@@ -1605,7 +1605,8 @@ test('a drop between directory rows becomes a parent and an order between the ne
 
 test('AI presets include mainstream endpoints and prefer a chat model', () => {
   const a=planningApp();
-  for(const provider of ['openai','anthropic','gemini','deepseek','dashscope'])assert.ok(a.run(`LLM_PRESETS.${provider}.base`));
+  for(const provider of ['openai','gemini','deepseek','dashscope'])assert.ok(a.run(`LLM_PRESETS.${provider}.base`));
+  assert.equal(a.run('LLM_PRESETS.anthropic.base'),'');assert.ok(a.run('LLM_PRESETS.anthropic.name').includes('兼容网关'));
   assert.equal(a.run("agentPreferredModel(['text-embedding-3-small','gpt-4.1'])"),'gpt-4.1');
 });
 
@@ -1646,6 +1647,28 @@ test('the assistant keeps conversations in a side list and its message tools are
   assert.ok(/agentHistoryBtn'\)\?\.addEventListener\('click',\(\)=>agentToggleSessions\(\)\)/.test(source));
   const use = source.match(/function agentUseConversation\(id\)\{[\s\S]*?\n\}/)[0];
   assert.ok(/agentState\.sessionId=id==='legacy'\?null:id/.test(use), '早期记录不带会话 ID，服务端照旧归档');
+});
+
+test('message action layout preserves the bubble content and copy/edit/rewind actions', async () => {
+  const a=planningApp(),copied=[],calls=[];
+  class Element {
+    constructor(){this.children=[];this.classList={add:()=>{},remove:()=>{}};this.attributes={};}
+    get firstChild(){return this.children[0]||null;}
+    appendChild(child){if(child.parent)child.parent.children.splice(child.parent.children.indexOf(child),1);this.children.push(child);child.parent=this;return child;}
+    setAttribute(key,value){this.attributes[key]=value;}
+  }
+  a.context.document={createElement:()=>new Element()};
+  a.context.navigator={clipboard:{writeText:async text=>copied.push(text)}};
+  a.context.setTimeout=()=>{};a.context.calls=calls;
+  a.run('agentEditMessage=i=>calls.push(["edit",i]);agentRewind=i=>calls.push(["rewind",i])');
+  const message=new Element(),content=new Element();message.appendChild(content);a.context.message=message;
+  a.run('agentMessageTools(message,{role:"user",content:"original message"},3)');
+  const [body,tools]=message.children;
+  assert.deepEqual(body.children,[content], '文本、意图和时间保留在气泡内');
+  assert.equal(tools.children.length,3);
+  assert.deepEqual(tools.children.map(x=>x.attributes['aria-label']),['复制','修改重发','回退到这里']);
+  await tools.children[0].onclick();tools.children[1].onclick();tools.children[2].onclick();
+  assert.deepEqual(copied,['original message']);assert.deepEqual(calls.map(x=>Array.from(x)),[['edit',3],['rewind',3]]);
 });
 
 test('a late conversation history response cannot overwrite a newer selection', async () => {
@@ -1928,4 +1951,98 @@ test('a visual exit failure cannot turn an already accepted card back into a ret
   a.context.fetch=async(path,o)=>{writes.push(JSON.parse(o.body));return {ok:true,text:async()=>'{"id":"made"}'}};
   a.run(`refresh=async()=>{};agentAppend=()=>{};var board={...planDraft({tasks:[{name:'动画不能影响业务',assignee:'test001'}]}),el:{querySelectorAll:()=>[{dataset:{key:'t0'},animate:()=>{throw Error('animation unavailable')}}]},history:[]};`);
   await a.run('planSubmit(board)');assert.equal(a.run('board.tasks[0].state'),'done');await a.run('planSubmit(board)');assert.equal(writes.length,1);
+});
+
+/* Assistant audit: durable intent, recovery and visible feedback. */
+test('a long execution retains its original goal after more than 24 trail messages',()=>{
+  const a=planningApp();a.run(`agentState.runGoal='原始目标：为所有成员调整例行安排';agentState.messages=[{role:'user',content:agentState.runGoal}];for(let i=0;i<18;i++)agentState.messages.push({role:'assistant',content:'提案'+i},{role:'user',content:'【系统回执】步骤'+i});`);
+  const recent=a.json('agentRecentMessages()');assert.ok(recent.some(m=>m.content==='原始目标：为所有成员调整例行安排'));assert.ok(recent.length<=25);
+});
+test('verification detects repeat time, task duration and description edits',()=>{
+  const a=planningApp();a.run(`S.repeats=[{id:'r',name:'例行任务',time:'09:00',active:true}];S.tasks=[{id:'t',name:'任务',duration:30,desc:'原文'}];var before=agentFingerprint();S.repeats[0].time='10:00';S.tasks[0].duration=45;S.tasks[0].desc='更正';`);
+  assert.equal(a.json('agentVerify(before,agentFingerprint())').length,2);
+});
+test('recovered card receipts override a stale draft and restore project dependencies',()=>{
+  const a=planningApp();a.run(`var board=planDraft({draftId:'draft-identity',projects:[{ref:'P',cardId:'project-identity',name:'项目'}],tasks:[{name:'子任务',cardId:'task-identity',projectRef:'P'}]});board.projects[0].selected=true;planApplyReceipts(board,{'project-identity':{id:'created-project'}});`);
+  assert.equal(a.run('board.projects[0].state'),'done');assert.equal(a.run('board.projects[0].selected'),false);assert.equal(a.run('board.tasks[0].project'),'id:created-project');assert.equal(a.run('board.tasks[0].state'),'draft');
+});
+test('restoring a saved draft keeps edited fields and rejected decisions',async()=>{
+  const a=planningApp(),cache=new Map();a.context.localStorage={getItem:k=>cache.get(k)||null,setItem:(k,v)=>cache.set(k,v)};a.context.document={querySelector:()=>null};
+  a.context.saved={version:3,board:{projects:[],tasks:[{key:'t0',cardId:'task-identity',name:'用户编辑',state:'rejected'}],next:1},receipts:{}};
+  a.context.fetch=async()=>({ok:true,text:async()=>JSON.stringify(a.context.saved)});
+  a.run(`agentState.conversationId='thread';agentPlanBoard=raw=>({...planDraft(raw),conversationId:'thread',el:{querySelector:()=>null}});`);
+  const board=await a.run(`agentRestoreBoard({draftId:'draft-identity',tasks:[{name:'原名',cardId:'task-identity'}]})`);
+  assert.equal(board.tasks[0].name,'用户编辑');assert.equal(board.tasks[0].state,'rejected');assert.equal(board.persistVersion,3);
+});
+test('draft saving serializes edits against the returned version and keeps stable IDs',async()=>{
+  const a=planningApp(),pending=[],cache=new Map();a.context.document={querySelector:()=>null};a.context.clearTimeout=()=>{};a.context.localStorage={getItem:k=>cache.get(k)||null,setItem:(k,v)=>cache.set(k,v)};
+  a.context.fetch=(path,o)=>new Promise(resolve=>pending.push({body:JSON.parse(o.body),reply:v=>resolve({ok:true,text:async()=>JSON.stringify(v)})}));
+  a.run(`var board={...planDraft({draftId:'draft-identity',tasks:[{cardId:'task-identity',name:'A'}]}),conversationId:'thread',el:{querySelector:()=>null}};`);
+  const first=a.run('planFlush(board)');a.run("board.tasks[0].name='B'");const second=a.run('planFlush(board)');
+  assert.equal(pending[0].body.data.version,0);pending[0].reply({version:1});await new Promise(r=>setImmediate(r));
+  assert.equal(pending[1].body.data.version,1);assert.equal(pending[1].body.data.board.tasks[0].name,'B');pending[1].reply({version:2});await Promise.all([first,second]);assert.equal(a.run('board.persistVersion'),2);assert.equal(a.run('board.tasks[0].cardId'),'task-identity');
+});
+test('native account confirmation never displays model supplied credentials',()=>{
+  const a=planningApp();const html=a.run(`agentActionHTML('account.create',{username:'member001',password:'fixture-never-visible',nested:{apiKey:'fixture-nested-secret'}})`);
+  assert.ok(html.includes('member001'));assert.ok(!html.includes('fixture-never-visible'));assert.ok(!html.includes('fixture-nested-secret'));
+});
+test('an already successful write stays successful if refreshing its view fails',async()=>{
+  const a=planningApp(),nodes={},buttonNodes={},steps=[];let writes=0;
+  const buttons={innerHTML:'',querySelector:s=>buttonNodes[s]||(buttonNodes[s]={})};const card={innerHTML:'',isConnected:true,querySelector:()=>buttons};
+  a.context.document={createElement:()=>card,querySelector:()=>({appendChild(){},scrollHeight:0})};a.context.fetch=async()=>{writes++;return {ok:true,text:async()=>'{"id":"created"}'}};a.context.steps=steps;
+  a.run(`agentActionHTML=()=>'';refresh=async()=>{throw Error('render failed')};agentRecordStep=(a,b)=>steps.push(b);var promise=agentRunOne({action:'repeat.create',data:{name:'安排'}});`);
+  await buttonNodes['.agent-action-confirm'].onclick();const result=await a.context.promise;
+  assert.equal(writes,1);assert.equal(Boolean(result.failed),false);assert.ok(steps[0].includes('执行成功'));assert.ok(steps[0].includes('不要重复提交'));
+});
+test('recorded MP4 preserves MIME and exposes transcribing state until its own response',async()=>{
+  const a=voiceApp(),instances=[];let respond,uploaded;
+  a.context.AbortController=AbortController;a.context.navigator.mediaDevices={getUserMedia:async()=>({getTracks:()=>[{stop(){}}]})};
+  a.context.MediaRecorder=class{static isTypeSupported(m){return m==='audio/mp4'}constructor(stream,o){this.mimeType=o.mimeType;this.state='inactive';instances.push(this)}start(){this.state='recording'}stop(){this.state='inactive';this.onstop()}};
+  a.context.apiBlob=(path,blob)=>{uploaded=blob;return new Promise(r=>respond=r)};
+  await a.run('agentVoiceStartRecording()');instances[0].ondataavailable({data:{size:10,type:'audio/mp4'}});a.run('agentStopVoice()');
+  assert.equal(uploaded.type,'audio/mp4');assert.equal(a.run('voice.transcribing'),true);
+  await a.run('agentVoiceStartRecording()');assert.equal(instances.length,1,'转写期间不能覆盖同一录音状态');
+  respond({text:'识别结果'});await new Promise(r=>setImmediate(r));assert.equal(a.run('voice.transcribing'),false);assert.equal(a.input.value,'识别结果');
+});
+test('persisting an edit sends the previous stored message as a durable branch anchor',async()=>{
+  const a=planningApp(),calls=[];a.context.document={querySelector:()=>null};a.context.fetch=async(path,o)=>{calls.push(JSON.parse(o.body));return {ok:true,text:async()=>'{"rewound":true}'}};
+  a.run(`agentState.conversationId='thread';agentState.editing=2;agentState.messages=[{role:'user',id:'first',content:'保留'},{role:'assistant',id:'anchor',content:'保留'},{role:'user',id:'edited',content:'修改这条'}]`);
+  assert.equal(await a.run('agentPersistEdit()'),true);assert.equal(calls[0].data.messageId,'anchor');assert.equal(calls[0].data.conversationId,'thread');
+});
+test('planning failures preserve a modification request instead of manufacturing a create card',async()=>{
+  const a=planningApp(),input={value:'',focus(){}},messages={appendChild(){},scrollHeight:0};a.context.document={querySelector:s=>s==='#agentInput'?input:s==='#agentMessages'?messages:null};a.context.AbortController=AbortController;
+  a.run(`var boards=0;agentAppend=()=>({remove(){}});agentPlanBoard=()=>boards++;agentRequest=async()=>{throw Error('fixture failure')};agentState.messages=[];`);
+  await a.run("agentPlanSubmit('删除昨天那个任务')");assert.equal(a.run('boards'),0);assert.equal(input.value,'删除昨天那个任务');
+});
+test('recovery keeps newer local edits when the last acknowledged write came from that page',async()=>{
+  const a=planningApp();a.context.document={querySelector:()=>null};a.context.localStorage={getItem:()=>JSON.stringify({version:1,writer:'old-page',board:{projects:[],tasks:[{key:'t0',cardId:'task-identity',name:'最后输入尚未回执',state:'draft'}],next:1}}),setItem(){}};
+  a.context.fetch=async()=>({ok:true,text:async()=>JSON.stringify({version:2,writer:'old-page',board:{projects:[],tasks:[{key:'t0',cardId:'task-identity',name:'较早输入',state:'draft'}],next:1},receipts:{'task-identity':{id:'already-created'}}})});
+  a.run(`agentState.conversationId='thread';agentPlanBoard=raw=>({...planDraft(raw),conversationId:'thread',el:{querySelector:()=>null}})`);
+  const board=await a.run(`agentRestoreBoard({draftId:'draft-identity',tasks:[{name:'原始内容'}]})`);
+  assert.equal(board.tasks[0].name,'最后输入尚未回执');assert.equal(board.tasks[0].state,'done','回执仍然覆盖本机过期的待处理状态');
+});
+test('a queued draft from a previous account never writes into the newly signed-in account',async()=>{
+  const a=planningApp();let writes=0;a.context.document={querySelector:()=>null};a.context.fetch=async()=>{writes++;return {ok:true,text:async()=>'{"version":1}'}};
+  a.run(`var board={...planDraft({tasks:[{name:'旧账户私有安排'}]}),ownerUser:'old-user',conversationId:'old-thread',el:{querySelector:()=>null}};S.user={id:'new-user',admin:0};`);
+  await a.run('planFlush(board)');assert.equal(writes,0);
+});
+test('narrow workspace tabs support arrow navigation and roving keyboard focus',()=>{
+  const a=planningApp(),attrs={};let focused='',prevented=false;
+  a.context.document={querySelector:s=>({classList:{toggle(){}},setAttribute:(k,v)=>attrs[s+':'+k]=v,focus:()=>focused=s})};
+  a.context.event={key:'ArrowRight',preventDefault(){prevented=true}};a.run("agentState.pane='cards';agentState.planBoard={closed:false};agentPaneKeydown(event)");
+  assert.equal(a.run('agentState.pane'),'chat');assert.equal(focused,'#agentPaneChat');assert.equal(attrs['#agentPaneChat:tabindex'],'0');assert.equal(prevented,true);
+});
+test('card retirement skips motion when reduced motion is requested and still commits its state',async()=>{
+  for(const reduced of [false,true]){
+    const a=planningApp(),calls=[];a.context.matchMedia=()=>({matches:reduced});a.context.calls=calls;
+    a.run(`var x={key:'t0',state:'draft',selected:true};var board={el:{querySelectorAll:()=>[{dataset:{key:'t0'},animate:(frames,options)=>{calls.push(options.duration);return {finished:Promise.resolve()}}}]}};`);
+    await a.run("planRetire(board,x,'rejected','已拒绝')");assert.equal(a.run('x.state'),'rejected');assert.equal(a.run('x.selected'),false);assert.deepEqual(calls,reduced?[]:[180]);
+  }
+});
+test('a failed state refresh reports a service error and only 401 opens sign-in',async()=>{
+  const a=app();a.run('var signIns=0;showAuth=()=>signIns++');
+  a.context.fetch=async()=>({ok:false,status:503,text:async()=>'{"error":"temporary service failure"}'});
+  await assert.rejects(a.run('refresh()'),/temporary service failure/);assert.equal(a.run('signIns'),0);
+  a.context.fetch=async()=>({ok:false,status:401,text:async()=>'{"error":"请登录"}'});
+  await a.run('refresh()');assert.equal(a.run('signIns'),1);
 });

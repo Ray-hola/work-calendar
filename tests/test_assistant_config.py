@@ -69,6 +69,7 @@ class AssistantConfigTests(unittest.TestCase):
             return self.store.action(self.admin, 'agent.config.test', data)
 
     def test_a_working_key_lists_its_models_and_answers(self):
+        self.store._action(self.admin,'agent.config.set',{'baseUrl':'https://api.openai.com/v1','model':'m','apiKey':'sk-saved'})
         result = self.probe({'/models': {'data': [{'id': 'gpt-b'}, {'id': 'gpt-a'}]}, '/chat/completions': _chat('好')},
                            provider='openai', baseUrl='https://api.openai.com/v1/chat/completions', model='gpt-a')
         self.assertTrue(result['ok'])
@@ -159,7 +160,7 @@ class AssistantConfigTests(unittest.TestCase):
         with self.assertRaises(Problem):
             self.store.action(self.member, 'agent.config.test', {'baseUrl': 'https://api.example.com/v1'})
         saved = self.store.action(self.admin, 'agent.config.set', {'provider': 'openai', 'baseUrl': 'https://api.openai.com/v1',
-                                                                   'model': 'gpt-a', 'models': ['gpt-a', 'gpt-b'], 'contextChars': 0})
+                                                                   'model': 'gpt-a', 'models': ['gpt-a', 'gpt-b'], 'contextChars': 0, 'apiKey': 'sk-saved'})
         self.assertEqual((saved['models'], saved['contextChars']), (['gpt-a', 'gpt-b'], 64000))
         with self.assertRaises(Problem):
             self.store.action(self.admin, 'agent.config.set', {'baseUrl': 'https://api.openai.com/v1', 'model': 'gpt-a', 'contextChars': 7})
