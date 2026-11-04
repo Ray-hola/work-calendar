@@ -9,6 +9,7 @@ import json
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -280,6 +281,22 @@ class SpeechToTextTests(unittest.TestCase):
         self.assertTrue(admin_view['apiKeySet'])
         self.assertNotIn('secret-key', json.dumps(admin_view, ensure_ascii=False))
         self.assertEqual(member_view['baseUrl'], '', '普通成员不需要看到转写地址')
+
+    def test_workbench_dictation_is_available_when_ai_assistant_is_off(self):
+        self.configure()
+        with patch.object(self.store,'creation_rules',return_value={'agent':'off'}):
+            self.assertEqual(self.store.agent_capabilities(self.member)['mode'],'off')
+            self.assertEqual(self.store.action(self.member,'speech.status',{}),{'configured':True})
+            self.assertEqual(self.store.transcribe(self.member,b'fake-audio','audio/mp4')['text'],'帮我安排明天的评审')
+            with self.assertRaises(Problem):self.store.asr_config(self.member)
+
+    def test_speech_status_contains_no_connection_details_and_rejects_inactive_accounts(self):
+        self.configure()
+        self.assertEqual(self.store.speech_status(self.member),{'configured':True})
+        self.store.db.execute('UPDATE users SET active=0 WHERE id=?',(self.member['id'],))
+        with self.assertRaises(Problem):self.store.speech_status(self.member)
+        with self.assertRaises(Problem):self.store.transcribe(self.member,b'audio','audio/webm')
+        self.assertEqual(_AsrStub.calls,0)
 
     def test_empty_audio_is_refused_before_any_upload(self):
         self.configure()

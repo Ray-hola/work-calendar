@@ -10793,3 +10793,19 @@ body.is-resizing-agent { user-select: none; }
   45% { transform: scale(1.18); }
   100% { transform: none; }
 }
+
+/* Shared dictation keeps textareas and their existing form semantics intact. */
+.voice-field { position: relative; display: block; min-width: 0; width: 100%; }
+.voice-field > textarea { display: block; width: 100%; resize: none; }
+.voice-field:has(> .field-voice-btn:not([hidden])) > textarea { padding-right: 42px; }
+.chat-compose > .voice-field { flex: 1; width: auto; }
+.field-voice-btn { position: absolute; right: 5px; bottom: 5px; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px; color: var(--muted); background: var(--surface); cursor: pointer; }
+.field-voice-btn[hidden] { display: none; }
+.field-voice-btn .icon-slot, .field-voice-btn svg { width: 14px; height: 14px; }
+.field-voice-btn:hover, .field-voice-btn.is-on { color: var(--accent); background: var(--surface-sunk); }
+.field-voice-btn:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 1px; }
+
+.field-voice-btn.is-transcribing svg { visibility: hidden; }
+.field-voice-btn.is-transcribing::after { content: ''; position: absolute; width: 12px; height: 12px; border: 1.5px solid var(--line); border-top-color: currentColor; border-radius: 50%; animation: fieldVoiceSpin .8s linear infinite; }
+@keyframes fieldVoiceSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .field-voice-btn.is-transcribing::after { animation: none; } }

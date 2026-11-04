@@ -468,14 +468,20 @@ class Store:
         self.audit(user['id'], 'agent.asr_config', {'baseUrl': base, 'model': model})
         return self.asr_config(user)
 
+    def speech_status(self, user):
+        """Safe shared dictation capability, independent of AI assistant access."""
+        self.user(user['id'])
+        value=self._asr_record().get('value') or {}
+        return {'configured':bool(value.get('baseUrl'))}
+
     def transcribe(self, user, body, content_type=''):
         """Forward a recorded clip to the configured speech-to-text service.
 
-        Members may dictate into their own composer, so this is a read-only
-        capability: it never touches workspace data and the key stays server
-        side, exactly like the chat proxy.
+        Active accounts may dictate into workbench inputs independently of AI
+        assistant access. It never changes business data; connection credentials
+        stay on the server.
         """
-        self.authorize_agent_tool(user, 'agent.chat')
+        self.user(user['id'])
         if not isinstance(body, (bytes, bytearray)) or not body:
             raise Problem(400, '没有收到音频内容')
         if len(body) > MAX_AUDIO_BYTES:
@@ -1658,14 +1664,14 @@ class Store:
             except ValueError:pass
         return root.get('date','')
 
-    def _repeat_stack_groups(self, tasks):
+    def _repeat_stack_groups(self, tasks, at=None):
         """Group outstanding periods, never future pre-generated occurrences.
 
         Records stay independent until a member handles the group. A setting
         change alone is reversible and never rewrites task history.
         """
         if not self.repeat_stacking():return []
-        by_id={t['id']:t for t in tasks};at=now();today=at.date().isoformat();groups={};batches={}
+        by_id={t['id']:t for t in tasks};at=at or now();today=at.date().isoformat();groups={};batches={}
         for task in self._raw_lineage_leaves(tasks):
             if task.get('status') not in ('todo','doing') or task.get('stackCompletedBy'):continue
             root=by_id.get(self._lineage_root(task,by_id),task)
@@ -1698,9 +1704,9 @@ class Store:
         return {'stackCount':len(periods),'stackPeriods':list(periods),
                 'stackDates':sorted(self._repeat_period_date(by_id[p],by_id) for p in periods if p in by_id)}
 
-    def _stack_metadata(self, tasks):
+    def _stack_metadata(self, tasks, stack_groups=None):
         by_id={t['id']:t for t in tasks};metadata={}
-        for group in self._repeat_stack_groups(tasks):
+        for group in self._repeat_stack_groups(tasks) if stack_groups is None else stack_groups:
             periods=set()
             for t in group:periods.update(t.get('stackPeriods') or [self._lineage_root(t,by_id)])
             metadata[group[-1]['id']]={'stackCount':len(periods),'stackPeriods':sorted(periods),'stackDates':sorted(self._repeat_period_date(by_id[p],by_id) for p in periods if p in by_id),'stackTaskIds':[t['id'] for t in group]}
@@ -1710,10 +1716,11 @@ class Store:
         return metadata
 
     def _lineage_leaves(self, tasks):
-        superseded=self._superseded_map(tasks);meta=self._stack_metadata(tasks)
+        groups=self._repeat_stack_groups(tasks)
+        superseded=self._superseded_map(tasks,groups);meta=self._stack_metadata(tasks,groups)
         return [{**t,**meta.get(t['id'],{})} for t in tasks if t['id'] not in superseded]
 
-    def _superseded_map(self, tasks):
+    def _superseded_map(self, tasks, stack_groups=None):
         """Map each superseded occurrence to the lineage leaf that replaced it.
 
         Deferral no longer leaves two live records: the successor takes over the
@@ -1735,7 +1742,7 @@ class Store:
         for task in tasks:
             if task.get('stackCompletedBy') in by_id:
                 superseded[task['id']]=task['stackCompletedBy']
-        for group in self._repeat_stack_groups(tasks):
+        for group in self._repeat_stack_groups(tasks) if stack_groups is None else stack_groups:
             for task in group[:-1]:superseded[task['id']]=group[-1]['id']
         for key in list(superseded):
             target=superseded[key];seen={key}
@@ -2251,7 +2258,8 @@ class Store:
 
     def snapshot(self, user):
         with self.lock, self.db:
-            self.advance_due_tasks()
+            at=now()
+            self.advance_due_tasks(at)
             self.settle_legacy_task_approvals()
             self.accept_pending_invitations()
             all_projects=self.all('projects')
@@ -2265,8 +2273,11 @@ class Store:
             folder_ids={p.get('folderId') for p in projects+file_archives}
             folders=[f for f in self.all('folders') if user['admin'] or f['id'] in folder_ids]
             all_tasks=self.all('tasks')
-            superseded=self._superseded_map(all_tasks)
-            stack_meta=self._stack_metadata(all_tasks)
+            # One projection supplies both hidden cards and their period counts.
+            # A request crossing a trigger time must not mix two group scopes.
+            stack_groups=self._repeat_stack_groups(all_tasks,at)
+            superseded=self._superseded_map(all_tasks,stack_groups)
+            stack_meta=self._stack_metadata(all_tasks,stack_groups)
             tasks=[]
             for task in all_tasks:
                 if not self.can_view_task(user,task):
@@ -2286,7 +2297,7 @@ class Store:
             owned={p['id'] for p in projects if p['owner']==user['id']}
             task_requests=[r for r in self.all('task_requests') if user['admin'] or r.get('requester')==user['id'] or r.get('projectId') in owned]
             automation=next((x.get('value',{}) for x in self.all('settings') if x.get('id')=='automation'),{})
-            return {'user':user,'users':self.users(),'today':now().date().isoformat(),'weekStart':self.week_start(),'repeatStacking':self.repeat_stacking(),'projects':projects,
+            return {'user':user,'users':self.users(),'today':at.date().isoformat(),'weekStart':self.week_start(),'repeatStacking':self.repeat_stacking(),'projects':projects,
 'folders':folders,'fileArchives':file_archives,'files':[f for f in all_files if f.get('projectId') in file_pids],'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees'] or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':[n for n in self.all('notifications') if n['to']==user['id'] and '12:00 初稿' not in str(n.get('title',''))], 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'taskRequests':task_requests, 'creationRules':self.creation_rules(user), 'creationPolicy':self.creation_policy() if user.get('role')=='superadmin' else None, 'accountOrder':next((x.get('value') or [] for x in self.all('settings') if x.get('id')=='account_order'),[]) if user['admin'] else [], 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or self.get('projects',s['projectId'])['owner']==user['id'])], 'chat':self.chat_summary(user),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.all('audit')[-60:] if user['admin'] else []}
 
     def diary_statistics(self, viewer, start=None, end=None):
@@ -2414,6 +2425,9 @@ class Store:
         return sorted(result, key=lambda item: str(item.get('completedAt') or item.get('createdAt') or ''), reverse=True)
 
     def action(self, user, action, data):
+        if action == 'speech.status':
+            with self.lock:
+                return self.speech_status(user)
         if action == 'agent.chat':
             return self.llm_chat(user, data)
         if action == 'agent.config.test':

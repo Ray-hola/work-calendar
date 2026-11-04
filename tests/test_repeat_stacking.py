@@ -41,6 +41,50 @@ class RepeatStackingTests(unittest.TestCase):
     def finish(self,id):
         return self.store.action(self.member,'task.complete',{'id':id,'summary':'one execution','actual':35})
 
+    def test_snapshot_uses_one_trigger_instant_for_status_hidden_cards_and_period_count(self):
+        self.rule(time='09:00');self.store.snapshot(self.member);self.enable()
+        self.at=(self.base+timedelta(days=1)).replace(hour=8,minute=59,second=59)
+        self.store.schedule(self.at)
+        advance=self.store.advance_due_tasks
+        def crossing(at=None):
+            result=advance(at)
+            self.at=self.at.replace(hour=9,minute=0,second=0)
+            return result
+        with patch.object(self.store,'advance_due_tasks',side_effect=crossing):
+            cards=self.pending()
+        self.assertEqual(len(cards),2)
+        self.assertEqual({t['status'] for t in cards},{'todo','doing'})
+        self.assertTrue(all(not t.get('stackCount') for t in cards))
+        cards=self.pending()
+        self.assertEqual(len(cards),1)
+        self.assertEqual((cards[0]['status'],cards[0]['stackCount']),('doing',2))
+
+    def test_lineage_projection_reuses_groups_when_clock_crosses_trigger(self):
+        self.rule(time='09:00');self.store.snapshot(self.member);self.enable()
+        self.at=(self.base+timedelta(days=1)).replace(hour=8,minute=59,second=59)
+        self.store.schedule(self.at)
+        group=self.store._repeat_stack_groups
+        def crossing(tasks,*args,**kwargs):
+            result=group(tasks,*args,**kwargs)
+            self.at=self.at.replace(hour=9,minute=0,second=0)
+            return result
+        with patch.object(self.store,'_repeat_stack_groups',side_effect=crossing) as grouping:
+            leaves=self.store._lineage_leaves(self.store.all('tasks'))
+        pending=[t for t in leaves if t['date']<=self.at.date().isoformat() and t['status'] in ('todo','doing')]
+        self.assertEqual(grouping.call_count,1)
+        self.assertEqual(len(pending),2)
+        self.assertTrue(all(not t.get('stackCount') for t in pending))
+
+    def test_due_pending_and_in_progress_periods_share_one_card(self):
+        self.rule();self.advance(1);self.enable()
+        tasks=self.store.all('tasks')
+        current=next(t for t in tasks if t['date']==self.at.date().isoformat())
+        current['status']='todo';self.store.put('tasks',current)
+        leaves=self.store._lineage_leaves(self.store.all('tasks'))
+        pending=[t for t in leaves if t['date']==self.at.date().isoformat() and t['status'] in ('todo','doing')]
+        self.assertEqual(len(pending),1)
+        self.assertEqual(pending[0]['stackCount'],2)
+
     def test_default_and_setting_permissions_and_strict_boolean(self):
         self.assertFalse(self.store.snapshot(self.member)['repeatStacking'])
         for name in ('member','admin'):

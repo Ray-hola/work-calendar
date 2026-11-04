@@ -1057,13 +1057,13 @@ test('voice input writes into the composer and hides itself when unsupported', (
   assert.ok(/window\.SpeechRecognition\|\|window\.webkitSpeechRecognition/.test(source),
     '保留浏览器自带引擎作为零配置兜底');
   const engine = source.match(/function agentVoiceEngine\(\)\{[\s\S]*?\n\}/)[0];
-  assert.ok(/agentServerAsr\?\.configured&&agentCanRecord\(\)/.test(engine),
+  assert.ok(/sharedSpeechStatus\?\?agentServerAsr/.test(engine),
     '配了服务端转写且浏览器能录音时优先走服务端');
   const init = source.match(/function agentInitVoice\(\)\{[\s\S]*?\n\}/)[0];
-  assert.ok(/classList\.toggle\('hidden',!engine\)/.test(init),
+  assert.ok(/classList\.toggle\('hidden',!agentVoiceEngine\(\)\)/.test(init),
     '没有任何引擎时麦克风按钮应当隐藏，而不是点了报错');
   const render = source.match(/function agentVoiceRender\(\)\{[\s\S]*?\n\}/)[0];
-  assert.ok(/input\.value=settled\+\(voice\.interim\?voice\.interim:''\)/.test(render),
+  assert.ok(/voiceWrite\(input,settled\+\(voice\.interim\?voice\.interim:''\)\)/.test(render),
     '最终文本与临时识别结果分开累积，输入框不会来回抖动');
   const start = source.match(/async function agentVoiceStartRecording\(\)\{[\s\S]*?\n\}/)[0];
   assert.ok(!/agentSubmit\(/.test(start), '录音只填进输入框，绝不自动发送');
@@ -2255,4 +2255,76 @@ test('Escape closes the top task overlay while typing and restores its opener wi
   assert.equal(elements['#modalBackdrop'].classList.hidden,false,'保留未保存内容的关闭确认');
   a.context.event={key:'n',target:{closest:()=>({})},preventDefault(){throw Error('typing intercepted')}};
   a.run('shortcutKey(event)');
+});
+
+function dictationField(id) {
+  return {id, value:'', isConnected:true, disabled:false, readOnly:false, maxLength:-1,
+    closest(){return this.hidden ? {} : null}, setSelectionRange(){}, dispatchEvent(){this.edits=(this.edits||0)+1}};
+}
+test('shared dictation targets the chosen field and cancels late recognition from another field', () => {
+  const a=voiceApp(),instances=[];
+  a.context.window={SpeechRecognition:fakeBrowserRecognition(instances)};
+  a.context.first=dictationField('taskDesc');a.context.second=dictationField('doneText');
+  a.run('toggleFieldVoice(first)');instances[0].onstart();
+  const stale=instances[0].onresult;
+  a.run('toggleFieldVoice(second)');instances[1].onstart();
+  stale({resultIndex:0,results:[{isFinal:true,0:{transcript:'旧任务'}}]});
+  instances[1].onresult({resultIndex:0,results:[{isFinal:true,0:{transcript:'完成总结'}}]});
+  assert.equal(a.context.first.value,'');assert.equal(a.context.second.value,'完成总结');assert.equal(a.input.value,'');
+});
+test('dictation refuses removed, hidden, disabled and readonly targets and account/view/room changes', () => {
+  for(const change of ['field.isConnected=false','field.hidden=true','field.disabled=true','field.readOnly=true',
+    'S.user.id="other"','UI.view="projects"','chatChannel="other"']){
+    const a=voiceApp();a.context.field=dictationField('chatInput');
+    a.context.S={user:{id:'member'}};a.context.UI={view:'chat'};a.context.chatChannel='general';
+    a.run('voice.target=field;voice.scope=voiceScope()');a.run(change);a.run('agentVoiceAppend("迟到的文字")');
+    assert.equal(a.context.field.value,'',change);
+  }
+});
+test('shared dictation respects maxlength and notifies drafts without losing manual edits', () => {
+  const a=voiceApp(),instances=[];a.context.Event=class {constructor(type){this.type=type}};
+  a.context.window={SpeechRecognition:fakeBrowserRecognition(instances)};
+  a.context.field=dictationField('taskDesc');a.context.field.maxLength=5;
+  a.run('toggleFieldVoice(field)');instances[0].onstart();
+  a.context.field.value='手改';a.run('agentVoiceFollowEdit()');
+  instances[0].onresult({resultIndex:0,results:[{isFinal:true,0:{transcript:'一二三四五'}}]});
+  assert.equal(a.context.field.value,'手改一二三');assert.ok(a.context.field.edits>0);
+});
+test('switching fields aborts pending server transcription and ignores its late result', async () => {
+  const a=voiceApp();let resolve,aborted=false;
+  a.context.AbortController=class {constructor(){this.signal={}}abort(){aborted=true}};
+  a.context.apiBlob=()=>new Promise(r=>resolve=r);
+  a.context.first=dictationField('taskDesc');a.context.second=dictationField('doneText');
+  a.run('voice.target=first;voice.scope=voiceScope();voice.recorder={mimeType:"audio/mp4"};voice.chunks=[{type:"audio/mp4"}]');
+  const pending=a.run('agentVoiceFinishRecording()');
+  a.run('agentCancelVoice();voice.target=second;voice.scope=voiceScope()');resolve({text:'旧内容'});await pending;
+  assert.equal(aborted,true);assert.equal(a.context.first.value,'');assert.equal(a.context.second.value,'');
+});
+test('late microphone permission releases tracks after the target is closed', async () => {
+  const a=voiceApp();let resolve,stops=0;
+  a.context.field=dictationField('taskDesc');
+  a.context.navigator.mediaDevices={getUserMedia:()=>new Promise(r=>resolve=r)};
+  a.run('voice.target=field;voice.scope=voiceScope()');const pending=a.run('agentVoiceStartRecording()');
+  a.context.field.hidden=true;resolve({getTracks:()=>[{stop(){stops++}}]});await pending;
+  assert.equal(stops,1);assert.equal(a.context.field.value,'');assert.equal(a.run('voice.starting'),false);
+});
+test('shared dictation uses safe service status before the assistant is opened', () => {
+  const a=voiceApp();a.context.window={};a.context.navigator.mediaDevices={getUserMedia(){}};a.context.MediaRecorder=class {};
+  a.run('sharedSpeechStatus={configured:true}');assert.equal(a.run('agentVoiceEngine()'),'server');
+  a.context.agentServerAsr={configured:true};a.run('sharedSpeechStatus={configured:false}');assert.equal(a.run('agentVoiceEngine()'),null);
+});
+
+test('unavailable MediaRecorder releases the permission stream and leaves dictation retryable', async () => {
+  const a=voiceApp();let stops=0;
+  a.context.MediaRecorder=class {constructor(){throw Error('unsupported')}static isTypeSupported(){return false}};
+  a.context.navigator.mediaDevices={getUserMedia:async()=>({getTracks:()=>[{stop(){stops++}}]})};
+  await a.run('agentVoiceStartRecording()');
+  assert.equal(stops,1);assert.equal(a.run('voice.starting||voice.active||voice.transcribing'),false);
+});
+test('returning to assistant dictation cannot route its results to a previous form', () => {
+  const a=voiceApp(),instances=[];a.context.window={SpeechRecognition:fakeBrowserRecognition(instances)};
+  a.context.field=dictationField('doneText');a.run('toggleFieldVoice(field)');instances[0].onstart();
+  a.run('agentToggleVoice()');instances[1].onstart();
+  instances[1].onresult({resultIndex:0,results:[{isFinal:true,0:{transcript:'新问题'}}]});
+  assert.equal(a.input.value,'新问题');assert.equal(a.context.field.value,'');
 });
