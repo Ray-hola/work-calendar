@@ -10750,6 +10750,9 @@ body.is-resizing-agent { user-select: none; }
 
 /* Binary settings save immediately; multi-value rules keep segmented choices. */
 .repeat-stacking-card { display: flex; align-items: center; gap: 16px; }
+.week-start-card { flex-wrap: wrap; }
+.week-start-card > div:first-child { flex: 1 1 260px; min-width: 0; }
+.week-start-card .week-start-seg { flex: none; }
 .settings-switch { display: inline-flex; align-items: center; gap: 10px; font-size: 13px; cursor: pointer; }
 .settings-switch-control { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 36px; flex: none; }
 .settings-switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; z-index: 1; }
