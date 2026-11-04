@@ -2159,6 +2159,19 @@ test('merged periods read as N 期, stack up in the week, and bump only when a g
   assert.ok(a.run(`weekTaskChip(${t},'2026-11-04')`).includes(' is-stacked"'));
 });
 
+test('the first merge from one to two periods bumps once, using the same root after a carry', () => {
+  const a=app();
+  a.run(`UI.stackSeen=undefined;S.tasks=[{id:'carry',originId:'p1',stackCount:1}];rememberStackSizes()`);
+  assert.deepEqual(a.json('[...UI.stackSeen]'),[['p1',1]]);
+  a.run("S.tasks=[{id:'p2',stackCount:2,stackPeriods:['p1','p2']}]");
+  assert.ok(a.run('stackBadge(S.tasks[0])').includes('is-bumped'),'已显示过的单期首次合并应跳动');
+  a.run('rememberStackSizes()');
+  assert.ok(!a.run('stackBadge(S.tasks[0])').includes('is-bumped'),'相同快照重新渲染不重复跳动');
+  a.run("UI.stackSeen=undefined");assert.ok(!a.run('stackBadge(S.tasks[0])').includes('is-bumped'),'初次加载合并任务保持安静');
+  a.run("S.tasks=[{id:'p1'},{id:'old',originId:'p1',superseded:true}];rememberStackSizes()");
+  assert.equal(a.run('UI.stackSeen.get("p1")'),1,'没有 stackCount 的普通单期同样记为一期');
+});
+
 test('a revisited view only fades in, and the timeline keeps the accent colour for last', () => {
   const sw = source.match(/function switchView\(view\)\{[\s\S]*?\n\}/)[0];
   assert.ok(/classList\?\.toggle\('is-revisit',seen\.has\(view\)\)/.test(sw));

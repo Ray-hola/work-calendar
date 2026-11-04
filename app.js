@@ -420,9 +420,12 @@ const deferHops=t=>taskLineageIds(t,false).size-1;
 /* Merged periods read as "N 期", a count of periods rather than a multiplier
    of work. A group keeps its key (its oldest period) as it grows, so the badge
    can give a small bump when another period joins since the last render. */
-const stackKey=t=>(t.stackPeriods||[])[0]||t.id;
+const stackKey=t=>(t.stackPeriods||[])[0]||t.originId||t.reworkOf||t.id;
 const stackBadge=t=>{const n=Number(t.stackCount);if(!(n>1))return '';const before=UI.stackSeen?.get(stackKey(t));
   return `<span class="stack-badge${before&&n>before?' is-bumped':''}" aria-label="合并 ${n} 期">${n} 期</span>`};
+function rememberStackSizes(){
+  UI.stackSeen=new Map((S.tasks||[]).filter(t=>!isSuperseded(t)).map(t=>[stackKey(t),Number(t.stackCount)||1]));
+}
 const stackPeriodDates=t=>t.stackDates||(t.stackPeriods||[]).map(id=>S.tasks.find(x=>x.id===id)?.date).filter(Boolean).sort();
 /* Every occurrence of one task shares originId/reworkOf links. Walking them
    lets the drawer show a single history for a task that was deferred or redone. */
@@ -2189,9 +2192,6 @@ function collectionSettings(){
   $('#saveCollection').onclick=async()=>{const m=current,weekdays=[...picked].sort(),dates=$('#collectionDates').value.split(/[,，\s]+/).map(x=>x.trim()).filter(Boolean);if(m==='weekly'&&!weekdays.length){toast('请选择每周补报日');return}if(m==='dates'&&!dates.length){toast('请填写指定补报日期');return}try{await act('automation.update',{mode:m,time:$('#collectionTime').value,weekdays,dates});closeModal();toast('项目补报时间已保存')}catch(e){}};
 }
 function renderAll(){
-  /* Remember each merged group's size after this render, so the next one can
-     tell which grew (stackBadge). */
-  globalThis.queueMicrotask?.(()=>{UI.stackSeen=new Map((S.tasks||[]).filter(t=>t.stackCount>1&&!isSuperseded(t)).map(t=>[stackKey(t),Number(t.stackCount)]))});
   $$('.admin-only-nav').forEach(n=>n.classList.toggle('hidden',!S.user?.admin));
   const pm=projectMode();
   ['#addProjectBtn','#addProjectTopBtn','#timelineAddProjectBtn'].forEach(id=>{$(id).innerHTML=entryLabel(pm,'项目');$(id).classList.toggle('hidden',pm==='none')});
@@ -2219,6 +2219,8 @@ function renderAll(){
   if(agentOff)$('#agentPanel')?.classList.add('hidden');
   $('.focus-card > span').textContent=S.user.admin?'成员今日安排':'今日安排';
   renderStats();renderInbox();renderAccounts();renderSettings();switchView(UI.view);
+  // Keep single periods too: their first merge from one to two is growth.
+  rememberStackSizes();
 }
 
 function scheduleTasks(includeHistory){
