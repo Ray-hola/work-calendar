@@ -4381,6 +4381,15 @@ body.nav-dragging * {
   from { opacity: 0; transform: translateY(6px); }
 }
 
+.space-description {
+  margin: 0 2px;
+  color: var(--ink-2);
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .space-section {
   padding: 18px 20px;
   background: var(--surface);

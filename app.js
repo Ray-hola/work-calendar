@@ -552,6 +552,13 @@ function weekDayColumn(iso,tasks,canAdd,carried=0){
     +`${past&&carried?`<p class="week-day-carried">${icon('arrow-right')}${carried} 项未完成，已递延</p>`:''}</div>`
     +`${canAdd&&!out&&!past?`<button class="week-day-add" type="button" data-date="${iso}" aria-label="在 ${escapeHTML(fmt(iso))} 新增任务">${icon('plus')}</button>`:''}</section>`;
 }
+function weekDeferralCounts(){
+  // A deferral is a historical event, even when its successor is now done.
+  // Superseded alone also includes merged periods and reopened work.
+  const deferred=new Set((S.logs||[]).filter(l=>l.kind==='defer').map(l=>l.taskId)),counts=new Map();
+  scheduleTasks(true).filter(t=>deferred.has(t.id)).forEach(t=>counts.set(t.date,(counts.get(t.date)||0)+1));
+  return counts;
+}
 function renderCalendar(){
   const horizon=weekOffsetFor(DATE_HORIZON);
   UI.selectedWeek=Math.min(UI.selectedWeek||0,horizon);
@@ -562,9 +569,7 @@ function renderCalendar(){
   $('#nextWeekBtn').disabled=UI.selectedWeek>=horizon;
   const board=$('#weekCarousel');
   board.dataset.turn=UI.weekDir||'';UI.weekDir='';
-  const carried=new Map();
-  scheduleTasks(true).filter(t=>isSuperseded(t)&&!['done','skipped'].includes(t.status)&&!t.stackCompletedBy)
-    .forEach(t=>carried.set(t.date,(carried.get(t.date)||0)+1));
+  const carried=weekDeferralCounts();
   board.innerHTML=`<div class="week-grid">${days.map(iso=>weekDayColumn(iso,tasks,canAdd,carried.get(iso)||0)).join('')}</div>`;
 
   $$('#weekCarousel .week-task').forEach(b=>b.onclick=()=>openDrawer(b.dataset.id));
@@ -619,6 +624,7 @@ function logTime(iso){const m=String(iso||'').match(/^\d{4}-(\d{2})-(\d{2})T(\d{
 function openDrawer(id){
   const alias=S.tasks.find(x=>x.id===id);if(alias&&isSuperseded(alias)&&alias.supersededBy&&(['todo','doing'].includes(alias.status)||alias.stackCompletedBy)){const target=S.tasks.find(x=>x.id===alias.supersededBy);if(target&&target.id!==id)return openDrawer(target.id)}
   const t=S.tasks.find(x=>x.id===id);if(!t)return;
+  if($('#taskDrawer').classList.contains('hidden'))UI.drawerReturnFocus=document.activeElement;
   clearFresh(taskLineageIds(t));
   const [c,l]=status(t),p=S.projects.find(p=>p.id===t.projectId),archived=['done','deferred','skipped'].includes(t.status),pendingApproval=['pending_approval','awaiting_approval','submitted'].includes(t.status),rejected=['rejected','returned'].includes(t.status),lineageIds=taskLineageIds(t);
   const manage=canManageProject(p)&&p.status==='active'&&!archived&&!pendingApproval&&!rejected,perform=!S.user.admin&&!archived&&t.assignee===S.user.id;
@@ -1230,7 +1236,7 @@ function renderProjectSpace(id){
   $('#projectsView .eyebrow').textContent=`项目空间 · ${folder?folder.name:'未归类'}`;
 
   $('#projectsView h1').textContent=p.name;
-  box.innerHTML=projectLifecycle(p,manage)+projectBackground(p,manage)+projectStaffing(p,manage)
+  box.innerHTML=(p.desc?`<p class="space-description">${escapeHTML(p.desc)}</p>`:'')+projectLifecycle(p,manage)+projectBackground(p,manage)+projectStaffing(p,manage)
     +`<section class="space-section space-tasks"><div class="space-head"><h2>项目任务</h2></div>${projectCardHTML(p,true)}</section>`
     +projectFiles(p);
   bindProjectCards();bindProjectSpace(p);
@@ -2029,7 +2035,10 @@ function deleteAccount(id){
   };
 }
 async function act(action,data){try{await api('/api/action',{action,data});await refresh();toast('操作已完成')}catch(e){toast(e.message);throw e}}
-function openModal(html){UI.docDirty=false;if(UI.briefSource){UI.briefSource.closest('.archive-file')?.classList.remove('is-out');UI.briefSource=null}UI.briefTyping?.finish();UI.briefTyping=null;document.querySelectorAll('.brief-folder').forEach(x=>x.remove());['#modalBackdrop','#modalBackdrop .modal','#modalContent'].forEach(s=>$(s)?.getAnimations?.().forEach(a=>a.cancel()));$('#modalContent').innerHTML=html;$('#modalBackdrop .modal')?.classList?.remove('is-wide','is-flown');$('#modalBackdrop').classList.remove('hidden')};function closeModal(){if(UI.docDirty&&!confirm('修改还没保存，确定关闭？'))return;UI.docDirty=false;if(typeof foldBrief==='function'&&foldBrief())return;$('#modalBackdrop').classList.add('hidden')};function closeDrawer(){$('#taskDrawer').classList.add('hidden')}
+function restorePanelFocus(target){
+  if(target?.isConnected&&!target.closest('.hidden'))target.focus?.({preventScroll:true});
+}
+function openModal(html){if($('#modalBackdrop').classList.contains('hidden'))UI.modalReturnFocus=document.activeElement;UI.docDirty=false;if(UI.briefSource){UI.briefSource.closest('.archive-file')?.classList.remove('is-out');UI.briefSource=null}UI.briefTyping?.finish();UI.briefTyping=null;document.querySelectorAll('.brief-folder').forEach(x=>x.remove());['#modalBackdrop','#modalBackdrop .modal','#modalContent'].forEach(s=>$(s)?.getAnimations?.().forEach(a=>a.cancel()));$('#modalContent').innerHTML=html;$('#modalBackdrop .modal')?.classList?.remove('is-wide','is-flown');$('#modalBackdrop').classList.remove('hidden')};function closeModal(){if(UI.docDirty&&!confirm('修改还没保存，确定关闭？'))return;UI.docDirty=false;if(typeof foldBrief==='function'&&foldBrief())return;$('#modalBackdrop').classList.add('hidden');restorePanelFocus(UI.modalReturnFocus)};function closeDrawer(){$('#taskDrawer').classList.add('hidden');restorePanelFocus(UI.drawerReturnFocus)}
 function newTask(projectId,initialDate){
   const admin=Boolean(S.user.admin),paths=taskProjects(),projects=paths.map(x=>x.p),temp=tempTaskMode(),locked=typeof projectId==='string';
   if(!projects.length&&temp==='none'){toast('你所在的规则组不能新建任务');return}
@@ -2908,6 +2917,10 @@ function openShortcuts(){
 }
 function shortcutKey(e){
   if(e.defaultPrevented||e.isComposing||e.ctrlKey||e.metaKey||e.altKey||!S.user||document.body.classList.contains('auth-locked'))return;
+  if(e.key==='Escape'){
+    if(!$('#modalBackdrop').classList.contains('hidden')){e.preventDefault();closeModal();return}
+    if(!$('#taskDrawer').classList.contains('hidden')){e.preventDefault();closeDrawer();return}
+  }
   if(e.target.closest?.('input,textarea,select,[contenteditable],[contenteditable="plaintext-only"]'))return;
   if(!$('#modalBackdrop').classList.contains('hidden')||!$('#taskDrawer').classList.contains('hidden'))return;
   const key=e.key.length===1?e.key.toLowerCase():e.key;
