@@ -519,6 +519,11 @@ class ScheduleAccessTests(unittest.TestCase):
         settled = self.store.get('tasks', task['id'])
         self.assertEqual(settled['status'], 'done')
         self.assertTrue(settled.get('carriedCompletion'))
+        snapshot = self.store.snapshot(self.store.user('test002'))
+        self.assertTrue(next(t for t in snapshot['tasks'] if t['id'] == task['id'])['superseded'])
+        events = [log for log in snapshot['logs'] if log['taskId'] == task['id'] and log['kind'] == 'defer']
+        self.assertEqual(len(events), 1, '完成后的周视图仍能读取原递延事件')
+        self.assertEqual(events[0]['target'], target)
 
     def test_deferred_chain_counts_once_in_diary_statistics(self):
         task = self.personal['test002']
