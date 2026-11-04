@@ -642,7 +642,8 @@ class Store:
             if table in ('tasks', 'task_history', 'logs'):
                 all_tasks = self.all('tasks')
                 superseded = self._superseded_map(all_tasks)
-                tasks = [{**t, 'superseded': int(t['id'] in superseded or bool(t.get('supersededBy')) or bool(t.get('superseded')))}
+                stack_meta = self._stack_metadata(all_tasks)
+                tasks = [{**t, **stack_meta.get(t['id'], {}), 'superseded': int(t['id'] in superseded or bool(t.get('supersededBy')) or bool(t.get('superseded')))}
                          for t in all_tasks if self.can_view_task(user, t)]
                 if table == 'tasks':
                     return [t for t in tasks if not t['superseded']]
@@ -1633,13 +1634,84 @@ class Store:
             parent=by_id[parent].get('originId') or by_id[parent].get('reworkOf')
         return root
 
-    def _lineage_leaves(self, tasks):
+    def _raw_lineage_leaves(self, tasks):
         """Return the newest record of every lineage: the one that owns the work."""
         by_id={t.get('id'):t for t in tasks if t.get('id')}
         groups={}
         for task in tasks:
             groups.setdefault(self._lineage_root(task,by_id),[]).append(task)
         return [max(chain,key=lambda t:(str(t.get('date','')),str(t.get('createdAt','')))) for chain in groups.values()]
+
+    def repeat_stacking(self):
+        row=self.db.execute("SELECT data FROM settings WHERE id='repeat_stacking'").fetchone()
+        return bool(row and json.loads(row['data']).get('value') is True)
+
+    def _repeat_period_date(self, task, by_id):
+        root=by_id.get(self._lineage_root(task,by_id),task)
+        if root.get('repeatDate'):return root['repeatDate']
+        # Old deterministic occurrence IDs preserve the original period even
+        # when reopening later moves the editable scheduled date to today.
+        prefix=f'repeat:{root.get("repeatId")}:{root.get("assignee")}:'
+        if root.get('repeatId') and root['id'].startswith(prefix):
+            candidate=root['id'][len(prefix):]
+            try:return date.fromisoformat(candidate).isoformat()
+            except ValueError:pass
+        return root.get('date','')
+
+    def _repeat_stack_groups(self, tasks):
+        """Group outstanding periods, never future pre-generated occurrences.
+
+        Records stay independent until a member handles the group. A setting
+        change alone is reversible and never rewrites task history.
+        """
+        if not self.repeat_stacking():return []
+        by_id={t['id']:t for t in tasks};at=now();today=at.date().isoformat();groups={};batches={}
+        for task in self._raw_lineage_leaves(tasks):
+            if task.get('status') not in ('todo','doing') or task.get('stackCompletedBy'):continue
+            root=by_id.get(self._lineage_root(task,by_id),task)
+            rule=root.get('repeatId')
+            if not rule:continue
+            key=(rule,task.get('assignee'),task.get('projectId'))
+            if task.get('stackBatchId'):
+                batches.setdefault((key,task['stackBatchId']),[]).append(task)
+            if task.get('date','')>today:continue
+            try:trigger=datetime.combine(date.fromisoformat(self._repeat_period_date(task,by_id)),time.fromisoformat(root.get('time') or '09:00'),TZ)
+            except (ValueError,TypeError,KeyError):continue
+            if trigger>at:continue
+            groups.setdefault(key,[]).append(task)
+        result=[];used=set()
+        for candidates in groups.values():
+            latest=max(self._repeat_period_date(t,by_id) for t in candidates)
+            members=[t for t in candidates if (self._repeat_period_date(t,by_id)==latest or t.get('originId') or t.get('reopen'))]
+            if len(members)>1:
+                members.sort(key=lambda t:(self._repeat_period_date(t,by_id),t['id']))
+                result.append(members);used.update(t['id'] for t in members)
+        for members in batches.values():
+            members=[t for t in members if t['id'] not in used]
+            if len(members)>1:result.append(sorted(members,key=lambda t:(self._repeat_period_date(t,by_id),t['id'])))
+        return result
+
+    def _stack_log_data(self, task):
+        periods=task.get('stackPeriods') or []
+        if len(periods)<=1:return {}
+        by_id={t['id']:t for t in self.all('tasks')}
+        return {'stackCount':len(periods),'stackPeriods':list(periods),
+                'stackDates':sorted(self._repeat_period_date(by_id[p],by_id) for p in periods if p in by_id)}
+
+    def _stack_metadata(self, tasks):
+        by_id={t['id']:t for t in tasks};metadata={}
+        for group in self._repeat_stack_groups(tasks):
+            periods=set()
+            for t in group:periods.update(t.get('stackPeriods') or [self._lineage_root(t,by_id)])
+            metadata[group[-1]['id']]={'stackCount':len(periods),'stackPeriods':sorted(periods),'stackDates':sorted(self._repeat_period_date(by_id[p],by_id) for p in periods if p in by_id),'stackTaskIds':[t['id'] for t in group]}
+        for t in tasks:
+            if len(t.get('stackPeriods',[]))>1 and t['id'] not in metadata:
+                metadata[t['id']]={'stackCount':len(t['stackPeriods']),'stackPeriods':t['stackPeriods'],'stackDates':sorted(self._repeat_period_date(by_id[p],by_id) for p in t['stackPeriods'] if p in by_id),'stackTaskIds':t.get('stackTaskIds',[])}
+        return metadata
+
+    def _lineage_leaves(self, tasks):
+        superseded=self._superseded_map(tasks);meta=self._stack_metadata(tasks)
+        return [{**t,**meta.get(t['id'],{})} for t in tasks if t['id'] not in superseded]
 
     def _superseded_map(self, tasks):
         """Map each superseded occurrence to the lineage leaf that replaced it.
@@ -1658,6 +1730,18 @@ class Store:
             for task in chain:
                 if task.get('id')!=leaf.get('id'):
                     superseded[task['id']]=leaf.get('id')
+        # Completed groups retain one real completion even after the setting
+        # is disabled. Resolve their representative through later deferrals.
+        for task in tasks:
+            if task.get('stackCompletedBy') in by_id:
+                superseded[task['id']]=task['stackCompletedBy']
+        for group in self._repeat_stack_groups(tasks):
+            for task in group[:-1]:superseded[task['id']]=group[-1]['id']
+        for key in list(superseded):
+            target=superseded[key];seen={key}
+            while target in superseded and target not in seen:
+                seen.add(target);target=superseded[target]
+            superseded[key]=target
         return superseded
 
     def _lineage_ancestors(self, task, tasks):
@@ -1839,6 +1923,88 @@ class Store:
                           'remaining': task.get('desc') or task.get('name'), 'target': target_day,
                           'nextTaskId': copy['id'], 'date': now().date().isoformat(), 'createdAt': timestamp()})
         return copy
+
+    def _task_progress(self, user, action, d, announce=True):
+        t=self.get('tasks',d['id']);self.performer(user,t)
+        log={'taskId':t['id'],'actor':user['id'],'date':t['date'],'createdAt':timestamp(),'estimated':t['duration'],'type':t['type']}
+        if action=='task.complete':
+            # Finishing a task needs no sign-off; only closing a project does.
+            summary=required(d,'summary')
+            log.update(kind='complete',summary=summary,actual=duration(d.get('actual')),feeling=d.get('feeling','一般'),followup=str(d.get('followup','')))
+            t['completionSummary']=summary; t['completionActual']=log['actual']; t['completionFeeling']=log['feeling']; t['submittedAt']=timestamp()
+            t['status']='done';t['completedAt']=timestamp();t['completedBy']=user['id']
+            self._settle_lineage(t,user['id'])
+            if not t.get('projectId') and t.get('creator') not in (None,user['id']):
+                self.notify(t['creator'],'任务已完成',f'{user["id"]} 完成了「{t["name"]}」。\n完成总结：{summary}','progress',t['id'])
+        elif action=='task.defer':
+            target=valid_date(d.get('date'))
+            if target<=t['date']:raise Problem(400,'递延日期必须晚于原日期')
+            if t.get('projectId'):
+                project=self.get('projects',t['projectId'])
+                if project.get('status')!='active':raise Problem(409,'只能递延进行中项目的任务')
+                if project.get('start') and target<project['start']:raise Problem(400,'递延日期不能早于项目开始日期')
+                if project.get('end') and target>project['end']:raise Problem(400,'递延日期不能晚于项目截止日期')
+            carried_deadline=t.get('deadline')
+            if carried_deadline and carried_deadline<target:
+                carried_deadline=target
+            log.update(kind='defer',reason=required(d,'reason'),remaining=required(d,'remaining'),target=target);root=t.get('originId') or t['id'];copy={**t,'id':uid(),'date':target,'status':'todo','fixed':False,'repeatId':None,'desc':log['remaining'],'duration':duration(d.get('duration',t.get('duration'))),'deadline':carried_deadline,'originId':root,'createdAt':timestamp(),'supersededBy':None,'supersededAt':None};self.put('tasks',copy);log['nextTaskId']=copy['id'];t['status']='deferred';t['supersededBy']=copy['id'];t['supersededAt']=timestamp()
+        else:
+            if not t['fixed']:raise Problem(400,'只有固定安排可以跳过本次')
+            log.update(kind='skip',reason=str(d.get('reason','临时跳过')));t['status']='skipped'
+        self.put('tasks',t);self.put('logs',log)
+        if announce:self._announce_progress(user,action,t,log)
+        return t
+
+    def _announce_progress(self, user, action, t, log, scope=''):
+        """Tell the project Owner, or a temp task's creator, what was recorded.
+        A merged group is one notice, its scope named, however many periods it holds."""
+        if t.get('projectId'):
+            p=self.get('projects',t['projectId'])
+            if p['owner']!=user['id']:self.notify(p['owner'],'项目任务进度',f'{user["id"]} 将「{t["name"]}」{scope}记录为 {t["status"]}。'+json.dumps(log,ensure_ascii=False),'progress',t['id'])
+        elif action!='task.complete' and t.get('creator') not in (None,user['id']):
+            self.notify(t['creator'],'临时任务进度',f'{user["id"]} 将「{t["name"]}」{scope}记录为 {status_label(t["status"])}。',
+                        'progress',t['id'])
+
+    def _repeat_progress(self, user, action, data):
+        task=self.get('tasks',data['id'])
+        # A lost completion response may be retried from any member of the group.
+        if action=='task.complete' and task.get('status')=='done' and (task.get('stackCompletedBy') or len(task.get('stackPeriods',[]))>1):
+            if user.get('admin') or task.get('assignee')!=user['id'] or not self.can_view_task(user,task):raise Problem(403,'只能记录自己的任务')
+            return self.get('tasks',task.get('stackCompletedBy') or task['id'])
+        self.performer(user,task)
+        tasks=self.all('tasks');group=next((g for g in self._repeat_stack_groups(tasks) if any(t['id']==task['id'] for t in g)),[task])
+        by_id={t['id']:t for t in tasks};periods=set()
+        for member in group:periods.update(member.get('stackPeriods') or [self._lineage_root(member,by_id)])
+        expected=data.get('stackPeriods')
+        if expected is not None and (not isinstance(expected,list) or not all(isinstance(x,str) for x in expected) or set(expected)!=periods):
+            raise Problem(409,'合并期次已变化，请刷新后重试')
+        if action=='task.skip' or len(periods)<=1:return self._task_progress(user,action,data)
+        for member in group:self.performer(user,member)
+        representative=group[-1]
+        history={'stackCount':len(periods),'stackPeriods':sorted(periods),'stackDates':sorted(self._repeat_period_date(by_id[p],by_id) for p in periods if p in by_id)}
+        scope=f'（合并 {len(periods)} 期）'
+        if action=='task.complete':
+            result=self._task_progress(user,action,{**data,'id':representative['id']},announce=False)
+            for member in group[:-1]:
+                member.update(status='done',completedAt=result['completedAt'],completedBy=user['id'],carriedCompletion=True,stackCompletedBy=result['id'])
+                self.put('tasks',member);self._settle_lineage(member,user['id'])
+            result.update(stackPeriods=sorted(periods),stackTaskIds=[t['id'] for t in group])
+            self.put('tasks',result)
+            event=next(x for x in reversed(self.all('logs')) if x.get('taskId')==result['id'] and x.get('kind')=='complete')
+            event.update(history);self.put('logs',event)
+            self._announce_progress(user,action,result,event,scope)
+            return {**result,'stackCount':len(periods)}
+        # Defer every period atomically, retaining the bundle even when the user
+        # picks a future day. Disabling the setting still reveals each period.
+        batch=uid();result=None
+        for member in group:
+            result=self._task_progress(user,action,{**data,'id':member['id']},announce=False)
+            copy=self.get('tasks',result['supersededBy']);copy['stackBatchId']=batch;self.put('tasks',copy)
+            event=next(x for x in reversed(self.all('logs')) if x.get('taskId')==result['id'] and x.get('kind')=='defer')
+            event.update(history,stackBatchId=batch);self.put('logs',event)
+        self._announce_progress(user,action,result,event,scope)
+        return result
+
 
     def _join_member(self, project, member, request_fields, title, body):
         """Put `member` on the project, settle their open invitation and tell them."""
@@ -2100,6 +2266,7 @@ class Store:
             folders=[f for f in self.all('folders') if user['admin'] or f['id'] in folder_ids]
             all_tasks=self.all('tasks')
             superseded=self._superseded_map(all_tasks)
+            stack_meta=self._stack_metadata(all_tasks)
             tasks=[]
             for task in all_tasks:
                 if not self.can_view_task(user,task):
@@ -2107,7 +2274,7 @@ class Store:
                 # Superseded occurrences stay in the payload so history, logs and
                 # approval lookups keep working; the client hides them from the
                 # active views and shows them in the deferral history instead.
-                tasks.append({**task,'superseded':True,'supersededBy':superseded[task['id']]} if task['id'] in superseded else task)
+                tasks.append({**task,**stack_meta.get(task['id'],{}),**({'superseded':True,'supersededBy':superseded[task['id']]} if task['id'] in superseded else {})})
             ids={t['id'] for t in tasks}; pids={p['id'] for p in projects}
             reports=[r for r in self.all('reports') if r['author']==user['id'] or user['admin'] or (r.get('projectId') and self.get('projects',r['projectId'])['owner']==user['id'])]
             # Briefs travel as index cards; the archive room fetches a full one when it is opened.
@@ -2119,7 +2286,7 @@ class Store:
             owned={p['id'] for p in projects if p['owner']==user['id']}
             task_requests=[r for r in self.all('task_requests') if user['admin'] or r.get('requester')==user['id'] or r.get('projectId') in owned]
             automation=next((x.get('value',{}) for x in self.all('settings') if x.get('id')=='automation'),{})
-            return {'user':user,'users':self.users(),'today':now().date().isoformat(),'weekStart':self.week_start(),'projects':projects,
+            return {'user':user,'users':self.users(),'today':now().date().isoformat(),'weekStart':self.week_start(),'repeatStacking':self.repeat_stacking(),'projects':projects,
 'folders':folders,'fileArchives':file_archives,'files':[f for f in all_files if f.get('projectId') in file_pids],'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees'] or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':[n for n in self.all('notifications') if n['to']==user['id'] and '12:00 初稿' not in str(n.get('title',''))], 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'taskRequests':task_requests, 'creationRules':self.creation_rules(user), 'creationPolicy':self.creation_policy() if user.get('role')=='superadmin' else None, 'accountOrder':next((x.get('value') or [] for x in self.all('settings') if x.get('id')=='account_order'),[]) if user['admin'] else [], 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or self.get('projects',s['projectId'])['owner']==user['id'])], 'chat':self.chat_summary(user),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.all('audit')[-60:] if user['admin'] else []}
 
     def diary_statistics(self, viewer, start=None, end=None):
@@ -2171,7 +2338,7 @@ class Store:
             event=max(approvals or completes,key=lambda l:str(l.get('createdAt','')),default=None)
             task=max(chain,key=lambda t:(str(t.get('date','')),str(t.get('createdAt',''))))
             # A task sent back by its Owner is open again, whatever its log says.
-            if task.get('status')!='done': continue
+            if task.get('status')!='done' or task.get('stackCompletedBy'): continue
             if not event: event={'createdAt':task.get('completedAt') or task.get('date','')+'T23:59:59+08:00'}
             if not event or root in seen: continue
             seen.add(root);project=projects.get(task.get('projectId'))
@@ -2998,6 +3165,10 @@ class Store:
                 if p.get('folderId')==f['id']:p['folderId']=None;self.put('projects',p)
             self.db.execute('DELETE FROM folders WHERE id=?',(f['id'],))
             return {'id':f['id'],'deleted':True}
+        if action=='repeat.stacking.update':
+            self.superadmin(user)
+            if not isinstance(d.get('enabled'),bool):raise Problem(400,'合并设置必须是布尔值')
+            return self.put('settings',{'id':'repeat_stacking','value':d['enabled'],'updatedAt':timestamp(),'by':user['id']})
         if action=='week_start.update':
             # The team's first day of the week, 0 = 周日 … 6 = 周六 (as JavaScript
             # counts them).  Everyone's week view and 周报 follow it.
@@ -3243,40 +3414,7 @@ class Store:
                 if recipient!=user['id']:self.notify(recipient,'任务被调整',f'{user["id"]} 调整「{t["name"]}」：{old["assignee"]} → {t["assignee"]}，{old["date"]} → {t["date"]}。','task',t['id'])
             return t
         if action in ('task.complete','task.defer','task.skip'):
-            t=self.get('tasks',d['id']);self.performer(user,t)
-            log={'taskId':t['id'],'actor':user['id'],'date':t['date'],'createdAt':timestamp(),'estimated':t['duration'],'type':t['type']}
-            if action=='task.complete':
-                # Finishing a task needs no sign-off; only closing a project does.
-                summary=required(d,'summary')
-                log.update(kind='complete',summary=summary,actual=duration(d.get('actual')),feeling=d.get('feeling','一般'),followup=str(d.get('followup','')))
-                t['completionSummary']=summary; t['completionActual']=log['actual']; t['completionFeeling']=log['feeling']; t['submittedAt']=timestamp()
-                t['status']='done';t['completedAt']=timestamp();t['completedBy']=user['id']
-                self._settle_lineage(t,user['id'])
-                if not t.get('projectId') and t.get('creator') not in (None,user['id']):
-                    self.notify(t['creator'],'任务已完成',f'{user["id"]} 完成了「{t["name"]}」。\n完成总结：{summary}','progress',t['id'])
-            elif action=='task.defer':
-                target=valid_date(d.get('date'))
-                if target<=t['date']:raise Problem(400,'递延日期必须晚于原日期')
-                if t.get('projectId'):
-                    project=self.get('projects',t['projectId'])
-                    if project.get('status')!='active':raise Problem(409,'只能递延进行中项目的任务')
-                    if project.get('start') and target<project['start']:raise Problem(400,'递延日期不能早于项目开始日期')
-                    if project.get('end') and target>project['end']:raise Problem(400,'递延日期不能晚于项目截止日期')
-                carried_deadline=t.get('deadline')
-                if carried_deadline and carried_deadline<target:
-                    carried_deadline=target
-                log.update(kind='defer',reason=required(d,'reason'),remaining=required(d,'remaining'),target=target);root=t.get('originId') or t['id'];copy={**t,'id':uid(),'date':target,'status':'todo','fixed':False,'repeatId':None,'desc':log['remaining'],'duration':duration(d.get('duration',t.get('duration'))),'deadline':carried_deadline,'originId':root,'createdAt':timestamp(),'supersededBy':None,'supersededAt':None};self.put('tasks',copy);log['nextTaskId']=copy['id'];t['status']='deferred';t['supersededBy']=copy['id'];t['supersededAt']=timestamp()
-            else:
-                if not t['fixed']:raise Problem(400,'只有固定安排可以跳过本次')
-                log.update(kind='skip',reason=str(d.get('reason','临时跳过')));t['status']='skipped'
-            self.put('tasks',t);self.put('logs',log)
-            if t.get('projectId'):
-                p=self.get('projects',t['projectId'])
-                if p['owner']!=user['id']:self.notify(p['owner'],'项目任务进度',f'{user["id"]} 将「{t["name"]}」记录为 {t["status"]}。'+json.dumps(log,ensure_ascii=False),'progress',t['id'])
-            elif action!='task.complete' and t.get('creator') not in (None,user['id']):
-                self.notify(t['creator'],'临时任务进度',f'{user["id"]} 将「{t["name"]}」记录为 {status_label(t["status"])}。',
-                            'progress',t['id'])
-            return t
+            return self._repeat_progress(user,action,d)
         if action=='task.completion.update':
             # The assignee corrects what they recorded; the task stays done.
             t=self.get('tasks',d['id'])
@@ -3292,7 +3430,7 @@ class Store:
             t['completionFeeling']=str(d.get('feeling') or t.get('completionFeeling') or '一般')
             t['completionEditedAt']=timestamp()
             self.put('tasks',t)
-            self.put('logs',{'taskId':t['id'],'actor':user['id'],'kind':'complete_edit','summary':t['completionSummary'],'actual':t['completionActual'],'feeling':t['completionFeeling'],'before':before,'date':t['date'],'createdAt':timestamp()})
+            self.put('logs',{'taskId':t['id'],'actor':user['id'],'kind':'complete_edit',**self._stack_log_data(t),'summary':t['completionSummary'],'actual':t['completionActual'],'feeling':t['completionFeeling'],'before':before,'date':t['date'],'createdAt':timestamp()})
             if t.get('projectId'):
                 owner=self.get('projects',t['projectId'])['owner']
                 if owner!=user['id']:self.notify(owner,'完成记录已修改',f'{user["id"]} 修改了「{t["name"]}」的完成记录。\n完成总结：{t["completionSummary"]}','progress',t['id'])
@@ -3316,7 +3454,7 @@ class Store:
             if t.get('deadline') and t['deadline']<t['date']:t['deadline']=t['date']
             t.pop('completedAt',None);t.pop('completedBy',None)
             self.put('tasks',t)
-            self.put('logs',{'taskId':t['id'],'actor':user['id'],'kind':'reopen','reason':reason,'date':today,'createdAt':timestamp()})
+            self.put('logs',{'taskId':t['id'],'actor':user['id'],'kind':'reopen',**self._stack_log_data(t),'reason':reason,'date':today,'createdAt':timestamp()})
             if t['assignee']!=user['id']:
                 self.notify(t['assignee'],'任务被打回',f'「{t["name"]}」被 {user["id"]} 打回，请继续处理。\n原因：{reason}','task_rejected',t['id'])
             return t
@@ -3691,15 +3829,21 @@ class Store:
                         id=f'repeat:{r["id"]}:{user}:{day.isoformat()}'
                         if project and self.member_gate(project,user):continue
                         if id not in existing:
-                            self.put('tasks',{'id':id,'repeatId':r['id'],'name':r['name'],'desc':r['desc'],'priority':r['priority'],'duration':r['duration'],'date':day.isoformat(),'time':r['time'],'deadline':deadline,'span':span,'projectId':r.get('projectId'),'assignee':user,'status':'todo','fixed':True,'type':'固定安排','createdAt':timestamp()});existing.add(id)
+                            self.put('tasks',{'id':id,'repeatId':r['id'],'repeatDate':day.isoformat(),'name':r['name'],'desc':r['desc'],'priority':r['priority'],'duration':r['duration'],'date':day.isoformat(),'time':r['time'],'deadline':deadline,'span':span,'projectId':r.get('projectId'),'assignee':user,'status':'todo','fixed':True,'type':'固定安排','createdAt':timestamp()});existing.add(id)
                 day+=timedelta(days=1)
+
+    def _report_tasks(self):
+        """Hide grouped periods without changing unrelated legacy diary counts."""
+        tasks=self.all('tasks');by_id={t['id']:t for t in tasks};superseded=self._superseded_map(tasks)
+        return [t for t in tasks if t['id'] not in superseded or
+                self._lineage_root(t,by_id)==self._lineage_root(by_id[superseded[t['id']]],by_id)]
 
     def aggregate(self, p, day, cutoff):
         reports=[r for r in self.all('reports') if r['projectId']==p['id'] and r['date']==day and r['kind']=='collaborator' and datetime.fromisoformat(r['createdAt'])<=cutoff]
         expected=[m for m,v in p['members'].items() if v=='accepted' and m!=p['owner']]
         diaries=[r for r in self.all('diaries') if r.get('date')==day and r.get('author') in expected]
         missing=[m for m in expected if not any(r['author']==m for r in reports) and not any(r.get('author')==m for r in diaries)]
-        tasks=[t for t in self.all('tasks') if t.get('projectId')==p['id'] and t['date']==day]
+        tasks=[t for t in self._report_tasks() if t.get('projectId')==p['id'] and t['date']==day]
         # A diary counts as having reported in, but what it says stays private:
         # this summary is filed under the project, where its Owner reads it.
         entries=[r['author']+'：'+json.dumps(r['content'],ensure_ascii=False) for r in reports]
@@ -3708,7 +3852,7 @@ class Store:
 
     def diary_digest(self, member, day):
         """Build the nightly member diary summary from that day's work."""
-        tasks=[t for t in self.all('tasks') if t.get('assignee')==member and t.get('date')==day and t.get('status')!='skipped']
+        tasks=[t for t in self._report_tasks() if t.get('assignee')==member and t.get('date')==day and t.get('status')!='skipped']
         done=[t for t in tasks if t.get('status')=='done']
         deferred=[t for t in tasks if t.get('status') in ('deferred','doing','todo','pending_approval','rejected')]
         existing=next((d for d in self.all('diaries') if d.get('author')==member and d.get('date')==day),None)
@@ -3746,7 +3890,7 @@ class Store:
         for p in self.all('projects'):
             if p.get('status') in ('pending','rejected') or (p.get('start') or '')>day or (p.get('end') and p['end']<day):continue
             owner_report=next((r for r in reports if r.get('projectId')==p['id'] and r.get('kind')=='owner'),None)
-            day_tasks=[t for t in self.all('tasks') if t.get('projectId')==p['id'] and t.get('date')==day and not t.get('repeatId')]
+            day_tasks=[t for t in self._report_tasks() if t.get('projectId')==p['id'] and t.get('date')==day and not t.get('repeatId')]
             if not owner_report and not day_tasks and not any(r.get('projectId')==p['id'] for r in reports):continue
             content,_=self.aggregate(p,day,at)
             expected=[m for m,v in (p.get('members') or {}).items() if v=='accepted' and m!=p.get('owner')]

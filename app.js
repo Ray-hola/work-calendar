@@ -411,11 +411,13 @@ const isArchivedTask=t=>['deferred','skipped','rejected'].includes(t.status);
 const isSuperseded=t=>Boolean(t&&t.superseded);
 /* 已递延 lists only unfinished work, once per current occurrence. Completing
    it keeps originId for history, but removes it from this list and its count. */
-const isDeferredTask=t=>!isSuperseded(t)&&Boolean(t.originId)&&['todo','doing'].includes(t.status);
-const deferHops=t=>taskLineageIds(t).size-1;
+const isDeferredTask=t=>!isSuperseded(t)&&Boolean(t.originId||t.stackCount>1)&&['todo','doing'].includes(t.status);
+const deferHops=t=>taskLineageIds(t,false).size-1;
+const stackBadge=t=>Number(t.stackCount)>1?`<span class="stack-badge" aria-label="合并 ${Number(t.stackCount)} 期">×${Number(t.stackCount)}</span>`:'';
+const stackPeriodDates=t=>t.stackDates||(t.stackPeriods||[]).map(id=>S.tasks.find(x=>x.id===id)?.date).filter(Boolean).sort();
 /* Every occurrence of one task shares originId/reworkOf links. Walking them
    lets the drawer show a single history for a task that was deferred or redone. */
-function taskLineageIds(task){
+function taskLineageIds(task,includeStack=true){
   const byId=new Map((S.tasks||[]).map(x=>[x.id,x])),ids=new Set([task.id]);
   let parent=task.originId||task.reworkOf,root=task.id;const seen=new Set();
   while(parent&&byId.has(parent)&&!seen.has(parent)){seen.add(parent);ids.add(parent);root=parent;
@@ -423,6 +425,7 @@ function taskLineageIds(task){
   /* Every hop of a deferral points at the first record, so the ones in
      between are found from there. */
   (S.tasks||[]).forEach(x=>{if(x.originId===root)ids.add(x.id)});
+  if(includeStack)for(const id of [...(task.stackTaskIds||[]),...(task.stackPeriods||[])]){const other=byId.get(id);if(other&&other.id!==task.id)taskLineageIds(other,false).forEach(x=>ids.add(x))}
   return ids;
 }
 /* A task can span several days: it stays on the board from `date` through
@@ -470,7 +473,7 @@ function taskCard(t){
      owner, time, DDL and status. The description lives in the drawer. */
   return `<article class="task-card" data-id="${escapeHTML(t.id)}" tabindex="0"${t.desc?` title="`
     +`${escapeHTML(t.desc)}"`:''}><span class="priority ${escapeHTML(t.priority)}">${escapeHTML(t.priority)}</span>`
-    +`<div class="task-main"><span class="task-name">${escapeHTML(t.name)}</span>${t.fixed?`<span class="fixed-badge">`
+    +`<div class="task-main"><span class="task-name" title="${escapeHTML(t.name)}">${escapeHTML(t.name)}</span>${stackBadge(t)}${t.fixed?`<span class="fixed-badge">`
     +`${icon('repeat')} 固定</span>`:''}${isMultiDay(t)?`<span class="span-badge">${spanDays(t)} 天</span>`:''}`
     +`${isSuperseded(t)?`<span class="superseded-badge">已被后续任务接替</span>`:''}${carriedFrom?`<span class="carried-badge">`
     +`${icon('arrow-right')} 由 ${escapeHTML(carriedDay||'前一日')} 递延${deferHops(t)>1?` · 第 ${deferHops(t)} 次`:''}`
@@ -520,7 +523,9 @@ function weekTaskChip(t,iso){
   const cont=iso>t.date,[c,l]=status(t);
   const meta=cont?`续 · ${nameOf(t.assignee)}`:`${escapeHTML(t.time||'09:00')} · ${nameOf(t.assignee)}`;
   return `<button class="week-task ${escapeHTML(t.priority)} ${c}${cont?' cont':''}" type="button" data-id="${escapeHTML(t.id)}" title="${escapeHTML(`${t.name} · ${nameOf(t.assignee)} · ${l}`)}">`
-    +`<span class="week-task-name">${escapeHTML(t.name)}</span>`
+    +`${t.stackCount>1?`<span class="week-task-title"><span class="week-task-name">${escapeHTML(t.name)}</span>${stackBadge(t)}</span>`
+    :`<span class="week-task-name">${escapeHTML(t.name)}</span>`}`
+
     +`<span class="week-task-meta">${escapeHTML(meta)}${!cont&&isMultiDay(t)?` · ${spanDays(t)} 天`:''}</span></button>`;
 }
 function weekDayColumn(iso,tasks,canAdd){
@@ -569,13 +574,32 @@ function renderDayContent(){
 /* Log kinds are storage keys; the drawer reads them back in people's words. */
 const LOG_LABELS={start:'开始任务',auto_start:'到点自动开始',complete:'完成任务',complete_pending:'提交完成审批',defer:'未完成，递延',skip:'跳过本次',edit_request:'申请修改任务',task_approval_superseded:'审批由后续任务接续',complete_edit:'修改完成记录',reopen:'被打回'};
 function logLine(x){
+  if(x.stackCount>1&&x.kind==='reopen')return `打回合并 ${x.stackCount} 期${x.reason?' · '+x.reason:''}`;
+  if(x.stackCount>1&&x.kind==='complete_edit')return `修改合并 ${x.stackCount} 期完成记录${x.summary?' · '+x.summary:''}${x.actual?' · 实际 '+x.actual+' 分钟':''}`;
+  if(x.stackCount>1&&x.kind==='complete')return `完成合并 ${x.stackCount} 期${x.summary?' · '+x.summary:''}${x.actual?' · 实际 '+x.actual+' 分钟':''}`;
+  if(x.kind==='defer'&&x.target)return `${x.stackCount>1?'合并 '+x.stackCount+' 期':''}递延至 ${fmt(x.target)}${x.reason?' · '+x.reason:''}`;
   if(x.kind==='adjust')return `指派调整：${nameOf(x.before?.assignee)} → ${nameOf(x.after?.assignee)}`;
   if(x.kind==='approval'||x.kind==='edit_approval'){const verdict=x.decision==='approved'?'通过':x.decision==='rejected'?'驳回':'';return `${x.kind==='approval'?'完成审批':'修改审批'}${verdict}${x.reason?` · ${x.reason}`:''}`}
   const detail=x.summary||x.reason||x.remaining||'';
   return `${LOG_LABELS[x.kind]||x.kind}${detail?` · ${detail}`:''}`;
 }
+function taskHistoryHTML(task,ids=taskLineageIds(task)){
+  const logs=(S.logs||[]).filter(x=>ids.has(x.taskId));
+  const row=x=>`<div class="history-item"><i></i><span>${escapeHTML(logLine(x))}${x.stackDates?.length?`<span class="history-dates">${x.stackDates.map(d=>`<span>${escapeHTML(fmt(d))}</span>`).join('')}</span>`:''}</span><small>${escapeHTML([x.actor==='system'?'系统':nameOf(x.actor),logTime(x.createdAt)].filter(Boolean).join(' · '))}</small></div>`;
+  if(!logs.length)return '<div class="history-item"><i></i><span>暂无记录</span></div>';
+  if(!(task.stackCount>1)&&!logs.some(x=>x.stackCount>1))return logs.map(row).join('');
+  const byId=new Map(S.tasks.map(t=>[t.id,t])),periodOf=id=>{let t=byId.get(id),seen=new Set();while(t&&(t.originId||t.reworkOf)&&!seen.has(t.id)){seen.add(t.id);t=byId.get(t.originId||t.reworkOf)||t; if(seen.has(t.id))break}return t},groups=new Map(),shared=[],batches=new Set();
+  for(const event of logs){
+    if(event.stackCount>1){if(event.stackBatchId){if(batches.has(event.stackBatchId))continue;batches.add(event.stackBatchId)}shared.push(event);continue;}
+    const root=periodOf(event.taskId),day=root?.repeatDate||(root?.id?.startsWith('repeat:')?root.id.slice(-10):root?.date)||'';
+    if(!groups.has(day))groups.set(day,[]);groups.get(day).push(event);
+  }
+  const section=(title,events)=>`<section class="history-period"><h4>${escapeHTML(title)}</h4>${events.map(row).join('')}</section>`;
+  return [...groups].sort(([a],[b])=>a.localeCompare(b)).map(([day,events])=>section(day?fmt(day):'任务记录',events)).join('')+(shared.length?section('合并操作',shared):'');
+}
 function logTime(iso){const m=String(iso||'').match(/^\d{4}-(\d{2})-(\d{2})T(\d{2}:\d{2})/);return m?`${Number(m[1])}月${Number(m[2])}日 ${m[3]}`:''}
 function openDrawer(id){
+  const alias=S.tasks.find(x=>x.id===id);if(alias&&isSuperseded(alias)&&alias.supersededBy&&(['todo','doing'].includes(alias.status)||alias.stackCompletedBy)){const target=S.tasks.find(x=>x.id===alias.supersededBy);if(target&&target.id!==id)return openDrawer(target.id)}
   const t=S.tasks.find(x=>x.id===id);if(!t)return;
   clearFresh(taskLineageIds(t));
   const [c,l]=status(t),p=S.projects.find(p=>p.id===t.projectId),archived=['done','deferred','skipped'].includes(t.status),pendingApproval=['pending_approval','awaiting_approval','submitted'].includes(t.status),rejected=['rejected','returned'].includes(t.status),lineageIds=taskLineageIds(t);
@@ -608,12 +632,12 @@ function openDrawer(id){
   const canDirectEdit=(S.user.admin||(perform&&ownTemp)||giver)&&!editPending&&(!p||p.status==='active')
     &&!['done','deferred','skipped','pending_approval','awaiting_approval','submitted','rejected'].includes(t.status);
   $('#drawerContent').innerHTML=`<div class="drawer-kicker">${escapeHTML(projectName(t))} · ${escapeHTML(t.priority)}`
-    +`</div><h2 class="drawer-title">${escapeHTML(t.name)}</h2><p class="drawer-description">`
+    +`</div><h2 class="drawer-title">${escapeHTML(t.name)}${stackBadge(t)}</h2><p class="drawer-description">`
     +`${escapeHTML(t.desc||'暂无描述')}</p>${completionSummary?`<div class="completion-summary"><span>`
     +`${reopenNote?'上次完成总结':'最新完成总结'}</span><p>${escapeHTML(completionSummary)}${completionActual?` · 实际 `
     +`${completionActual} 分钟`:''}</p></div>`:''}${reopenNote}${editSummary}<div class="detail-grid"><div><span>状态`
     +`</span><strong><i class="status-dot ${c}"></i>${l}</strong></div><div><span>预计时长</span><strong>${t.duration} 分钟`
-    +`</strong></div><div><span>${isMultiDay(t)?`任务周期 · ${spanDays(t)} 天`:'安排日期'}</span><strong>${escapeHTML(t.date)}`
+    +`</strong></div>${t.stackCount>1?`<div><span>合并期次</span><strong class="stack-period-list">${stackPeriodDates(t).map(d=>`<span>${escapeHTML(fmt(d))}</span>`).join('')}</strong></div>`:''}<div><span>${isMultiDay(t)?`任务周期 · ${spanDays(t)} 天`:'安排日期'}</span><strong>${escapeHTML(t.date)}`
     +`${isMultiDay(t)?` → ${escapeHTML(taskEnd(t))}`:''}</strong></div><div><span>DDL</span><strong class="`
     +`${t.status==='done'?'':daysCount(S.today,taskEnd(t))<0?'overdue-text':''}">${escapeHTML(ddlText(t))}</strong>`
     +`</div><div><span>负责人</span><strong>${escapeHTML(nameOf(t.assignee))}</strong></div>`
@@ -623,10 +647,7 @@ function openDrawer(id){
     +`${canDirectEdit?'<button class="secondary-btn edit-task-request-btn" id="directTaskEdit">直接调整任务</button>':''}`
     +`${manage?'<button class="secondary-btn" id="adjustTaskAssignment">调整任务指派</button>':''}`
     +`${canDelete?'<button class="secondary-btn danger-btn" id="deleteTask">删除此任务</button>':''}<div class="history">`
-    +`<h3>任务记录</h3>${S.logs.filter(x=>lineageIds.has(x.taskId)).map(x=>`<div class="history-item"><i></i><span>`
-    +`${escapeHTML(logLine(x))}</span><small>`
-    +`${escapeHTML([nameOf(x.actor),logTime(x.createdAt)].filter(Boolean).join(' · '))}</small>`
-    +`</div>`).join('')||'<div class="history-item"><i></i><span>暂无记录</span></div>'}</div>${actionCopy}`
+    +`<h3>任务记录</h3>${taskHistoryHTML(t,lineageIds)}</div>${actionCopy}`
     +`${completionActions}${editReviewActions}`;
   $('#taskDrawer').classList.remove('hidden');$('#startTask')?.addEventListener('click',()=>act('task.start',{id:t.id}).then(()=>closeDrawer()).catch(()=>{}));$('#completeTask')?.addEventListener('click',()=>complete(t));$('#deferTask')?.addEventListener('click',()=>defer(t));$('#requestTaskEdit')?.addEventListener('click',()=>editTaskRequest(id));$('#directTaskEdit')?.addEventListener('click',()=>editTaskRequest(id,true));$('#adjustTaskAssignment')?.addEventListener('click',()=>editTaskAssignment(id));$('#deleteTask')?.addEventListener('click',async()=>{if(!confirm(`确认删除「${t.name}」？删除后将从日历移除。`))return;try{await act('task.delete',{id:t.id});closeDrawer()}catch(e){}});$('#editCompletion')?.addEventListener('click',()=>editCompletion(t));$('#reopenTask')?.addEventListener('click',()=>reopenTask(t));$('#approveEditRequest')?.addEventListener('click',()=>reviewTaskEdit(t.id,true));$('#rejectEditRequest')?.addEventListener('click',()=>reviewTaskEdit(t.id,false));
 }
@@ -660,7 +681,7 @@ function reopenTask(t){
   $('#cancelAction').onclick=closeModal;
   $('#confirmReopen').onclick=async()=>{const reason=$('#reopenReason').value.trim();if(!reason){toast('请填写打回原因');return}try{await act('task.reopen',{id:t.id,reason});closeModal();closeDrawer();toast('任务已打回')}catch(e){}};
 }
-function complete(t){openModal(`<div class="eyebrow">完成记录 · ${escapeHTML(t.name)}</div><h2>记录完成</h2><label class="form-field">完成总结<textarea id="doneText" ></textarea></label><label class="form-field">实际耗时（分钟）<input id="actualMins" type="number" value="${t.duration}"></label><label class="form-field">工作感受<select id="feeling"><option>顺利</option><option>一般</option><option>困难</option><option>阻塞</option></select></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmComplete">确认完成</button></div>`);$('#cancelAction').onclick=closeModal;$('#confirmComplete').onclick=async()=>{try{await api('/api/action',{action:'task.complete',data:{id:t.id,summary:$('#doneText').value||'完成任务',actual:Number($('#actualMins').value),feeling:$('#feeling').value}});closeModal();closeDrawer();await refresh();toast('任务已完成')}catch(e){toast(e.message)}}}
+function complete(t){openModal(`<div class="eyebrow">完成记录 · ${escapeHTML(t.name)}</div><h2>记录完成${stackBadge(t)}</h2><label class="form-field">完成总结<textarea id="doneText" ></textarea></label><label class="form-field">实际耗时（分钟）<input id="actualMins" type="number" value="${t.duration}"></label><label class="form-field">工作感受<select id="feeling"><option>顺利</option><option>一般</option><option>困难</option><option>阻塞</option></select></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmComplete">${t.stackCount>1?`完成全部 ${t.stackCount} 期`:'确认完成'}</button></div>`);$('#cancelAction').onclick=closeModal;$('#confirmComplete').onclick=async()=>{try{await api('/api/action',{action:'task.complete',data:{id:t.id,summary:$('#doneText').value||'完成任务',...(t.stackCount>1?{stackPeriods:t.stackPeriods}:{}),actual:Number($('#actualMins').value),feeling:$('#feeling').value}});closeModal();closeDrawer();await refresh();toast('任务已完成')}catch(e){toast(e.message)}}}
 function editTaskRequest(id,direct=false){
   const t=S.tasks.find(x=>x.id===id),p=S.projects.find(x=>x.id===t?.projectId);if(!t)return;
   const pool=p?projectAssignees(p)
@@ -694,7 +715,7 @@ function reviewTaskEdit(id,accept,notificationId){
   if(accept){(async()=>{try{await act('task.edit_review',{id:r.id,accept:true});if(notificationId)await act('inbox.read',{id:notificationId});closeModal();closeDrawer();toast('任务修改已批准')}catch(e){}})();return}
   openModal(`<div class="eyebrow">任务修改审批 · 驳回</div><h2>驳回修改申请</h2><p>申请理由：${escapeHTML(r.reason||'未填写')}</p><label class="form-field">驳回建议<textarea id="editRejectReason" placeholder="请说明需要如何调整"></textarea></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmEditReject">驳回并通知</button></div>`);$('#cancelAction').onclick=closeModal;$('#confirmEditReject').onclick=async()=>{const reason=$('#editRejectReason').value.trim();if(!reason){toast('请填写驳回建议');return}try{await act('task.edit_review',{id:r.id,accept:false,reason});if(notificationId)await act('inbox.read',{id:notificationId});closeModal();closeDrawer()}catch(e){}};
 }
-function defer(t){openModal(`<div class="eyebrow">未完成 · 递延预览</div><h2>先说说卡在哪里</h2><label class="form-field">原因<select id="deferReason"><option>时间不足</option><option>等待他人</option><option>需求变化</option><option>遇到阻塞</option><option>其他</option></select></label><label class="form-field">剩余工作<textarea id="remainText"></textarea></label><label class="form-field">递延到<input id="deferDate" type="date" max="${DATE_HORIZON}" value="${add(t.date,1)}"></label><label class="form-field">剩余时长<input id="remainMins" type="number" value="${Math.max(15,Math.round(t.duration/2))}"></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">返回修改</button><button class="primary-btn" id="confirmDefer">确认递延</button></div>`);$('#cancelAction').onclick=closeModal;$('#confirmDefer').onclick=async()=>{try{await api('/api/action',{action:'task.defer',data:{id:t.id,reason:$('#deferReason').value,remaining:$('#remainText').value||'继续完成原任务',date:$('#deferDate').value,duration:Number($('#remainMins').value)}});closeModal();closeDrawer();await refresh();toast('任务已递延')}catch(e){toast(e.message)}}}
+function defer(t){openModal(`<div class="eyebrow">未完成 · 递延预览</div><h2>先说说卡在哪里</h2><label class="form-field">原因<select id="deferReason"><option>时间不足</option><option>等待他人</option><option>需求变化</option><option>遇到阻塞</option><option>其他</option></select></label><label class="form-field">剩余工作<textarea id="remainText"></textarea></label><label class="form-field">递延到<input id="deferDate" type="date" max="${DATE_HORIZON}" value="${add(t.date,1)}"></label><label class="form-field">剩余时长<input id="remainMins" type="number" value="${Math.max(15,Math.round(t.duration/2))}"></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">返回修改</button><button class="primary-btn" id="confirmDefer">确认递延</button></div>`);$('#cancelAction').onclick=closeModal;$('#confirmDefer').onclick=async()=>{try{await api('/api/action',{action:'task.defer',data:{id:t.id,...(t.stackCount>1?{stackPeriods:t.stackPeriods}:{}),reason:$('#deferReason').value,remaining:$('#remainText').value||'继续完成原任务',date:$('#deferDate').value,duration:Number($('#remainMins').value)}});closeModal();closeDrawer();await refresh();toast('任务已递延')}catch(e){toast(e.message)}}}
 function diaryReport(author,day){
   return (S.diaries||[]).find(r=>r.author===author&&r.date===day)||(S.reports||[]).filter(r=>r.author===author&&r.date===day&&r.kind!=='brief').sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')))[0];
 }
@@ -1702,8 +1723,15 @@ function renderSettings(){
   const admin=Boolean(S.user?.admin);
   $('#settingsView .automation-card')?.classList.toggle('hidden',!admin);
   $('#runAutomationBtn')?.classList.toggle('hidden',!admin);
+  renderRepeatStackingSetting();
   renderWeekStartSetting();
   renderCreationPolicy();
+}
+function renderRepeatStackingSetting(){
+  const box=$('#repeatStackingCard');if(!box)return;
+  const allowed=S.user?.role==='superadmin';box.classList.toggle('hidden',!allowed);if(!allowed)return;
+  box.innerHTML=`<div><span class="eyebrow">固定任务</span><h2>递延合并</h2></div><label class="repeat-stacking-choice"><input type="checkbox" id="repeatStackingEnabled"${S.repeatStacking?' checked':''}>合并未完成期次</label>`;
+  const input=box.querySelector('input');input.onchange=async()=>{const enabled=input.checked;input.disabled=true;try{await act('repeat.stacking.update',{enabled})}catch(e){input.checked=Boolean(S.repeatStacking)}finally{input.disabled=false;if(UI.view==='settings')$('#repeatStackingEnabled')?.focus()}};
 }
 function renderWeekStartSetting(){
   const box=$('#weekStartCard');if(!box)return;
@@ -2313,14 +2341,14 @@ function renderPip(){
   const tasks=sortTasks(scheduleTasks().filter(t=>taskActiveOn(t,S.today)&&!isArchivedTask(t))).sort((a,b)=>open(b)-open(a));
   const tickable=t=>!S.user.admin&&t.assignee===S.user.id&&open(t);
   doc.querySelector('#pipSummary').textContent=`${fmt(S.today)} · 还剩 ${tasks.filter(open).length} 项`;
-  doc.querySelector('#pipList').innerHTML=tasks.map(t=>`<li class="${open(t)?'':'closed'}"><label><input type="checkbox" data-id="${escapeHTML(t.id)}" ${open(t)?'':'checked'} ${tickable(t)?'':'disabled'}><span>${escapeHTML(t.name)}</span></label><small>${escapeHTML([t.time,S.user.admin?nameOf(t.assignee):'',projectName(t),open(t)?'':status(t)[1]].filter(Boolean).join(' · '))}</small></li>`).join('')||'<li class="empty">今天没有待办</li>';
+  doc.querySelector('#pipList').innerHTML=tasks.map(t=>`<li class="${open(t)?'':'closed'}"><label><input type="checkbox" data-id="${escapeHTML(t.id)}" ${open(t)?'':'checked'} ${tickable(t)?'':'disabled'}><span>${escapeHTML(t.name)}${t.stackCount>1?` ×${t.stackCount}`:''}</span></label><small>${escapeHTML([t.time,S.user.admin?nameOf(t.assignee):'',projectName(t),open(t)?'':status(t)[1]].filter(Boolean).join(' · '))}</small></li>`).join('')||'<li class="empty">今天没有待办</li>';
   doc.querySelectorAll('#pipList input[data-id]:not([disabled])').forEach(box=>box.onchange=()=>pipComplete(box));
 }
 async function pipComplete(box){
   const t=S.tasks.find(x=>x.id===box.dataset.id);if(!t)return;
   box.disabled=true;
   try{
-    await api('/api/action',{action:'task.complete',data:{id:t.id,summary:'完成任务',actual:Number(t.duration)||30,feeling:'顺利'}});
+    await api('/api/action',{action:'task.complete',data:{id:t.id,summary:'完成任务',...(t.stackCount>1?{stackPeriods:t.stackPeriods}:{}),actual:Number(t.duration)||30,feeling:'顺利'}});
     await refresh();pipNote(`「${t.name}」已完成`);
   }catch(e){box.checked=false;box.disabled=false;pipNote(e.message)}
 }
@@ -3665,9 +3693,13 @@ function agentSafeParams(value){
   if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).filter(([k])=>!/password|api.?key|authorization|token|secret/i.test(k)).map(([k,v])=>[k,agentSafeParams(v)]));
   return value;
 }
+function agentTaskScope(action,payload){
+  const task=S.tasks?.find(t=>t.id===payload.id);
+  return ['task.complete','task.defer'].includes(action)&&task?.stackCount>1?{...payload,stackPeriods:[...task.stackPeriods]}:payload;
+}
 function agentActionHTML(action,payload,executed=false){
-  const safe=agentSafeParams(payload),labels={id:'操作对象',name:'名称',username:'账户',role:'权限组',assignee:'执行人',assignees:'执行人',owner:'负责人',projectId:'所属项目',date:'日期',start:'开始',end:'结束',time:'时间',duration:'分钟',priority:'优先级',active:'启用',accept:'同意',reason:'原因',frequency:'重复方式',weekdays:'星期',dates:'指定日期',status:'状态',summary:'总结',actual:'实际用时',report:'报告',title:'标题',content:'内容'};
-  const display=(k,v)=>{if(k==='id')return S.tasks?.find(x=>x.id===v)?.name||S.projects?.find(x=>x.id===v)?.name||S.repeats?.find(x=>x.id===v)?.name||nameOf(v);if(['owner','assignee'].includes(k))return nameOf(v);if(k==='role')return ({member:'普通成员',admin:'管理员',superadmin:'超级管理员'}[v]||v);if(k==='projectId')return S.projects?.find(x=>x.id===v)?.name||'临时任务';if(Array.isArray(v))return v.map(x=>['assignees','members'].includes(k)?nameOf(x):String(x)).join('、');if(typeof v==='boolean')return v?'是':'否';return typeof v==='object'?JSON.stringify(v):String(v??'—')};
+  const safe=agentSafeParams(payload),labels={stackPeriods:'合并期次',id:'操作对象',name:'名称',username:'账户',role:'权限组',assignee:'执行人',assignees:'执行人',owner:'负责人',projectId:'所属项目',date:'日期',start:'开始',end:'结束',time:'时间',duration:'分钟',priority:'优先级',active:'启用',accept:'同意',reason:'原因',frequency:'重复方式',weekdays:'星期',dates:'指定日期',status:'状态',summary:'总结',actual:'实际用时',report:'报告',title:'标题',content:'内容'};
+  const display=(k,v)=>{if(k==='stackPeriods')return v.map(id=>{const t=S.tasks?.find(x=>x.id===id);return t?fmt(t.repeatDate||(t.id.startsWith('repeat:')?t.id.slice(-10):t.date)):id}).join('、');if(k==='id'){const task=S.tasks?.find(x=>x.id===v);if(task)return task.name+(task.stackCount>1?' ×'+task.stackCount:'');return S.projects?.find(x=>x.id===v)?.name||S.repeats?.find(x=>x.id===v)?.name||nameOf(v)}if(['owner','assignee'].includes(k))return nameOf(v);if(k==='role')return ({member:'普通成员',admin:'管理员',superadmin:'超级管理员'}[v]||v);if(k==='projectId')return S.projects?.find(x=>x.id===v)?.name||'临时任务';if(Array.isArray(v))return v.map(x=>['assignees','members'].includes(k)?nameOf(x):String(x)).join('、');if(typeof v==='boolean')return v?'是':'否';return typeof v==='object'?JSON.stringify(v):String(v??'—')};
   const entries=Object.entries(safe),known=entries.filter(([k])=>labels[k]);
   return `<dl class="agent-action-fields">${known.map(([k,v])=>`<div><dt>${labels[k]}</dt><dd>${escapeHTML(display(k,v))}</dd></div>`).join('')}</dl>${!executed&&action==='account.delete'?'<p class="agent-action-impact">将移除该账户。</p>':''}`+(entries.some(([k])=>!labels[k])?`<details class="agent-action-details"><summary>其他参数</summary><pre>${escapeHTML(JSON.stringify(safe,null,2))}</pre></details>`:'');
 }
@@ -3735,7 +3767,7 @@ function agentRunOne(proposal){
     const list=$('#agentMessages');
     if(!list){resolve({cancelled:true});return}
     const label=AGENT_ACTION_LABELS[proposal.action]||proposal.action;
-    const payload=agentTidyTaskName(proposal.action,agentSafeParams((proposal.data&&typeof proposal.data==='object')?proposal.data:{}));
+    const payload=agentTaskScope(proposal.action,agentTidyTaskName(proposal.action,agentSafeParams((proposal.data&&typeof proposal.data==='object')?proposal.data:{})));
     /* The pace comes from the standing switch beside the input, so the card
        only has to show what is about to happen. */
     const card=document.createElement('div');
