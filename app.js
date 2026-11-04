@@ -5215,7 +5215,7 @@ async function loadSpeechStatus(){
 }
 function scanVoiceFields(){
   document.querySelectorAll('textarea').forEach(input=>{
-    if(input.id==='agentInput'||input.disabled||input.readOnly||input.closest('.voice-field'))return;
+    if(input.id==='agentInput'||input.id==='meetingTranscript'||input.disabled||input.readOnly||input.closest('.voice-field'))return;
     if(!input.hasAttribute('aria-label')&&!input.hasAttribute('aria-labelledby')&&input.labels?.length===1){
       const label=input.labels[0].textContent.trim();if(label)input.setAttribute('aria-label',label);
     }
