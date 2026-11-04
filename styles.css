@@ -10497,3 +10497,30 @@ body.is-resizing-agent { user-select: none; }
   .agent-message.has-tools .agent-message-tools { height: 32px; gap: 4px; }
   .agent-message-tools .agent-tool-btn { width: 32px; height: 32px; flex-basis: 32px; }
 }
+
+/* Fixed-period multiplicity stays subordinate to the task name. */
+.stack-badge { display: inline-flex; align-items: center; flex-shrink: 0; margin-left: 6px; padding: 2px 6px; border: 1px solid var(--accent-line); border-radius: 5px; background: var(--accent-soft); color: var(--accent-dark); font: 600 11px/1.2 var(--font-sans); white-space: nowrap; vertical-align: middle; }
+.week-task-name .stack-badge { margin-left: 4px; padding: 1px 4px; font-size: 10px; }
+.repeat-stacking-card { align-items: center; gap: 16px; }
+.repeat-stacking-choice { display: inline-flex; align-items: center; gap: 9px; min-height: 36px; font-size: 13px; cursor: pointer; }
+.repeat-stacking-choice input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.repeat-stacking-choice:has(input:disabled) { opacity: .6; cursor: wait; }
+@media (max-width: 560px) { .repeat-stacking-card { align-items: flex-start; } }
+
+#settingsView .automation-card + .automation-card { margin-top: 18px; }
+
+.drawer-actions :is(.primary-btn,.secondary-btn,.defer-btn) { height: 32px; min-height: 32px; box-sizing: border-box; padding: 0 12px; font: 600 12px/1 var(--font-sans); border-radius: 8px; box-shadow: none; }
+
+.stack-period-list { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.stack-period-list > span { white-space: nowrap; }
+.modal-footer:has(#confirmComplete) { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); }
+.modal-footer:has(#confirmComplete) button { height: 32px; min-height: 32px; padding: 0 12px; font-size: 12px; border-radius: 8px; box-shadow: none; }
+
+.history-period { margin-top: 14px; }
+.history-period h4 { margin: 0 0 8px; color: var(--ink-2); font: 600 12px/1.4 var(--font-sans); }
+.history-dates { display: flex; flex-wrap: wrap; gap: 3px 8px; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.history-dates > span { white-space: nowrap; }
+.task-main:has(> .stack-badge) .task-name { flex: 0 1 auto; max-width: calc(100% - 40px); }
+.task-main > .stack-badge { display: inline-flex; flex-shrink: 0; margin-left: 0; overflow: visible; }
+/* The period badge replaces redundant fixed/carry labels in a compact row. */
+.task-main:has(> .stack-badge) > :is(.fixed-badge,.carried-badge,.defer-target) { display: none; }

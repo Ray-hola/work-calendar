@@ -15,8 +15,8 @@ MAX_CALLS = 8
 TABLES = {
     'people': ('账户目录；只有公开姓名、角色与启用状态', 'id displayName nickname role active'),
     'projects': ('当前可见项目，members 为账户到 accepted/pending 状态的 JSON', 'id name desc background owner creator status start end members'),
-    'tasks': ('可见任务的当前递延链末端；统计任务数量用此表，避免重复计数', 'id name desc projectId assignee creator date deadline time duration priority status fixed completedAt completionSummary originId'),
-    'task_history': ('可见任务的全部历史记录；superseded=1 表示已被后续递延或返工任务接替', 'id name desc projectId assignee creator date deadline time duration priority status fixed completedAt completionSummary originId superseded'),
+    'tasks': ('可见任务的当前递延链末端及合并期次代表；stackCount为期数，统计卡片数量用此表，避免重复计数', 'id name desc projectId assignee creator date deadline time duration priority status fixed completedAt completionSummary originId repeatId stackCount'),
+    'task_history': ('可见任务的全部历史记录；superseded=1 表示已被后续递延或返工任务接替', 'id name desc projectId assignee creator date deadline time duration priority status fixed completedAt completionSummary originId repeatId stackCount superseded'),
     'logs': ('可见任务的工作记录，kind=complete/defer 等', 'id taskId actor kind date createdAt actual estimated reason summary'),
     'completions': ('工作日志中的真实完成事件，已去除递延链重复，包含按权限可见的历史归档完成；历史完成统计用此表', 'id kind taskId projectId name assignee owner completedAt'),
     'reports': ('可见日报和报告；团队日报 content 已应用人工修订', 'id author projectId kind date content createdAt updatedAt'),
@@ -32,7 +32,7 @@ TABLES = {
     'task_requests': ('有权查看的任务申请', 'id projectId requester assignee status createdAt'),
     'edit_requests': ('有权查看的任务修改申请', 'id taskId requester approver status createdAt'),
 }
-NUMBERS = {'active', 'duration', 'fixed', 'superseded', 'actual', 'estimated', 'read', 'auto', 'size', 'completed', 'ratio', 'minutes', 'deferrals', 'order'}
+NUMBERS = {'active', 'duration', 'fixed', 'superseded', 'actual', 'estimated', 'read', 'auto', 'size', 'completed', 'ratio', 'minutes', 'deferrals', 'order', 'stackCount'}
 FUNCTIONS = frozenset('count sum total avg min max abs round coalesce ifnull nullif lower upper length substr substring instr replace trim ltrim rtrim like glob date time datetime strftime julianday unixepoch json json_extract json_array_length json_type json_valid group_concat printf format typeof iif likelihood likely unlikely'.split())
 
 

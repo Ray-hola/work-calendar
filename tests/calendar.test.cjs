@@ -2046,3 +2046,50 @@ test('a failed state refresh reports a service error and only 401 opens sign-in'
   a.context.fetch=async()=>({ok:false,status:401,text:async()=>'{"error":"请登录"}'});
   await a.run('refresh()');assert.equal(a.run('signIns'),1);
 });
+
+test('a stacked period is one deferred card while all period histories remain available',()=>{
+  const a=app();
+  a.run(`S.user={id:'test001',admin:0};S.projects=[];S.logs=[];S.tasks=[
+    {id:'old',name:'routine',assignee:'test001',date:'2026-11-02',status:'deferred',superseded:true},
+    {id:'carry',name:'routine',assignee:'test001',date:'2026-11-04',status:'doing',originId:'old',superseded:true},
+    {id:'today',name:'routine',assignee:'test001',date:'2026-11-04',status:'todo',stackCount:2,stackTaskIds:['carry','today'],stackPeriods:['old','today'],priority:'P1',duration:30}];`);
+  assert.deepEqual(a.json('scheduleTasks().map(t=>t.id)'),['today']);
+  assert.equal(a.run('isDeferredTask(S.tasks[2])'),true);
+  assert.deepEqual(a.json('[...taskLineageIds(S.tasks[2])].sort()'),['carry','old','today']);
+  assert.equal(a.run('deferHops(S.tasks[2])'),0,'期次数不应冒充递延跳数');
+  a.run("S.tasks[2].stackDates=['2026-11-02','2026-11-04']");assert.deepEqual(a.json('stackPeriodDates(S.tasks[2])'),['2026-11-02','2026-11-04']);
+  assert.match(a.run('taskCard(S.tasks[2])'),/合并 2 期.*×2/);
+  a.run("S.tasks[2].status='done'");assert.equal(a.run('isDeferredTask(S.tasks[2])'),false);
+});
+
+test('only superadmin sees the stacking checkbox and failed saves restore its state',async()=>{
+  const a=app(),input={checked:false,disabled:false},box={innerHTML:'',hidden:null,classList:{toggle:(name,value)=>{box.hidden=value}},querySelector:()=>input};
+  a.context.document={querySelector:s=>s==='#repeatStackingCard'?box:null};
+  for(const role of ['member','admin']){a.run(`S.user={role:'${role}'};renderRepeatStackingSetting()`);assert.equal(box.hidden,true);assert.equal(box.innerHTML,'');}
+  a.run("S.user={role:'superadmin'};S.repeatStacking=false;renderRepeatStackingSetting();act=async()=>{throw new Error('offline')}");
+  assert.equal(box.hidden,false);assert.match(box.innerHTML,/type="checkbox"/);assert.ok(!box.innerHTML.includes('<p'));
+  input.checked=true;await input.onchange();assert.equal(input.checked,false);assert.equal(input.disabled,false);
+});
+
+test('stacked history separates original periods and folds one grouped operation without repeating time',()=>{
+  const a=app();
+  a.run(`S.tasks=[{id:'old',date:'2026-11-02'},{id:'new',date:'2026-11-03'}];S.logs=[
+    {taskId:'old',kind:'defer',target:'2026-11-03',reason:'carry',actor:'system'},
+    {taskId:'new',kind:'auto_start',actor:'system'},
+    {taskId:'old',kind:'defer',target:'2026-11-04',stackBatchId:'batch',stackCount:2,stackDates:['2026-11-02','2026-11-03'],actor:'test001'},
+    {taskId:'new',kind:'defer',target:'2026-11-04',stackBatchId:'batch',stackCount:2,stackDates:['2026-11-02','2026-11-03'],actor:'test001'},
+    {taskId:'new',kind:'complete',stackCount:2,stackDates:['2026-11-02','2026-11-03'],actual:25,summary:'<script>x</script>',actor:'test001'}];`);
+  const html=a.run("taskHistoryHTML({id:'new',stackCount:4},new Set(['old','new']))");
+  assert.ok(html.includes('<h4>11月2日</h4>'));assert.ok(html.includes('<h4>11月3日</h4>'));assert.ok(html.includes('<h4>合并操作</h4>'));
+  assert.equal((html.match(/合并 2 期递延至/g)||[]).length,1);
+  assert.equal((html.match(/完成合并 2 期/g)||[]).length,1);assert.ok(!html.includes('完成合并 4 期'));
+  assert.equal((html.match(/实际 25 分钟/g)||[]).length,1);
+  assert.ok(html.includes('系统'));assert.ok(html.includes('&lt;script&gt;'));assert.ok(!html.includes('<script>'));
+});
+
+test('AI confirmation binds and displays the same grouped-period scope as direct completion',()=>{
+  const a=planningApp();a.run("S.tasks=[{id:'p1',date:'2026-11-02'},{id:'p2',date:'2026-11-03',name:'巡检',stackCount:2,stackPeriods:['p1','p2']}]");
+  assert.deepEqual(a.json("agentTaskScope('task.complete',{id:'p2',summary:'done'})"),{id:'p2',summary:'done',stackPeriods:['p1','p2']});
+  const html=a.run("agentActionHTML('task.complete',agentTaskScope('task.complete',{id:'p2',summary:'done'}))");
+  assert.ok(html.includes('巡检 ×2'));assert.ok(html.includes('11月2日、11月3日'));assert.ok(!html.includes('<pre>'));
+});
