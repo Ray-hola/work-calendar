@@ -2328,3 +2328,25 @@ test('returning to assistant dictation cannot route its results to a previous fo
   instances[1].onresult({resultIndex:0,results:[{isFinal:true,0:{transcript:'新问题'}}]});
   assert.equal(a.input.value,'新问题');assert.equal(a.context.field.value,'');
 });
+
+test('project meeting UI exposes raw transcript, live capture and prompt template controls', () => {
+  assert.ok(/function projectMeetings\(p,manage\)/.test(source));
+  assert.ok(/id=\"meetingTranscript\"/.test(source));
+  assert.ok(/id=\"meetingPrompt\"/.test(source));
+  assert.ok(/function meetingToggleLive\(id,input\)/.test(source));
+  assert.ok(/continuous=true/.test(source));
+});
+
+test('meeting live capture autosaves transcript and ignores stale recognition sessions', () => {
+  const live = source.match(/function meetingToggleLive\(id,input\)\{[\s\S]*?\n\}\n\n/)[0];
+  assert.ok(/meetingScheduleSave\(\)/.test(live));
+  assert.ok(/generation!==meetingLive\.generation/.test(live));
+  assert.ok(/meeting\.transcript\.update/.test(source));
+});
+
+test('meeting minutes generation sends the editable prompt template through the server action', () => {
+  assert.ok(/meeting\.minutes\.generate/.test(source));
+  assert.ok(/const meta=values\(\)/.test(source));
+  assert.ok(/promptTemplate/.test(source));
+  assert.ok(/default_meeting_prompt/.test(source) || /MEETING_PROMPT_DEFAULT/.test(source));
+});

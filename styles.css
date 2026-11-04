@@ -10809,3 +10809,23 @@ body.is-resizing-agent { user-select: none; }
 .field-voice-btn.is-transcribing::after { content: ''; position: absolute; width: 12px; height: 12px; border: 1.5px solid var(--line); border-top-color: currentColor; border-radius: 50%; animation: fieldVoiceSpin .8s linear infinite; }
 @keyframes fieldVoiceSpin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .field-voice-btn.is-transcribing::after { animation: none; } }
+
+/* 项目会议：原稿与纪要分栏前的轻量编辑结构，沿用项目空间的线条和间距。 */
+.project-meetings .space-head { align-items: flex-start; }
+.project-meetings .space-head h2 { margin-bottom: 4px; }
+.meeting-list { display: grid; gap: 6px; }
+.meeting-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 12px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--surface); color: var(--ink); text-align: left; cursor: pointer; }
+.meeting-row:hover { border-color: var(--accent-line); background: var(--surface-sunk); }
+.meeting-icon { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 28px; border-radius: 8px; color: var(--accent); background: var(--accent-soft); }
+.meeting-icon .icon { width: 15px; height: 15px; }
+.meeting-copy { display: grid; gap: 3px; min-width: 0; flex: 1; }
+.meeting-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.meeting-copy small { color: var(--muted); font-size: 11px; }
+.meeting-arrow .icon { width: 14px; height: 14px; color: var(--faint); }
+.meeting-editor-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 10px; }
+.meeting-live-bar { display: flex; align-items: center; gap: 10px; margin: -2px 0 12px; }
+.meeting-live-bar .muted { font-size: 11px; }
+.meeting-minutes-preview { display: grid; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+.meeting-minutes-preview h3 { margin: 0; font-size: 14px; }
+.meeting-minutes-body { min-height: 70px; padding: 11px 12px; border: 1px solid var(--line-soft); border-radius: 9px; background: var(--surface-sunk); white-space: pre-wrap; line-height: 1.65; font-size: 13px; }
+@media (max-width: 640px) { .meeting-editor-grid { grid-template-columns: 1fr; } .meeting-live-bar { align-items: flex-start; flex-direction: column; } }
