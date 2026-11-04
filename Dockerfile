@@ -12,7 +12,7 @@ WORKDIR /app
 # The server needs no packages; tzdata supplies Asia/Shanghai, which slim images leave out.
 RUN pip install --no-cache-dir tzdata
 
-COPY server.py agent_workspace.py app.js index.html styles.css ./
+COPY server.py agent_workspace.py assistant_privacy.py app.js index.html styles.css ./
 
 EXPOSE 4173
 VOLUME ["/app/data"]

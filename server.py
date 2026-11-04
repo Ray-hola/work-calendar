@@ -16,6 +16,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
+from assistant_privacy import scrub, connection_key
 from agent_workspace import Workspace, WorkspaceError, schema as workspace_schema, tools as workspace_tools, compact, MAX_CALLS
 
 # OpenCode Go exposes these models through the OpenAI-compatible
@@ -116,7 +117,7 @@ MAX_AUDIO_BYTES = 8_000_000
 # Like the audio route, the bound is raised per-route in do_POST.
 FILES_PATH = '/api/files'
 MAX_FILE_BYTES = 20_000_000
-TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'task_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages', 'messages', 'folders', 'files', 'agent_conversations')
+TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'task_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages', 'messages', 'folders', 'files', 'agent_conversations', 'agent_drafts', 'agent_receipts')
 
 # Who may start what.  superadmin sorts members into rule groups (规则组, kept
 # apart from the superadmin/admin/member roles); each group says, for a new
@@ -285,6 +286,7 @@ class Store:
                 }
             }, ensure_ascii=False)))
             self.db.commit()
+        self.scrub_assistant_records()
         self.forget_delivered_diaries()
         self.db.commit()
         self.initial_passwords = {}
@@ -293,6 +295,18 @@ class Store:
 
     def close(self):
         self.db.close()
+
+    def scrub_assistant_records(self):
+        """Remove credentials retained by older nested action/audit records."""
+        job = 'migrate:assistant-credentials-v1'
+        if self.db.execute('SELECT 1 FROM jobs WHERE id=?', (job,)).fetchone():
+            return
+        for table in ('agent_messages', 'audit'):
+            for record in self.all(table):
+                clean = scrub(record)
+                if clean != record:
+                    self.put(table, clean)
+        self.db.execute('INSERT INTO jobs VALUES (?,?)', (job, timestamp()))
 
     def forget_delivered_diaries(self):
         """Diaries used to reach project Owners, as notices and inside the
@@ -430,6 +444,9 @@ class Store:
         base = str(data.get('baseUrl', '')).strip().rstrip('/')
         model = str(data.get('model') or '').strip() or 'Qwen/Qwen3-ASR-0.6B'
         language = str(data.get('language') or 'zh').strip() or 'zh'
+        if data.get('disabled') is True:
+            self.put('settings', {'id': 'asr', 'value': {}, 'updatedAt': timestamp()})
+            return self.asr_config(user)
         if not base:
             raise Problem(400, '请填写语音转写服务的 API 地址')
         parsed = urllib.parse.urlparse(base)
@@ -439,12 +456,14 @@ class Store:
             raise Problem(400, '语音转写配置长度超出限制')
         previous = self._asr_record()
         value = dict(previous.get('value') or {})
+        value['apiKey'] = connection_key(value, data, base)
         value.update({'baseUrl': base, 'model': model, 'language': language})
         if 'apiKey' in data:
             key = str(data.get('apiKey') or '').strip()
             if len(key) > 500:
                 raise Problem(400, 'API Key 过长')
             value['apiKey'] = key
+        if data.get('clearApiKey') is True:value.pop('apiKey',None)
         self.put('settings', {'id': 'asr', 'value': value, 'updatedAt': timestamp()})
         self.audit(user['id'], 'agent.asr_config', {'baseUrl': base, 'model': model})
         return self.asr_config(user)
@@ -473,6 +492,7 @@ class Store:
         # purpose, so there is no `requests` to lean on for one upload.
         boundary = '----workcalendar' + uuid.uuid4().hex
         audio_type = (content_type or 'audio/webm').split(';')[0].strip() or 'audio/webm'
+        audio_ext = {'audio/mp4': 'mp4', 'audio/ogg': 'ogg', 'audio/wav': 'wav', 'audio/mpeg': 'mp3'}.get(audio_type, 'webm')
         parts = []
         def field(name, value):
             parts.append(
@@ -482,7 +502,7 @@ class Store:
             field('language', language)
         field('response_format', 'json')
         parts.append(
-            (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="clip.webm"\r\n'
+            (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="clip.{audio_ext}"\r\n'
              f'Content-Type: {audio_type}\r\n\r\n').encode('utf-8'))
         parts.append(bytes(body))
         parts.append(f'\r\n--{boundary}--\r\n'.encode('utf-8'))
@@ -497,6 +517,7 @@ class Store:
                 raw = response.read(1_000_000)
         except urllib.error.HTTPError as exc:
             detail = exc.read(4000).decode('utf-8', errors='replace')
+            if key:detail = detail.replace(key, '[已隐藏]')
             raise Problem(502, f'语音转写服务返回 HTTP {exc.code}：{detail[:300]}')
         except (urllib.error.URLError, TimeoutError) as exc:
             raise Problem(502, f'语音转写服务连接失败：{str(exc)[:200]}')
@@ -563,6 +584,7 @@ class Store:
             raise Problem(400, 'API 配置长度超出限制')
         previous = self._llm_record()
         value = dict(previous.get('value') or {})
+        value['apiKey'] = connection_key(value, data, base)
         value.update({'baseUrl': base, 'model': model, 'provider': provider})
         if isinstance(data.get('models'), list):
             value['models'] = [str(m)[:200] for m in data['models'] if str(m).strip()][:500]
@@ -584,6 +606,7 @@ class Store:
             value['temperature'] = max(0.0, min(2.0, float(data.get('temperature', value.get('temperature', 0.2)))))
         except (TypeError, ValueError):
             raise Problem(400, 'temperature 必须是 0 至 2 的数字')
+        if data.get('clearApiKey') is True:value.pop('apiKey',None)
         record = {'id': 'llm', 'value': value, 'updatedAt': timestamp()}
         self.put('settings', record)
         return self.llm_config(user)
@@ -729,15 +752,18 @@ class Store:
     def test_llm_config(self, user, data):
         """Try an address and key before saving them: list the models it
         offers and, when a model is named, have it answer one word.  Nothing
-        is stored; an empty key means the one already saved."""
+        is stored; a blank key reuses a saved key only for the same API root."""
         self.admin(user)
-        saved = dict(self._llm_record().get('value') or {})
+        with self.lock:
+            current_user = self.user(user['id'])
+            self.admin(current_user)
+            saved = dict(self._llm_record().get('value') or {})
         provider = str(data.get('provider') or 'custom').strip()
         base = str(data.get('baseUrl') or '').strip() or (OPENCODE_GO_BASE_URL if provider == 'opencode-go' else '')
         parsed = urllib.parse.urlparse(base)
         if parsed.scheme not in ('http', 'https') or not parsed.netloc:
             return {'ok': False, 'models': [], 'reason': '请填写 http(s) 开头的 API 地址'}
-        key = str(data.get('apiKey') or '').strip() or str(saved.get('apiKey') or '')
+        key = connection_key(saved, data, base)
         root, headers = self.llm_root(base), self.llm_headers(base, key)
         model = str(data.get('model') or '').strip()
         started = _time.monotonic()
@@ -749,7 +775,7 @@ class Store:
                 with urllib.request.urlopen(request, timeout=20) as response:
                     return json.loads(response.read(2_000_000).decode('utf-8')), None
             except urllib.error.HTTPError as exc:
-                return None, self.llm_failure(exc.code, exc.read(4000).decode('utf-8', errors='replace'))
+                return None, self.llm_failure(exc.code, exc.read(4000).decode('utf-8', errors='replace').replace(key, '[已隐藏]') if key else exc.read(4000).decode('utf-8', errors='replace'))
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
                 return None, f'连不上服务：{str(getattr(exc, "reason", exc))[:200]}'
             except (UnicodeDecodeError, json.JSONDecodeError):
@@ -777,6 +803,8 @@ class Store:
         ms = int((_time.monotonic() - started) * 1000)
         if reply_error:
             return {'ok': False, 'models': models, 'reason': f'模型「{model}」验证失败：{reply_error}', 'ms': ms}
+        with self.lock:
+            self.admin(self.user(user['id']))
         return {'ok': True, 'models': models or candidates, 'testedModel': model, 'ms': ms,
                 'message': f'模型「{model}」验证成功 · {len(models)} 个可用模型' if models
                 else f'模型「{model}」验证成功（未取得模型列表）'}
@@ -810,7 +838,7 @@ class Store:
                 if index == len(window) - 1:
                     raise Problem(400, '消息内容不能为空')
                 continue
-            messages.append({'role': item['role'], 'content': content})
+            messages.append({'role': item['role'], 'content': scrub(content)})
 
         # The newest turns are the ones being talked about, so an over-long
         # conversation loses its oldest turns rather than being refused. The
@@ -851,7 +879,7 @@ class Store:
         allowed = sorted(a for a, t in AGENT_ACTION_TO_TOOL.items() if t in caps['tools'] and a not in WORK_CARD_ACTIONS) if operator else []
         if operator:
             policy += ('\n其他管理操作可使用 business_action，或单个 <action>{"action":"动作名","data":{...}}</action>；'
-                       f'允许的其他动作：{", ".join(allowed)}。等待页面确认与实际回执，不能声称已执行。')
+                       f'允许的其他动作：{", ".join(allowed)}。等待页面确认与实际回执，不能声称已执行。账户创建只起草账户与权限组，不生成或返回密码，初始密码由用户在页面单独填写。')
         policy += ('\n所有任务/项目的创建、修改、删除统一使用 work_cards，不能使用 business_action 或 <action>。'
                    '此工具仅起草可编辑卡片；包括只读助手在内，都可协助起草，最终提交仍按用户自己的业务权限审批。'
                    'projects/tasks 中每张卡包含 operation=create/update/delete；修改/删除必须先通过 SQL 检索真实 id，'
@@ -885,6 +913,11 @@ class Store:
         prefix = [{'role': 'system', 'content': policy}, {'role': 'system', 'content': compact(environment)}]
         if messages and messages[0]['role'] == 'system':
             prefix.append(messages.pop(0))
+        goal = data.get('runGoal')
+        if goal:
+            if not isinstance(goal, str) or len(goal) > MAX_MESSAGE_CHARS:
+                raise Problem(400, '本轮目标过长，请缩小需求范围')
+            prefix.append({'role': 'user', 'content': '本轮用户目标（执行过程中必须保留）：' + goal})
         latest = messages[-1]
         messages[:0] = prefix
         protected = {id(m) for m in prefix + [latest]}
@@ -897,9 +930,16 @@ class Store:
         key = str(cfg.get('apiKey') or '')
         if not base or not model:
             raise Problem(409, '请先由 superadmin 配置 LLM API')
-        session_id = str(data.get('sessionId') or f'work-calendar-{user["id"]}').strip()
+        session_id = str(data.get('sessionId') or AGENT_LEGACY_CONVERSATION).strip()
         if not session_id or len(session_id) > 128 or any(ch not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.:' for ch in session_id):
             raise Problem(400, 'Agent 会话 ID 格式无效')
+        with self.lock, self.db:
+            meta = self.agent_metadata(user, session_id, create=True)
+            if meta.get('deleted'):
+                raise Problem(409, '这段对话已删除，请开始新对话')
+            generation = int(meta.get('generation', 0)) + 1
+            meta['generation'] = generation
+            self.put('agent_conversations', meta)
         endpoint = self.llm_root(base) + '/chat/completions'
         payload = self.llm_payload(model, messages, temperature=float(cfg.get('temperature', 0.2)))
         payload['tools'] = tool_definitions
@@ -941,6 +981,7 @@ class Store:
                 return result
             except urllib.error.HTTPError as exc:
                 detail = exc.read(4000).decode('utf-8', errors='replace')
+                if key:detail = detail.replace(key, '[已隐藏]')
                 # One compatibility fallback, only for an explicit unsupported
                 # tools parameter. Authentication/quota/model errors are kept.
                 if native_tools and exc.code in (400, 422) and re.search(r'tools?|tool_choice', detail, re.I) and re.search(r'unsupported|not support|unknown|unrecognized|invalid.*schema', detail, re.I):
@@ -1034,7 +1075,7 @@ class Store:
                             raise WorkspaceError('一次只起草一组管理卡片')
                         with self.lock:
                             prepared_cards = self.prepare_work_cards(current, args)
-                            if not any(prepared_cards.values()):
+                            if not prepared_cards['projects'] and not prepared_cards['tasks']:
                                 raise WorkspaceError('请至少起草一张管理卡片')
                             cards = prepared_cards
                         output = {'prepared': True, 'executed': False}
@@ -1048,7 +1089,7 @@ class Store:
                         self.authorize_agent_tool(current, tool)
                         if proposal is not None:
                             raise WorkspaceError('一次只准备一项业务操作，请等待已有操作的回执')
-                        proposal = {'action': action, 'data': args['data']}
+                        proposal = {'action': action, 'data': {k: v for k, v in args['data'].items() if k != 'password'}}
                         output = {'prepared': True, 'executed': False, 'requiresConfirmation': True}
                     elif name in ('workspace_schema', 'workspace_query', 'workspace_read'):
                         self.authorize_agent_tool(current, name.replace('_', '.', 1))
@@ -1078,7 +1119,7 @@ class Store:
             content, result, choice = ask()
         # Never show tool protocol fragments or claim the environment executed a
         # business change. Writes still go through execute_agent_action.
-        content = re.sub(r'<tool>[\s\S]*?</tool>', '', str(content)).strip()
+        content = scrub(re.sub(r'<tool>[\s\S]*?</tool>', '', str(content)).strip())
         if not content:
             content = '查询尚未得到可用答复，请缩小范围后重试。';incomplete = True
         plan_match = re.search(r'<plan>([\s\S]*?)</plan>', content)
@@ -1120,11 +1161,16 @@ class Store:
             content = content[:MAX_MESSAGE_CHARS - 40] + '\n（回复过长，已省略后续内容，请缩小范围后继续。）'
             incomplete = True
         with self.lock, self.db:
+            meta = self.agent_metadata(user, session_id)
+            if not meta or meta.get('deleted') or meta.get('generation') != generation:
+                raise Problem(409, '对话已删除、回退或有更新的请求，本次回复不再写入')
             if self.agent_capabilities(self.user(user['id'])) != caps:
                 raise Problem(409, '账户权限已变化，请重新发送问题')
             thread = {'conversation': session_id} if data.get('sessionId') else {}
-            if last_user:
-                self.record_agent_message(user['id'], 'user', last_user, thread)
+            stored_user = self.record_agent_message(user['id'], 'user', last_user, thread) if last_user else None
+            final_plan = re.search(r'<plan>([\s\S]*?)</plan>', content)
+            if final_plan:
+                self.save_initial_draft(user, session_id, json.loads(final_plan.group(1)))
             state = []
             for item in reversed(list(pending_reads.values())):
                 if len(state) < 3 and len(compact(state + [item])) <= 1800:
@@ -1132,7 +1178,7 @@ class Store:
             stored = self.record_agent_message(user['id'], 'assistant', content, {**thread, 'tools': trace, 'toolState': state})
             self.audit(user['id'], 'agent.chat', {'sessionId': data.get('sessionId'), 'planning': planning,
                                                 'toolCalls': len(trace), 'contextChars': peak})
-        return {'content': content, 'messageId': stored['id'], 'model': result.get('model', model), 'tools': trace, 'toolCalls': len(trace), 'contextChars': peak, 'contextBudget': budget, 'incomplete': incomplete,
+        return {'content': content, 'messageId': stored['id'], 'userMessageId': (stored_user or {}).get('id'), 'model': result.get('model', model), 'tools': trace, 'toolCalls': len(trace), 'contextChars': peak, 'contextBudget': budget, 'incomplete': incomplete,
                 'usage': result.get('usage'), 'finishReason': choice.get('finish_reason'),
                 # How many older turns were left out, so a caller can tell that
                 # the model was given less than it sent.
@@ -1170,7 +1216,8 @@ class Store:
     def prepare_work_cards(self, user, data):
         if not isinstance(data, dict):
             raise WorkspaceError('卡片参数必须是对象')
-        result = {'projects': [], 'tasks': []}
+        result = {'projects': [], 'tasks': [], 'draftId': self.agent_identity(data.get('draftId'))}
+        card_ids = set()
         for kind, limit in (('project', 6), ('task', 30)):
             items = data.get(kind + 's', [])
             if not isinstance(items, list) or len(items) > limit:
@@ -1184,6 +1231,9 @@ class Store:
                 keys = WORK_CARD_FIELDS[kind] + (('ref', 'members', 'addMembers', 'removeMembers') if kind == 'project' else ('projectId', 'projectRef', 'reason'))
                 card = {k: item[k] for k in keys if k in item}
                 card['operation'] = operation
+                card['cardId'] = self.agent_identity(item.get('cardId'))
+                if card['cardId'] in card_ids:card['cardId'] = self.agent_identity()
+                card_ids.add(card['cardId'])
                 if operation == 'create':
                     card.pop('status', None)
                 if operation != 'create':
@@ -1194,13 +1244,36 @@ class Store:
                     before_keys = WORK_CARD_FIELDS[kind] + (('members',) if kind == 'project' else ('projectId', 'creator', 'fixed', 'repeatId'))
                     card.update(id=row['id'], before={k: row.get(k) for k in before_keys}, revision=revision, impact=impact)
                     if operation == 'delete':
-                        card = {k: card[k] for k in ('operation', 'id', 'before', 'revision', 'impact')}
+                        card = {k: card[k] for k in ('operation', 'id', 'before', 'revision', 'impact', 'cardId')}
                 result[kind + 's'].append(card)
         if len(compact(result)) > MAX_MESSAGE_CHARS - 300:
             raise WorkspaceError('卡片资料过长，请减少卡片数量后重试')
         return result
 
     def apply_work_card(self, user, data):
+        if data.get('confirmed') is not True:
+            raise Problem(400, '请先确认管理卡片')
+        thread = str(data.get('sessionId') or AGENT_LEGACY_CONVERSATION)
+        meta = self.agent_metadata(user, thread)
+        if meta and meta.get('deleted'):raise Problem(409, '对话已删除，不能提交旧卡片')
+        card_id = data.get('cardId')
+        if not isinstance(card_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,100}', card_id):
+            raise Problem(400, '卡片 ID 无效')
+        key = user['id'] + ':' + card_id
+        receipt = next((r for r in self.all('agent_receipts') if r['id'] == key), None)
+        # Compare the reviewed intent, independent of transport/session metadata.
+        intent = {k: data.get(k) for k in ('kind', 'operation', 'id', 'revision', 'changes', 'request', 'reason', 'confirm')}
+        fingerprint = hashlib.sha256(json.dumps(intent,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        if receipt:
+            if receipt['fingerprint'] != fingerprint:
+                raise Problem(409, '这张卡片已执行，不能用同一卡片提交不同内容')
+            return receipt['result']
+        result = self._apply_work_card(user, data)
+        self.put('agent_receipts', {'id': key, 'user': user['id'], 'cardId': card_id,
+                                  'fingerprint': fingerprint, 'result': result, 'createdAt': timestamp()})
+        return result
+
+    def _apply_work_card(self, user, data):
         """A human submits one reviewed card under the normal business rights."""
         kind, operation = data.get('kind'), data.get('operation')
         if not isinstance(kind, str) or kind not in WORK_CARD_FIELDS or operation not in ('create', 'update', 'delete'):
@@ -1302,10 +1375,10 @@ class Store:
         record = {'id': uid(), 'user': user_id, 'role': role,
                   # Truncate to exactly what the proxy will accept, so a
                   # replayed record can never be refused for length.
-                  'content': str(content or '')[:MAX_MESSAGE_CHARS], 'createdAt': timestamp()}
+                  'content': scrub(str(content or ''))[:MAX_MESSAGE_CHARS], 'createdAt': timestamp()}
         if isinstance(extra, dict):
             record.update(extra)
-        return self.put('agent_messages', record)
+        return self.put('agent_messages', scrub(record))
 
     def agent_target(self, user, data):
         """Whose assistant record a call reads: one's own, or anyone's for admins."""
@@ -1314,18 +1387,103 @@ class Store:
             self.admin(user)
         return target
 
+    @staticmethod
+    def agent_identity(value=None):
+        return value if isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9_-]{8,100}', value) else uuid.uuid4().hex
+
+    def agent_metadata(self, user, thread, create=False):
+        key = user['id'] + ':' + thread
+        row = next((r for r in self.all('agent_conversations') if r['id'] == key), None)
+        if row is None and create:
+            row = self.put('agent_conversations', {'id': key, 'user': user['id'], 'conversation': thread,
+                       'title': '', 'generation': 0, 'createdAt': timestamp(), 'updatedAt': timestamp()})
+        return row
+
+    def save_initial_draft(self, user, thread, raw):
+        key = user['id'] + ':' + raw['draftId']
+        if not any(r['id'] == key for r in self.all('agent_drafts')):
+            self.put('agent_drafts', {'id': key, 'user': user['id'], 'conversation': thread,
+                     'draftId': raw['draftId'], 'raw': scrub(raw), 'board': None, 'version': 0})
+
+    def get_agent_draft(self, user, data):
+        draft_id = required(data, 'draftId')
+        key = user['id'] + ':' + draft_id
+        draft = next((r for r in self.all('agent_drafts') if r['id'] == key), None)
+        meta = self.agent_metadata(user, draft['conversation']) if draft else None
+        if meta and meta.get('deleted'):
+            return {'board': None, 'version': 0, 'receipts': {}}
+        if not draft:
+            ids = data.get('cardIds', [])
+            ids = set(x for x in ids[:36] if isinstance(x,str)) if isinstance(ids,list) else set()
+            return {'board': None, 'version': 0, 'receipts': {r['cardId']:r['result'] for r in self.all('agent_receipts') if r.get('user')==user['id'] and r.get('cardId') in ids}}
+        raw = draft.get('board') or draft.get('raw') or {}
+        ids = {x.get('cardId') for kind in ('projects', 'tasks') for x in raw.get(kind, [])}
+        extra = data.get('cardIds', [])
+        if isinstance(extra, list):
+            ids.update(x for x in extra[:36] if isinstance(x, str))
+        receipts = {r['cardId']: r['result'] for r in self.all('agent_receipts')
+                    if r.get('user') == user['id'] and r.get('cardId') in ids}
+        return {**draft, 'receipts': receipts}
+
+    def save_agent_draft(self, user, data):
+        draft_id, thread = required(data, 'draftId'), required(data, 'conversationId')
+        if not re.fullmatch(r'[A-Za-z0-9_-]{8,100}', draft_id):
+            raise Problem(400, '草稿 ID 无效')
+        meta = self.agent_metadata(user, thread, create=True)
+        if meta.get('deleted'):
+            raise Problem(409, '对话已删除，不能保存草稿')
+        board = data.get('board')
+        if (not isinstance(board, dict) or len(compact(board)) > 100_000 or
+                any(not isinstance(board.get(k), list) or len(board[k]) > n or
+                    any(not isinstance(x, dict) for x in board[k]) for k, n in [('projects', 6), ('tasks', 30)])):
+            raise Problem(400, '草稿内容无效或过长')
+        key = user['id'] + ':' + draft_id
+        previous = next((r for r in self.all('agent_drafts') if r['id'] == key), None)
+        if previous and (previous.get('conversation') != thread or data.get('version') != previous['version']):
+            raise Problem(409, '草稿已在其他页面更新，请重新打开后继续')
+        clean = {k: board[k] for k in ('projects', 'tasks', 'next', 'note', 'closed') if k in board}
+        for kind in ('projects', 'tasks'):
+            for x in clean[kind]:
+                if x.get('state') == 'submitting':
+                    x['state'] = 'draft'
+        row = {**(previous or {}), 'id': key, 'user': user['id'], 'conversation': thread,
+               'draftId': draft_id, 'writer': str(data.get('writer') or '')[:100], 'board': scrub(clean), 'version': (previous or {}).get('version', 0) + 1}
+        self.put('agent_drafts', row)
+        return {'version': row['version']}
+
+    def rewind_agent_conversation(self, user, data):
+        thread = required(data, 'conversationId')
+        meta = self.agent_metadata(user, thread, create=True)
+        if meta.get('deleted'):
+            raise Problem(409, '对话已删除')
+        rows = [m for m in self.all('agent_messages') if m.get('user') == user['id'] and
+                (m.get('conversation') or AGENT_LEGACY_CONVERSATION) == thread and not m.get('inactive')]
+        anchor = data.get('messageId')
+        index = next((i for i, m in enumerate(rows) if m['id'] == anchor and m.get('role') in ('user', 'assistant')), -1)
+        if anchor and index < 0:
+            raise Problem(409, '回退位置已变化，请重新加载对话')
+        for message in rows[index + 1:]:
+            if message.get('role') in ('user', 'assistant'):
+                message['inactive'] = True
+                self.put('agent_messages', message)
+        meta['generation'] = int(meta.get('generation', 0)) + 1
+        self.put('agent_conversations', meta)
+        return {'rewound': True}
+
     def agent_conversations(self, user, data):
         """The account's conversations, newest first, as the assistant's side
         list shows them.  Lines stored before conversations existed form one
         conversation of their own, 早期记录."""
         target = self.agent_target(user, data)
-        metadata = {r['conversation']: r for r in self.all('agent_conversations') if r.get('user') == target}
+        all_metadata = {r['conversation']: r for r in self.all('agent_conversations') if r.get('user') == target}
+        deleted = {k for k, r in all_metadata.items() if r.get('deleted')}
+        metadata = {k: r for k, r in all_metadata.items() if k not in deleted}
         groups = {thread: {'id': thread, 'title': '', 'count': 0,
                           'createdAt': r.get('createdAt', r.get('updatedAt', '')),
                           'updatedAt': r.get('updatedAt', '')} for thread, r in metadata.items()}
         last = {}
         for seq, m in enumerate(self.all('agent_messages')):
-            if m.get('user') != target:
+            if m.get('user') != target or m.get('inactive') or (m.get('conversation') or AGENT_LEGACY_CONVERSATION) in deleted:
                 continue
             thread = m.get('conversation') or AGENT_LEGACY_CONVERSATION
             last[thread] = seq
@@ -1345,7 +1503,10 @@ class Store:
         its conversations when `conversationId` names it."""
         target = self.agent_target(user, data)
         thread = data.get('conversationId')
-        rows = [m for m in self.all('agent_messages') if m.get('user') == target and
+        meta = self.agent_metadata({'id': target}, thread or AGENT_LEGACY_CONVERSATION)
+        if meta and meta.get('deleted'):
+            return {'userId': target, 'messages': []}
+        rows = [m for m in self.all('agent_messages') if m.get('user') == target and not m.get('inactive') and
                 (not thread or (m.get('conversation') or AGENT_LEGACY_CONVERSATION) == thread)]
         # all() already returns rows in insertion (rowid) order, which is the
         # chronological transcript even when several records share a timestamp.
@@ -1419,7 +1580,7 @@ class Store:
         return self.put('notifications', record)
 
     def audit(self, actor, action, details):
-        self.put('audit', {'actor':actor, 'action':action, 'details':details, 'createdAt':timestamp()})
+        self.put('audit', {'actor':actor, 'action':action, 'details':scrub(details), 'createdAt':timestamp()})
 
     def can_view_project(self, user, p):
         if p.get('status') in ('done','archived'):
@@ -2088,6 +2249,11 @@ class Store:
     def action(self, user, action, data):
         if action == 'agent.chat':
             return self.llm_chat(user, data)
+        if action == 'agent.config.test':
+            result = self.test_llm_config(user, data)
+            with self.lock, self.db:
+                self.audit(user['id'], action, {'ok': result.get('ok')})
+            return result
         with self.lock, self.db:
             result=self._action(user,action,data)
             # Never persist credentials or chat message bodies in the audit log.
@@ -2428,6 +2594,12 @@ class Store:
             return self.apply_work_card(user, d)
         if action=='agent.execute':
             return self.execute_agent_action(user, d)
+        if action=='agent.draft.get':
+            return self.get_agent_draft(user, d)
+        if action=='agent.draft.save':
+            return self.save_agent_draft(user, d)
+        if action=='agent.conversation.rewind':
+            return self.rewind_agent_conversation(user, d)
         if action=='agent.history':
             return self.agent_history(user, d)
         if action=='agent.conversations':
@@ -2438,8 +2610,9 @@ class Store:
             if action.endswith('.rename') and not title:raise Problem(400,'请填写对话名称')
             key=f'{user["id"]}:{thread}'
             previous=next((r for r in self.all('agent_conversations') if r['id']==key),None)
+            if previous and previous.get('deleted'):raise Problem(409,'这段对话已删除，请开始新对话')
             if previous and action.endswith('.create'):return previous
-            return self.put('agent_conversations',{'id':key,'user':user['id'],'conversation':thread,'title':title,
+            return self.put('agent_conversations',{**(previous or {}),'id':key,'user':user['id'],'conversation':thread,'title':title,
                                                  'createdAt':(previous or {}).get('createdAt') or timestamp(),'updatedAt':timestamp()})
         if action=='agent.conversation.delete':
             target=self.agent_target(user,d);thread=required(d,'conversationId')
@@ -2447,7 +2620,12 @@ class Store:
                 for message in self.all('agent_messages'):
                     if message.get('user')==target and (message.get('conversation') or AGENT_LEGACY_CONVERSATION)==thread:
                         self.db.execute('DELETE FROM agent_messages WHERE id=?',(message['id'],))
-                self.db.execute('DELETE FROM agent_conversations WHERE id=?',(f'{target}:{thread}',))
+                meta = self.agent_metadata({'id': target}, thread, create=True)
+                meta.update(deleted=True, generation=int(meta.get('generation', 0)) + 1)
+                self.put('agent_conversations', meta)
+                for draft in self.all('agent_drafts'):
+                    if draft.get('user') == target and draft.get('conversation') == thread:
+                        self.db.execute('DELETE FROM agent_drafts WHERE id=?', (draft['id'],))
             self.audit(user['id'],'agent.conversation.delete',{'target':target,'conversation':thread})
             return {'deleted':True,'conversationId':thread}
         if action=='agent.history.clear':
@@ -2460,7 +2638,9 @@ class Store:
                         self.db.execute('DELETE FROM agent_messages WHERE id=?',(message['id'],))
                 for row in self.all('agent_conversations'):
                     if row.get('user')==target:
-                        self.db.execute('DELETE FROM agent_conversations WHERE id=?',(row['id'],))
+                        row.update(deleted=True,generation=int(row.get('generation',0))+1);self.put('agent_conversations',row)
+                for row in self.all('agent_drafts'):
+                    if row.get('user')==target:self.db.execute('DELETE FROM agent_drafts WHERE id=?',(row['id'],))
             self.audit(user['id'],'agent.history.clear',{'target':target})
             return {'cleared':True,'userId':target}
         if action=='account.profile':

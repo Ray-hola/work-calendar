@@ -10408,3 +10408,48 @@ body.is-resizing-agent { user-select: none; }
 .plan-empty { display: grid; justify-items: center; gap: 10px; padding: 28px 16px; color: var(--muted); border: 1px dashed var(--line); border-radius: 12px; text-align: center; font-size: 12px; }
 .plan-empty svg { color: var(--success); width: 22px; height: 22px; }
 .plan-empty strong { color: var(--ink); font: 600 16px/1.4 var(--font-serif); }
+
+/* Reviewed assistant states: selection scope, recovery and narrow chat access. */
+.agent-status { margin: 0; padding: 0 16px; color: var(--muted); font-size: 12px; }
+.agent-status:empty { display: none; }
+.agent-pane-tabs { display: none; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.agent-pane-tabs button { border: 1px solid transparent; border-radius: 7px; padding: 8px 12px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; }
+.agent-pane-tabs [aria-selected="true"] { background: var(--surface); border-color: var(--line); color: var(--accent-dark); }
+#agentReplyBadge { color: var(--accent-dark); }
+.plan-pick { min-width: 36px; min-height: 36px; justify-content: center; margin: -8px -5px -8px -8px; flex-shrink: 0; }
+.plan-select-label { min-height: 36px; padding: 0 4px; }
+.plan-selection .plan-accept-selected { font-weight: 600; }
+.plan-save-status { color: var(--muted); font-size: 11px; }
+.plan-foot .plan-sum { min-width: 70px; font-size: 11px; }
+.agent-action-fields { margin: 0; display: grid; gap: 8px; }
+.agent-action-fields > div { display: grid; grid-template-columns: 76px minmax(0,1fr); gap: 8px; }
+.agent-action-fields dt { color: var(--muted); }
+.agent-action-fields dd { margin: 0; overflow-wrap: anywhere; }
+.agent-action-impact { margin: 0; color: var(--muted); font-size: 12px; }
+.agent-action-details pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-account-password { display: grid; gap: 6px; }
+.agent-account-password input { min-width: 0; width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.agent-account-password small { color: var(--muted); }
+.agent-config .agent-key-choice { display: flex; align-items: center; gap: 8px; font-weight: 400; }
+.agent-config .agent-key-choice input { width: 18px; height: 18px; margin: 0; }
+.agent-setup p { color: var(--muted); }
+@container assistant (max-width: 760px) {
+  .agent-panel.is-planning .agent-pane-tabs:not(.hidden) { display: flex; }
+  .agent-panel.is-planning.is-chat-pane .agent-draft-area { display: none; }
+  .agent-panel.is-planning.is-chat-pane .agent-conversation { flex: 1; min-height: 0; }
+  .agent-panel.is-planning.is-chat-pane .agent-messages { display: grid; }
+}
+@media (max-width: 760px) {
+  .agent-panel.is-planning .agent-pane-tabs:not(.hidden) { display: flex; }
+  .agent-panel.is-planning.is-chat-pane .agent-draft-area { display: none; }
+  .agent-panel.is-planning.is-chat-pane .agent-conversation { flex: 1; min-height: 0; }
+  .agent-panel.is-planning.is-chat-pane .agent-messages { display: grid; }
+}
+@container assistant (max-width: 560px) {
+  .plan-foot { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; }
+  .plan-foot .plan-add { grid-column: 1; grid-row: 1; justify-self: start; }
+  .plan-foot .plan-cancel { grid-column: 2; grid-row: 1; }
+  .plan-foot .plan-sum { grid-column: 1; grid-row: 2; align-self: center; }
+  .plan-foot .plan-confirm { grid-column: 2; grid-row: 2; }
+}
+@media (pointer: coarse) { .plan-pick { min-width: 44px; min-height: 44px; } }

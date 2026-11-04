@@ -318,8 +318,8 @@ let S={user:null,users:[],tasks:[],projects:[],folders:[],files:[],fileArchives:
 const readJSON=async r=>{const text=await r.text();try{return text?JSON.parse(text):{}}catch(_){throw new Error([504,524].includes(r.status)?'服务响应超时，请稍后再试；给 AI 助手的需求可以拆短一点':`服务暂时不可用（HTTP ${r.status}），请稍后再试`)}};
 const api=(path,body,options={})=>fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Work-Calendar':'1'},credentials:'same-origin',body:JSON.stringify(body),...options}).then(async r=>{const x=await readJSON(r);if(!r.ok)throw new Error(x.error||'操作未完成');return x});
 /* Raw-body sibling of api() for uploads: audio is sent as-is, not as JSON. */
-const apiBlob=(path,blob)=>fetch(path,{method:'POST',headers:{'Content-Type':blob.type||'application/octet-stream','X-Work-Calendar':'1'},credentials:'same-origin',body:blob}).then(async r=>{const x=await r.json().catch(()=>({}));if(!r.ok)throw new Error(x.error||'请求未完成');return x});
-const getState=()=>fetch('/api/state',{credentials:'same-origin'}).then(async r=>{const x=await readJSON(r);if(!r.ok)throw new Error(x.error||'请登录');return x});
+const apiBlob=(path,blob,options={})=>fetch(path,{...options,method:'POST',headers:{'Content-Type':blob.type||'application/octet-stream','X-Work-Calendar':'1'},credentials:'same-origin',body:blob}).then(async r=>{const x=await r.json().catch(()=>({}));if(!r.ok)throw new Error(x.error||'请求未完成');return x});
+const getState=()=>fetch('/api/state',{credentials:'same-origin'}).then(async r=>{const x=await readJSON(r);if(!r.ok){const e=new Error(x.error||'读取工作台失败');e.status=r.status;throw e}return x});
 const fmt=iso=>{const d=new Date(`${iso}T12:00:00`);return `${d.getMonth()+1}月${d.getDate()}日`};
 const wd=iso=>['周日','周一','周二','周三','周四','周五','周六'][new Date(`${iso}T12:00:00`).getDay()];
 const add=(iso,n)=>{const d=new Date(`${iso}T12:00:00`);d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)};
@@ -351,7 +351,7 @@ function knownAccounts(){try{const v=JSON.parse(localStorage.getItem(KNOWN_ACCOU
 function rememberAccount(id){if(!id)return;try{localStorage.setItem(KNOWN_ACCOUNTS_KEY,JSON.stringify([id,...knownAccounts().filter(x=>x!==id)].slice(0,8)))}catch(_){}}
 async function refresh(){
   let next;
-  try{next=await getState()}catch(e){showAuth();return}
+  try{next=await getState()}catch(e){if(e.status===401){showAuth();return}throw e}
   if(S.user?.id!==next.user.id){
     if(S.user&&typeof agentResetUser==='function')agentResetUser();
     Object.assign(UI,{space:'',folder:'',view:'calendar',member:'all',filter:'all',selectedWeek:0,detailDate:null,timelineScroll:null,dayOffset:0});
@@ -2845,14 +2845,14 @@ window.addEventListener('focus',()=>{if(UI.view==='inbox')refreshInboxState()});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&UI.view==='inbox')refreshInboxState()});
 $('#pipBtn').classList.toggle('hidden',!pipSupported());$('#pipBtn').onclick=openPip;
 hydrateIcons();
-if(location.protocol==='file:'){showAuth()}else{refresh()}
+if(location.protocol==='file:'){showAuth()}else{refresh().catch(e=>toast(e.message||'连接工作台失败，请刷新重试'))}
 
 /* Embedded Agent UI: superadmin-managed OpenAI-compatible endpoint via server proxy. */
 const AGENT_CONFIG_KEY='work-calendar-agent-config-v1';
 const TRANSCRIBE_ENDPOINT='/api/transcribe';
 const OPENCODE_GO_ENDPOINT='https://opencode.ai/zen/go/v1/chat/completions';
 const OPENCODE_GO_MODELS=['glm-5.3-flash','glm-5.3','glm-5.2','glm-5.1','kimi-k3','kimi-k2.7-code','kimi-k2.6','longcat-2.0','deepseek-v4.1-flash','deepseek-v4-pro','deepseek-v4-flash','deepseek-v4-flash-vision-exp','mimo-v2.5','mimo-v2.5-pro','hy4-preview','hy3','grok-4.5'];
-const agentState={messages:[],busy:false,paused:false,resume:null,controller:null,lastInput:'',editing:null,steps:0,failures:0,mode:null,lastActionKey:'',repeats:0,autoRun:false,stop:false,pendingResolve:null,plan:false,planBoard:null,conversationDrafts:new Map(),historyLoad:0,historyLoading:false,historyError:false,sessionRender:0,sessionId:(globalThis.crypto?.randomUUID?.()||`wc-${Date.now()}-${Math.random().toString(36).slice(2)}`)};
+const agentState={clientId:(globalThis.crypto?.randomUUID?.()||`page-${Date.now()}-${Math.random().toString(36).slice(2)}`),messages:[],busy:false,paused:false,resume:null,controller:null,lastInput:'',editing:null,steps:0,failures:0,mode:null,lastActionKey:'',repeats:0,autoRun:false,stop:false,pendingResolve:null,plan:false,planBoard:null,conversationDrafts:new Map(),historyLoad:0,historyLoading:false,historyError:false,sessionRender:0,sessionId:(globalThis.crypto?.randomUUID?.()||`wc-${Date.now()}-${Math.random().toString(36).slice(2)}`)};
 let agentServerConfig=null;
 let agentServerAsr=null;
 function agentIsBusy(){return agentState.busy}
@@ -2898,7 +2898,7 @@ function renderAgentModelChip(){
   el.textContent=ready?(cfg.model||'已接入'):'未接入';
   el.title=ready
     ?('当前模型：'+(cfg.model||'（服务端已配置）')+(cfg.provider?' · '+cfg.provider:''))
-    :'还没有配置模型，点右上角的齿轮填写 API';
+    :(S.user?.role==='superadmin'?'还没有配置模型，打开 AI 接入配置':'还没有配置模型，请联系管理员');
   if(switchable)el.title+='（点一下切换）';
 }
 
@@ -2914,6 +2914,8 @@ function agentSamples(context){
 }
 function agentRenderEmptyState(list){
   const samples=agentSamples();
+  if(!list)return;
+  if(agentServerConfig&&!agentServerConfig.configured){list.innerHTML=`<div class="agent-setup"><strong>先接入 AI 模型</strong><p>${S.user?.role==='superadmin'?'连接模型后，可以查询工作安排、起草卡片。':'请联系管理员配置模型。你的输入可以继续保留。'}</p>${S.user?.role==='superadmin'?'<button type="button" class="secondary-btn" id="agentSetupBtn">配置模型</button>':''}</div>`;$('#agentSetupBtn')?.addEventListener('click',()=>agentSetConfigVisible(true));return}
   list.innerHTML='<div class="agent-samples">'
     +samples.map(s=>`<button type="button" class="agent-sample ${s.plan?'is-plan':''}" data-text="${escapeHTML(s.text)}"${s.plan?' data-plan="1"':''}>`
       +(s.plan?icon('sparkles'):'')+escapeHTML(s.text)+'</button>').join('')
@@ -2930,6 +2932,7 @@ function agentAppend(role,content,kind='',intent=''){
   const tools=role==='assistant'&&!kind?(agentState.lastTools||[]):[];
   const messageId=role==='assistant'&&!kind?agentState.lastMessageId:null;
   if(role==='assistant'&&!kind){agentState.lastTools=[];agentState.lastMessageId=null;}
+  if(role==='assistant'&&agentState.planBoard&&!agentState.planBoard.closed){agentState.unreadReply=agentState.pane!=='chat';if(kind==='error')agentSetPane('chat');else agentSyncPane()}
   agentState.messages.push({role,content,...(tools.length?{tools}:{}),...(messageId?{id:messageId}:{})});
   const list=$('#agentMessages');if(!list)return;
   const el=document.createElement('div');
@@ -2975,9 +2978,11 @@ function agentEditMessage(index){
   agentState.editing=index;agentState.plan=intent.plan;input.value=intent.body;
   agentSyncPlanButton();input.focus();toast('修改后发送，将从这条消息重新开始；已创建的数据保留');
 }
-function agentRewind(index){
+async function agentRewind(index){
   if(agentState.busy){toast('先停止当前执行，再回退对话');return}
   const m=agentState.messages[index];if(!m)return;
+  if(m.id){const owner=S.user?.id,thread=agentState.conversationId;agentState.busy=true;agentUpdateBusy();try{await api('/api/action',{action:'agent.conversation.rewind',data:{conversationId:thread||'legacy',messageId:m.id}})}catch(e){toast(e.message);return}finally{if(owner===S.user?.id&&thread===agentState.conversationId){agentState.busy=false;agentUpdateBusy()}}if(owner!==S.user?.id||thread!==agentState.conversationId)return;}
+  agentState.planBoard=null;agentSyncDraftLayout();
   agentState.messages=agentState.messages.slice(0,index+1);
   agentRenderTranscript($('#agentMessages'),agentState.messages);
   agentShowStep('已回退当前对话。已执行的操作和已创建的数据保留。');
@@ -2985,6 +2990,7 @@ function agentRewind(index){
 }
 function agentPrepareMessage(text,planning=false){
   if(agentState.editing!==null){
+    agentState.planBoard=null;agentSyncDraftLayout();
     agentState.messages=agentState.messages.slice(0,agentState.editing);
     agentState.editing=null;agentRenderTranscript($('#agentMessages'),agentState.messages);
   }
@@ -3059,7 +3065,7 @@ function agentMessageNode(m,index=-1){
     const label=AGENT_ACTION_LABELS[m.action]||m.action||'操作';
     node.className='agent-message assistant agent-action-record';
     const managed=/^(project|task)\.(create|update|delete)$/.test(m.action)||m.action==='task.edit_request';
-    node.innerHTML=`<div class="agent-action-title">已提交 · ${escapeHTML(label)}</div>`+(managed?`<span>${escapeHTML(m.data?.name||m.content||label)}</span>`:`<pre class="agent-action-payload">${escapeHTML(JSON.stringify(m.data||{},null,2))}</pre>`)+`<small class="agent-time">${escapeHTML(agentFormatTime(m.createdAt))}</small>`;
+    node.innerHTML=`<div class="agent-action-title">已提交 · ${escapeHTML(label)}</div>`+(managed?`<span>${escapeHTML(m.data?.name||m.content||label)}</span>`:agentActionHTML(m.action,m.data||{},true))+`<small class="agent-time">${escapeHTML(agentFormatTime(m.createdAt))}</small>`;
     return node;
   }
   node.className=`agent-message ${m.role==='user'?'user':'assistant'}`;
@@ -3071,8 +3077,9 @@ function agentMessageNode(m,index=-1){
   if(m.role==='assistant'&&/<plan>/i.test(m.content||'')){
     const draft=agentSplitPlan(m.content);
     text.textContent=(draft.clean?draft.clean+' ':'')+`（草稿：${draft.projects.length?draft.projects.length+' 个项目、':''}${draft.tasks.length} 个任务）`;
-    if(draft.projects.length||draft.tasks.length){const btn=document.createElement('button');btn.type='button';btn.className='ghost-btn plan-reopen-history';btn.textContent='再打开这份草稿';btn.onclick=()=>agentPlanBoard(draft);node.appendChild(btn)}
+    if((draft.projects.length||draft.tasks.length)&&!agentState.viewing){const btn=document.createElement('button');btn.type='button';btn.className='ghost-btn plan-reopen-history';btn.textContent=draft.draftId?'恢复这份草稿':'复制为新草稿';btn.onclick=()=>agentRestoreBoard(draft);node.appendChild(btn)}
   }
+  if(m.role==='assistant'&&/<action>/i.test(m.content||'')){const parsed=agentSplitActions(m.content);text.textContent=parsed.clean||parsed.actions.map(x=>'当时提议：'+(AGENT_ACTION_LABELS[x.action]||'业务操作')).join('；')}
   const stamp=document.createElement('small');stamp.className='agent-time';stamp.textContent=agentFormatTime(m.createdAt);node.appendChild(stamp);
   agentToolSummary(node,m.tools);agentMessageTools(node,m,index);
   return node;
@@ -3098,6 +3105,7 @@ async function agentLoadOwnHistory(){
     const turns=messages.filter(m=>(m.role==='user'||m.role==='assistant')&&String(m.content||'').trim());
     agentState.messages=turns.map(m=>({role:m.role,content:m.content,...(m.id?{id:m.id}:{}),...(Array.isArray(m.tools)&&m.tools.length?{tools:m.tools}:{})}));
     if(messages.length)agentRenderTranscript(list,messages);else agentRenderEmptyState(list);
+    if(!agentState.planBoard){const source=[...messages].reverse().find(m=>m.role==='assistant'&&/<plan>/i.test(m.content||''));if(source){const raw=agentSplitPlan(source.content);if(raw.draftId){await agentRestoreBoard(raw,true);if(!active()||thread!==agentState.conversationId)return}}}
     const card=agentState.pendingCard;
     if(card&&agentState.pendingResolve&&!card.isConnected)list.appendChild(card);
     const board=agentState.planBoard;
@@ -3120,6 +3128,7 @@ const agentNewConversationId=()=>globalThis.crypto?.randomUUID?.()||`wc-${Date.n
 function agentUseConversation(id){
   if(typeof agentCancelVoice==='function')agentCancelVoice();
   const input=$('#agentInput'),previous=agentState.conversationId;
+  if(agentState.planBoard)planFlush(agentState.planBoard);
   if(previous)agentState.conversationDrafts.set(previous,{board:agentState.planBoard,input:input?.value||'',plan:agentState.plan});
   const saved=agentState.conversationDrafts.get(id);
   agentState.conversationId=id;agentState.sessionId=id==='legacy'?null:id;
@@ -3135,12 +3144,47 @@ function agentWriteBlocked(){
   if(agentState.historyLoading||agentState.historyError){toast(agentState.historyError?'请先重试加载这段对话':'对话正在加载，请稍候');return true}
   return false;
 }
+async function agentPersistEdit(){
+  if(agentState.editing===null)return true;
+  const cut=agentState.messages.slice(0,agentState.editing).filter(m=>m.id).at(-1),owner=S.user?.id,thread=agentState.conversationId;
+  agentState.busy=true;agentUpdateBusy();
+  try{await api('/api/action',{action:'agent.conversation.rewind',data:{conversationId:agentState.conversationId||'legacy',messageId:cut?.id||null}});return owner===S.user?.id&&thread===agentState.conversationId}
+  catch(e){toast(e.message||'暂时无法建立对话分支，请重试');return false}
+  finally{if(owner===S.user?.id&&thread===agentState.conversationId){agentState.busy=false;agentUpdateBusy()}}
+}
+function agentOfferSetup(){
+  if(S.user?.role==='superadmin')agentSetConfigVisible(true);
+  else toast('模型尚未接入，请联系管理员配置。输入内容已保留。');
+}
+function agentConnectionHint(){
+  const same=String($('#agentEndpoint')?.value||'').replace(/\/chat\/completions\/?$|\/$/g,'')===String(agentServerConfig?.baseUrl||'').replace(/\/chat\/completions\/?$|\/$/g,'');
+  const input=$('#agentApiKey');if(input)input.placeholder=same&&agentServerConfig?.apiKeySet?'留空沿用此地址保存的密钥':'新地址不会沿用原密钥；本地服务可留空';
+}
+function agentSetPane(pane){
+  agentState.pane=pane==='chat'?'chat':'cards';if(pane==='chat')agentState.unreadReply=false;
+  agentSyncPane();
+}
+function agentPaneKeydown(e){
+  if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;
+  e.preventDefault();const pane=e.key==='Home'?'cards':e.key==='End'?'chat':agentState.pane==='chat'?'cards':'chat';
+  agentSetPane(pane);$(pane==='chat'?'#agentPaneChat':'#agentPaneCards')?.focus();
+}
+function agentSyncPane(){
+  const show=Boolean(agentState.planBoard&&!agentState.planBoard.closed&&!agentState.viewing),chat=agentState.pane==='chat';
+  $('#agentPaneTabs')?.classList.toggle('hidden',!show);
+  $('#agentPanel')?.classList.toggle('is-chat-pane',chat);
+  $('#agentPaneCards')?.setAttribute('aria-selected',String(!chat));
+  $('#agentPaneChat')?.setAttribute('aria-selected',String(chat));
+  $('#agentPaneCards')?.setAttribute('tabindex',chat?'-1':'0');
+  $('#agentPaneChat')?.setAttribute('tabindex',chat?'0':'-1');
+  const badge=$('#agentReplyBadge');if(badge){badge.textContent=agentState.unreadReply?' · 新回复':'';badge.classList.toggle('hidden',!agentState.unreadReply)}
+}
 function agentSyncDraftLayout(){
   const board=agentState.planBoard,show=Boolean(board&&!board.closed&&!agentState.viewing);
   $('#agentPanel')?.classList.toggle('is-planning',show);
   $('#agentDraftArea')?.classList.toggle('hidden',!show);
   $('#agentDraftToggle')?.classList.toggle('hidden',!board||Boolean(agentState.viewing));
-  applyAgentPanelSize();
+  applyAgentPanelSize();agentSyncPane();
 }
 async function agentToggleSessions(open=!agentState.sessionsOpen){
   agentState.sessionsOpen=open;agentState.sessionRender++;
@@ -3246,7 +3290,7 @@ async function agentDeleteConversation(id,target){
   const deletedOwnActive=target===owner&&id===agentState.conversationId;
   if(target===owner){
     if(deletedOwnActive)agentUseConversation(null);
-    agentState.conversationDrafts.delete(id);
+    agentState.conversationDrafts.delete(id);agentForgetDraftCache(id,owner);
   }
   if((agentState.viewing||owner)===target){
     if(agentState.viewing&&agentState.viewConversation===id){agentState.viewConversation=null;const box=$('#agentMessages');if(box)box.innerHTML=''}
@@ -3259,7 +3303,7 @@ async function agentDeleteConversation(id,target){
 const LLM_PRESETS={
   'opencode-go':{name:'OpenCode Go（推荐）',base:OPENCODE_GO_ENDPOINT,key:''},
   openai:{name:'OpenAI',base:'https://api.openai.com/v1',key:'sk-…'},
-  anthropic:{name:'Anthropic Claude',base:'https://api.anthropic.com/v1',key:'sk-ant-…'},
+  anthropic:{name:'Claude（需 OpenAI 兼容网关）',base:'',key:'sk-…'},
   gemini:{name:'Google Gemini',base:'https://generativelanguage.googleapis.com/v1beta/openai',key:'AIza…'},
   deepseek:{name:'DeepSeek',base:'https://api.deepseek.com/v1',key:'sk-…'},
   moonshot:{name:'Moonshot Kimi',base:'https://api.moonshot.cn/v1',key:'sk-…'},
@@ -3292,7 +3336,7 @@ function agentConfigStatus(text,state=''){
 function agentSetConfigVisible(show){
   agentInvalidateConfigTest();
   $('#agentConfig')?.classList.toggle('hidden',!show);
-  if(!show)return;
+  if(!show){$('#agentConfigBtn')?.focus?.();return}
   const sel=$('#agentProvider');
   if(sel&&!sel.options.length)sel.innerHTML=Object.entries(LLM_PRESETS).map(([k,v])=>`<option value="${k}">${escapeHTML(v.name)}</option>`).join('');
   const c=agentServerConfig||agentConfig(),provider=LLM_PRESETS[c.provider]?c.provider:'custom';
@@ -3302,6 +3346,8 @@ function agentSetConfigVisible(show){
   $('#agentContextChars').value=String(c.contextChars??32000);
   agentConfigStatus('');agentSyncProviderUI();
   agentModelsSource=agentConfigConnection();
+  $('#agentClearKey')&&( $('#agentClearKey').checked=false);
+  $('#agentProvider')?.focus?.();
 }
 function agentRenderModelOptions(selected=''){
   const select=$('#agentModelSelect'),input=$('#agentCustomModel');if(!select||!input)return;
@@ -3327,7 +3373,7 @@ function agentSyncProviderUI(changed=false){
 async function agentTestConfig(){
   agentInvalidateConfigTest();
   const btn=$('#agentConfigTest'),model=agentPickedModel();
-  const data={provider:$('#agentProvider').value,baseUrl:$('#agentEndpoint').value.trim(),apiKey:$('#agentApiKey').value.trim(),model};
+  const data={provider:$('#agentProvider').value,baseUrl:$('#agentEndpoint').value.trim(),apiKey:$('#agentApiKey').value.trim(),model,clearApiKey:Boolean($('#agentClearKey')?.checked)};
   if(!data.baseUrl&&data.provider!=='opencode-go'){agentConfigStatus('请先填写 API 地址','fail');return}
   const version=agentConfigVersion,user=S.user?.id,identity=agentConfigConnection(),controller=new AbortController();
   agentConfigTestController=controller;
@@ -3349,7 +3395,7 @@ async function agentSaveConfig(){
   agentInvalidateConfigTest();
   try{
     const data=await api('/api/action',{action:'agent.config.set',data:{provider,baseUrl:endpoint,model,apiKey,models,
-      contextChars:Number($('#agentContextChars').value)}});
+      contextChars:Number($('#agentContextChars').value),clearApiKey:Boolean($('#agentClearKey')?.checked)}});
     agentServerConfig=data;saveAgentConfig({provider,endpoint,model});renderAgentModelChip();agentSetConfigVisible(false);
     toast('Agent API 配置已保存（密钥仅保存在服务端）');
   }catch(e){toast(e.message||'保存失败')}
@@ -3389,6 +3435,7 @@ async function agentLoadServerConfig(){
   try{agentServerConfig=await api('/api/action',{action:'agent.config.get',data:{}})}catch(_){agentServerConfig=null}
   try{agentServerAsr=await api('/api/action',{action:'agent.asr.get',data:{}})}catch(_){agentServerAsr=null}
   renderAgentModelChip();renderAgentAsrConfig();agentInitVoice();
+  if(!agentState.messages.length&&!agentState.historyError)agentRenderEmptyState($('#agentMessages'));
 }
 function agentExtractText(data){
   const text=data?.choices?.[0]?.message?.content||data?.choices?.[0]?.text||data?.message?.content||data?.message||data?.content||data?.text;
@@ -3405,13 +3452,15 @@ async function agentRequest(messages,planning=false){
   const controller=new AbortController();agentState.controller=controller;
   try{
     const parentMessageId=[...agentState.messages].reverse().find(m=>m.role==='assistant'&&m.id)?.id;
-    const data=await api('/api/agent/chat',{messages,sessionId:agentState.sessionId,planning,parentMessageId},{signal:controller.signal});
+    const data=await api('/api/agent/chat',{messages,sessionId:agentState.sessionId,planning,parentMessageId,runGoal:agentState.runGoal||''},{signal:controller.signal});
     agentState.lastTools=Array.isArray(data.tools)?data.tools:[];agentState.lastMessageId=data.messageId||null;
+    const asked=[...agentState.messages].reverse().find(m=>m.role==='user');if(asked&&data.userMessageId)asked.id=data.userMessageId;
     if(agentState.sessionsOpen&&!agentState.viewing)agentRenderSessions();
     const text=agentExtractText(data);if(!text)throw new Error('服务端 Agent 未返回文本');return String(text);
   }finally{if(agentState.controller===controller)agentState.controller=null}
 }
 const AGENT_ACTION_LABELS={
+  'task.completion.update':'更正完成记录','task.reopen':'打回任务','project.complete_request':'申请项目结项','report.schedule.update':'设置报告收集',
   'task.create':'创建任务','task.update':'调整任务','task.delete':'删除任务','task.complete':'完成任务',
   'task.edit_review':'审批修改申请','project.create':'创建项目',
   'project.delete':'删除项目','project.review':'审批项目','project.update':'调整项目','project.invite':'添加协作者',
@@ -3506,7 +3555,8 @@ function agentSplitPlan(text){
     try{read(clean.replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,''))}catch(_){}
     if(projects.length||tasks.length)return {clean:'',projects,tasks};
   }
-  return {clean,projects,tasks};
+  let draftId;try{const m=String(text||'').match(/<plan>([\s\S]*?)<\/plan>/i);if(m)draftId=JSON.parse(m[1]).draftId}catch(_){}
+  return {clean,projects,tasks,...(draftId?{draftId}:{})};
 }
 
 /* Runs are meant to go the distance for a real job, so the ceiling sits far
@@ -3548,10 +3598,12 @@ function agentSystemPrompt(context,planning){
 function agentRecentMessages(){
   /* Last line of defence: the proxy refuses an empty message, and a blank turn
      carries nothing the model needs anyway. */
-  return agentState.messages
+  const recent=agentState.messages
     .filter(x=>String(x.content||'').trim())
     .slice(-AGENT_CONTEXT_LIMIT)
     .map(x=>({role:x.role,content:x.content}));
+  if(agentState.runGoal&&!recent.some(m=>m.role==='user'&&m.content===agentState.runGoal))recent.unshift({role:'user',content:agentState.runGoal});
+  return recent;
 }
 async function agentNext(context){
   if(!await agentWaitForResume())return [];
@@ -3570,7 +3622,7 @@ async function agentNext(context){
    data actually looks like now, so it cannot treat a return value as proof and
    has to reconcile the two before moving on. */
 function agentFingerprint(){
-  const of=(list,fields)=>Object.fromEntries((list||[]).map(x=>[x.id,fields.map(f=>String(x[f]==null?'':x[f])).join('|')]));
+  const of=list=>Object.fromEntries((list||[]).map(x=>[x.id,JSON.stringify(x)]));
   return {
     tasks:of(S.tasks,['name','status','assignee','date','deadline','priority']),
     projects:of(S.projects,['name','status','owner']),
@@ -3605,6 +3657,17 @@ function agentSummarize(result){
   if(result.id)return `记录 ${result.id}`;
   try{return JSON.stringify(result).slice(0,300)}catch(_){return '已完成'}
 }
+function agentSafeParams(value){
+  if(Array.isArray(value))return value.map(agentSafeParams);
+  if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).filter(([k])=>!/password|api.?key|authorization|token|secret/i.test(k)).map(([k,v])=>[k,agentSafeParams(v)]));
+  return value;
+}
+function agentActionHTML(action,payload,executed=false){
+  const safe=agentSafeParams(payload),labels={id:'操作对象',name:'名称',username:'账户',role:'权限组',assignee:'执行人',assignees:'执行人',owner:'负责人',projectId:'所属项目',date:'日期',start:'开始',end:'结束',time:'时间',duration:'分钟',priority:'优先级',active:'启用',accept:'同意',reason:'原因',frequency:'重复方式',weekdays:'星期',dates:'指定日期',status:'状态',summary:'总结',actual:'实际用时',report:'报告',title:'标题',content:'内容'};
+  const display=(k,v)=>{if(k==='id')return S.tasks?.find(x=>x.id===v)?.name||S.projects?.find(x=>x.id===v)?.name||S.repeats?.find(x=>x.id===v)?.name||nameOf(v);if(['owner','assignee'].includes(k))return nameOf(v);if(k==='role')return ({member:'普通成员',admin:'管理员',superadmin:'超级管理员'}[v]||v);if(k==='projectId')return S.projects?.find(x=>x.id===v)?.name||'临时任务';if(Array.isArray(v))return v.map(x=>['assignees','members'].includes(k)?nameOf(x):String(x)).join('、');if(typeof v==='boolean')return v?'是':'否';return typeof v==='object'?JSON.stringify(v):String(v??'—')};
+  const entries=Object.entries(safe),known=entries.filter(([k])=>labels[k]);
+  return `<dl class="agent-action-fields">${known.map(([k,v])=>`<div><dt>${labels[k]}</dt><dd>${escapeHTML(display(k,v))}</dd></div>`).join('')}</dl><p class="agent-action-impact">${executed?'操作已提交，以上为当时记录的内容。':action==='account.delete'?'将移除该账户，请核对操作对象。':action==='account.create'?'账户仅在你确认后创建；初始密码只提交给工作台，不发送给模型。':'按当前账户权限提交，确认前不会改动数据。'}</p>`+(entries.some(([k])=>!labels[k])?`<details class="agent-action-details"><summary>其他参数</summary><pre>${escapeHTML(JSON.stringify(safe,null,2))}</pre></details>`:'');
+}
 /* A step line is replayed to the model as a user turn but rendered as a quiet
    receipt, so the transcript stays readable while the model keeps its context. */
 function agentShowStep(display){
@@ -3623,7 +3686,8 @@ function agentUpdateBusy(){
   const pause=$('#agentPauseBtn');
   if(pause){pause.classList.toggle('hidden',!agentState.busy);pause.textContent=agentState.paused?'继续':'暂停';pause.setAttribute('aria-pressed',String(agentState.paused))}
   const mic=$('#agentMicBtn');
-  if(mic){mic.disabled=agentState.busy;mic.setAttribute('aria-disabled',agentState.busy?'true':'false')}
+  if(mic){mic.disabled=agentState.busy||voice.transcribing||voice.starting;mic.setAttribute('aria-disabled',agentState.busy?'true':'false')}
+  const status=$('#agentStatus');if(status)status.textContent=agentState.paused?'已暂停':agentState.pendingResolve?'等待确认':agentState.busy?'正在处理…':'';
   /* Say on the composer itself what the run is waiting for, so a paused card
      is never mistaken for a composer that ate the message. */
   if(input){
@@ -3668,13 +3732,14 @@ function agentRunOne(proposal){
     const list=$('#agentMessages');
     if(!list){resolve({cancelled:true});return}
     const label=AGENT_ACTION_LABELS[proposal.action]||proposal.action;
-    const payload=agentTidyTaskName(proposal.action,(proposal.data&&typeof proposal.data==='object')?proposal.data:{});
+    const payload=agentTidyTaskName(proposal.action,agentSafeParams((proposal.data&&typeof proposal.data==='object')?proposal.data:{}));
     /* The pace comes from the standing switch beside the input, so the card
        only has to show what is about to happen. */
     const card=document.createElement('div');
     card.className='agent-message assistant agent-action';
     card.innerHTML=`<div class="agent-action-title">待确认操作 · ${escapeHTML(label)}</div>`
-      +`<pre class="agent-action-payload">${escapeHTML(JSON.stringify(payload,null,2))}</pre>`
+      +agentActionHTML(proposal.action,payload)
+      +(proposal.action==='account.create'?'<label class="agent-account-password">初始密码<input type="password" minlength="6" autocomplete="new-password" aria-label="新账户初始密码"><small>至少 6 位，仅提交给工作台</small></label>':'')
       +'<div class="agent-action-buttons"></div>';
     list.appendChild(card);list.scrollTop=list.scrollHeight;
     /* The card is a piece of live UI, not a line of the stored transcript.
@@ -3699,24 +3764,28 @@ function agentRunOne(proposal){
       if(agentState.pendingExecuting)return;
       agentState.pendingExecuting=true;
       if(!await agentWaitForResume()){agentState.pendingExecuting=false;finish({cancelled:true});return}
+      if(proposal.action==='account.create'){const secret=card.querySelector('input[type=password]');if(!secret||secret.value.length<6){agentState.pendingExecuting=false;toast('请在卡片里填写至少 6 位初始密码');return}payload.password=secret.value;secret.value='';}
       buttons.innerHTML='<span class="agent-action-done">执行中…</span>';
       const before=agentFingerprint();
       try{
         const result=await api('/api/action',{action:'agent.execute',data:{action:proposal.action,data:payload,confirmed:true,sessionId:agentState.sessionId}});
-        await refresh();
+        delete payload.password;
+        let verificationWarning='';
+        try{await refresh()}catch(_){verificationWarning='操作已成功，但界面核对暂未完成；请刷新查看，不要重复提交。'}
         /* The ledger is read again here rather than trusting the return value:
            a step that reports success but changed nothing has to be visible to
            the model before it plans the next one. */
-        const diff=agentVerify(before,agentFingerprint());
+        const diff=verificationWarning?[]:agentVerify(before,agentFingerprint());
         const summary=agentSummarize(result);
         buttons.innerHTML='<span class="agent-action-done">已执行</span>';
         toast(`已${label}`);
         agentRecordStep(`已${label} · ${summary}`,
           `【系统回执】${label} 执行成功，返回：${summary}。`
-          +`数据核对：${diff.length?diff.join('；'):'没有发现任何变化'}。`
+          +`数据核对：${verificationWarning|| (diff.length?diff.join('；'):'服务端已确认成功；当前可见列表没有可比较的变化，不要仅据此重复执行')}。`
           +`先核对这一步有没有达到预期：达到了再输出下一个动作；对不上或没生效，先修正它再继续。`);
         agentState.pendingExecuting=false;finish({label,result});
       }catch(err){
+        delete payload.password;
         const message=err?.message||'执行失败';
         toast(message);
         agentState.failures+=1;
@@ -3736,6 +3805,7 @@ function agentRunOne(proposal){
       +'<button class="primary-btn agent-action-confirm">确认执行</button>';
     /* The composer now reads as busy while this card waits, so refresh it. */
     agentUpdateBusy();
+    if(typeof requestAnimationFrame==='function')requestAnimationFrame(()=>{if(card.isConnected&&agentState.pendingCard===card)list.scrollTop=list.scrollHeight});
     buttons.querySelector('.agent-action-cancel').onclick=cancel;
     buttons.querySelector('.agent-action-confirm').onclick=execute;
     const hand=buttons.querySelector('.agent-action-handover');
@@ -3793,6 +3863,7 @@ async function agentLoop(context){
   return steps;
 }
 async function agentSubmit(){
+  const owner=S.user?.id,thread=agentState.conversationId;
   const input=$('#agentInput'),text=input?.value.trim();if(!text||agentWriteBlocked())return;
   /* Dropping this on the floor is what made a stuck run look like it was
      eating messages: the text stayed in the box and nothing happened. */
@@ -3801,9 +3872,12 @@ async function agentSubmit(){
                                :'助手还在处理上一条消息，点「停止」可以打断它');
     return;
   }
+  if(agentServerConfig&& !agentServerConfig.configured){agentOfferSetup();return}
   const intent=agentPlanIntent(text);
   /* The 规划任务 switch, or a typed mark, turns this message into a draft. */
   if(intent.plan||agentState.plan){input.value='';agentState.plan=false;agentSyncPlanButton();return agentPlanSubmit(intent.body)}
+  if(!await agentPersistEdit()||agentState.busy||owner!==S.user?.id||thread!==agentState.conversationId)return;
+  agentState.runGoal=text;agentSetPane('chat');
   agentPrepareMessage(text);input.value='';const asked=agentAppend('user',text);
   agentState.autoRun=false;agentState.stop=false;agentState.paused=false;agentState.steps=0;agentState.failures=0;
   agentState.mode=agentPref();agentState.lastActionKey='';agentState.repeats=0;
@@ -3815,7 +3889,7 @@ async function agentSubmit(){
     if(e.name!=='AbortError')agentAppend('assistant',e?.message||'暂时无法连接 Agent 服务。','error');
   }
   agentFoldTrail(asked);
-  agentState.busy=false;agentState.autoRun=false;agentState.steps=0;
+  agentState.busy=false;agentState.autoRun=false;agentState.steps=0;agentState.runGoal='';
   agentState.pendingResolve=null;
   agentUpdateBusy();
   input.focus();
@@ -3827,8 +3901,10 @@ async function agentSubmit(){
    the normal dialogs, under the user's own rules, so this works whatever the
    assistant itself is allowed to do. */
 async function agentPlanSubmit(body){
+  const owner=S.user?.id,thread=agentState.conversationId;
   if(agentWriteBlocked())return;
   const input=$('#agentInput');
+  if(agentServerConfig&&!agentServerConfig.configured){if(body!==undefined&&input)input.value=body;agentOfferSetup();return}
   const source=body===undefined?(input?.value||''):body;
   const text=agentPlanIntent(source).body.trim();
   if(!text){toast('先在输入框里写下你的安排');return}
@@ -3837,6 +3913,8 @@ async function agentPlanSubmit(body){
                                :'助手还在处理上一条消息，点「停止」可以打断它');
     return;
   }
+  if(!await agentPersistEdit()||agentState.busy||owner!==S.user?.id||thread!==agentState.conversationId)return;
+  agentState.runGoal=text;
   agentPrepareMessage(text,true);input.value='';agentSyncPlanButton();
   agentAppend('user',AGENT_PLAN_MARK+' '+text,'','plan');
   agentState.busy=true;agentState.stop=false;agentState.paused=false;agentUpdateBusy();
@@ -3849,18 +3927,17 @@ async function agentPlanSubmit(body){
     wait?.remove();
     const draft=agentSplitPlan(answer);
     if(!draft.projects.length&&!draft.tasks.length){
-      draft.tasks=[{name:'',desc:text,assignee:'',missing:['请填写任务名称、确认负责人和日期']}];
-      draft.clean='先保留你的安排，补齐标红字段后就可以确认。';
+      agentAppend('assistant',draft.clean||'没有生成可用卡片。请补充目标或稍后重试，原请求已保留。','error');input.value=text;return;
     }
     agentPlanBoard(draft);
   }catch(e){
     wait?.remove();
     if(e.name!=='AbortError'){
-      agentPlanBoard({clean:'AI 暂时未能完成拆分，已保留你的安排，可直接编辑或稍后重试。',projects:[],tasks:[{name:'',desc:text,assignee:''}]});
+      input.value=text;agentSetPane('chat');
       agentAppend('assistant',e?.message||'暂时无法连接 Agent 服务。','error');
     }
   }finally{
-    agentState.busy=false;agentUpdateBusy();input.focus();
+    agentState.busy=false;agentState.runGoal='';agentUpdateBusy();input.focus();
   }
 }
 const PLAN_DAY=/^\d{4}-\d{2}-\d{2}$/;
@@ -3883,7 +3960,7 @@ function planDraft(raw){
     return {key:'t'+i,deadline:t.deadline||null,name,desc:String(t.desc||'').slice(0,2000),project,assignee,date:planDay(t.date,S.today),time:/^\d{2}:\d{2}$/.test(String(t.time||''))?t.time:'09:00',duration:Math.min(1440,Math.max(1,Math.round(Number(t.duration)||60))),priority:['P0','P1','P2'].includes(t.priority)?t.priority:'P1',state:'draft'};
   });
   for(const [kind,list] of [['project',projects],['task',tasks]])list.forEach((x,i)=>{
-    const rawItem=raw[kind+'s'][i],op=rawItem.operation||'create';x.operation=op;
+    const rawItem=raw[kind+'s'][i],op=rawItem.operation||'create';x.operation=op;x.cardId=rawItem.cardId||agentNewConversationId();
     if(op==='create')return;
     const before=rawItem.before||{},changes=Object.fromEntries(Object.entries(rawItem).filter(([k])=>!['before','id','revision','impact','operation','ref','key'].includes(k)));
     Object.assign(x,before,changes,{id:rawItem.id,before,revision:rawItem.revision,impact:rawItem.impact||{},operation:op,confirm:'',deleteConfirmed:false});
@@ -3891,7 +3968,7 @@ function planDraft(raw){
     if(kind==='task')x.project=x.projectId?'id:'+x.projectId:'';
     else{const old=Object.keys(before.members||{}).filter(id=>id!==x.owner);x.addMembers=Array.isArray(rawItem.addMembers)?rawItem.addMembers:[];x.removeMembers=Array.isArray(rawItem.removeMembers)?rawItem.removeMembers:[];x.members=[...new Set([...old.filter(id=>!x.removeMembers.includes(id)),...x.addMembers])];}
   });
-  return {projects,tasks,next:tasks.length};
+  return {projects,tasks,next:tasks.length,draftId:raw.draftId||agentNewConversationId()};
 }
 /* What would happen to a task card and who may take it: 'direct', 'approval',
    'wait' (its project still has to be approved) or 'none'. Mirrors the server's
@@ -3964,7 +4041,9 @@ function planUpdateSelection(board){
   if(all){all.checked=open.length>0&&selected.length===open.length;all.indeterminate=selected.length>0&&selected.length<open.length;all.disabled=Boolean(board.busy)||!open.length;}
   const count=el.querySelector('.plan-select-count');if(count)count.textContent=selected.length?`已选 ${selected.length} 项`:`待处理 ${open.length} 项`;
   el.querySelectorAll('.plan-card').forEach(card=>{const x=card.dataset.ref!=null?board.projects.find(p=>p.ref===card.dataset.ref):board.tasks.find(t=>t.key===card.dataset.key);card.classList.toggle('is-selected',Boolean(x?.selected));const box=card.querySelector('[data-plan-select]');if(box)box.checked=Boolean(x?.selected)});
-  el.querySelectorAll('.plan-accept-selected,.plan-reject-selected').forEach(b=>b.disabled=Boolean(board.busy)||!selected.length);
+  el.querySelectorAll('.plan-accept-selected,.plan-reject-selected').forEach(b=>{b.disabled=Boolean(board.busy)||!selected.length;if(b.classList.contains('plan-accept-selected'))b.textContent=selected.length?`接受所选 ${selected.length} 项`:'接受所选'});
+  const acceptAll=el.querySelector('.plan-confirm');if(acceptAll){acceptAll.classList.toggle('primary-btn',!selected.length);acceptAll.classList.toggle('secondary-btn',Boolean(selected.length));acceptAll.title=`处理全部 ${open.length} 张待处理卡片，包含未勾选项`;acceptAll.setAttribute('aria-label',`全部接受，共 ${open.length} 项`);}
+  planScheduleSave(board);
 }
 async function planRetire(board,x,state,result){
   x.state=state;x.selected=false;x.result=result;x.error='';
@@ -3974,13 +4053,68 @@ async function planRetire(board,x,state,result){
   }
 }
 async function planReject(board,items){
-  if(board.busy||agentState.busy||agentWriteBlocked())return;
+  if(board.conflict){toast('草稿在其他页面有更新，请点“重新加载草稿”后继续');return}
+  if(board.busy||board.restoring||agentState.busy||agentWriteBlocked())return;
   if(board.conversationId!==undefined&&(board!==agentState.planBoard||board.conversationId!==agentState.conversationId))return;
   const targets=planOpenCards(board).filter(x=>items.includes(x));if(!targets.length)return;
   planCheckpoint(board);board.busy=true;planRender(board);
   try{for(const x of targets){await planRetire(board,x,'rejected','已拒绝');planRender(board)}}
   finally{board.busy=false;planRender(board)}
   toast(`已拒绝 ${targets.length} 张卡片`);
+}
+
+/* Persist reviewed cards separately from the model transcript. A receipt always
+   wins over a stale editor snapshot; reopening is recovery, never re-execution. */
+function planSnapshot(board){
+  const copy=JSON.parse(JSON.stringify({projects:board.projects,tasks:board.tasks,next:board.next,note:board.note||'',closed:Boolean(board.closed)}));
+  [...copy.projects,...copy.tasks].forEach(x=>{if(x.state==='submitting')x.state='draft'});return copy;
+}
+function agentForgetDraftCache(thread,user=S.user?.id){
+  try{for(let i=localStorage.length-1;i>=0;i--){const key=localStorage.key(i);if(key?.startsWith(`wc-agent-draft:${user}:`)&&JSON.parse(localStorage.getItem(key)||'null')?.conversationId===thread)localStorage.removeItem(key)}}catch(_){}
+}
+function planCacheKey(board){return `wc-agent-draft:${board.ownerUser||S.user?.id}:${board.draftId}`}
+function planCache(board,snapshot){try{localStorage.setItem(planCacheKey(board),JSON.stringify({version:board.persistVersion||0,writer:agentState.clientId,conversationId:board.conversationId,board:snapshot}))}catch(_){}}
+function planScheduleSave(board){
+  if(!board?.draftId||board.deleted||board.ownerUser&&board.ownerUser!==S.user?.id||!board.conversationId||board.restoring||typeof setTimeout!=='function')return;
+  const snapshot=planSnapshot(board),serialized=JSON.stringify(snapshot);planCache(board,snapshot);
+  if(serialized===board.savedSnapshot||board.conflict)return;
+  clearTimeout(board.saveTimer);board.saveTimer=setTimeout(()=>planFlush(board),350);
+}
+async function planFlush(board){
+  if(!board?.draftId||board.deleted||board.ownerUser&&board.ownerUser!==S.user?.id||!board.conversationId||board.restoring||board.conflict)return;
+  clearTimeout(board.saveTimer);
+  if(board.saving){await board.saving;if(!board.saveError)return planFlush(board);return}
+  const user=S.user?.id,snapshot=planSnapshot(board),serialized=JSON.stringify(snapshot);
+  if(serialized===board.savedSnapshot)return;
+  board.saving=(async()=>{
+    try{const r=await api('/api/action',{action:'agent.draft.save',data:{draftId:board.draftId,conversationId:board.conversationId,version:board.persistVersion||0,writer:agentState.clientId,board:snapshot}});
+      if(S.user?.id!==user)return;board.persistVersion=r.version;board.savedSnapshot=serialized;board.saveError='';planCache(board,planSnapshot(board));
+    }catch(e){board.saveError=e.message||'未同步，已保留本机草稿';board.conflict=/其他页面|已删除/.test(board.saveError);board.deleted=/已删除/.test(board.saveError);}
+    finally{board.saving=null;const status=board.el?.querySelector?.('.plan-save-status');if(status)status.textContent=board.saveError||'草稿已保存';if(board.conflict)planRender(board);}
+  })();
+  await board.saving;
+  if(!board.saveError&&serialized!==JSON.stringify(planSnapshot(board)))return planFlush(board);
+}
+function planApplyReceipts(board,receipts){
+  for(const x of board.projects.concat(board.tasks))if(receipts?.[x.cardId]){
+    const r=receipts[x.cardId];x.state='done';x.selected=false;x.error='';x.result=r?.requested||r?.status==='pending'?'已提交申请':'已接受';
+    if(x.ref!=null&&planOperation(x)==='create')board.tasks.forEach(t=>{if(t.project==='ref:'+x.ref)t.project='id:'+r.id});
+  }
+}
+async function agentRestoreBoard(raw,loading=false){
+  const user=S.user?.id,thread=agentState.conversationId;
+  if(!loading&&agentWriteBlocked())return null;
+  let saved;
+  if(raw.draftId){
+    if(agentState.planBoard?.draftId===raw.draftId)await planFlush(agentState.planBoard);
+    try{saved=await api('/api/action',{action:'agent.draft.get',data:{draftId:raw.draftId}})}catch(e){toast(e.message||'无法恢复草稿，请重试');return null}
+  }
+  if(user!==S.user?.id||thread!==agentState.conversationId||agentState.viewing)return null;
+  const board=agentPlanBoard(saved?.raw||raw,true);board.restoring=true;board.persistVersion=saved?.version||0;
+  let snapshot=saved?.board;
+  try{const cached=JSON.parse(localStorage.getItem(planCacheKey(board))||'null');if(cached&&(cached.version===(saved?.version||0)||cached.writer&&cached.writer===saved?.writer))snapshot=cached.board}catch(_){}
+  if(snapshot)Object.assign(board,snapshot);
+  board.closed=false;planApplyReceipts(board,saved?.receipts);board.restoring=false;planRender(board);return board;
 }
 
 function planCheckpoint(board){
@@ -4083,7 +4217,7 @@ function planCardsHTML(board){
   const decorate=(html,x)=>{
     const working=x.state==='submitting',disabled=board.busy?' disabled':'';
     html=html.replace(/<button type="button" class="plan-remove"[\s\S]*?<\/button>/,'');
-    html=html.replace('<div class="plan-card-top">',`<div class="plan-card-top"><label class="plan-pick"><input type="checkbox" data-plan-select aria-label="选择${escapeHTML(x.name||'这张卡片')}"${x.selected?' checked':''}${disabled}></label>`);
+    html=html.replace('<div class="plan-card-top">',`<div class="plan-card-top"><label class="plan-pick" title="选择这张卡片（不会立即执行）"><input type="checkbox" data-plan-select aria-label="选择${escapeHTML(x.name||'这张卡片')}"${x.selected?' checked':''}${disabled}></label>`);
     if(working)html=html.replace(/(<span class="plan-state[^>]*>)[^<]*/, '$1接受中…');
     return html.replace('</article>',`<p class="plan-validation" role="status"></p><div class="plan-card-actions"><button type="button" class="ghost-btn plan-reject"${disabled}>拒绝</button><button type="button" class="primary-btn plan-accept"${disabled}>${working?'接受中…':'接受'}</button></div></article>`);
   };
@@ -4101,13 +4235,14 @@ function planTally(board){
 }
 function planConfirmLabel(){return '全部接受';
 }
-function agentPlanBoard(raw){
+function agentPlanBoard(raw,restoring=false){
   const list=$('#agentDraftCards')||$('#agentMessages');if(!list)return null;
-  const board={...planDraft(raw),conversationId:agentState.conversationId,note:raw.clean||'',closed:false,busy:false,history:[]};
+  const board={...planDraft(raw),ownerUser:S.user?.id,conversationId:agentState.conversationId,note:raw.clean||'',closed:false,busy:false,restoring,history:[]};
   board.el=document.createElement('div');
   board.el.className='agent-message assistant plan-board';
+  agentState.pane='cards';agentState.unreadReply=false;
   planActivate(board);
-  planRender(board,true);
+  planRender(board,true);planScheduleSave(board);
   list.scrollTop=Math.max(0,board.el.offsetTop-12);
   return board;
 }
@@ -4127,22 +4262,23 @@ function planRender(board,entering=false){
   if(board.closed){
     el.innerHTML=head+`<div class="plan-foot is-closed"><span class="plan-sum">${escapeHTML(board.closedNote||'未处理的卡片已保留')}</span><button type="button" class="ghost-btn plan-reopen">重新打开</button></div>`;
   }else{
-    const n=planTally(board),sum=[n.wait?`${n.wait} 项要等审批`:'',n.none?`${n.none} 项暂不能接受`:''].filter(Boolean).join(' · ');
-    el.innerHTML=head+`<div class="plan-draft-tools"><button type="button" class="ghost-btn plan-undo"${board.history?.length&&!board.busy?'':' disabled'}>撤销修改</button><button type="button" class="ghost-btn plan-copy">复制草稿</button><span>可逐张接受或拒绝，也可以勾选后批量处理</span></div><div class="plan-selection"><label class="plan-select-label"><input type="checkbox" class="plan-select-all">全选</label><span class="plan-select-count" role="status"></span><button type="button" class="ghost-btn plan-reject-selected">拒绝所选</button><button type="button" class="secondary-btn plan-accept-selected">接受所选</button></div><div class="plan-cards${entering?' is-entering':''}">${planCardsHTML(board)||'<div class="plan-empty">'+icon('check')+'<strong>本组卡片已处理完</strong><span>接受与拒绝的结果已保留，可继续提出新的安排。</span></div>'}</div><div class="plan-foot"><button type="button" class="ghost-btn plan-add">${icon('plus')}加一个任务</button><span class="plan-sum">${sum}</span><button type="button" class="ghost-btn plan-cancel">${open.length?'收起草稿':'收起'}</button><button type="button" class="primary-btn plan-confirm"${open.length&&!board.busy?'':' disabled'}>${board.busy?'正在接受…':planConfirmLabel()}</button></div>`;
+    const n=planTally(board),sum=[n.delete?`含 ${n.delete} 项删除`:'',n.wait?`${n.wait} 项要等审批`:'',n.none?`${n.none} 项暂不能接受`:''].filter(Boolean).join(' · ');
+    el.innerHTML=head+`<div class="plan-draft-tools"><button type="button" class="ghost-btn plan-undo"${board.history?.length&&!board.busy?'':' disabled'}>撤销修改</button><button type="button" class="ghost-btn plan-copy">复制草稿</button>${board.conflict?'<button type="button" class="ghost-btn plan-restore">重新加载草稿</button>':''}<small class="plan-save-status" role="status">${escapeHTML(board.saveError||(board.savedSnapshot?'草稿已保存':'草稿自动保存'))}</small><span>可逐张接受或拒绝，也可以勾选后批量处理</span></div><div class="plan-selection"><label class="plan-select-label"><input type="checkbox" class="plan-select-all">全选</label><span class="plan-select-count" role="status"></span><button type="button" class="ghost-btn plan-reject-selected">拒绝所选</button><button type="button" class="primary-btn plan-accept-selected">接受所选</button></div><div class="plan-cards${entering?' is-entering':''}">${planCardsHTML(board)||'<div class="plan-empty">'+icon('check')+'<strong>本组卡片已处理完</strong><span>接受与拒绝的结果已保留，可继续提出新的安排。</span></div>'}</div><div class="plan-foot"><button type="button" class="ghost-btn plan-add">${icon('plus')}加一个任务</button><span class="plan-sum">全部 ${open.length} 项${sum?' · '+sum:''}${board.saveError?' · '+escapeHTML(board.saveError):''}</span><button type="button" class="ghost-btn plan-cancel">${open.length?'收起草稿':'收起'}</button><button type="button" class="primary-btn plan-confirm"${open.length&&!board.busy?'':' disabled'}>${board.busy?'正在接受…':planConfirmLabel()}</button></div>`;
     el.querySelectorAll('input,textarea,select,button').forEach(field=>{field.disabled=Boolean(board.busy)||field.disabled});
     planMarkFields(board);planUpdateSelection(board);
     if(entering)el.querySelectorAll('.plan-card').forEach((c,i)=>c.style.setProperty('--i',String(i)));
   }
-  planBind(board);
+  planBind(board);planScheduleSave(board);
 }
 /* One set of listeners per board; every card reads and writes the draft. */
 function planBind(board){
   const el=board.el;if(el.dataset.bound)return;el.dataset.bound='1';
   const item=node=>{const card=node.closest('.plan-card');if(!card)return null;return card.dataset.ref!=null?board.projects.find(p=>p.ref===card.dataset.ref):board.tasks.find(t=>t.key===card.dataset.key)};
   el.addEventListener('focusin',e=>{if(item(e.target)&&!board.busy)planCheckpoint(board)});
-  el.addEventListener('input',e=>{const f=e.target.dataset?.f,x=item(e.target);if(board.busy)return;if(x&&['name','desc','reason','confirm'].includes(f)){x[f]=e.target.value;planMarkFields(board);const undo=el.querySelector('.plan-undo');if(undo)undo.disabled=!board.history?.length}});
+  el.addEventListener('input',e=>{const f=e.target.dataset?.f,x=item(e.target);if(board.busy)return;if(x&&['name','desc','reason','confirm'].includes(f)){x[f]=e.target.value;planMarkFields(board);const undo=el.querySelector('.plan-undo');if(undo)undo.disabled=!board.history?.length;planScheduleSave(board)}});
   el.addEventListener('change',e=>{
     const f=e.target.dataset?.f,x=item(e.target);if(board.busy)return;
+    planScheduleSave(board);
     if(e.target.classList.contains('plan-select-all')){planOpenCards(board).forEach(x=>x.selected=e.target.checked);planUpdateSelection(board);return}
     if(e.target.hasAttribute('data-plan-select')&&x){x.selected=e.target.checked;planUpdateSelection(board);return}
     if(!f||!x)return;
@@ -4159,6 +4295,7 @@ function planBind(board){
   el.addEventListener('click',e=>{
     const b=e.target.closest('button');if(!b||board.busy)return;
     const x=item(b);
+    if(b.classList.contains('plan-restore'))return agentRestoreBoard({draftId:board.draftId});
     if(b.classList.contains('plan-undo'))return planUndo(board);
     if(b.classList.contains('plan-copy')){navigator.clipboard.writeText(JSON.stringify({projects:board.projects.filter(planPending),tasks:board.tasks.filter(planPending)},null,2)).then(()=>toast('草稿已复制')).catch(()=>toast('复制失败，请稍后重试'));return}
     if(b.classList.contains('plan-reload')&&x)return planReload(board,x);
@@ -4180,7 +4317,7 @@ function planRemove(board,x){return planReject(board,[x])}
 function planAddTask(board){
   planCheckpoint(board);
   const last=board.tasks.filter(t=>planPending(t)&&planOperation(t)==='create').at(-1),key='t'+(board.next++);
-  board.tasks.push({key,name:'',desc:'',project:last?.project||'',assignee:last?.assignee||'',date:last?.date||S.today,time:'09:00',duration:60,priority:'P1',state:'draft'});
+  board.tasks.push({key,cardId:agentNewConversationId(),name:'',desc:'',project:last?.project||'',assignee:last?.assignee||'',date:last?.date||S.today,time:'09:00',duration:60,priority:'P1',state:'draft'});
   planRender(board);
   board.el.querySelector(`.plan-card[data-key="${key}"] .plan-title`)?.focus();
 }
@@ -4188,7 +4325,8 @@ function planAddTask(board){
    through the normal action and keeps its own error if it is refused, so the
    user fixes that card and confirms again without redoing the rest. */
 async function planSubmit(board,items=null){
-  if(board.busy||agentState.busy||agentWriteBlocked())return;
+  if(board.conflict){toast('草稿在其他页面有更新，请点“重新加载草稿”后继续');return}
+  if(board.busy||board.restoring||agentState.busy||agentWriteBlocked())return;
   if(board.conversationId!==undefined&&(board!==agentState.planBoard||board.conversationId!==agentState.conversationId))return;
   const candidates=planOpenCards(board).filter(x=>items===null||items.includes(x));if(!candidates.length)return;
   board.busy=true;agentState.busy=true;agentState.stop=false;agentState.paused=false;agentUpdateBusy();planRender(board);
@@ -4204,12 +4342,12 @@ async function planSubmit(board,items=null){
     try{
       let changes=planChanges(x,kind);
       if(op==='create')changes=kind==='project'?{name:x.name.trim(),desc:x.desc,start:x.start,end:x.end,cycle:x.end?'range':'infinite',priority:x.priority||'P1',members:x.members,...(S.user.admin?{owner:x.owner}:{})}:{name:x.name.trim(),desc:x.desc,projectId:x.project.startsWith('id:')?x.project.slice(3):null,assignee:x.assignee,date:x.date,deadline:x.deadline||null,time:x.time,duration:Number(x.duration)||60,priority:x.priority};
-      const r=await api('/api/action',{action:'work.card.apply',data:{kind,operation:op,id:x.id,revision:x.revision,changes,confirmed:true,confirm:op==='delete'?(kind==='project'?x.confirm:x.deleteConfirmed?x.before.name:''):undefined,request:path.mode==='approval',reason:x.reason,sessionId:agentState.sessionId}});
+      const r=await api('/api/action',{action:'work.card.apply',data:{kind,operation:op,id:x.id,revision:x.revision,cardId:x.cardId,changes,confirmed:true,confirm:op==='delete'?(kind==='project'?x.confirm:x.deleteConfirmed?x.before.name:''):undefined,request:path.mode==='approval',reason:x.reason,sessionId:agentState.sessionId}});
       const pending=r?.requested||r?.status==='pending'||path.mode==='approval';
       results[pending?'approval':op]++;board.history=[];
       if(kind==='project'&&op==='create')board.tasks.forEach(t=>{if(t.project==='ref:'+x.ref)t.project='id:'+r.id});
       await planRetire(board,x,'done',pending?'已提交申请':op==='create'?'已创建':op==='update'?'已修改':'已删除');
-    }catch(e){x.state='draft';x.error=e?.message||'提交失败';results.failed++}
+    }catch(e){x.state='draft';x.error=e?.message||'提交失败';results.failed++;if(board.conversationId&&board.draftId){try{const recovered=await api('/api/action',{action:'agent.draft.get',data:{draftId:board.draftId,cardIds:board.projects.concat(board.tasks).map(t=>t.cardId)}});planApplyReceipts(board,recovered.receipts);if(x.state==='done'){results.failed--;results[op]++;}}catch(_){}}}
     planRender(board);
   };
   try{
@@ -4614,7 +4752,7 @@ function initAgentUI(){
   $('#agentConfigBtn')?.addEventListener('click',()=>agentSetConfigVisible(true));
   $('#agentConfigClose')?.addEventListener('click',()=>agentSetConfigVisible(false));
   $('#agentProvider')?.addEventListener('change',()=>agentSyncProviderUI(true));
-  for(const id of ['#agentEndpoint','#agentApiKey'])$(id)?.addEventListener('input',()=>agentInvalidateConfigTest(true));
+  for(const id of ['#agentEndpoint','#agentApiKey'])$(id)?.addEventListener('input',()=>{agentInvalidateConfigTest(true);agentConnectionHint()} );
   $('#agentCustomModel')?.addEventListener('input',()=>agentInvalidateConfigTest());
   $('#agentConfigTest')?.addEventListener('click',agentTestConfig);
   $('#agentModelSelect')?.addEventListener('change',()=>{agentInvalidateConfigTest();const manual=$('#agentModelSelect').value==='__custom';
@@ -4629,7 +4767,7 @@ function initAgentUI(){
   });
   document.addEventListener('click',e=>{if(!e.target.closest?.('.agent-model-slot'))agentToggleModelMenu(false)});
   $('#agentConfigSave')?.addEventListener('click',agentSaveConfig);
-  $('#agentConfigReset')?.addEventListener('click',()=>{saveAgentConfig({});agentServerConfig=null;agentSetConfigVisible(false);toast('已清除本机 Agent 配置；如需清除服务端密钥请重新保存')});
+  $('#agentConfigReset')?.addEventListener('click',async()=>{const c=agentServerConfig;if(!c?.baseUrl){toast('尚未保存服务端连接');return}try{agentServerConfig=await api('/api/action',{action:'agent.config.set',data:{baseUrl:c.baseUrl,provider:c.provider,model:c.model,clearApiKey:true}});agentSetConfigVisible(true);renderAgentModelChip();toast('已移除服务端模型密钥')}catch(e){toast(e.message)}});
   $('#agentAsrSave')?.addEventListener('click',async()=>{
     const baseUrl=$('#agentAsrEndpoint').value.trim();
     if(!baseUrl){toast('请填写语音转写服务地址；如需关闭请用「停用语音转写」');return}
@@ -4639,11 +4777,15 @@ function initAgentUI(){
     try{agentServerAsr=await api('/api/action',{action:'agent.asr.set',data:payload});renderAgentAsrConfig();agentInitVoice();toast('语音转写配置已保存')}catch(e){toast(e.message||'保存失败')}
   });
   $('#agentAsrClear')?.addEventListener('click',async()=>{
-    try{agentServerAsr=await api('/api/action',{action:'agent.asr.set',data:{baseUrl:''}}).catch(()=>null);}catch(_){}
-    try{await api('/api/action',{action:'agent.asr.set',data:{baseUrl:'',apiKey:''}})}catch(_){}
-    agentServerAsr=await api('/api/action',{action:'agent.asr.get',data:{}}).catch(()=>null);
-    renderAgentAsrConfig();agentInitVoice();toast('已停用语音转写，语音输入回退到浏览器识别');
+    try{agentServerAsr=await api('/api/action',{action:'agent.asr.set',data:{disabled:true}});renderAgentAsrConfig();agentInitVoice();toast('已停用语音转写')}catch(e){toast(e.message||'停用失败')}
   });
+  $('#agentPaneCards')?.addEventListener('click',()=>agentSetPane('cards'));
+  $('#agentPaneChat')?.addEventListener('click',()=>agentSetPane('chat'));
+  $('#agentPaneTabs')?.addEventListener('keydown',agentPaneKeydown);
+  document.addEventListener('keydown',e=>{if(e.key!=='Escape'||e.defaultPrevented||$('#agentPanel')?.classList.contains('hidden')||agentPanelDrag)return;
+    e.preventDefault();if(!$('#agentConfig')?.classList.contains('hidden'))agentSetConfigVisible(false);
+    else if(!$('#agentModelMenu')?.classList.contains('hidden')){agentToggleModelMenu(false);$('#agentModelChip')?.focus()}
+    else{$('#agentCloseBtn')?.click();$('#agentBtn')?.focus()}});
     $('#agentForm')?.addEventListener('submit',e=>{e.preventDefault();agentSubmit()});
   document.addEventListener('compositionend',()=>{imeUntil=Date.now()+80},true);
   $('#agentInput')?.addEventListener('keydown',agentInputKeydown);
@@ -4660,7 +4802,7 @@ function initAgentUI(){
    Web Speech API as a zero-config fallback. The transcript only lands in the
    input box where you can edit it before sending; nothing is auto-sent.
    ------------------------------------------------------------------------- */
-const voice={recorder:null,stream:null,chunks:[],recognition:null,engine:null,active:false,base:'',final:'',interim:'',lang:'',startedAt:0,generation:0};
+const voice={recorder:null,stream:null,chunks:[],recognition:null,engine:null,active:false,base:'',final:'',interim:'',lang:'',startedAt:0,generation:0,transcribing:false,starting:false,session:null,controller:null};
 function agentSpeechRecognition(){
   return window.SpeechRecognition||window.webkitSpeechRecognition||null;
 }
@@ -4714,22 +4856,24 @@ function agentVoiceFollowEdit(){
 }
 function agentVoiceStart(){
   const engine=agentVoiceEngine();
-  if(!engine)return;
+  if(!engine||voice.starting||voice.transcribing)return;
   agentStopVoice();
   if(engine==='server')agentVoiceStartRecording();
   else agentVoiceStartRecognition();
 }
 /* ---------- server engine: record with MediaRecorder, transcribe on upload ---------- */
 async function agentVoiceStartRecording(){
-  const generation=voice.generation;
+  if(voice.starting||voice.transcribing)return;
+  const generation=voice.generation;voice.starting=true;agentVoiceState();
   let stream;
   try{
     stream=await navigator.mediaDevices.getUserMedia({audio:true});
   }catch(_){
-    toast('没有拿到麦克风权限，请在地址栏允许后重试');
+    if(generation===voice.generation){voice.starting=false;agentVoiceState();toast('没有拿到麦克风权限，请在地址栏允许后重试')}
     return;
   }
   if(generation!==voice.generation){stream.getTracks().forEach(track=>track.stop());return}
+  voice.starting=false;
   const mime=typeof MediaRecorder.isTypeSupported==='function'
     ? ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4'].find(t=>MediaRecorder.isTypeSupported(t))||''
     : '';
@@ -4737,32 +4881,30 @@ async function agentVoiceStartRecording(){
   try{recorder=mime?new MediaRecorder(stream,{mimeType:mime}):new MediaRecorder(stream)}catch(_){recorder=new MediaRecorder(stream)}
   voice.stream=stream;voice.recorder=recorder;voice.chunks=[];voice.interim='';
   voice.engine='server';voice.active=true;voice.startedAt=Date.now();
-  recorder.ondataavailable=event=>{if(event.data&&event.data.size)voice.chunks.push(event.data)};
-  recorder.onstop=()=>agentVoiceFinishRecording();
+  const session={recorder,stream,chunks:voice.chunks,generation};voice.session=session;
+  recorder.ondataavailable=event=>{if(event.data&&event.data.size)session.chunks.push(event.data)};
+  recorder.onstop=()=>agentVoiceFinishRecording(session);
   try{recorder.start()}catch(_){agentStopVoice();return}
   agentVoiceState();
 }
-async function agentVoiceFinishRecording(){
-  const generation=voice.generation;
-  const chunks=voice.chunks.slice();voice.chunks=[];
-  voice.stream?.getTracks().forEach(track=>{try{track.stop()}catch(_){}});
-  voice.stream=null;
-  if(!chunks.length){agentVoiceState();return}
-  const blob=new Blob(chunks,{type:voice.recorder?.mimeType||'audio/webm'});
-  const bar=$('#agentVoiceBar');
-  if(bar)bar.textContent='正在转写…';
+async function agentVoiceFinishRecording(session=null){
+  session=session||{recorder:voice.recorder,stream:voice.stream,chunks:voice.chunks,generation:voice.generation};
+  const {recorder,stream,generation}=session,chunks=session.chunks.slice();
+  stream?.getTracks().forEach(track=>{try{track.stop()}catch(_){}});
+  if(generation!==voice.generation)return;
+  voice.chunks=[];voice.stream=null;voice.active=false;voice.transcribing=Boolean(chunks.length);
+  agentVoiceState();
+  if(!chunks.length){if(voice.recorder===recorder)voice.recorder=null;return}
+  const blob=new Blob(chunks,{type:recorder?.mimeType||chunks[0]?.type||'audio/webm'});
+  const controller=typeof AbortController==='function'?new AbortController():null;voice.controller=controller;
   try{
-    const result=await apiBlob(TRANSCRIBE_ENDPOINT,blob);
+    const result=await apiBlob(TRANSCRIBE_ENDPOINT,blob,controller?{signal:controller.signal}:{});
     if(generation!==voice.generation)return;
     agentVoiceAppend(result?.text||'');
     if(!result?.text)toast('没有识别到内容，再说一次试试');
-  }catch(err){
-    if(generation===voice.generation)toast(err?.message||'语音转写失败');
-  }finally{
-    if(generation!==voice.generation)return;
-    voice.recorder=null;agentVoiceState();
-    const bar=$('#agentVoiceBar');
-    if(bar)bar.textContent='正在聆听…说出来吧，说完再点一次麦克风';
+  }catch(err){if(generation===voice.generation&&err.name!=='AbortError')toast(err?.message||'语音转写失败')}
+  finally{
+    if(generation===voice.generation){if(voice.recorder===recorder)voice.recorder=null;voice.session=null;voice.transcribing=false;voice.controller=null;agentVoiceState()}
   }
 }
 /* ---------- browser engine: Web Speech API, zero config ---------- */
@@ -4800,9 +4942,9 @@ function agentVoiceStartRecognition(){
 }
 function agentStopVoice(){
   const recognition=voice.recognition,recorder=voice.recorder;
-  voice.recognition=null;voice.recorder=null;voice.active=false;voice.interim='';
+  voice.recognition=null;voice.active=false;voice.interim='';
   if(recognition){try{recognition.stop()}catch(_){}}
-  if(recorder&&recorder.state!=='inactive'){try{recorder.stop()}catch(_){}}else{
+  if(recorder&&recorder.state!=='inactive'){voice.transcribing=true;try{recorder.stop()}catch(_){voice.transcribing=false}}else{
     voice.stream?.getTracks().forEach(track=>{try{track.stop()}catch(_){}});
     voice.stream=null;agentVoiceState();
   }
@@ -4811,15 +4953,15 @@ function agentStopVoice(){
 /* Changing conversations cancels audio instead of delivering its late text
    into the new composer. A normal Stop still transcribes in the same chat. */
 function agentCancelVoice(){
-  voice.generation++;
+  voice.generation++;voice.controller?.abort();voice.starting=false;voice.transcribing=false;
   if(voice.recognition)for(const key of ['onstart','onresult','onerror','onend'])voice.recognition[key]=null;
   if(voice.recorder){voice.recorder.onstop=null;voice.recorder.ondataavailable=null}
   agentStopVoice();
   voice.stream?.getTracks().forEach(track=>{try{track.stop()}catch(_){}});voice.stream=null;
-  voice.chunks=[];voice.base='';voice.final='';voice.interim='';
+  voice.recorder=null;voice.session=null;voice.transcribing=false;voice.chunks=[];voice.base='';voice.final='';voice.interim='';agentVoiceState();
 }
 function agentToggleVoice(){
-  if(!agentVoiceEngine())return;
+  if(!agentVoiceEngine()||voice.starting||voice.transcribing)return;
   if(voice.active)agentStopVoice();else agentVoiceStart();
 }
 function agentVoiceState(){
@@ -4831,7 +4973,7 @@ function agentVoiceState(){
     const slot=mic.querySelector('.icon-slot');if(slot)slot.dataset.icon=voice.active?'square':'mic';
   }
   const voiceBar=$('#agentVoiceBar');
-  if(voiceBar)voiceBar.classList.toggle('hidden',!voice.active);
+  if(voiceBar){voiceBar.classList.toggle('hidden',!voice.active&&!voice.transcribing&&!voice.starting);voiceBar.textContent=voice.transcribing?'正在转写…可继续编辑输入，切换对话将取消转写':voice.starting?'正在等待麦克风权限…':'正在聆听…说完再点一次麦克风'}
   agentUpdateBusy();
 }
 /* Called once when the panel opens (and after the server config arrives): reveal
