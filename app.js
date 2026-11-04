@@ -384,6 +384,10 @@ function switchView(view){
      panel the rail happened to be parked on last. */
   if(view==='calendar'&&changed)UI.selectedWeek=0;
   $$('.view').forEach(v=>v.classList.toggle('active-view',v.id===`${view}View`));
+  /* The page rises in once per visit to the app; coming back to a view only
+     fades it in, so moving between familiar pages does not drag. */
+  const shown=$(`#${view}View`),seen=UI.seenViews||(UI.seenViews=new Set());
+  shown?.classList?.toggle('is-revisit',seen.has(view));seen.add(view);
   $$('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.view===view));
   const labels={today:'今日任务',calendar:'周视图',projects:'项目空间',timeline:'项目时间轴',achievements:'成果库',archive:'档案室',inbox:'收件箱',accounts:'账户管理',settings:'系统设置',dayDetail:'日期详情',chat:'沟通区'};
   $('#crumbCurrent').textContent=`/ ${labels[view]||view}`;
@@ -413,7 +417,12 @@ const isSuperseded=t=>Boolean(t&&t.superseded);
    it keeps originId for history, but removes it from this list and its count. */
 const isDeferredTask=t=>!isSuperseded(t)&&Boolean(t.originId||t.stackCount>1)&&['todo','doing'].includes(t.status);
 const deferHops=t=>taskLineageIds(t,false).size-1;
-const stackBadge=t=>Number(t.stackCount)>1?`<span class="stack-badge" aria-label="合并 ${Number(t.stackCount)} 期">×${Number(t.stackCount)}</span>`:'';
+/* Merged periods read as "N 期", a count of periods rather than a multiplier
+   of work. A group keeps its key (its oldest period) as it grows, so the badge
+   can give a small bump when another period joins since the last render. */
+const stackKey=t=>(t.stackPeriods||[])[0]||t.id;
+const stackBadge=t=>{const n=Number(t.stackCount);if(!(n>1))return '';const before=UI.stackSeen?.get(stackKey(t));
+  return `<span class="stack-badge${before&&n>before?' is-bumped':''}" aria-label="合并 ${n} 期">${n} 期</span>`};
 const stackPeriodDates=t=>t.stackDates||(t.stackPeriods||[]).map(id=>S.tasks.find(x=>x.id===id)?.date).filter(Boolean).sort();
 /* Every occurrence of one task shares originId/reworkOf links. Walking them
    lets the drawer show a single history for a task that was deferred or redone. */
@@ -522,7 +531,7 @@ function weekLabel(off){
 function weekTaskChip(t,iso){
   const cont=iso>t.date,[c,l]=status(t);
   const meta=cont?`续 · ${nameOf(t.assignee)}`:`${escapeHTML(t.time||'09:00')} · ${nameOf(t.assignee)}`;
-  return `<button class="week-task ${escapeHTML(t.priority)} ${c}${cont?' cont':''}" type="button" data-id="${escapeHTML(t.id)}" title="${escapeHTML(`${t.name} · ${nameOf(t.assignee)} · ${l}`)}">`
+  return `<button class="week-task ${escapeHTML(t.priority)} ${c}${cont?' cont':''}${t.stackCount>1?' is-stacked':''}" type="button" data-id="${escapeHTML(t.id)}" title="${escapeHTML(`${t.name} · ${nameOf(t.assignee)} · ${l}`)}">`
     +`${t.stackCount>1?`<span class="week-task-title"><span class="week-task-name">${escapeHTML(t.name)}</span>${stackBadge(t)}</span>`
     :`<span class="week-task-name">${escapeHTML(t.name)}</span>`}`
 
@@ -1251,7 +1260,7 @@ function projectLifecycle(p,manage){
 }
 function projectBackground(p,manage){
   const text=p.background||'';
-  return `<section class="space-section"><div class="space-head"><h2>项目背景</h2>${manage?'<button class="primary-btn" '
+  return `<section class="space-section"><div class="space-head"><h2>项目背景</h2>${manage?'<button class="primary-btn is-idle" '
     +'id="saveBackground" disabled>已保存</button>':''}</div>`
     +`${manage?docEdit(text,'id="spaceBackground" data-placeholder="为什么做、要达成什么、边界在哪里"')
     :`<div class="space-text">${text?escapeHTML(text):'<span class="muted">Owner 还没有写项目背景</span>'}</div>`}</section>`;
@@ -1313,7 +1322,10 @@ function bindProjectSpace(p){
   const bg=$('#spaceBackground'),btn=$('#saveBackground');
   if(bg&&btn){
     let saved=docText(bg),saving=false;
-    const sync=()=>{const dirty=docText(bg)!==saved;btn.disabled=saving||!dirty;btn.textContent=saving?'保存中…':dirty?'保存':'已保存'};
+    /* Saved reads as a quiet note; only unsaved text turns it into a button. */
+    const sync=()=>{const dirty=docText(bg)!==saved;btn.disabled=saving||!dirty;btn.textContent=saving?'保存中…':dirty?'保存':'已保存';
+      btn.classList?.toggle('is-idle',!saving&&!dirty)};
+
     bg.oninput=sync;
     btn.onclick=async()=>{
       if(saving)return;
@@ -1905,7 +1917,7 @@ function startAccountDrag(e,row){
   document.body.appendChild(ghost);row.classList.add('is-placeholder');document.body.classList.add('is-dragging-account');
   UI.accountDrag={id};
   const rows=()=>[...$$('#accountList .account-item')];
-  const flip=change=>{const before=new Map(rows().map(r=>[r,r.getBoundingClientRect().top]));change();rows().forEach(r=>{if(r===row)return;const d=before.get(r)-r.getBoundingClientRect().top;if(d)r.animate([{transform:`translateY(${d}px)`},{transform:'none'}],{duration:200,easing:'cubic-bezier(.2,.8,.2,1)'})})};
+  const flip=change=>{const before=new Map(rows().map(r=>[r,r.getBoundingClientRect().top]));change();rows().forEach(r=>{if(r===row)return;const d=before.get(r)-r.getBoundingClientRect().top;if(d&&!navReducedMotion())r.animate([{transform:`translateY(${d}px)`},{transform:'none'}],{duration:200,easing:'cubic-bezier(.2,.8,.2,1)'})})};
   let scroll=0;
   const move=ev=>{
     ghost.style.left=(ev.clientX-offX)+'px';ghost.style.top=(ev.clientY-offY)+'px';
@@ -1921,7 +1933,7 @@ function startAccountDrag(e,row){
   const drop=async()=>{
     removeEventListener('pointermove',move);removeEventListener('pointerup',drop);removeEventListener('pointercancel',drop);clearInterval(tick);
     const to=row.closest('.account-group').dataset.role,end=row.getBoundingClientRect(),now=ghost.getBoundingClientRect();
-    ghost.animate([{transform:'scale(1.02)'},{transform:`translate(${end.left-now.left}px,${end.top-now.top}px)`}],{duration:170,easing:'cubic-bezier(.2,.8,.2,1)'}).onfinish=()=>{ghost.remove();row.classList.remove('is-placeholder');document.body.classList.remove('is-dragging-account')};
+    ghost.animate([{transform:'scale(1.02)'},{transform:`translate(${end.left-now.left}px,${end.top-now.top}px)`}],{duration:navReducedMotion()?0:170,easing:'cubic-bezier(.2,.8,.2,1)'}).onfinish=()=>{ghost.remove();row.classList.remove('is-placeholder');document.body.classList.remove('is-dragging-account')};
     const order=rows().map(r=>r.dataset.user);
     UI.accountDrag=null;
     if(to===from&&order.join()===start)return;
@@ -2151,6 +2163,9 @@ function collectionSettings(){
   $('#saveCollection').onclick=async()=>{const m=$('#collectionMode').value,weekdays=$$('input[name="collectionWeekday"]:checked').map(x=>Number(x.value)),dates=$('#collectionDates').value.split(/[,，\s]+/).map(x=>x.trim()).filter(Boolean);if(m==='weekly'&&!weekdays.length){toast('请选择每周收集日');return}if(m==='dates'&&!dates.length){toast('请填写指定收集日期');return}try{await act('automation.update',{mode:m,time:$('#collectionTime').value,weekdays,dates});closeModal()}catch(e){}};
 }
 function renderAll(){
+  /* Remember each merged group's size after this render, so the next one can
+     tell which grew (stackBadge). */
+  globalThis.queueMicrotask?.(()=>{UI.stackSeen=new Map((S.tasks||[]).filter(t=>t.stackCount>1&&!isSuperseded(t)).map(t=>[stackKey(t),Number(t.stackCount)]))});
   $$('.admin-only-nav').forEach(n=>n.classList.toggle('hidden',!S.user?.admin));
   const pm=projectMode();
   ['#addProjectBtn','#addProjectTopBtn','#timelineAddProjectBtn'].forEach(id=>{$(id).innerHTML=entryLabel(pm,'项目');$(id).classList.toggle('hidden',pm==='none')});
@@ -2278,7 +2293,7 @@ function renderTimeline(){
   for(const d of days){const last=months.at(-1);if(last?.month===d.month)last.count++;else months.push({month:d.month,offset:d.n-model.start,count:1})}
   const todayLine=`<i class="gantt-today-line" style="left:${(model.today-model.start+.5)*dayWidth}px" aria-hidden="true"></i>`;
   grid.innerHTML=`<div class="gantt-header"><div class="gantt-corner"><strong>项目 / Owner</strong></div><div class="gantt-axis"><div class="gantt-months">${months.map(m=>`<span style="left:${m.offset*dayWidth}px;width:${m.count*dayWidth}px"><b>${m.month.replace('-',' 年 ')} 月</b></span>`).join('')}</div><div class="gantt-dates">${days.map(d=>`<div class="gantt-date ${[0,6].includes(d.dow)?'weekend':''} ${d.n===model.today?'is-today':''}" title="${d.iso}"><strong>${d.day}</strong><small>${['日','一','二','三','四','五','六'][d.dow]}</small></div>`).join('')}</div></div></div>${model.rows.map((r,i)=>{
-    const p=r.project,palette=['coral','blue','green','purple','gold'][i%5],range=r.invalid?'日期待修正':`${p.start} → ${p.end||'未设截止'}`;
+    const p=r.project,palette=['blue','green','purple','gold','coral'][i%5],range=r.invalid?'日期待修正':`${p.start} → ${p.end||'未设截止'}`;
     return `<div class="gantt-row" data-project="${escapeHTML(p.id)}"><div class="gantt-project"><div><i class="project-color ${palette}"></i><strong title="${escapeHTML(p.name)}">${escapeHTML(p.name)}</strong></div><small>${escapeHTML(nameOf(p.owner))} <span>· ${projectStatus(p)}</span></small><span class="gantt-range">${escapeHTML(range)}</span></div><div class="gantt-track">${todayLine}${r.invalid?'<span class="gantt-invalid">请修正项目起止日期</span>':`<div class="gantt-bar ${palette} ${r.openEnded?'open-ended':''} ${['pending','rejected'].includes(p.status)?'awaiting':''}" style="left:${r.offset*dayWidth+3}px;width:${Math.max(26,r.span*dayWidth-6)}px" tabindex="0" aria-label="${escapeHTML(p.name)}，${escapeHTML(range)}，${projectStatus(p)}" title="${escapeHTML(p.name)} · ${escapeHTML(p.owner)}\n${escapeHTML(range)} · ${projectStatus(p)}"><span>${escapeHTML(p.name)}${r.openEnded?' · 未设截止 →':''}</span></div>`}</div></div>`;
   }).join('')}`;
   const updateRange=()=>{
@@ -2361,7 +2376,7 @@ function renderPip(){
   const tasks=sortTasks(scheduleTasks().filter(t=>taskActiveOn(t,S.today)&&!isArchivedTask(t))).sort((a,b)=>open(b)-open(a));
   const tickable=t=>!S.user.admin&&t.assignee===S.user.id&&open(t);
   doc.querySelector('#pipSummary').textContent=`${fmt(S.today)} · 还剩 ${tasks.filter(open).length} 项`;
-  doc.querySelector('#pipList').innerHTML=tasks.map(t=>`<li class="${open(t)?'':'closed'}"><label><input type="checkbox" data-id="${escapeHTML(t.id)}" ${open(t)?'':'checked'} ${tickable(t)?'':'disabled'}><span>${escapeHTML(t.name)}${t.stackCount>1?` ×${t.stackCount}`:''}</span></label><small>${escapeHTML([t.time,S.user.admin?nameOf(t.assignee):'',projectName(t),open(t)?'':status(t)[1]].filter(Boolean).join(' · '))}</small></li>`).join('')||'<li class="empty">今天没有待办</li>';
+  doc.querySelector('#pipList').innerHTML=tasks.map(t=>`<li class="${open(t)?'':'closed'}"><label><input type="checkbox" data-id="${escapeHTML(t.id)}" ${open(t)?'':'checked'} ${tickable(t)?'':'disabled'}><span>${escapeHTML(t.name)}${t.stackCount>1?` · ${t.stackCount} 期`:''}</span></label><small>${escapeHTML([t.time,S.user.admin?nameOf(t.assignee):'',projectName(t),open(t)?'':status(t)[1]].filter(Boolean).join(' · '))}</small></li>`).join('')||'<li class="empty">今天没有待办</li>';
   doc.querySelectorAll('#pipList input[data-id]:not([disabled])').forEach(box=>box.onchange=()=>pipComplete(box));
 }
 async function pipComplete(box){
@@ -3739,7 +3754,7 @@ function agentTaskScope(action,payload){
 }
 function agentActionHTML(action,payload,executed=false){
   const safe=agentSafeParams(payload),labels={stackPeriods:'合并期次',id:'操作对象',name:'名称',username:'账户',role:'权限组',assignee:'执行人',assignees:'执行人',owner:'负责人',projectId:'所属项目',date:'日期',start:'开始',end:'结束',time:'时间',duration:'分钟',priority:'优先级',active:'启用',accept:'同意',reason:'原因',frequency:'重复方式',weekdays:'星期',dates:'指定日期',status:'状态',summary:'总结',actual:'实际用时',report:'报告',title:'标题',content:'内容'};
-  const display=(k,v)=>{if(k==='stackPeriods')return v.map(id=>{const t=S.tasks?.find(x=>x.id===id);return t?fmt(t.repeatDate||(t.id.startsWith('repeat:')?t.id.slice(-10):t.date)):id}).join('、');if(k==='id'){const task=S.tasks?.find(x=>x.id===v);if(task)return task.name+(task.stackCount>1?' ×'+task.stackCount:'');return S.projects?.find(x=>x.id===v)?.name||S.repeats?.find(x=>x.id===v)?.name||nameOf(v)}if(['owner','assignee'].includes(k))return nameOf(v);if(k==='role')return ({member:'普通成员',admin:'管理员',superadmin:'超级管理员'}[v]||v);if(k==='projectId')return S.projects?.find(x=>x.id===v)?.name||'临时任务';if(Array.isArray(v))return v.map(x=>['assignees','members'].includes(k)?nameOf(x):String(x)).join('、');if(typeof v==='boolean')return v?'是':'否';return typeof v==='object'?JSON.stringify(v):String(v??'—')};
+  const display=(k,v)=>{if(k==='stackPeriods')return v.map(id=>{const t=S.tasks?.find(x=>x.id===id);return t?fmt(t.repeatDate||(t.id.startsWith('repeat:')?t.id.slice(-10):t.date)):id}).join('、');if(k==='id'){const task=S.tasks?.find(x=>x.id===v);if(task)return task.name+(task.stackCount>1?' · '+task.stackCount+' 期':'');return S.projects?.find(x=>x.id===v)?.name||S.repeats?.find(x=>x.id===v)?.name||nameOf(v)}if(['owner','assignee'].includes(k))return nameOf(v);if(k==='role')return ({member:'普通成员',admin:'管理员',superadmin:'超级管理员'}[v]||v);if(k==='projectId')return S.projects?.find(x=>x.id===v)?.name||'临时任务';if(Array.isArray(v))return v.map(x=>['assignees','members'].includes(k)?nameOf(x):String(x)).join('、');if(typeof v==='boolean')return v?'是':'否';return typeof v==='object'?JSON.stringify(v):String(v??'—')};
   const entries=Object.entries(safe),known=entries.filter(([k])=>labels[k]);
   return `<dl class="agent-action-fields">${known.map(([k,v])=>`<div><dt>${labels[k]}</dt><dd>${escapeHTML(display(k,v))}</dd></div>`).join('')}</dl>${!executed&&action==='account.delete'?'<p class="agent-action-impact">将移除该账户。</p>':''}`+(entries.some(([k])=>!labels[k])?`<details class="agent-action-details"><summary>其他参数</summary><pre>${escapeHTML(JSON.stringify(safe,null,2))}</pre></details>`:'');
 }

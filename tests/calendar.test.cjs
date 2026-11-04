@@ -2058,7 +2058,7 @@ test('a stacked period is one deferred card while all period histories remain av
   assert.deepEqual(a.json('[...taskLineageIds(S.tasks[2])].sort()'),['carry','old','today']);
   assert.equal(a.run('deferHops(S.tasks[2])'),0,'期次数不应冒充递延跳数');
   a.run("S.tasks[2].stackDates=['2026-11-02','2026-11-04']");assert.deepEqual(a.json('stackPeriodDates(S.tasks[2])'),['2026-11-02','2026-11-04']);
-  assert.match(a.run('taskCard(S.tasks[2])'),/合并 2 期.*×2/);
+  assert.match(a.run('taskCard(S.tasks[2])'),/合并 2 期">2 期</);
   a.run("S.tasks[2].status='done'");assert.equal(a.run('isDeferredTask(S.tasks[2])'),false);
 });
 
@@ -2091,14 +2091,14 @@ test('AI confirmation binds and displays the same grouped-period scope as direct
   const a=planningApp();a.run("S.tasks=[{id:'p1',date:'2026-11-02'},{id:'p2',date:'2026-11-03',name:'巡检',stackCount:2,stackPeriods:['p1','p2']}]");
   assert.deepEqual(a.json("agentTaskScope('task.complete',{id:'p2',summary:'done'})"),{id:'p2',summary:'done',stackPeriods:['p1','p2']});
   const html=a.run("agentActionHTML('task.complete',agentTaskScope('task.complete',{id:'p2',summary:'done'}))");
-  assert.ok(html.includes('巡检 ×2'));assert.ok(html.includes('11月2日、11月3日'));assert.ok(!html.includes('<pre>'));
+  assert.ok(html.includes('巡检 · 2 期'));assert.ok(html.includes('11月2日、11月3日'));assert.ok(!html.includes('<pre>'));
 });
 
 test('a merged period badge sits beside the clamped week chip name, never inside it', () => {
   const a = app();
   a.run("S.users=[{id:'member',active:1}];S.today='2026-11-04'");
   const chip = a.run(`weekTaskChip({id:'t',name:'${'很长的固定任务名称'.repeat(4)}',assignee:'member',priority:'P1',status:'todo',date:'2026-11-04',stackCount:3},'2026-11-04')`);
-  assert.ok(/<span class="week-task-title"><span class="week-task-name">[^<]*<\/span><span class="stack-badge"[^>]*>×3<\/span><\/span>/.test(chip));
+  assert.ok(/<span class="week-task-title"><span class="week-task-name">[^<]*<\/span><span class="stack-badge"[^>]*>3 期<\/span><\/span>/.test(chip));
   const plain = a.run(`weekTaskChip({id:'u',name:'普通任务',assignee:'member',priority:'P1',status:'todo',date:'2026-11-04'},'2026-11-04')`);
   assert.ok(!plain.includes('week-task-title') && plain.includes('<span class="week-task-name">普通任务</span>'));
 });
@@ -2143,4 +2143,22 @@ test('the project space card drops what the page already shows', () => {
   assert.equal(space.split('invite-members').length - 1, 0, '添加协作者只留在项目人力里');
   assert.ok(space.includes('spaceInvite') && space.includes('add-project-task'));
   assert.ok(!space.includes('project-members'));
+});
+
+test('merged periods read as N 期, stack up in the week, and bump only when a group grows', () => {
+  const a = app();
+  a.run("S.users=[{id:'member',active:1}];S.today='2026-11-04';UI.stackSeen=undefined");
+  const t = "{id:'b',name:'日报',assignee:'member',priority:'P1',status:'todo',date:'2026-11-04',stackCount:3,stackPeriods:['p1','p2','p3']}";
+  assert.equal(a.run(`stackBadge(${t})`), '<span class="stack-badge" aria-label="合并 3 期">3 期</span>', '第一次显示不跳');
+  a.run("UI.stackSeen=new Map([['p1',2]])");
+  assert.ok(a.run(`stackBadge(${t})`).includes('is-bumped'), '同一组多了一期才跳一下');
+  a.run("UI.stackSeen=new Map([['p1',3]])");
+  assert.ok(!a.run(`stackBadge(${t})`).includes('is-bumped'));
+  assert.ok(a.run(`weekTaskChip(${t},'2026-11-04')`).includes(' is-stacked"'));
+});
+
+test('a revisited view only fades in, and the timeline keeps the accent colour for last', () => {
+  const sw = source.match(/function switchView\(view\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/classList\?\.toggle\('is-revisit',seen\.has\(view\)\)/.test(sw));
+  assert.ok(/palette=\['blue','green','purple','gold','coral'\]/.test(source), '珊瑚色和「今天」红线同色，排在最后');
 });
