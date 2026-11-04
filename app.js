@@ -1773,8 +1773,11 @@ function renderWeekStartSetting(){
     +`全员生效。</p></div><div class="rule-seg week-start-seg" role="radiogroup" aria-label="每周开始日">${order.map(d=>`<button type="button" `
     +`class="rule-opt${d===day?' is-on':''}" role="radio" aria-checked="${d===day}" data-day="${d}">${WEEKDAY_SHORT[d]}</button>`).join('')}</div>`;
   box.querySelectorAll('[data-day]').forEach(b=>b.onclick=async()=>{
-    const next=Number(b.dataset.day);if(next===weekStartDay())return;
-    try{await act('week_start.update',{day:next});toast(`每周改为从${WEEKDAY_SHORT[next]}开始`)}catch(e){}
+    const next=Number(b.dataset.day);if(next===weekStartDay()||box.dataset.saving)return;
+    /* One change at a time: the choice shows at once and the row waits for the save. */
+    box.dataset.saving='1';box.querySelectorAll('[data-day]').forEach(x=>{const on=x===b;x.classList.toggle('is-on',on);x.setAttribute('aria-checked',String(on));x.disabled=true});
+    try{await act('week_start.update',{day:next});toast(`每周改为从${WEEKDAY_SHORT[next]}开始`)}catch(e){renderWeekStartSetting()}
+    finally{delete box.dataset.saving}
   });
 }
 /* Groups that exist read as a list, one row each; a group is made or changed
@@ -1786,7 +1789,7 @@ function renderCreationPolicy(){
   const inGroup=gid=>S.users.filter(u=>roleOf(u)==='member'&&groupOf(u)===gid);
   const tag=(label,value,labels)=>`<span class="rule-tag is-${escapeHTML(value)}"><small>${label}</small>${labels[value]||''}</span>`;
   const row=g=>{const list=inGroup(g.id);return `<div class="rule-row" data-group="${escapeHTML(g.id)}" role="button" tabindex="0" aria-label="编辑「${escapeHTML(g.name)}」"><div class="rule-row-name"><strong>${escapeHTML(g.name)}</strong></div><div class="rule-row-tags">${CREATION_KINDS.map(k=>tag(KIND_LABELS[k],g[k],RULE_LABELS)).join('')}${tag('AI 助手',g.agent||'read',AGENT_ACCESS_LABELS)}</div><div class="rule-row-people" title="${escapeHTML(list.map(u=>nameOf(u.id)).join('、'))}">${list.slice(0,4).map(u=>avatarHTML(u.id)).join('')}<span>${list.length} 人</span></div><span class="task-arrow">${icon('chevron-right')}</span></div>`};
-  box.innerHTML=`<div class="creation-head"><h2>规则组</h2><button class="secondary-btn" id="addCreationGroup">${icon('plus')}新建规则组</button></div><div class="rule-list">${policy.groups.map(row).join('')}</div>`;
+  box.innerHTML=`<div class="creation-head"><div><span class="eyebrow">成员权限</span><h2>规则组</h2></div><button class="secondary-btn" id="addCreationGroup">${icon('plus')}新建规则组</button></div><div class="rule-list">${policy.groups.map(row).join('')}</div>`;
   $$('#creationPolicy .rule-row').forEach(r=>{r.onclick=()=>editRuleGroup(r.dataset.group);r.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();editRuleGroup(r.dataset.group)}}});
   $('#addCreationGroup').onclick=()=>editRuleGroup(null);
 }
@@ -1805,8 +1808,9 @@ function editRuleGroup(gid){
   const groupName=id=>policy.groups.find(x=>x.id===id)?.name||fallback;
   const seg=(key,labels,label)=>`<div class="rule-line"><span>${label}</span><div class="rule-seg" role="radiogroup" aria-label="${label}">${Object.entries(labels).map(([v,l])=>`<button type="button" class="rule-opt${draft[key]===v?' is-on':''}" role="radio" aria-checked="${draft[key]===v}" data-key="${key}" data-value="${v}">${l}</button>`).join('')}</div></div>`;
   const person=u=>{const cur=groupOf(u),from=!picked.has(u.id)&&cur!=='default'?`<small>${escapeHTML(groupName(cur))}</small>`:'';return `<button type="button" class="rule-person${picked.has(u.id)?' is-on':''}" data-user="${escapeHTML(u.id)}" aria-pressed="${picked.has(u.id)}"${isDefault?' disabled':''}>${avatarHTML(u.id)}<span>${escapeHTML(nameOf(u.id))}${from}</span></button>`};
-  const tools=isDefault?'':'<span><button type="button" class="ghost-btn" id="rulePickAll">全选</button> <button type="button" class="ghost-btn" id="rulePickNone">全不选</button></span>';
-  openModal(`<div class="rule-card is-editing"><header class="rule-card-head"><input class="rule-name" id="ruleGroupName" value="${escapeHTML(draft.name)}" maxlength="20" aria-label="规则组名称"></header><div class="rule-lines">${CREATION_KINDS.map(k=>seg(k,RULE_LABELS,KIND_LABELS[k])).join('')}${seg('agent',AGENT_ACCESS_LABELS,'AI 助手')}</div><div class="rule-members"><div class="rule-members-head"><span>成员</span>${tools}</div><div class="rule-people">${members.map(person).join('')||'<span class="muted">还没有普通用户。</span>'}</div></div></div><div class="modal-footer">${isNew||isDefault?'':'<button class="ghost-btn rule-delete" id="deleteRuleGroup">删除</button>'}<button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="saveRuleGroup">${isNew?'创建':'保存'}</button></div>`);
+  const tools=isDefault?'<small class="rule-members-note">没分到其他规则组的成员都按这一组</small>'
+    :'<span><button type="button" class="ghost-btn" id="rulePickAll">全选</button> <button type="button" class="ghost-btn" id="rulePickNone">全不选</button></span>';
+  openModal(`<div class="rule-card is-editing"><header class="rule-card-head"><label class="rule-name-wrap" title="点击修改名称"><input class="rule-name" id="ruleGroupName" value="${escapeHTML(draft.name)}" maxlength="20" aria-label="规则组名称">${icon('edit','rule-name-icon')}</label></header><div class="rule-lines">${CREATION_KINDS.map(k=>seg(k,RULE_LABELS,KIND_LABELS[k])).join('')}${seg('agent',AGENT_ACCESS_LABELS,'AI 助手')}</div><div class="rule-members"><div class="rule-members-head"><span>成员</span>${tools}</div><div class="rule-people">${members.map(person).join('')||'<span class="muted">还没有普通用户。</span>'}</div></div></div><div class="modal-footer">${isNew||isDefault?'':'<button class="ghost-btn rule-delete" id="deleteRuleGroup">删除</button>'}<button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="saveRuleGroup">${isNew?'创建':'保存'}</button></div>`);
   const sync=()=>$$('#modalContent .rule-person').forEach(b=>{const on=picked.has(b.dataset.user);b.classList.toggle('is-on',on);b.setAttribute('aria-pressed',String(on))});
   $$('#modalContent .rule-opt').forEach(b=>b.onclick=()=>{draft[b.dataset.key]=b.dataset.value;b.parentElement.querySelectorAll('.rule-opt').forEach(x=>{x.classList.toggle('is-on',x===b);x.setAttribute('aria-checked',String(x===b))})});
   if(!isDefault){
@@ -2156,11 +2160,24 @@ function fixedTask(){
 }
 function collectionSettings(){
   const cfg=S.automation||{},mode=cfg.mode||'daily',days=['周一','周二','周三','周四','周五','周六','周日'],selected=cfg.weekdays||[0,1,2,3,4];
-  openModal(`<div class="eyebrow">Super Admin · 自动收集</div><h2>设置总结收集时间</h2><label class="form-field">收集周期<select id="collectionMode"><option value="daily">每天</option><option value="weekly">每周指定星期</option><option value="dates">指定日期</option></select></label><label class="form-field">收集时间<input id="collectionTime" type="time" value="${escapeHTML(cfg.time||'00:00')}"></label><fieldset class="member-checkboxes" id="collectionWeekdayFields"><legend>每周几收集</legend>${days.map((d,i)=>`<label><input type="checkbox" name="collectionWeekday" value="${i}" ${selected.includes(i)?'checked':''}> ${d}</label>`).join('')}</fieldset><label class="form-field hidden" id="collectionDatesField">指定日期（逗号分隔）<input id="collectionDates" value="${escapeHTML((cfg.dates||[]).join(', '))}" placeholder="2026-09-20, 2026-10-01"></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="saveCollection">保存收集规则</button></div>`);
-  $('#collectionMode').value=mode;
-  const sync=()=>{const m=$('#collectionMode').value;$('#collectionWeekdayFields').classList.toggle('hidden',m!=='weekly');$('#collectionDatesField').classList.toggle('hidden',m!=='dates')};
-  $('#collectionMode').onchange=sync;sync();$('#cancelAction').onclick=closeModal;
-  $('#saveCollection').onclick=async()=>{const m=$('#collectionMode').value,weekdays=$$('input[name="collectionWeekday"]:checked').map(x=>Number(x.value)),dates=$('#collectionDates').value.split(/[,，\s]+/).map(x=>x.trim()).filter(Boolean);if(m==='weekly'&&!weekdays.length){toast('请选择每周收集日');return}if(m==='dates'&&!dates.length){toast('请填写指定收集日期');return}try{await act('automation.update',{mode:m,time:$('#collectionTime').value,weekdays,dates});closeModal()}catch(e){}};
+  /* Same controls as the rule groups: one row of choices for how often, toggles
+     for the weekdays, named after the card that opens it. */
+  const modes={daily:'每天',weekly:'每周几',dates:'指定日期'};let current=modes[mode]?mode:'daily';const picked=new Set(selected);
+  openModal(`<div class="eyebrow">日记自动化规则</div><h2>项目补报时间</h2><p class="muted">到点时，前一天 Owner 没交项目日报的项目，会自动汇总成一份补报，交给 Owner 确认。</p>`
+    +`<div class="collection-form"><div class="rule-line"><span>补报周期</span><div class="rule-seg" role="radiogroup" aria-label="补报周期">${Object.entries(modes).map(([v,l])=>`<button type="button" `
+    +`class="rule-opt${v===current?' is-on':''}" role="radio" aria-checked="${v===current}" data-mode="${v}">${l}</button>`).join('')}</div></div>`
+    +`<div class="rule-line" id="collectionWeekdayFields"><span>星期</span><div class="rule-seg is-multi" role="group" aria-label="每周补报日">${days.map((d,i)=>`<button type="button" `
+    +`class="rule-opt${picked.has(i)?' is-on':''}" aria-pressed="${picked.has(i)}" data-weekday="${i}">${d.slice(1)}</button>`).join('')}</div></div>`
+    +`<label class="form-field hidden" id="collectionDatesField">指定日期（逗号分隔）<input id="collectionDates" value="${escapeHTML((cfg.dates||[]).join(', '))}" placeholder="2026-09-20, 2026-10-01"></label>`
+    +`<label class="form-field">补报时间<input id="collectionTime" type="time" value="${escapeHTML(cfg.time||'00:00')}"></label></div>`
+    +`<div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="saveCollection">保存</button></div>`);
+  const sync=()=>{$('#collectionWeekdayFields').classList.toggle('hidden',current!=='weekly');$('#collectionDatesField').classList.toggle('hidden',current!=='dates');
+    $$('#modalContent [data-mode]').forEach(b=>{const on=b.dataset.mode===current;b.classList.toggle('is-on',on);b.setAttribute('aria-checked',String(on))})};
+  $$('#modalContent [data-mode]').forEach(b=>b.onclick=()=>{current=b.dataset.mode;sync()});
+  $$('#modalContent [data-weekday]').forEach(b=>b.onclick=()=>{const i=Number(b.dataset.weekday);picked.has(i)?picked.delete(i):picked.add(i);
+    b.classList.toggle('is-on',picked.has(i));b.setAttribute('aria-pressed',String(picked.has(i)))});
+  sync();$('#cancelAction').onclick=closeModal;
+  $('#saveCollection').onclick=async()=>{const m=current,weekdays=[...picked].sort(),dates=$('#collectionDates').value.split(/[,，\s]+/).map(x=>x.trim()).filter(Boolean);if(m==='weekly'&&!weekdays.length){toast('请选择每周补报日');return}if(m==='dates'&&!dates.length){toast('请填写指定补报日期');return}try{await act('automation.update',{mode:m,time:$('#collectionTime').value,weekdays,dates});closeModal();toast('项目补报时间已保存')}catch(e){}};
 }
 function renderAll(){
   /* Remember each merged group's size after this render, so the next one can
@@ -2917,7 +2934,14 @@ document.addEventListener('keydown',e=>{
 $('#addProjectBtn').onclick=newProject;$('#addProjectTopBtn').onclick=newProject;
 $('#addTaskBtn').onclick=newTask;$('#emptyAddBtn').onclick=newTask;$('#timelineAddProjectBtn').onclick=newProject;
 $('#createFixedBtn').onclick=fixedTask;$('#collectionSettingsBtn').onclick=collectionSettings;
-$('#forceAssignBtn').onclick=()=>switchView('projects');$('#runAutomationBtn').onclick=()=>act('scheduler.run',{});
+$('#forceAssignBtn').onclick=()=>switchView('projects');/* 立即运行一次检查 does what the scheduler does every half minute anyway, so it
+   needs no confirmation; it says what it found instead of a bare 操作已完成. */
+$('#runAutomationBtn').onclick=async()=>{
+  const b=$('#runAutomationBtn');if(b.disabled)return;b.disabled=true;
+  try{const r=await api('/api/action',{action:'scheduler.run',data:{}});await refresh();
+    toast(r?.created?`检查完成：生成或发出 ${r.created} 项`:'检查完成：没有需要处理的')}catch(e){toast(e.message)}finally{b.disabled=false}
+};
+
 $('#markAllReadBtn').onclick=()=>act('inbox.read',{all:true});
 $('#manageInboxBtn').onclick=()=>{UI.inboxManage=!UI.inboxManage;UI.inboxPicked=new Set();renderInbox()};
 $('#archiveTodayBtn').onclick=openTodayArchive;

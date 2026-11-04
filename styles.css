@@ -7393,12 +7393,14 @@ body.nav-dragging * {
   color: var(--muted);
 }
 
+/* A rule is a choice, not a warning: open is green, asks-first is amber, the
+   assistant's read-only mode is blue, and "not allowed" / "off" stay neutral. */
 .rule-tag.is-direct,
 .rule-tag.is-operate { color: var(--c-green-ink); background: var(--c-green-soft); }
-.rule-tag.is-approval,
-.rule-tag.is-read { color: var(--c-gold-ink); background: var(--c-gold-soft); }
+.rule-tag.is-approval { color: var(--c-gold-ink); background: var(--c-gold-soft); }
+.rule-tag.is-read { color: var(--c-blue-ink); background: var(--c-blue-soft); }
 .rule-tag.is-none,
-.rule-tag.is-off { color: var(--danger-ink); background: var(--c-coral-soft); }
+.rule-tag.is-off { color: var(--muted); background: var(--surface-sunk); }
 
 .rule-row-people {
   display: flex;
@@ -7452,6 +7454,68 @@ body.nav-dragging * {
   align-items: center;
   gap: 8px;
 }
+
+/* The group's name is an input that looks like a title; a pencil says so. */
+.rule-name-wrap {
+  position: relative;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+}
+
+.rule-name-wrap .rule-name {
+  padding-right: 34px;
+}
+
+.rule-name-icon {
+  position: absolute;
+  right: 10px;
+  width: 15px;
+  height: 15px;
+  color: var(--faint);
+  pointer-events: none;
+  transition: color var(--t-fast) var(--ease);
+}
+
+.rule-name-wrap:hover .rule-name-icon,
+.rule-name:focus + .rule-name-icon {
+  color: var(--accent);
+}
+
+.rule-members-note {
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+/* 默认规则 lists who falls back to it; the chips are not choices there. */
+.rule-person:disabled.is-on {
+  border-color: var(--line-soft);
+  background: var(--surface-sunk);
+  font-weight: 500;
+}
+
+.collection-form {
+  display: grid;
+  gap: 12px;
+}
+
+.collection-form .form-field {
+  margin: 0;
+}
+
+.creation-card .eyebrow {
+  font: 600 10.5px/1.2 var(--font-sans);
+  letter-spacing: .16em;
+  color: var(--muted);
+}
+
+.rule-seg.is-multi .rule-opt.is-on {
+  background: var(--accent-soft-2);
+  color: var(--accent-dark);
+  font-weight: 600;
+}
+
 
 .rule-name {
   flex: 1;

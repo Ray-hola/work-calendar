@@ -2162,3 +2162,14 @@ test('a revisited view only fades in, and the timeline keeps the accent colour f
   assert.ok(/classList\?\.toggle\('is-revisit',seen\.has\(view\)\)/.test(sw));
   assert.ok(/palette=\['blue','green','purple','gold','coral'\]/.test(source), '珊瑚色和「今天」红线同色，排在最后');
 });
+
+test('settings speak plainly: neutral "not allowed", one-choice-at-a-time week start, a run that reports what it did', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../styles.css'), 'utf8');
+  assert.ok(/\.rule-tag\.is-none,\s*\.rule-tag\.is-off \{ color: var\(--muted\)/.test(css), '不允许 / 关闭 不再用警示红');
+  assert.ok(/\.rule-tag\.is-read \{ color: var\(--c-blue-ink\)/.test(css), 'AI 查询与审批不再同色');
+  const week = source.match(/function renderWeekStartSetting\(\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/box\.dataset\.saving/.test(week) && /x\.disabled=true/.test(week), '保存期间不能连点');
+  const collect = source.match(/function collectionSettings\(\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(collect.includes('<h2>项目补报时间</h2>') && collect.includes('data-mode') && collect.includes('data-weekday'));
+  assert.ok(/检查完成：/.test(source) && /action:'scheduler\.run'/.test(source));
+});
