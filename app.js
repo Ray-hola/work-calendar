@@ -2915,7 +2915,7 @@ function agentSamples(context){
 function agentRenderEmptyState(list){
   const samples=agentSamples();
   if(!list)return;
-  if(agentServerConfig&&!agentServerConfig.configured){list.innerHTML=`<div class="agent-setup"><strong>先接入 AI 模型</strong><p>${S.user?.role==='superadmin'?'连接模型后，可以查询工作安排、起草卡片。':'请联系管理员配置模型。你的输入可以继续保留。'}</p>${S.user?.role==='superadmin'?'<button type="button" class="secondary-btn" id="agentSetupBtn">配置模型</button>':''}</div>`;$('#agentSetupBtn')?.addEventListener('click',()=>agentSetConfigVisible(true));return}
+  if(agentServerConfig&&!agentServerConfig.configured){list.innerHTML=`<div class="agent-setup"><strong>先接入 AI 模型</strong>${S.user?.role==='superadmin'?'':'<p>请联系管理员配置模型。</p>'}${S.user?.role==='superadmin'?'<button type="button" class="secondary-btn" id="agentSetupBtn">配置模型</button>':''}</div>`;$('#agentSetupBtn')?.addEventListener('click',()=>agentSetConfigVisible(true));return}
   list.innerHTML='<div class="agent-samples">'
     +samples.map(s=>`<button type="button" class="agent-sample ${s.plan?'is-plan':''}" data-text="${escapeHTML(s.text)}"${s.plan?' data-plan="1"':''}>`
       +(s.plan?icon('sparkles'):'')+escapeHTML(s.text)+'</button>').join('')
@@ -2958,6 +2958,9 @@ function agentToolSummary(node,tools){
 }
 function agentMessageTools(node,message,index){
   if(!['user','assistant'].includes(message.role))return;
+  const body=document.createElement('div');body.className='agent-message-body';
+  while(node.firstChild)body.appendChild(node.firstChild);
+  node.appendChild(body);node.classList.add('has-tools');
   const tools=document.createElement('div');tools.className='agent-message-tools';
   const button=(name,label,run)=>{const b=document.createElement('button');b.type='button';b.className='agent-tool-btn';
     b.innerHTML=icon(name);b.title=label;b.setAttribute('aria-label',label);b.onclick=()=>run(b);tools.appendChild(b)};
@@ -3666,7 +3669,7 @@ function agentActionHTML(action,payload,executed=false){
   const safe=agentSafeParams(payload),labels={id:'操作对象',name:'名称',username:'账户',role:'权限组',assignee:'执行人',assignees:'执行人',owner:'负责人',projectId:'所属项目',date:'日期',start:'开始',end:'结束',time:'时间',duration:'分钟',priority:'优先级',active:'启用',accept:'同意',reason:'原因',frequency:'重复方式',weekdays:'星期',dates:'指定日期',status:'状态',summary:'总结',actual:'实际用时',report:'报告',title:'标题',content:'内容'};
   const display=(k,v)=>{if(k==='id')return S.tasks?.find(x=>x.id===v)?.name||S.projects?.find(x=>x.id===v)?.name||S.repeats?.find(x=>x.id===v)?.name||nameOf(v);if(['owner','assignee'].includes(k))return nameOf(v);if(k==='role')return ({member:'普通成员',admin:'管理员',superadmin:'超级管理员'}[v]||v);if(k==='projectId')return S.projects?.find(x=>x.id===v)?.name||'临时任务';if(Array.isArray(v))return v.map(x=>['assignees','members'].includes(k)?nameOf(x):String(x)).join('、');if(typeof v==='boolean')return v?'是':'否';return typeof v==='object'?JSON.stringify(v):String(v??'—')};
   const entries=Object.entries(safe),known=entries.filter(([k])=>labels[k]);
-  return `<dl class="agent-action-fields">${known.map(([k,v])=>`<div><dt>${labels[k]}</dt><dd>${escapeHTML(display(k,v))}</dd></div>`).join('')}</dl><p class="agent-action-impact">${executed?'操作已提交，以上为当时记录的内容。':action==='account.delete'?'将移除该账户，请核对操作对象。':action==='account.create'?'账户仅在你确认后创建；初始密码只提交给工作台，不发送给模型。':'按当前账户权限提交，确认前不会改动数据。'}</p>`+(entries.some(([k])=>!labels[k])?`<details class="agent-action-details"><summary>其他参数</summary><pre>${escapeHTML(JSON.stringify(safe,null,2))}</pre></details>`:'');
+  return `<dl class="agent-action-fields">${known.map(([k,v])=>`<div><dt>${labels[k]}</dt><dd>${escapeHTML(display(k,v))}</dd></div>`).join('')}</dl>${!executed&&action==='account.delete'?'<p class="agent-action-impact">将移除该账户。</p>':''}`+(entries.some(([k])=>!labels[k])?`<details class="agent-action-details"><summary>其他参数</summary><pre>${escapeHTML(JSON.stringify(safe,null,2))}</pre></details>`:'');
 }
 /* A step line is replayed to the model as a user turn but rendered as a quiet
    receipt, so the transcript stays readable while the model keeps its context. */
@@ -4090,7 +4093,7 @@ async function planFlush(board){
     try{const r=await api('/api/action',{action:'agent.draft.save',data:{draftId:board.draftId,conversationId:board.conversationId,version:board.persistVersion||0,writer:agentState.clientId,board:snapshot}});
       if(S.user?.id!==user)return;board.persistVersion=r.version;board.savedSnapshot=serialized;board.saveError='';planCache(board,planSnapshot(board));
     }catch(e){board.saveError=e.message||'未同步，已保留本机草稿';board.conflict=/其他页面|已删除/.test(board.saveError);board.deleted=/已删除/.test(board.saveError);}
-    finally{board.saving=null;const status=board.el?.querySelector?.('.plan-save-status');if(status)status.textContent=board.saveError||'草稿已保存';if(board.conflict)planRender(board);}
+    finally{board.saving=null;const status=board.el?.querySelector?.('.plan-save-status');if(status)status.textContent=board.saveError||'';if(board.conflict)planRender(board);}
   })();
   await board.saving;
   if(!board.saveError&&serialized!==JSON.stringify(planSnapshot(board)))return planFlush(board);
@@ -4183,7 +4186,7 @@ function planMutationHTML(board,x,kind){
     body+=diff();
     if(path.mode==='approval')body+=`<label class="plan-change-reason">修改理由<textarea data-f="reason" rows="2">${escapeHTML(x.reason||'')}</textarea></label>`;
   }
-  return `<article class="plan-card is-${op} is-${path.mode}${project?' is-project':''}" ${attr}><div class="plan-card-top"><span class="plan-kind">${icon(project?'folder':'calendar-check')}${label}</span><span class="plan-state is-${path.mode}">${path.mode==='approval'?'提交申请':path.mode==='none'?'无权操作':'待确认'}</span><button type="button" class="plan-remove" aria-label="移除这张卡" title="移除这张卡">${icon('x')}</button></div>${body}<p class="plan-note">${escapeHTML(path.mode==='none'||path.mode==='approval'?path.note:'确认后才会'+(op==='delete'?'删除':'保存修改'))}</p><button type="button" class="ghost-btn plan-reload">重新读取</button>${x.error?`<p class="plan-error">${escapeHTML(x.error)}</p>`:''}</article>`;
+  return `<article class="plan-card is-${op} is-${path.mode}${project?' is-project':''}" ${attr}><div class="plan-card-top"><span class="plan-kind">${icon(project?'folder':'calendar-check')}${label}</span><span class="plan-state is-${path.mode}">${path.mode==='approval'?'提交申请':path.mode==='none'?'无权操作':'待确认'}</span><button type="button" class="plan-remove" aria-label="移除这张卡" title="移除这张卡">${icon('x')}</button></div>${body}<p class="plan-note">${escapeHTML(path.mode==='none'||path.mode==='approval'?path.note:'')}</p><button type="button" class="ghost-btn plan-reload">重新读取</button>${x.error?`<p class="plan-error">${escapeHTML(x.error)}</p>`:''}</article>`;
 }
 async function planReload(board,x){
   if(board.busy||agentState.busy||agentWriteBlocked())return;
@@ -4258,12 +4261,12 @@ function planRender(board,entering=false){
   const el=board.el,all=board.projects.concat(board.tasks),open=planOpenCards(board),accepted=all.filter(x=>x.state==='done').length,rejected=all.filter(x=>x.state==='rejected').length,working=all.filter(x=>x.state==='submitting').length;
   agentSyncDraftLayout();
   const progress=[working?`接受中 ${working}`:'',accepted?`已接受 ${accepted}`:'',rejected?`已拒绝 ${rejected}`:''].filter(Boolean).join(' · ');
-  const head=`<div class="plan-board-head">${icon('sparkles')}<strong>待处理 · ${open.length} 张卡片</strong><span>${escapeHTML(progress||board.note)}</span></div>`;
+  const head=`<div class="plan-board-head">${icon('sparkles')}<strong>待处理 · ${open.length} 张卡片</strong><span>${escapeHTML(progress)}</span></div>`;
   if(board.closed){
     el.innerHTML=head+`<div class="plan-foot is-closed"><span class="plan-sum">${escapeHTML(board.closedNote||'未处理的卡片已保留')}</span><button type="button" class="ghost-btn plan-reopen">重新打开</button></div>`;
   }else{
     const n=planTally(board),sum=[n.delete?`含 ${n.delete} 项删除`:'',n.wait?`${n.wait} 项要等审批`:'',n.none?`${n.none} 项暂不能接受`:''].filter(Boolean).join(' · ');
-    el.innerHTML=head+`<div class="plan-draft-tools"><button type="button" class="ghost-btn plan-undo"${board.history?.length&&!board.busy?'':' disabled'}>撤销修改</button><button type="button" class="ghost-btn plan-copy">复制草稿</button>${board.conflict?'<button type="button" class="ghost-btn plan-restore">重新加载草稿</button>':''}<small class="plan-save-status" role="status">${escapeHTML(board.saveError||(board.savedSnapshot?'草稿已保存':'草稿自动保存'))}</small><span>可逐张接受或拒绝，也可以勾选后批量处理</span></div><div class="plan-selection"><label class="plan-select-label"><input type="checkbox" class="plan-select-all">全选</label><span class="plan-select-count" role="status"></span><button type="button" class="ghost-btn plan-reject-selected">拒绝所选</button><button type="button" class="primary-btn plan-accept-selected">接受所选</button></div><div class="plan-cards${entering?' is-entering':''}">${planCardsHTML(board)||'<div class="plan-empty">'+icon('check')+'<strong>本组卡片已处理完</strong><span>接受与拒绝的结果已保留，可继续提出新的安排。</span></div>'}</div><div class="plan-foot"><button type="button" class="ghost-btn plan-add">${icon('plus')}加一个任务</button><span class="plan-sum">全部 ${open.length} 项${sum?' · '+sum:''}${board.saveError?' · '+escapeHTML(board.saveError):''}</span><button type="button" class="ghost-btn plan-cancel">${open.length?'收起草稿':'收起'}</button><button type="button" class="primary-btn plan-confirm"${open.length&&!board.busy?'':' disabled'}>${board.busy?'正在接受…':planConfirmLabel()}</button></div>`;
+    el.innerHTML=head+`<div class="plan-draft-tools"><button type="button" class="ghost-btn plan-undo"${board.history?.length&&!board.busy?'':' disabled'}>撤销修改</button><button type="button" class="ghost-btn plan-copy">复制草稿</button>${board.conflict?'<button type="button" class="ghost-btn plan-restore">重新加载草稿</button>':''}<small class="plan-save-status" role="status">${escapeHTML(board.saveError||'')}</small></div><div class="plan-selection"><label class="plan-select-label"><input type="checkbox" class="plan-select-all">全选</label><span class="plan-select-count" role="status"></span><div class="plan-selection-actions"><button type="button" class="ghost-btn plan-reject-selected">拒绝所选</button><button type="button" class="primary-btn plan-accept-selected">接受所选</button></div></div><div class="plan-cards${entering?' is-entering':''}">${planCardsHTML(board)||'<div class="plan-empty">'+icon('check')+'<strong>本组卡片已处理完</strong></div>'}</div><div class="plan-foot"><button type="button" class="ghost-btn plan-add">${icon('plus')}加一个任务</button><span class="plan-sum">全部 ${open.length} 项${sum?' · '+sum:''}${board.saveError?' · '+escapeHTML(board.saveError):''}</span><button type="button" class="ghost-btn plan-cancel">${open.length?'收起草稿':'收起'}</button><button type="button" class="primary-btn plan-confirm"${open.length&&!board.busy?'':' disabled'}>${board.busy?'正在接受…':planConfirmLabel()}</button></div>`;
     el.querySelectorAll('input,textarea,select,button').forEach(field=>{field.disabled=Boolean(board.busy)||field.disabled});
     planMarkFields(board);planUpdateSelection(board);
     if(entering)el.querySelectorAll('.plan-card').forEach((c,i)=>c.style.setProperty('--i',String(i)));
@@ -4973,7 +4976,7 @@ function agentVoiceState(){
     const slot=mic.querySelector('.icon-slot');if(slot)slot.dataset.icon=voice.active?'square':'mic';
   }
   const voiceBar=$('#agentVoiceBar');
-  if(voiceBar){voiceBar.classList.toggle('hidden',!voice.active&&!voice.transcribing&&!voice.starting);voiceBar.textContent=voice.transcribing?'正在转写…可继续编辑输入，切换对话将取消转写':voice.starting?'正在等待麦克风权限…':'正在聆听…说完再点一次麦克风'}
+  if(voiceBar){voiceBar.classList.toggle('hidden',!voice.active&&!voice.transcribing&&!voice.starting);voiceBar.textContent=voice.transcribing?'正在转写…':voice.starting?'等待麦克风权限…':'正在聆听…'}
   agentUpdateBusy();
 }
 /* Called once when the panel opens (and after the server config arrives): reveal

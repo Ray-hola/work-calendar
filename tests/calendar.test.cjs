@@ -1649,6 +1649,28 @@ test('the assistant keeps conversations in a side list and its message tools are
   assert.ok(/agentState\.sessionId=id==='legacy'\?null:id/.test(use), '早期记录不带会话 ID，服务端照旧归档');
 });
 
+test('message action layout preserves the bubble content and copy/edit/rewind actions', async () => {
+  const a=planningApp(),copied=[],calls=[];
+  class Element {
+    constructor(){this.children=[];this.classList={add:()=>{},remove:()=>{}};this.attributes={};}
+    get firstChild(){return this.children[0]||null;}
+    appendChild(child){if(child.parent)child.parent.children.splice(child.parent.children.indexOf(child),1);this.children.push(child);child.parent=this;return child;}
+    setAttribute(key,value){this.attributes[key]=value;}
+  }
+  a.context.document={createElement:()=>new Element()};
+  a.context.navigator={clipboard:{writeText:async text=>copied.push(text)}};
+  a.context.setTimeout=()=>{};a.context.calls=calls;
+  a.run('agentEditMessage=i=>calls.push(["edit",i]);agentRewind=i=>calls.push(["rewind",i])');
+  const message=new Element(),content=new Element();message.appendChild(content);a.context.message=message;
+  a.run('agentMessageTools(message,{role:"user",content:"original message"},3)');
+  const [body,tools]=message.children;
+  assert.deepEqual(body.children,[content], '文本、意图和时间保留在气泡内');
+  assert.equal(tools.children.length,3);
+  assert.deepEqual(tools.children.map(x=>x.attributes['aria-label']),['复制','修改重发','回退到这里']);
+  await tools.children[0].onclick();tools.children[1].onclick();tools.children[2].onclick();
+  assert.deepEqual(copied,['original message']);assert.deepEqual(calls.map(x=>Array.from(x)),[['edit',3],['rewind',3]]);
+});
+
 test('a late conversation history response cannot overwrite a newer selection', async () => {
   const a=planningApp(),list={innerHTML:'',scrollTop:0,scrollHeight:0};
   a.context.document={querySelector:s=>s==='#agentMessages'?list:null};

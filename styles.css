@@ -10453,3 +10453,47 @@ body.is-resizing-agent { user-select: none; }
   .plan-foot .plan-confirm { grid-column: 2; grid-row: 2; }
 }
 @media (pointer: coarse) { .plan-pick { min-width: 44px; min-height: 44px; } }
+
+/* One control scale for the assistant, independent of page-level button sizes. */
+.agent-panel :is(.primary-btn, .secondary-btn, .ghost-btn) {
+  box-sizing: border-box;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: 600 12px/1 var(--font-sans);
+  letter-spacing: 0;
+  box-shadow: none;
+}
+.agent-panel .primary-btn { border-color: transparent; }
+.agent-panel .primary-btn::after { display: none; }
+.agent-panel :is(.primary-btn, .secondary-btn):hover { transform: none; box-shadow: none; }
+.agent-panel .plan-card-actions button { min-width: 64px; }
+.agent-panel .plan-selection button { min-width: 90px; }
+.plan-selection-actions { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px; }
+.agent-action-buttons { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
+.agent-panel .agent-action-buttons button { min-width: 0; padding-inline: 8px; }
+.agent-panel .agent-config-actions button { flex: 1; }
+.agent-panel .agent-config-actions { width: 100%; max-width: 360px; margin-left: auto; }
+.agent-panel :is(.agent-plan-toggle, .agent-mode-opt) { height: 32px; min-height: 32px; box-sizing: border-box; }
+.agent-panel .agent-mode { align-items: center; padding: 0; }
+.agent-panel .agent-mic-btn { width: 32px; padding: 0; flex-shrink: 0; }
+.agent-panel .agent-header-actions { align-items: center; }
+.agent-panel .agent-header-actions > button { height: 28px; min-height: 28px; }
+.plan-save-status:empty, .plan-board-head > span:empty, .plan-note:empty { display: none; }
+.plan-draft-tools { margin: 10px 0; }
+
+/* Message actions sit below the bubble; small glyphs keep the text dominant. */
+.agent-message.has-tools { padding: 0; background: transparent; }
+.agent-message-body { padding: 10px 12px; background: var(--surface-sunk); border-radius: 14px; }
+.agent-message.user .agent-message-body { background: var(--accent-soft-2); border-radius: 12px 12px 5px 12px; }
+.agent-message.has-tools .agent-message-tools { height: 22px; gap: 1px; margin: 3px 0 0; line-height: 1; }
+.agent-message.user .agent-message-tools { justify-content: flex-end; }
+.agent-message-tools .agent-tool-btn { width: 22px; height: 22px; min-height: 0; flex: 0 0 22px; padding: 0; border: 0; background: transparent; line-height: 1; }
+.agent-message-tools .agent-tool-btn .icon { width: 12px; height: 12px; stroke-width: 1.5; }
+.agent-message-tools .agent-tool-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (pointer: coarse) {
+  .agent-message.has-tools .agent-message-tools { height: 32px; gap: 4px; }
+  .agent-message-tools .agent-tool-btn { width: 32px; height: 32px; flex-basis: 32px; }
+}
