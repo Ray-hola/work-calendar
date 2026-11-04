@@ -343,7 +343,7 @@ const status=t=>{
 };
 const projectName=t=>(S.projects.find(p=>p.id===t.projectId)||{}).name||'个人';
 function toast(msg){const e=$('#toast');e.textContent=msg;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200)}
-function showAuth(){document.body.classList.add('auth-locked');let e=$('#authScreen');if(!e){e=document.createElement('section');e.id='authScreen';document.body.prepend(e)}const local=location.protocol==='file:';e.innerHTML=`<div class="auth-card"><div class="brand"><span class="brand-mark">战</span><span>战略小组<br><strong>台账</strong></span></div><h1>登录工作台</h1><form id="loginForm"><label>账户<input id="loginUser" autocomplete="username" value="superadmin" required></label><label>密码<input id="loginPass" type="password" autocomplete="current-password" required></label><button class="primary-btn" type="submit" ${local?'disabled':''}>${local?'请先启动本地服务':'进入工作台'}</button><div id="loginError" class="login-error">${local?'请在工作区运行 ./run.sh，然后访问 http://127.0.0.1:4173/':''}</div></form></div>`;$('#loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/login',{username:$('#loginUser').value,password:$('#loginPass').value});document.body.classList.remove('auth-locked');e.target.closest('#authScreen').remove();await refresh();switchView('calendar')}catch(err){$('#loginError').textContent=err.message}}}
+function showAuth(){if(typeof agentCancelVoice==='function')agentCancelVoice();document.body.classList.add('auth-locked');let e=$('#authScreen');if(!e){e=document.createElement('section');e.id='authScreen';document.body.prepend(e)}const local=location.protocol==='file:';e.innerHTML=`<div class="auth-card"><div class="brand"><span class="brand-mark">战</span><span>战略小组<br><strong>台账</strong></span></div><h1>登录工作台</h1><form id="loginForm"><label>账户<input id="loginUser" autocomplete="username" value="superadmin" required></label><label>密码<input id="loginPass" type="password" autocomplete="current-password" required></label><button class="primary-btn" type="submit" ${local?'disabled':''}>${local?'请先启动本地服务':'进入工作台'}</button><div id="loginError" class="login-error">${local?'请在工作区运行 ./run.sh，然后访问 http://127.0.0.1:4173/':''}</div></form></div>`;$('#loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/login',{username:$('#loginUser').value,password:$('#loginPass').value});document.body.classList.remove('auth-locked');e.target.closest('#authScreen').remove();await refresh();switchView('calendar')}catch(err){$('#loginError').textContent=err.message}}}
 /* Accounts that have signed in on this browser, newest first. The switcher
    offers only these, so it never lists the whole team to everyone. */
 const KNOWN_ACCOUNTS_KEY='wc-accounts';
@@ -358,7 +358,7 @@ async function refresh(){
   }
   /* updateChatDot is defined further down the file than the unit-test sandbox
      loads, so guard the call rather than assume it is in scope. */
-  S=next;rememberAccount(S.user.id);renderAll();renderPip();if(typeof updateChatDot==='function')updateChatDot();
+  S=next;rememberAccount(S.user.id);renderAll();renderPip();if(typeof loadSpeechStatus==='function')loadSpeechStatus();if(typeof updateChatDot==='function')updateChatDot();
 }
 let inboxRefreshPromise=null;
 async function refreshInboxState(){
@@ -3833,7 +3833,7 @@ function agentUpdateBusy(){
   const pause=$('#agentPauseBtn');
   if(pause){pause.classList.toggle('hidden',!agentState.busy);pause.textContent=agentState.paused?'继续':'暂停';pause.setAttribute('aria-pressed',String(agentState.paused))}
   const mic=$('#agentMicBtn');
-  if(mic){mic.disabled=agentState.busy||voice.transcribing||voice.starting;mic.setAttribute('aria-disabled',agentState.busy?'true':'false')}
+  if(mic){mic.disabled=agentState.busy||(!voice.target&&(voice.transcribing||voice.starting));mic.setAttribute('aria-disabled',agentState.busy?'true':'false')}
   const status=$('#agentStatus');if(status)status.textContent=agentState.paused?'已暂停':agentState.pendingResolve?'等待确认':agentState.busy?'正在处理…':'';
   /* Say on the composer itself what the run is waiting for, so a paused card
      is never mistaken for a composer that ate the message. */
@@ -3841,7 +3841,7 @@ function agentUpdateBusy(){
     input.placeholder=agentState.paused?'已暂停，点「继续」保留进度接着处理…'
       :agentState.pendingResolve?'等待确认…'
       :agentState.busy?'处理中…'
-      :voice.active?'正在聆听…'
+      :voice.active&&!voice.target?'正在聆听…'
       :agentState.plan?'说说要安排什么，我来起草项目和任务卡片…'
       :'问点什么…';
   }
@@ -4600,6 +4600,7 @@ function renderChatChannels(){
   $$('#chatChannels .chat-channel').forEach(b=>b.onclick=()=>{
     /* Switching rooms reads only the room you switched to. */
     if(chatChannel!==b.dataset.channel){
+      if(typeof voice!=='undefined'&&voice.target?.id==='chatInput')agentCancelVoice();
       chatChannel=b.dataset.channel;
       renderChatCurrent();
     }
@@ -4804,6 +4805,7 @@ function resizeChatInput(){
   input.style.height=Math.min(120,input.scrollHeight)+'px';
 }
 async function chatSend(){
+  if(voice.target?.id==='chatInput')agentCancelVoice();
   const input=$('#chatInput'),text=input?.value.trim();
   if(!text)return;
   input.value='';input.style.height='';chatMentionQuery=null;renderChatMentionMenu();
@@ -4888,7 +4890,7 @@ function initAgentUI(){
   initAgentPanelResize();
   $('#agentBtn')?.addEventListener('click',async()=>{$('#agentPanel').classList.remove('hidden');applyAgentPanelSize();renderAgentCapability();await agentLoadOwnHistory();await agentLoadServerConfig();agentSyncPlanButton();agentInitVoice();$('#agentInput').focus()});
   $('#agentHistoryBtn')?.addEventListener('click',()=>agentToggleSessions());
-  $('#agentCloseBtn')?.addEventListener('click',()=>{agentStopVoice();agentSetConfigVisible(false);agentToggleModelMenu(false);$('#agentPanel').classList.add('hidden')});
+  $('#agentCloseBtn')?.addEventListener('click',()=>{if(!voice.target)agentCancelVoice();agentSetConfigVisible(false);agentToggleModelMenu(false);$('#agentPanel').classList.add('hidden')});
   $('#agentStopBtn')?.addEventListener('click',()=>agentHalt('已停止，草稿和已执行记录保留。'));
   $('#agentPauseBtn')?.addEventListener('click',()=>agentTogglePause());
   $('#agentDraftToggle')?.addEventListener('click',()=>{const b=agentState.planBoard;if(b){b.closed=!b.closed;planRender(b)}});
@@ -4921,10 +4923,10 @@ function initAgentUI(){
     const payload={baseUrl,model:$('#agentAsrModel').value.trim(),language:$('#agentAsrLanguage').value.trim()||'zh'};
     const apiKey=$('#agentAsrApiKey').value.trim();
     if(apiKey)payload.apiKey=apiKey;
-    try{agentServerAsr=await api('/api/action',{action:'agent.asr.set',data:payload});renderAgentAsrConfig();agentInitVoice();toast('语音转写配置已保存')}catch(e){toast(e.message||'保存失败')}
+    try{agentServerAsr=await api('/api/action',{action:'agent.asr.set',data:payload});sharedSpeechStatus={configured:agentServerAsr.configured};renderAgentAsrConfig();agentInitVoice();scanVoiceFields();toast('语音转写配置已保存')}catch(e){toast(e.message||'保存失败')}
   });
   $('#agentAsrClear')?.addEventListener('click',async()=>{
-    try{agentServerAsr=await api('/api/action',{action:'agent.asr.set',data:{disabled:true}});renderAgentAsrConfig();agentInitVoice();toast('已停用语音转写')}catch(e){toast(e.message||'停用失败')}
+    try{agentServerAsr=await api('/api/action',{action:'agent.asr.set',data:{disabled:true}});sharedSpeechStatus={configured:agentServerAsr.configured};renderAgentAsrConfig();agentInitVoice();scanVoiceFields();toast('已停用语音转写')}catch(e){toast(e.message||'停用失败')}
   });
   $('#agentPaneCards')?.addEventListener('click',()=>agentSetPane('cards'));
   $('#agentPaneChat')?.addEventListener('click',()=>agentSetPane('chat'));
@@ -4949,7 +4951,8 @@ function initAgentUI(){
    Web Speech API as a zero-config fallback. The transcript only lands in the
    input box where you can edit it before sending; nothing is auto-sent.
    ------------------------------------------------------------------------- */
-const voice={recorder:null,stream:null,chunks:[],recognition:null,engine:null,active:false,base:'',final:'',interim:'',lang:'',startedAt:0,generation:0,transcribing:false,starting:false,session:null,controller:null};
+const voice={recorder:null,stream:null,chunks:[],recognition:null,engine:null,active:false,base:'',final:'',interim:'',lang:'',startedAt:0,generation:0,transcribing:false,starting:false,session:null,controller:null,target:null,scope:null,writing:false};
+let sharedSpeechStatus=null,speechStatusOwner=null;
 function agentSpeechRecognition(){
   return window.SpeechRecognition||window.webkitSpeechRecognition||null;
 }
@@ -4959,7 +4962,7 @@ function agentCanRecord(){
 /* Prefer the server engine when it is configured and the browser can record;
    otherwise fall back to whatever recognition the browser itself provides. */
 function agentVoiceEngine(){
-  if(agentServerAsr?.configured&&agentCanRecord())return 'server';
+  if((sharedSpeechStatus??agentServerAsr)?.configured&&agentCanRecord())return 'server';
   if(agentSpeechRecognition())return 'browser';
   return null;
 }
@@ -4975,26 +4978,26 @@ function agentVoiceLang(){
 /* Recognition emits a fresh interim guess for the tail while the settled text
    accumulates; only `final` is kept, so the box never stutters. */
 function agentVoiceRender(){
-  const input=$('#agentInput');if(!input)return;
+  const input=voiceInput();if(!input)return;
   const settled=voice.base+voice.final;
-  input.value=settled+(voice.interim?voice.interim:'');
+  voiceWrite(input,settled+(voice.interim?voice.interim:''));
   try{input.setSelectionRange(input.value.length,input.value.length)}catch(_){}
   agentSyncPlanButton();
 }
 /* The transcript joins whatever the box holds when it arrives, so text typed or
    deleted while recording or transcribing is neither lost nor brought back. */
 function agentVoiceAppend(text){
-  const input=$('#agentInput');
+  const input=voiceInput();
   if(!text||!input)return;
-  input.value+=text;
+  voiceWrite(input,input.value+text);
   try{input.setSelectionRange(input.value.length,input.value.length)}catch(_){}
   agentSyncPlanButton();
 }
 /* Typing while dictating makes the box's current text the new starting point, so
    words recognized next are added after the edit instead of over it. */
 function agentVoiceFollowEdit(){
-  if(!voice.active||voice.engine!=='browser')return;
-  const input=$('#agentInput');if(!input)return;
+  if(voice.writing||!voice.active||voice.engine!=='browser')return;
+  const input=voiceInput();if(!input)return;
   const tail=voice.interim||'';
   const tailKept=Boolean(tail)&&input.value.endsWith(tail);
   voice.base=tailKept?input.value.slice(0,-tail.length):input.value;
@@ -5019,18 +5022,21 @@ async function agentVoiceStartRecording(){
     if(generation===voice.generation){voice.starting=false;agentVoiceState();toast('没有拿到麦克风权限，请在地址栏允许后重试')}
     return;
   }
-  if(generation!==voice.generation){stream.getTracks().forEach(track=>track.stop());return}
+  if(generation!==voice.generation||!voiceInput()){stream.getTracks().forEach(track=>track.stop());return}
   voice.starting=false;
   const mime=typeof MediaRecorder.isTypeSupported==='function'
     ? ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4'].find(t=>MediaRecorder.isTypeSupported(t))||''
     : '';
   let recorder;
-  try{recorder=mime?new MediaRecorder(stream,{mimeType:mime}):new MediaRecorder(stream)}catch(_){recorder=new MediaRecorder(stream)}
+  try{
+    try{recorder=mime?new MediaRecorder(stream,{mimeType:mime}):new MediaRecorder(stream)}catch(_){recorder=new MediaRecorder(stream)}
+  }catch(_){stream.getTracks().forEach(track=>track.stop());agentVoiceState();toast('浏览器无法录音，请重试');return}
   voice.stream=stream;voice.recorder=recorder;voice.chunks=[];voice.interim='';
   voice.engine='server';voice.active=true;voice.startedAt=Date.now();
   const session={recorder,stream,chunks:voice.chunks,generation};voice.session=session;
   recorder.ondataavailable=event=>{if(event.data&&event.data.size)session.chunks.push(event.data)};
   recorder.onstop=()=>agentVoiceFinishRecording(session);
+  recorder.onerror=()=>{if(generation===voice.generation){agentCancelVoice();toast('录音中断，请重试')}};
   try{recorder.start()}catch(_){agentStopVoice();return}
   agentVoiceState();
 }
@@ -5038,7 +5044,7 @@ async function agentVoiceFinishRecording(session=null){
   session=session||{recorder:voice.recorder,stream:voice.stream,chunks:voice.chunks,generation:voice.generation};
   const {recorder,stream,generation}=session,chunks=session.chunks.slice();
   stream?.getTracks().forEach(track=>{try{track.stop()}catch(_){}});
-  if(generation!==voice.generation)return;
+  if(generation!==voice.generation||!voiceInput())return;
   voice.chunks=[];voice.stream=null;voice.active=false;voice.transcribing=Boolean(chunks.length);
   agentVoiceState();
   if(!chunks.length){if(voice.recorder===recorder)voice.recorder=null;return}
@@ -5060,9 +5066,9 @@ function agentVoiceStartRecognition(){
   if(!Engine)return;
   const generation=voice.generation,recognition=new Engine();
   recognition.lang=agentVoiceLang();recognition.continuous=true;recognition.interimResults=true;
-  voice.recognition=recognition;voice.engine='browser';
-  voice.base=$('#agentInput')?.value||'';voice.final='';voice.interim='';
-  recognition.onstart=()=>{if(generation!==voice.generation)return;voice.active=true;agentVoiceState();agentVoiceRender()};
+  voice.recognition=recognition;voice.engine='browser';voice.starting=true;agentVoiceState();
+  voice.base=voiceInput()?.value||'';voice.final='';voice.interim='';
+  recognition.onstart=()=>{if(generation!==voice.generation)return;voice.starting=false;voice.active=true;agentVoiceState();agentVoiceRender()};
   recognition.onresult=event=>{
     if(generation!==voice.generation)return;
     let interim='',final='';
@@ -5076,16 +5082,16 @@ function agentVoiceStartRecognition(){
   recognition.onerror=event=>{
     if(generation!==voice.generation)return;
     const reason=event?.error||'';
-    voice.active=false;voice.recognition=null;agentVoiceState();
+    voice.starting=false;voice.active=false;voice.recognition=null;agentVoiceState();
     if(reason==='not-allowed'||reason==='service-not-allowed')toast('浏览器没有麦克风权限，请在地址栏允许后重试');
     else if(reason==='audio-capture')toast('没有检测到可用的麦克风');
     else if(reason!=='aborted'&&reason!=='no-speech')toast('语音识别中断，请重试');
   };
   recognition.onend=()=>{
     if(generation!==voice.generation)return;
-    voice.active=false;voice.recognition=null;voice.interim='';agentVoiceRender();agentVoiceState();
+    voice.starting=false;voice.active=false;voice.recognition=null;voice.interim='';agentVoiceRender();agentVoiceState();
   };
-  try{recognition.start()}catch(_){voice.recognition=null}
+  try{recognition.start()}catch(_){voice.starting=false;voice.recognition=null;agentVoiceState();toast('语音识别未能启动，请重试')}
 }
 function agentStopVoice(){
   const recognition=voice.recognition,recorder=voice.recorder;
@@ -5102,45 +5108,117 @@ function agentStopVoice(){
 function agentCancelVoice(){
   voice.generation++;voice.controller?.abort();voice.starting=false;voice.transcribing=false;
   if(voice.recognition)for(const key of ['onstart','onresult','onerror','onend'])voice.recognition[key]=null;
-  if(voice.recorder){voice.recorder.onstop=null;voice.recorder.ondataavailable=null}
+  if(voice.recorder){voice.recorder.onstop=null;voice.recorder.ondataavailable=null;voice.recorder.onerror=null}
   agentStopVoice();
   voice.stream?.getTracks().forEach(track=>{try{track.stop()}catch(_){}});voice.stream=null;
   voice.recorder=null;voice.session=null;voice.transcribing=false;voice.chunks=[];voice.base='';voice.final='';voice.interim='';agentVoiceState();
 }
 function agentToggleVoice(){
+  if(voice.target&&voice.target!==$('#agentInput'))agentCancelVoice();
+  voice.target=null;voice.scope=null;
   if(!agentVoiceEngine()||voice.starting||voice.transcribing)return;
   if(voice.active)agentStopVoice();else agentVoiceStart();
 }
 function agentVoiceState(){
   const mic=$('#agentMicBtn');
   if(mic){
-    mic.classList.toggle('is-on',voice.active);
-    mic.setAttribute('aria-pressed',voice.active?'true':'false');
-    mic.title=voice.active?'正在聆听：再点一下结束并转成文字':'语音输入：点一下开始说话，再点一下结束并转成文字';
-    const slot=mic.querySelector('.icon-slot');if(slot)slot.dataset.icon=voice.active?'square':'mic';
+    mic.classList.toggle('is-on',voice.active&&!voice.target);
+    mic.setAttribute('aria-pressed',voice.active&&!voice.target?'true':'false');
+    mic.title=voice.active&&!voice.target?'正在聆听：再点一下结束并转成文字':'语音输入：点一下开始说话，再点一下结束并转成文字';
+    const slot=mic.querySelector('.icon-slot');if(slot)slot.dataset.icon=voice.active&&!voice.target?'square':'mic';
   }
   const voiceBar=$('#agentVoiceBar');
-  if(voiceBar){voiceBar.classList.toggle('hidden',!voice.active&&!voice.transcribing&&!voice.starting);voiceBar.textContent=voice.transcribing?'正在转写…':voice.starting?'等待麦克风权限…':'正在聆听…'}
+  if(voiceBar){voiceBar.classList.toggle('hidden',Boolean(voice.target)||(!voice.active&&!voice.transcribing&&!voice.starting));voiceBar.textContent=voice.transcribing?'正在转写…':voice.starting?'等待麦克风权限…':'正在聆听…'}
+  updateFieldVoiceButtons();
   agentUpdateBusy();
 }
-/* Called once when the panel opens (and after the server config arrives): reveal
-   the mic only when some engine exists, and say which one is in use. */
+/* Keep the assistant entry consistent with the shared dictation capability. */
 function agentInitVoice(){
-  const engine=agentVoiceEngine();
-  $('#agentMicBtn')?.classList.toggle('hidden',!engine);
-  const hint=$('#agentVoiceHint');
-  if(hint){
-    hint.classList.toggle('hidden',!engine);
-    if(engine)hint.textContent=engine==='server'
-      ?`语音输入：点一下麦克风开始说话，再点一下结束，音频会送到 ${agentServerAsr?.model||'本地转写服务'} 转成文字，可先改再发。`
-      :'语音输入：点一下麦克风开始说话，再点一下结束，识别结果会填进输入框，可先改再发。';
-  }
+  $('#agentMicBtn')?.classList.toggle('hidden',!agentVoiceEngine());
+  $('#agentVoiceHint')?.classList.add('hidden');
   agentVoiceState();
+}
+function voiceScope(){
+  return {user:typeof S==='undefined'?null:S.user?.id,view:typeof UI==='undefined'?null:UI.view,
+    channel:typeof chatChannel==='undefined'?null:chatChannel};
+}
+function voiceInput(){
+  const input=voice.target||$('#agentInput');
+  if(!voice.target)return input;
+  const scope=voiceScope(),same=voice.scope&&scope.user===voice.scope.user&&scope.view===voice.scope.view
+    &&(input.id!=='chatInput'||scope.channel===voice.scope.channel);
+  if(!same||input.isConnected===false||input.disabled||input.readOnly||input.closest?.('.hidden,[hidden],fieldset[disabled],.view:not(.active-view)')||input.getClientRects?.().length===0){
+    agentCancelVoice();return null;
+  }
+  return input;
+}
+function voiceWrite(input,value){
+  const limit=input.maxLength;
+  input.value=Number.isInteger(limit)&&limit>=0?value.slice(0,limit):value;
+  // Notify draft/dirty-state handlers without treating recognition as a manual edit.
+  voice.writing=true;
+  try{if(typeof Event==='function')input.dispatchEvent?.(new Event('input',{bubbles:true}))}
+  finally{voice.writing=false}
+}
+function toggleFieldVoice(input){
+  if(voice.target===input&&(voice.active||voice.starting||voice.transcribing)){
+    if(voice.active)agentStopVoice();else agentCancelVoice();
+    return;
+  }
+  agentCancelVoice();voice.target=input;voice.scope=voiceScope();
+  if(voiceInput())agentVoiceStart();
+}
+function updateFieldVoiceButtons(){
+  if(typeof document==='undefined')return;
+  document.querySelectorAll('.field-voice-btn').forEach(button=>{
+    const input=button.parentElement.querySelector('textarea'),on=voice.target===input;
+    const busy=on&&(voice.active||voice.starting||voice.transcribing);
+    const label=busy?(voice.active?'结束录音':voice.starting?'取消等待麦克风':'取消转写'):'语音输入';
+    button.hidden=!agentVoiceEngine()||input.disabled||input.readOnly;
+    button.classList.toggle('is-on',busy);
+    button.classList.toggle('is-transcribing',on&&voice.transcribing);
+    if(button.getAttribute('aria-label')!==label){button.setAttribute('aria-label',label);button.title=label}
+    button.setAttribute('aria-pressed',busy?'true':'false');
+  });
+}
+async function loadSpeechStatus(){
+  const owner=S.user?.id;if(!owner)return;
+  // A new account must not inherit the previous account's service capability.
+  if(speechStatusOwner!==owner){sharedSpeechStatus=null;speechStatusOwner=owner}
+  try{
+    const status=await api('/api/action',{action:'speech.status',data:{}});
+    if(S.user?.id!==owner)return;
+    sharedSpeechStatus=status;agentInitVoice();scanVoiceFields();
+  }catch(_){if(S.user?.id===owner){sharedSpeechStatus={configured:false};agentInitVoice();scanVoiceFields()}}
+}
+function scanVoiceFields(){
+  document.querySelectorAll('textarea').forEach(input=>{
+    if(input.id==='agentInput'||input.disabled||input.readOnly||input.closest('.voice-field'))return;
+    if(!input.hasAttribute('aria-label')&&!input.hasAttribute('aria-labelledby')&&input.labels?.length===1){
+      const label=input.labels[0].textContent.trim();if(label)input.setAttribute('aria-label',label);
+    }
+    const wrapper=document.createElement('span');wrapper.className='voice-field';
+    input.before(wrapper);wrapper.append(input);
+    const button=document.createElement('button');button.type='button';button.className='field-voice-btn';
+    button.innerHTML=icon('mic');button.onclick=()=>toggleFieldVoice(input);wrapper.append(button);
+  });
+  if(voice.target&&(voice.active||voice.starting||voice.transcribing))voiceInput();
+  updateFieldVoiceButtons();
+}
+function initSharedVoice(){
+  scanVoiceFields();
+  document.addEventListener('input',event=>{if(event.target===voice.target)agentVoiceFollowEdit()});
+  document.addEventListener('submit',event=>{if(voice.target&&event.target.contains(voice.target))agentCancelVoice()},true);
+  // Forms and assistant proposal cards are mounted dynamically. Observe only
+  // structural/visibility changes, not our own button feedback attributes.
+  const observer=new MutationObserver(scanVoiceFields);
+  observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','style','disabled','readonly']});
 }
 
 
 initAgentUI();
 initChatUI();
+initSharedVoice();
 initNavigationLayout();
 function ensureAccountCreateButton(){
   const owner=Boolean(S.user?.role==='superadmin'),host=$('#accountsView .page-intro');if(!host)return;
