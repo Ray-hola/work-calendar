@@ -296,6 +296,18 @@ select {
   animation-delay: 200ms;
 }
 
+.view.active-view.is-revisit > * {
+  animation: wcFadeIn .18s var(--ease) both;
+  animation-delay: 0ms;
+}
+
+/* On the first entry the page itself rises; the space inside it does not
+   rise a second time. */
+.view.active-view:not(.is-revisit) .project-space {
+  animation: none;
+}
+
+
 @keyframes weekFromNext {
   from { opacity: 0; transform: translateX(24px); }
   to { opacity: 1; transform: none; }
@@ -2423,11 +2435,36 @@ select {
   background: var(--c-purple-soft);
 }
 
+/* 未完成，递延 sits beside 记录完成 as its quieter twin: same shape, warm outline. */
 .defer-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 16px;
   border: 1px solid var(--c-coral-line);
-  color: var(--danger);
-  background: var(--accent-soft);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--c-coral-ink);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  transition: background var(--t) var(--ease), border-color var(--t) var(--ease), transform var(--t) var(--ease);
 }
+
+.defer-btn:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  transform: translateY(-1px);
+}
+
+.defer-btn .icon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+
 
 /* One member scope shared by today, the week board and date details. */
 .schedule-scope {
@@ -3178,6 +3215,18 @@ select {
   outline: none;
 }
 
+/* Merged periods sit on the board as a small stack of sheets. */
+.week-task.is-stacked {
+  margin: 0 5px 5px 0;
+  box-shadow: 3px 3px 0 -1px var(--surface), 3px 3px 0 0 var(--line), 6px 6px 0 -1px var(--surface), 6px 6px 0 0 var(--line-soft);
+}
+
+.week-task.is-stacked:hover,
+.week-task.is-stacked:focus-visible {
+  box-shadow: 3px 3px 0 -1px var(--surface), 3px 3px 0 0 var(--line-strong), 6px 6px 0 -1px var(--surface), 6px 6px 0 0 var(--line), 0 12px 20px -16px rgba(64, 54, 42, .6);
+}
+
+
 .week-task-name {
   font-size: 13px;
   font-weight: 500;
@@ -3752,21 +3801,33 @@ select {
   transform: scale(.6);
 }
 
+/* A new task keeps its number; the number turns red and wears a small dot. */
 .project-child-row.is-new::before {
-  content: '';
-  justify-self: center;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--danger);
-  animation: notifyPulse 2.4s var(--ease) infinite;
-  transition: opacity var(--t) var(--ease), transform var(--t) var(--ease);
+  color: var(--danger);
+  font-weight: 600;
+  background: radial-gradient(circle at calc(100% - 2px) 3px, var(--danger) 0 2.5px, transparent 3px);
+  transition: color var(--t) var(--ease);
 }
 
 .project-child-row.is-new.is-seen::before {
-  opacity: 0;
-  transform: scale(0);
+  color: var(--faint);
+  font-weight: 400;
+  background: none;
 }
+
+/* 调整指派 on every row is noise; it comes up with the row under a pointer. */
+@media (hover: hover) {
+  .project-child-row > .assign-project-task {
+    opacity: 0;
+    transition: opacity var(--t-fast) var(--ease);
+  }
+
+  .project-child-row:hover > .assign-project-task,
+  .project-child-row:focus-within > .assign-project-task {
+    opacity: 1;
+  }
+}
+
 
 /* Handed-out 临时任务 name the other person, which needs a wider column. */
 .temp-task-node .project-task-open {
@@ -4349,7 +4410,42 @@ body.nav-dragging * {
   font-size: 15px;
 }
 
+/* Seven short day names need room to read as separate choices. */
+.week-start-seg {
+  gap: 2px;
+  min-width: 0;
+}
+
+.week-start-seg .rule-opt {
+  min-width: 42px;
+  padding: 0 10px;
+}
+
+@media (max-width: 560px) {
+  .week-start-seg .rule-opt {
+    min-width: 0;
+    padding: 0 4px;
+  }
+}
+
+.space-head .primary-btn.is-idle {
+
+  height: auto;
+  padding: 0 2px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--faint);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: default;
+}
+
+.space-head .primary-btn.is-idle::after {
+  display: none;
+}
+
 .space-head h2 span {
+
   margin-left: 4px;
   font-size: 12px;
   font-weight: 500;
@@ -7306,12 +7402,14 @@ body.nav-dragging * {
   color: var(--muted);
 }
 
+/* A rule is a choice, not a warning: open is green, asks-first is amber, the
+   assistant's read-only mode is blue, and "not allowed" / "off" stay neutral. */
 .rule-tag.is-direct,
 .rule-tag.is-operate { color: var(--c-green-ink); background: var(--c-green-soft); }
-.rule-tag.is-approval,
-.rule-tag.is-read { color: var(--c-gold-ink); background: var(--c-gold-soft); }
+.rule-tag.is-approval { color: var(--c-gold-ink); background: var(--c-gold-soft); }
+.rule-tag.is-read { color: var(--c-blue-ink); background: var(--c-blue-soft); }
 .rule-tag.is-none,
-.rule-tag.is-off { color: var(--danger-ink); background: var(--c-coral-soft); }
+.rule-tag.is-off { color: var(--muted); background: var(--surface-sunk); }
 
 .rule-row-people {
   display: flex;
@@ -7365,6 +7463,68 @@ body.nav-dragging * {
   align-items: center;
   gap: 8px;
 }
+
+/* The group's name is an input that looks like a title; a pencil says so. */
+.rule-name-wrap {
+  position: relative;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+}
+
+.rule-name-wrap .rule-name {
+  padding-right: 34px;
+}
+
+.rule-name-icon {
+  position: absolute;
+  right: 10px;
+  width: 15px;
+  height: 15px;
+  color: var(--faint);
+  pointer-events: none;
+  transition: color var(--t-fast) var(--ease);
+}
+
+.rule-name-wrap:hover .rule-name-icon,
+.rule-name:focus + .rule-name-icon {
+  color: var(--accent);
+}
+
+.rule-members-note {
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+/* 默认规则 lists who falls back to it; the chips are not choices there. */
+.rule-person:disabled.is-on {
+  border-color: var(--line-soft);
+  background: var(--surface-sunk);
+  font-weight: 500;
+}
+
+.collection-form {
+  display: grid;
+  gap: 12px;
+}
+
+.collection-form .form-field {
+  margin: 0;
+}
+
+.creation-card .eyebrow {
+  font: 600 10.5px/1.2 var(--font-sans);
+  letter-spacing: .16em;
+  color: var(--muted);
+}
+
+.rule-seg.is-multi .rule-opt.is-on {
+  background: var(--accent-soft-2);
+  color: var(--accent-dark);
+  font-weight: 600;
+}
+
 
 .rule-name {
   flex: 1;
@@ -10588,11 +10748,26 @@ body.is-resizing-agent { user-select: none; }
 .week-task-title .week-task-name { flex: 1 1 auto; min-width: 0; }
 .week-task-title .stack-badge { flex: none; margin: 1px 0 0; padding: 1px 4px; font-size: 10px; }
 
-.repeat-stacking-card { align-items: center; gap: 16px; }
-.repeat-stacking-choice { display: inline-flex; align-items: center; gap: 9px; min-height: 36px; font-size: 13px; cursor: pointer; }
-.repeat-stacking-choice input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
-.repeat-stacking-choice:has(input:disabled) { opacity: .6; cursor: wait; }
-@media (max-width: 560px) { .repeat-stacking-card { align-items: flex-start; } }
+/* Binary settings save immediately; multi-value rules keep segmented choices. */
+.repeat-stacking-card { display: flex; align-items: center; gap: 16px; }
+.week-start-card { flex-wrap: wrap; }
+.week-start-card > div:first-child { flex: 1 1 260px; min-width: 0; }
+.week-start-card .week-start-seg { flex: none; }
+.settings-switch { display: inline-flex; align-items: center; gap: 10px; font-size: 13px; cursor: pointer; }
+.settings-switch-control { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 36px; flex: none; }
+.settings-switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; z-index: 1; }
+.settings-switch-track { position: relative; width: 36px; height: 22px; border: 1px solid var(--line-strong); border-radius: 99px; background: var(--surface-sunk); transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease); }
+.settings-switch-track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: transform var(--t-fast) var(--ease), background var(--t-fast) var(--ease); }
+.settings-switch input:checked + .settings-switch-track { background: var(--accent); border-color: var(--accent); }
+.settings-switch input:checked + .settings-switch-track::after { transform: translateX(14px); background: var(--surface); }
+.settings-switch input:focus-visible + .settings-switch-track { outline: 2px solid var(--accent); outline-offset: 3px; }
+.settings-switch:has(input:disabled) { opacity: .6; cursor: wait; }
+.settings-switch input:disabled { cursor: wait; }
+.project-automation-card { display: block; }
+.automation-setting-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.automation-setting-head > div:first-child { min-width: 0; }
+.project-automation-card .automation-actions { margin-top: 14px; }
+.project-automation-card .secondary-btn { margin-top: 0; }
 
 #settingsView .automation-card + .automation-card { margin-top: 18px; }
 
@@ -10607,3 +10782,14 @@ body.is-resizing-agent { user-select: none; }
 .task-main > .stack-badge { display: inline-flex; flex-shrink: 0; margin-left: 0; overflow: visible; }
 /* The period badge replaces redundant fixed/carry labels in a compact row. */
 .task-main:has(> .stack-badge) > :is(.fixed-badge,.carried-badge,.defer-target) { display: none; }
+
+/* A group that just took in another period: the count gives one small bump. */
+.stack-badge.is-bumped {
+  animation: stackBump .55s cubic-bezier(.3, 1.6, .5, 1) both;
+}
+
+@keyframes stackBump {
+  0% { transform: scale(.7); background: var(--accent-soft-2); }
+  45% { transform: scale(1.18); }
+  100% { transform: none; }
+}

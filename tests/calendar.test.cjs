@@ -2058,17 +2058,40 @@ test('a stacked period is one deferred card while all period histories remain av
   assert.deepEqual(a.json('[...taskLineageIds(S.tasks[2])].sort()'),['carry','old','today']);
   assert.equal(a.run('deferHops(S.tasks[2])'),0,'期次数不应冒充递延跳数');
   a.run("S.tasks[2].stackDates=['2026-11-02','2026-11-04']");assert.deepEqual(a.json('stackPeriodDates(S.tasks[2])'),['2026-11-02','2026-11-04']);
-  assert.match(a.run('taskCard(S.tasks[2])'),/合并 2 期.*×2/);
+  assert.match(a.run('taskCard(S.tasks[2])'),/合并 2 期">2 期</);
   a.run("S.tasks[2].status='done'");assert.equal(a.run('isDeferredTask(S.tasks[2])'),false);
 });
 
-test('only superadmin sees the stacking checkbox and failed saves restore its state',async()=>{
+test('only superadmin sees the stacking switch and failed saves restore its state',async()=>{
   const a=app(),input={checked:false,disabled:false},box={innerHTML:'',hidden:null,classList:{toggle:(name,value)=>{box.hidden=value}},querySelector:()=>input};
   a.context.document={querySelector:s=>s==='#repeatStackingCard'?box:null};
   for(const role of ['member','admin']){a.run(`S.user={role:'${role}'};renderRepeatStackingSetting()`);assert.equal(box.hidden,true);assert.equal(box.innerHTML,'');}
   a.run("S.user={role:'superadmin'};S.repeatStacking=false;renderRepeatStackingSetting();act=async()=>{throw new Error('offline')}");
-  assert.equal(box.hidden,false);assert.match(box.innerHTML,/type="checkbox"/);assert.ok(!box.innerHTML.includes('<p'));
+  assert.equal(box.hidden,false);assert.match(box.innerHTML,/type="checkbox" role="switch"/);assert.ok(!box.innerHTML.includes('<p'));
   input.checked=true;await input.onchange();assert.equal(input.checked,false);assert.equal(input.disabled,false);
+});
+
+test('project auto-report switch honors roles, defaults on and changes only enabled',async()=>{
+  const a=app(),input={id:'projectAutomationEnabled',checked:false,disabled:false},box={innerHTML:'',querySelector:()=>input};
+  a.context.document={querySelector:s=>s==='#projectAutomationToggle'?box:null};
+  a.run("S.user={id:'member',admin:0};renderProjectAutomationSetting()");assert.equal(box.innerHTML,'');
+  a.run("S.user={id:'admin',admin:1};S.automation={mode:'weekly',time:'03:15',weekdays:[1,3]};renderProjectAutomationSetting()");
+  assert.match(box.innerHTML,/role="switch" id="projectAutomationEnabled" checked/);
+  const calls=[];a.context.save=async(action,data)=>calls.push({action,data:JSON.parse(JSON.stringify(data))});a.run('act=save');
+  input.checked=false;await input.onchange();assert.deepEqual(calls,[{action:'automation.update',data:{enabled:false}}]);
+  assert.deepEqual(a.json('S.automation'),{mode:'weekly',time:'03:15',weekdays:[1,3]},'开关不覆盖周期、时间或日期');
+  a.run("S.automation.enabled=false;renderProjectAutomationSetting();act=async()=>{throw Error('offline')}");
+  assert.ok(!box.innerHTML.includes(' checked'));input.checked=true;await input.onchange();
+  assert.equal(input.checked,false);assert.equal(input.disabled,false);
+});
+
+test('settings switches lock until the save completes and restore focus to the rendered control',async()=>{
+  const a=app(),input={id:'toggle',checked:true,disabled:false},replacement={focus(){this.focused=true}};
+  let resolve,called=0;const pending=new Promise(done=>{resolve=done});
+  a.context.document={querySelector:()=>replacement};a.context.input=input;
+  a.context.save=()=>{called++;return pending};a.run("UI.view='settings';bindSettingSwitch(input,save,()=>false)");
+  const first=input.onchange();assert.equal(input.disabled,true);await input.onchange();assert.equal(called,1);
+  resolve();await first;assert.equal(input.disabled,false);assert.equal(replacement.focused,true);
 });
 
 test('stacked history separates original periods and folds one grouped operation without repeating time',()=>{
@@ -2091,14 +2114,14 @@ test('AI confirmation binds and displays the same grouped-period scope as direct
   const a=planningApp();a.run("S.tasks=[{id:'p1',date:'2026-11-02'},{id:'p2',date:'2026-11-03',name:'巡检',stackCount:2,stackPeriods:['p1','p2']}]");
   assert.deepEqual(a.json("agentTaskScope('task.complete',{id:'p2',summary:'done'})"),{id:'p2',summary:'done',stackPeriods:['p1','p2']});
   const html=a.run("agentActionHTML('task.complete',agentTaskScope('task.complete',{id:'p2',summary:'done'}))");
-  assert.ok(html.includes('巡检 ×2'));assert.ok(html.includes('11月2日、11月3日'));assert.ok(!html.includes('<pre>'));
+  assert.ok(html.includes('巡检 · 2 期'));assert.ok(html.includes('11月2日、11月3日'));assert.ok(!html.includes('<pre>'));
 });
 
 test('a merged period badge sits beside the clamped week chip name, never inside it', () => {
   const a = app();
   a.run("S.users=[{id:'member',active:1}];S.today='2026-11-04'");
   const chip = a.run(`weekTaskChip({id:'t',name:'${'很长的固定任务名称'.repeat(4)}',assignee:'member',priority:'P1',status:'todo',date:'2026-11-04',stackCount:3},'2026-11-04')`);
-  assert.ok(/<span class="week-task-title"><span class="week-task-name">[^<]*<\/span><span class="stack-badge"[^>]*>×3<\/span><\/span>/.test(chip));
+  assert.ok(/<span class="week-task-title"><span class="week-task-name">[^<]*<\/span><span class="stack-badge"[^>]*>3 期<\/span><\/span>/.test(chip));
   const plain = a.run(`weekTaskChip({id:'u',name:'普通任务',assignee:'member',priority:'P1',status:'todo',date:'2026-11-04'},'2026-11-04')`);
   assert.ok(!plain.includes('week-task-title') && plain.includes('<span class="week-task-name">普通任务</span>'));
 });
@@ -2145,6 +2168,48 @@ test('the project space card drops what the page already shows', () => {
   assert.equal(space.split('invite-members').length - 1, 0, '添加协作者只留在项目人力里');
   assert.ok(space.includes('spaceInvite') && space.includes('add-project-task'));
   assert.ok(!space.includes('project-members'));
+});
+
+test('merged periods read as N 期, stack up in the week, and bump only when a group grows', () => {
+  const a = app();
+  a.run("S.users=[{id:'member',active:1}];S.today='2026-11-04';UI.stackSeen=undefined");
+  const t = "{id:'b',name:'日报',assignee:'member',priority:'P1',status:'todo',date:'2026-11-04',stackCount:3,stackPeriods:['p1','p2','p3']}";
+  assert.equal(a.run(`stackBadge(${t})`), '<span class="stack-badge" aria-label="合并 3 期">3 期</span>', '第一次显示不跳');
+  a.run("UI.stackSeen=new Map([['p1',2]])");
+  assert.ok(a.run(`stackBadge(${t})`).includes('is-bumped'), '同一组多了一期才跳一下');
+  a.run("UI.stackSeen=new Map([['p1',3]])");
+  assert.ok(!a.run(`stackBadge(${t})`).includes('is-bumped'));
+  assert.ok(a.run(`weekTaskChip(${t},'2026-11-04')`).includes(' is-stacked"'));
+});
+
+test('the first merge from one to two periods bumps once, using the same root after a carry', () => {
+  const a=app();
+  a.run(`UI.stackSeen=undefined;S.tasks=[{id:'carry',originId:'p1',stackCount:1}];rememberStackSizes()`);
+  assert.deepEqual(a.json('[...UI.stackSeen]'),[['p1',1]]);
+  a.run("S.tasks=[{id:'p2',stackCount:2,stackPeriods:['p1','p2']}]");
+  assert.ok(a.run('stackBadge(S.tasks[0])').includes('is-bumped'),'已显示过的单期首次合并应跳动');
+  a.run('rememberStackSizes()');
+  assert.ok(!a.run('stackBadge(S.tasks[0])').includes('is-bumped'),'相同快照重新渲染不重复跳动');
+  a.run("UI.stackSeen=undefined");assert.ok(!a.run('stackBadge(S.tasks[0])').includes('is-bumped'),'初次加载合并任务保持安静');
+  a.run("S.tasks=[{id:'p1'},{id:'old',originId:'p1',superseded:true}];rememberStackSizes()");
+  assert.equal(a.run('UI.stackSeen.get("p1")'),1,'没有 stackCount 的普通单期同样记为一期');
+});
+
+test('a revisited view only fades in, and the timeline keeps the accent colour for last', () => {
+  const sw = source.match(/function switchView\(view\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/classList\?\.toggle\('is-revisit',seen\.has\(view\)\)/.test(sw));
+  assert.ok(/palette=\['blue','green','purple','gold','coral'\]/.test(source), '珊瑚色和「今天」红线同色，排在最后');
+});
+
+test('settings speak plainly: neutral "not allowed", one-choice-at-a-time week start, a run that reports what it did', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../styles.css'), 'utf8');
+  assert.ok(/\.rule-tag\.is-none,\s*\.rule-tag\.is-off \{ color: var\(--muted\)/.test(css), '不允许 / 关闭 不再用警示红');
+  assert.ok(/\.rule-tag\.is-read \{ color: var\(--c-blue-ink\)/.test(css), 'AI 查询与审批不再同色');
+  const week = source.match(/function renderWeekStartSetting\(\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/box\.dataset\.saving/.test(week) && /x\.disabled=true/.test(week), '保存期间不能连点');
+  const collect = source.match(/function collectionSettings\(\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(collect.includes('<h2>项目补报时间</h2>') && collect.includes('data-mode') && collect.includes('data-weekday'));
+  assert.ok(/检查完成：/.test(source) && /action:'scheduler\.run'/.test(source));
 });
 
 test('week history retains deferral events after completion without treating merged or reopened rows as deferrals', () => {

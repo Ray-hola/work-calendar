@@ -384,6 +384,10 @@ function switchView(view){
      panel the rail happened to be parked on last. */
   if(view==='calendar'&&changed)UI.selectedWeek=0;
   $$('.view').forEach(v=>v.classList.toggle('active-view',v.id===`${view}View`));
+  /* The page rises in once per visit to the app; coming back to a view only
+     fades it in, so moving between familiar pages does not drag. */
+  const shown=$(`#${view}View`),seen=UI.seenViews||(UI.seenViews=new Set());
+  shown?.classList?.toggle('is-revisit',seen.has(view));seen.add(view);
   $$('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.view===view));
   const labels={today:'今日任务',calendar:'周视图',projects:'项目空间',timeline:'项目时间轴',achievements:'成果库',archive:'档案室',inbox:'收件箱',accounts:'账户管理',settings:'系统设置',dayDetail:'日期详情',chat:'沟通区'};
   $('#crumbCurrent').textContent=`/ ${labels[view]||view}`;
@@ -413,7 +417,15 @@ const isSuperseded=t=>Boolean(t&&t.superseded);
    it keeps originId for history, but removes it from this list and its count. */
 const isDeferredTask=t=>!isSuperseded(t)&&Boolean(t.originId||t.stackCount>1)&&['todo','doing'].includes(t.status);
 const deferHops=t=>taskLineageIds(t,false).size-1;
-const stackBadge=t=>Number(t.stackCount)>1?`<span class="stack-badge" aria-label="合并 ${Number(t.stackCount)} 期">×${Number(t.stackCount)}</span>`:'';
+/* Merged periods read as "N 期", a count of periods rather than a multiplier
+   of work. A group keeps its key (its oldest period) as it grows, so the badge
+   can give a small bump when another period joins since the last render. */
+const stackKey=t=>(t.stackPeriods||[])[0]||t.originId||t.reworkOf||t.id;
+const stackBadge=t=>{const n=Number(t.stackCount);if(!(n>1))return '';const before=UI.stackSeen?.get(stackKey(t));
+  return `<span class="stack-badge${before&&n>before?' is-bumped':''}" aria-label="合并 ${n} 期">${n} 期</span>`};
+function rememberStackSizes(){
+  UI.stackSeen=new Map((S.tasks||[]).filter(t=>!isSuperseded(t)).map(t=>[stackKey(t),Number(t.stackCount)||1]));
+}
 const stackPeriodDates=t=>t.stackDates||(t.stackPeriods||[]).map(id=>S.tasks.find(x=>x.id===id)?.date).filter(Boolean).sort();
 /* Every occurrence of one task shares originId/reworkOf links. Walking them
    lets the drawer show a single history for a task that was deferred or redone. */
@@ -522,7 +534,7 @@ function weekLabel(off){
 function weekTaskChip(t,iso){
   const cont=iso>t.date,[c,l]=status(t);
   const meta=cont?`续 · ${nameOf(t.assignee)}`:`${escapeHTML(t.time||'09:00')} · ${nameOf(t.assignee)}`;
-  return `<button class="week-task ${escapeHTML(t.priority)} ${c}${cont?' cont':''}" type="button" data-id="${escapeHTML(t.id)}" title="${escapeHTML(`${t.name} · ${nameOf(t.assignee)} · ${l}`)}">`
+  return `<button class="week-task ${escapeHTML(t.priority)} ${c}${cont?' cont':''}${t.stackCount>1?' is-stacked':''}" type="button" data-id="${escapeHTML(t.id)}" title="${escapeHTML(`${t.name} · ${nameOf(t.assignee)} · ${l}`)}">`
     +`${t.stackCount>1?`<span class="week-task-title"><span class="week-task-name">${escapeHTML(t.name)}</span>${stackBadge(t)}</span>`
     :`<span class="week-task-name">${escapeHTML(t.name)}</span>`}`
 
@@ -1257,7 +1269,7 @@ function projectLifecycle(p,manage){
 }
 function projectBackground(p,manage){
   const text=p.background||'';
-  return `<section class="space-section"><div class="space-head"><h2>项目背景</h2>${manage?'<button class="primary-btn" '
+  return `<section class="space-section"><div class="space-head"><h2>项目背景</h2>${manage?'<button class="primary-btn is-idle" '
     +'id="saveBackground" disabled>已保存</button>':''}</div>`
     +`${manage?docEdit(text,'id="spaceBackground" data-placeholder="为什么做、要达成什么、边界在哪里"')
     :`<div class="space-text">${text?escapeHTML(text):'<span class="muted">Owner 还没有写项目背景</span>'}</div>`}</section>`;
@@ -1319,7 +1331,10 @@ function bindProjectSpace(p){
   const bg=$('#spaceBackground'),btn=$('#saveBackground');
   if(bg&&btn){
     let saved=docText(bg),saving=false;
-    const sync=()=>{const dirty=docText(bg)!==saved;btn.disabled=saving||!dirty;btn.textContent=saving?'保存中…':dirty?'保存':'已保存'};
+    /* Saved reads as a quiet note; only unsaved text turns it into a button. */
+    const sync=()=>{const dirty=docText(bg)!==saved;btn.disabled=saving||!dirty;btn.textContent=saving?'保存中…':dirty?'保存':'已保存';
+      btn.classList?.toggle('is-idle',!saving&&!dirty)};
+
     bg.oninput=sync;
     btn.onclick=async()=>{
       if(saving)return;
@@ -1750,14 +1765,32 @@ function renderSettings(){
   $('#settingsView .automation-card')?.classList.toggle('hidden',!admin);
   $('#runAutomationBtn')?.classList.toggle('hidden',!admin);
   renderRepeatStackingSetting();
+  renderProjectAutomationSetting();
   renderWeekStartSetting();
   renderCreationPolicy();
+}
+function settingSwitch(id,label,checked){
+  return `<label class="settings-switch"><span>${escapeHTML(label)}</span><span class="settings-switch-control"><input type="checkbox" role="switch" id="${id}"${checked?' checked':''}><span class="settings-switch-track" aria-hidden="true"></span></span></label>`;
+}
+function bindSettingSwitch(input,save,current){
+  input.onchange=async()=>{
+    if(input.disabled)return;
+    input.disabled=true;
+    try{await save(input.checked)}catch(e){input.checked=current()}
+    finally{input.disabled=false;if(UI.view==='settings')$('#'+input.id)?.focus()}
+  };
+}
+function renderProjectAutomationSetting(){
+  const box=$('#projectAutomationToggle');if(!box)return;
+  box.innerHTML='';if(!S.user?.admin)return;
+  box.innerHTML=settingSwitch('projectAutomationEnabled','自动补报',S.automation?.enabled!==false);
+  bindSettingSwitch(box.querySelector('input'),enabled=>act('automation.update',{enabled}),()=>S.automation?.enabled!==false);
 }
 function renderRepeatStackingSetting(){
   const box=$('#repeatStackingCard');if(!box)return;
   const allowed=S.user?.role==='superadmin';box.classList.toggle('hidden',!allowed);if(!allowed)return;
-  box.innerHTML=`<div><span class="eyebrow">固定任务</span><h2>递延合并</h2></div><label class="repeat-stacking-choice"><input type="checkbox" id="repeatStackingEnabled"${S.repeatStacking?' checked':''}>合并未完成期次</label>`;
-  const input=box.querySelector('input');input.onchange=async()=>{const enabled=input.checked;input.disabled=true;try{await act('repeat.stacking.update',{enabled})}catch(e){input.checked=Boolean(S.repeatStacking)}finally{input.disabled=false;if(UI.view==='settings')$('#repeatStackingEnabled')?.focus()}};
+  box.innerHTML=`<div><span class="eyebrow">固定任务</span><h2>递延合并</h2></div>${settingSwitch('repeatStackingEnabled','合并未完成期次',S.repeatStacking)}`;
+  bindSettingSwitch(box.querySelector('input'),enabled=>act('repeat.stacking.update',{enabled}),()=>Boolean(S.repeatStacking));
 }
 function renderWeekStartSetting(){
   const box=$('#weekStartCard');if(!box)return;
@@ -1767,8 +1800,11 @@ function renderWeekStartSetting(){
     +`全员生效。</p></div><div class="rule-seg week-start-seg" role="radiogroup" aria-label="每周开始日">${order.map(d=>`<button type="button" `
     +`class="rule-opt${d===day?' is-on':''}" role="radio" aria-checked="${d===day}" data-day="${d}">${WEEKDAY_SHORT[d]}</button>`).join('')}</div>`;
   box.querySelectorAll('[data-day]').forEach(b=>b.onclick=async()=>{
-    const next=Number(b.dataset.day);if(next===weekStartDay())return;
-    try{await act('week_start.update',{day:next});toast(`每周改为从${WEEKDAY_SHORT[next]}开始`)}catch(e){}
+    const next=Number(b.dataset.day);if(next===weekStartDay()||box.dataset.saving)return;
+    /* One change at a time: the choice shows at once and the row waits for the save. */
+    box.dataset.saving='1';box.querySelectorAll('[data-day]').forEach(x=>{const on=x===b;x.classList.toggle('is-on',on);x.setAttribute('aria-checked',String(on));x.disabled=true});
+    try{await act('week_start.update',{day:next});toast(`每周改为从${WEEKDAY_SHORT[next]}开始`)}catch(e){renderWeekStartSetting()}
+    finally{delete box.dataset.saving}
   });
 }
 /* Groups that exist read as a list, one row each; a group is made or changed
@@ -1780,7 +1816,7 @@ function renderCreationPolicy(){
   const inGroup=gid=>S.users.filter(u=>roleOf(u)==='member'&&groupOf(u)===gid);
   const tag=(label,value,labels)=>`<span class="rule-tag is-${escapeHTML(value)}"><small>${label}</small>${labels[value]||''}</span>`;
   const row=g=>{const list=inGroup(g.id);return `<div class="rule-row" data-group="${escapeHTML(g.id)}" role="button" tabindex="0" aria-label="编辑「${escapeHTML(g.name)}」"><div class="rule-row-name"><strong>${escapeHTML(g.name)}</strong></div><div class="rule-row-tags">${CREATION_KINDS.map(k=>tag(KIND_LABELS[k],g[k],RULE_LABELS)).join('')}${tag('AI 助手',g.agent||'read',AGENT_ACCESS_LABELS)}</div><div class="rule-row-people" title="${escapeHTML(list.map(u=>nameOf(u.id)).join('、'))}">${list.slice(0,4).map(u=>avatarHTML(u.id)).join('')}<span>${list.length} 人</span></div><span class="task-arrow">${icon('chevron-right')}</span></div>`};
-  box.innerHTML=`<div class="creation-head"><h2>规则组</h2><button class="secondary-btn" id="addCreationGroup">${icon('plus')}新建规则组</button></div><div class="rule-list">${policy.groups.map(row).join('')}</div>`;
+  box.innerHTML=`<div class="creation-head"><div><span class="eyebrow">成员权限</span><h2>规则组</h2></div><button class="secondary-btn" id="addCreationGroup">${icon('plus')}新建规则组</button></div><div class="rule-list">${policy.groups.map(row).join('')}</div>`;
   $$('#creationPolicy .rule-row').forEach(r=>{r.onclick=()=>editRuleGroup(r.dataset.group);r.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();editRuleGroup(r.dataset.group)}}});
   $('#addCreationGroup').onclick=()=>editRuleGroup(null);
 }
@@ -1799,8 +1835,9 @@ function editRuleGroup(gid){
   const groupName=id=>policy.groups.find(x=>x.id===id)?.name||fallback;
   const seg=(key,labels,label)=>`<div class="rule-line"><span>${label}</span><div class="rule-seg" role="radiogroup" aria-label="${label}">${Object.entries(labels).map(([v,l])=>`<button type="button" class="rule-opt${draft[key]===v?' is-on':''}" role="radio" aria-checked="${draft[key]===v}" data-key="${key}" data-value="${v}">${l}</button>`).join('')}</div></div>`;
   const person=u=>{const cur=groupOf(u),from=!picked.has(u.id)&&cur!=='default'?`<small>${escapeHTML(groupName(cur))}</small>`:'';return `<button type="button" class="rule-person${picked.has(u.id)?' is-on':''}" data-user="${escapeHTML(u.id)}" aria-pressed="${picked.has(u.id)}"${isDefault?' disabled':''}>${avatarHTML(u.id)}<span>${escapeHTML(nameOf(u.id))}${from}</span></button>`};
-  const tools=isDefault?'':'<span><button type="button" class="ghost-btn" id="rulePickAll">全选</button> <button type="button" class="ghost-btn" id="rulePickNone">全不选</button></span>';
-  openModal(`<div class="rule-card is-editing"><header class="rule-card-head"><input class="rule-name" id="ruleGroupName" value="${escapeHTML(draft.name)}" maxlength="20" aria-label="规则组名称"></header><div class="rule-lines">${CREATION_KINDS.map(k=>seg(k,RULE_LABELS,KIND_LABELS[k])).join('')}${seg('agent',AGENT_ACCESS_LABELS,'AI 助手')}</div><div class="rule-members"><div class="rule-members-head"><span>成员</span>${tools}</div><div class="rule-people">${members.map(person).join('')||'<span class="muted">还没有普通用户。</span>'}</div></div></div><div class="modal-footer">${isNew||isDefault?'':'<button class="ghost-btn rule-delete" id="deleteRuleGroup">删除</button>'}<button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="saveRuleGroup">${isNew?'创建':'保存'}</button></div>`);
+  const tools=isDefault?'<small class="rule-members-note">没分到其他规则组的成员都按这一组</small>'
+    :'<span><button type="button" class="ghost-btn" id="rulePickAll">全选</button> <button type="button" class="ghost-btn" id="rulePickNone">全不选</button></span>';
+  openModal(`<div class="rule-card is-editing"><header class="rule-card-head"><label class="rule-name-wrap" title="点击修改名称"><input class="rule-name" id="ruleGroupName" value="${escapeHTML(draft.name)}" maxlength="20" aria-label="规则组名称">${icon('edit','rule-name-icon')}</label></header><div class="rule-lines">${CREATION_KINDS.map(k=>seg(k,RULE_LABELS,KIND_LABELS[k])).join('')}${seg('agent',AGENT_ACCESS_LABELS,'AI 助手')}</div><div class="rule-members"><div class="rule-members-head"><span>成员</span>${tools}</div><div class="rule-people">${members.map(person).join('')||'<span class="muted">还没有普通用户。</span>'}</div></div></div><div class="modal-footer">${isNew||isDefault?'':'<button class="ghost-btn rule-delete" id="deleteRuleGroup">删除</button>'}<button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="saveRuleGroup">${isNew?'创建':'保存'}</button></div>`);
   const sync=()=>$$('#modalContent .rule-person').forEach(b=>{const on=picked.has(b.dataset.user);b.classList.toggle('is-on',on);b.setAttribute('aria-pressed',String(on))});
   $$('#modalContent .rule-opt').forEach(b=>b.onclick=()=>{draft[b.dataset.key]=b.dataset.value;b.parentElement.querySelectorAll('.rule-opt').forEach(x=>{x.classList.toggle('is-on',x===b);x.setAttribute('aria-checked',String(x===b))})});
   if(!isDefault){
@@ -1911,7 +1948,7 @@ function startAccountDrag(e,row){
   document.body.appendChild(ghost);row.classList.add('is-placeholder');document.body.classList.add('is-dragging-account');
   UI.accountDrag={id};
   const rows=()=>[...$$('#accountList .account-item')];
-  const flip=change=>{const before=new Map(rows().map(r=>[r,r.getBoundingClientRect().top]));change();rows().forEach(r=>{if(r===row)return;const d=before.get(r)-r.getBoundingClientRect().top;if(d)r.animate([{transform:`translateY(${d}px)`},{transform:'none'}],{duration:200,easing:'cubic-bezier(.2,.8,.2,1)'})})};
+  const flip=change=>{const before=new Map(rows().map(r=>[r,r.getBoundingClientRect().top]));change();rows().forEach(r=>{if(r===row)return;const d=before.get(r)-r.getBoundingClientRect().top;if(d&&!navReducedMotion())r.animate([{transform:`translateY(${d}px)`},{transform:'none'}],{duration:200,easing:'cubic-bezier(.2,.8,.2,1)'})})};
   let scroll=0;
   const move=ev=>{
     ghost.style.left=(ev.clientX-offX)+'px';ghost.style.top=(ev.clientY-offY)+'px';
@@ -1927,7 +1964,7 @@ function startAccountDrag(e,row){
   const drop=async()=>{
     removeEventListener('pointermove',move);removeEventListener('pointerup',drop);removeEventListener('pointercancel',drop);clearInterval(tick);
     const to=row.closest('.account-group').dataset.role,end=row.getBoundingClientRect(),now=ghost.getBoundingClientRect();
-    ghost.animate([{transform:'scale(1.02)'},{transform:`translate(${end.left-now.left}px,${end.top-now.top}px)`}],{duration:170,easing:'cubic-bezier(.2,.8,.2,1)'}).onfinish=()=>{ghost.remove();row.classList.remove('is-placeholder');document.body.classList.remove('is-dragging-account')};
+    ghost.animate([{transform:'scale(1.02)'},{transform:`translate(${end.left-now.left}px,${end.top-now.top}px)`}],{duration:navReducedMotion()?0:170,easing:'cubic-bezier(.2,.8,.2,1)'}).onfinish=()=>{ghost.remove();row.classList.remove('is-placeholder');document.body.classList.remove('is-dragging-account')};
     const order=rows().map(r=>r.dataset.user);
     UI.accountDrag=null;
     if(to===from&&order.join()===start)return;
@@ -2153,11 +2190,24 @@ function fixedTask(){
 }
 function collectionSettings(){
   const cfg=S.automation||{},mode=cfg.mode||'daily',days=['周一','周二','周三','周四','周五','周六','周日'],selected=cfg.weekdays||[0,1,2,3,4];
-  openModal(`<div class="eyebrow">Super Admin · 自动收集</div><h2>设置总结收集时间</h2><label class="form-field">收集周期<select id="collectionMode"><option value="daily">每天</option><option value="weekly">每周指定星期</option><option value="dates">指定日期</option></select></label><label class="form-field">收集时间<input id="collectionTime" type="time" value="${escapeHTML(cfg.time||'00:00')}"></label><fieldset class="member-checkboxes" id="collectionWeekdayFields"><legend>每周几收集</legend>${days.map((d,i)=>`<label><input type="checkbox" name="collectionWeekday" value="${i}" ${selected.includes(i)?'checked':''}> ${d}</label>`).join('')}</fieldset><label class="form-field hidden" id="collectionDatesField">指定日期（逗号分隔）<input id="collectionDates" value="${escapeHTML((cfg.dates||[]).join(', '))}" placeholder="2026-09-20, 2026-10-01"></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="saveCollection">保存收集规则</button></div>`);
-  $('#collectionMode').value=mode;
-  const sync=()=>{const m=$('#collectionMode').value;$('#collectionWeekdayFields').classList.toggle('hidden',m!=='weekly');$('#collectionDatesField').classList.toggle('hidden',m!=='dates')};
-  $('#collectionMode').onchange=sync;sync();$('#cancelAction').onclick=closeModal;
-  $('#saveCollection').onclick=async()=>{const m=$('#collectionMode').value,weekdays=$$('input[name="collectionWeekday"]:checked').map(x=>Number(x.value)),dates=$('#collectionDates').value.split(/[,，\s]+/).map(x=>x.trim()).filter(Boolean);if(m==='weekly'&&!weekdays.length){toast('请选择每周收集日');return}if(m==='dates'&&!dates.length){toast('请填写指定收集日期');return}try{await act('automation.update',{mode:m,time:$('#collectionTime').value,weekdays,dates});closeModal()}catch(e){}};
+  /* Same controls as the rule groups: one row of choices for how often, toggles
+     for the weekdays, named after the card that opens it. */
+  const modes={daily:'每天',weekly:'每周几',dates:'指定日期'};let current=modes[mode]?mode:'daily';const picked=new Set(selected);
+  openModal(`<div class="eyebrow">日记自动化规则</div><h2>项目补报时间</h2><p class="muted">到点时，前一天 Owner 没交项目日报的项目，会自动汇总成一份补报，交给 Owner 确认。</p>`
+    +`<div class="collection-form"><div class="rule-line"><span>补报周期</span><div class="rule-seg" role="radiogroup" aria-label="补报周期">${Object.entries(modes).map(([v,l])=>`<button type="button" `
+    +`class="rule-opt${v===current?' is-on':''}" role="radio" aria-checked="${v===current}" data-mode="${v}">${l}</button>`).join('')}</div></div>`
+    +`<div class="rule-line" id="collectionWeekdayFields"><span>星期</span><div class="rule-seg is-multi" role="group" aria-label="每周补报日">${days.map((d,i)=>`<button type="button" `
+    +`class="rule-opt${picked.has(i)?' is-on':''}" aria-pressed="${picked.has(i)}" data-weekday="${i}">${d.slice(1)}</button>`).join('')}</div></div>`
+    +`<label class="form-field hidden" id="collectionDatesField">指定日期（逗号分隔）<input id="collectionDates" value="${escapeHTML((cfg.dates||[]).join(', '))}" placeholder="2026-09-20, 2026-10-01"></label>`
+    +`<label class="form-field">补报时间<input id="collectionTime" type="time" value="${escapeHTML(cfg.time||'00:00')}"></label></div>`
+    +`<div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="saveCollection">保存</button></div>`);
+  const sync=()=>{$('#collectionWeekdayFields').classList.toggle('hidden',current!=='weekly');$('#collectionDatesField').classList.toggle('hidden',current!=='dates');
+    $$('#modalContent [data-mode]').forEach(b=>{const on=b.dataset.mode===current;b.classList.toggle('is-on',on);b.setAttribute('aria-checked',String(on))})};
+  $$('#modalContent [data-mode]').forEach(b=>b.onclick=()=>{current=b.dataset.mode;sync()});
+  $$('#modalContent [data-weekday]').forEach(b=>b.onclick=()=>{const i=Number(b.dataset.weekday);picked.has(i)?picked.delete(i):picked.add(i);
+    b.classList.toggle('is-on',picked.has(i));b.setAttribute('aria-pressed',String(picked.has(i)))});
+  sync();$('#cancelAction').onclick=closeModal;
+  $('#saveCollection').onclick=async()=>{const m=current,weekdays=[...picked].sort(),dates=$('#collectionDates').value.split(/[,，\s]+/).map(x=>x.trim()).filter(Boolean);if(m==='weekly'&&!weekdays.length){toast('请选择每周补报日');return}if(m==='dates'&&!dates.length){toast('请填写指定补报日期');return}try{await act('automation.update',{mode:m,time:$('#collectionTime').value,weekdays,dates});closeModal();toast('项目补报时间已保存')}catch(e){}};
 }
 function renderAll(){
   $$('.admin-only-nav').forEach(n=>n.classList.toggle('hidden',!S.user?.admin));
@@ -2187,6 +2237,8 @@ function renderAll(){
   if(agentOff)$('#agentPanel')?.classList.add('hidden');
   $('.focus-card > span').textContent=S.user.admin?'成员今日安排':'今日安排';
   renderStats();renderInbox();renderAccounts();renderSettings();switchView(UI.view);
+  // Keep single periods too: their first merge from one to two is growth.
+  rememberStackSizes();
 }
 
 function scheduleTasks(includeHistory){
@@ -2287,7 +2339,7 @@ function renderTimeline(){
   for(const d of days){const last=months.at(-1);if(last?.month===d.month)last.count++;else months.push({month:d.month,offset:d.n-model.start,count:1})}
   const todayLine=`<i class="gantt-today-line" style="left:${(model.today-model.start+.5)*dayWidth}px" aria-hidden="true"></i>`;
   grid.innerHTML=`<div class="gantt-header"><div class="gantt-corner"><strong>项目 / Owner</strong></div><div class="gantt-axis"><div class="gantt-months">${months.map(m=>`<span style="left:${m.offset*dayWidth}px;width:${m.count*dayWidth}px"><b>${m.month.replace('-',' 年 ')} 月</b></span>`).join('')}</div><div class="gantt-dates">${days.map(d=>`<div class="gantt-date ${[0,6].includes(d.dow)?'weekend':''} ${d.n===model.today?'is-today':''}" title="${d.iso}"><strong>${d.day}</strong><small>${['日','一','二','三','四','五','六'][d.dow]}</small></div>`).join('')}</div></div></div>${model.rows.map((r,i)=>{
-    const p=r.project,palette=['coral','blue','green','purple','gold'][i%5],range=r.invalid?'日期待修正':`${p.start} → ${p.end||'未设截止'}`;
+    const p=r.project,palette=['blue','green','purple','gold','coral'][i%5],range=r.invalid?'日期待修正':`${p.start} → ${p.end||'未设截止'}`;
     return `<div class="gantt-row" data-project="${escapeHTML(p.id)}"><div class="gantt-project"><div><i class="project-color ${palette}"></i><strong title="${escapeHTML(p.name)}">${escapeHTML(p.name)}</strong></div><small>${escapeHTML(nameOf(p.owner))} <span>· ${projectStatus(p)}</span></small><span class="gantt-range">${escapeHTML(range)}</span></div><div class="gantt-track">${todayLine}${r.invalid?'<span class="gantt-invalid">请修正项目起止日期</span>':`<div class="gantt-bar ${palette} ${r.openEnded?'open-ended':''} ${['pending','rejected'].includes(p.status)?'awaiting':''}" style="left:${r.offset*dayWidth+3}px;width:${Math.max(26,r.span*dayWidth-6)}px" tabindex="0" aria-label="${escapeHTML(p.name)}，${escapeHTML(range)}，${projectStatus(p)}" title="${escapeHTML(p.name)} · ${escapeHTML(p.owner)}\n${escapeHTML(range)} · ${projectStatus(p)}"><span>${escapeHTML(p.name)}${r.openEnded?' · 未设截止 →':''}</span></div>`}</div></div>`;
   }).join('')}`;
   const updateRange=()=>{
@@ -2370,7 +2422,7 @@ function renderPip(){
   const tasks=sortTasks(scheduleTasks().filter(t=>taskActiveOn(t,S.today)&&!isArchivedTask(t))).sort((a,b)=>open(b)-open(a));
   const tickable=t=>!S.user.admin&&t.assignee===S.user.id&&open(t);
   doc.querySelector('#pipSummary').textContent=`${fmt(S.today)} · 还剩 ${tasks.filter(open).length} 项`;
-  doc.querySelector('#pipList').innerHTML=tasks.map(t=>`<li class="${open(t)?'':'closed'}"><label><input type="checkbox" data-id="${escapeHTML(t.id)}" ${open(t)?'':'checked'} ${tickable(t)?'':'disabled'}><span>${escapeHTML(t.name)}${t.stackCount>1?` ×${t.stackCount}`:''}</span></label><small>${escapeHTML([t.time,S.user.admin?nameOf(t.assignee):'',projectName(t),open(t)?'':status(t)[1]].filter(Boolean).join(' · '))}</small></li>`).join('')||'<li class="empty">今天没有待办</li>';
+  doc.querySelector('#pipList').innerHTML=tasks.map(t=>`<li class="${open(t)?'':'closed'}"><label><input type="checkbox" data-id="${escapeHTML(t.id)}" ${open(t)?'':'checked'} ${tickable(t)?'':'disabled'}><span>${escapeHTML(t.name)}${t.stackCount>1?` · ${t.stackCount} 期`:''}</span></label><small>${escapeHTML([t.time,S.user.admin?nameOf(t.assignee):'',projectName(t),open(t)?'':status(t)[1]].filter(Boolean).join(' · '))}</small></li>`).join('')||'<li class="empty">今天没有待办</li>';
   doc.querySelectorAll('#pipList input[data-id]:not([disabled])').forEach(box=>box.onchange=()=>pipComplete(box));
 }
 async function pipComplete(box){
@@ -2915,7 +2967,14 @@ document.addEventListener('keydown',e=>{
 $('#addProjectBtn').onclick=newProject;$('#addProjectTopBtn').onclick=newProject;
 $('#addTaskBtn').onclick=newTask;$('#emptyAddBtn').onclick=newTask;$('#timelineAddProjectBtn').onclick=newProject;
 $('#createFixedBtn').onclick=fixedTask;$('#collectionSettingsBtn').onclick=collectionSettings;
-$('#forceAssignBtn').onclick=()=>switchView('projects');$('#runAutomationBtn').onclick=()=>act('scheduler.run',{});
+$('#forceAssignBtn').onclick=()=>switchView('projects');/* 立即运行一次检查 does what the scheduler does every half minute anyway, so it
+   needs no confirmation; it says what it found instead of a bare 操作已完成. */
+$('#runAutomationBtn').onclick=async()=>{
+  const b=$('#runAutomationBtn');if(b.disabled)return;b.disabled=true;
+  try{const r=await api('/api/action',{action:'scheduler.run',data:{}});await refresh();
+    toast(r?.created?`检查完成：生成或发出 ${r.created} 项`:'检查完成：没有需要处理的')}catch(e){toast(e.message)}finally{b.disabled=false}
+};
+
 $('#markAllReadBtn').onclick=()=>act('inbox.read',{all:true});
 $('#manageInboxBtn').onclick=()=>{UI.inboxManage=!UI.inboxManage;UI.inboxPicked=new Set();renderInbox()};
 $('#archiveTodayBtn').onclick=openTodayArchive;
@@ -3752,7 +3811,7 @@ function agentTaskScope(action,payload){
 }
 function agentActionHTML(action,payload,executed=false){
   const safe=agentSafeParams(payload),labels={stackPeriods:'合并期次',id:'操作对象',name:'名称',username:'账户',role:'权限组',assignee:'执行人',assignees:'执行人',owner:'负责人',projectId:'所属项目',date:'日期',start:'开始',end:'结束',time:'时间',duration:'分钟',priority:'优先级',active:'启用',accept:'同意',reason:'原因',frequency:'重复方式',weekdays:'星期',dates:'指定日期',status:'状态',summary:'总结',actual:'实际用时',report:'报告',title:'标题',content:'内容'};
-  const display=(k,v)=>{if(k==='stackPeriods')return v.map(id=>{const t=S.tasks?.find(x=>x.id===id);return t?fmt(t.repeatDate||(t.id.startsWith('repeat:')?t.id.slice(-10):t.date)):id}).join('、');if(k==='id'){const task=S.tasks?.find(x=>x.id===v);if(task)return task.name+(task.stackCount>1?' ×'+task.stackCount:'');return S.projects?.find(x=>x.id===v)?.name||S.repeats?.find(x=>x.id===v)?.name||nameOf(v)}if(['owner','assignee'].includes(k))return nameOf(v);if(k==='role')return ({member:'普通成员',admin:'管理员',superadmin:'超级管理员'}[v]||v);if(k==='projectId')return S.projects?.find(x=>x.id===v)?.name||'临时任务';if(Array.isArray(v))return v.map(x=>['assignees','members'].includes(k)?nameOf(x):String(x)).join('、');if(typeof v==='boolean')return v?'是':'否';return typeof v==='object'?JSON.stringify(v):String(v??'—')};
+  const display=(k,v)=>{if(k==='stackPeriods')return v.map(id=>{const t=S.tasks?.find(x=>x.id===id);return t?fmt(t.repeatDate||(t.id.startsWith('repeat:')?t.id.slice(-10):t.date)):id}).join('、');if(k==='id'){const task=S.tasks?.find(x=>x.id===v);if(task)return task.name+(task.stackCount>1?' · '+task.stackCount+' 期':'');return S.projects?.find(x=>x.id===v)?.name||S.repeats?.find(x=>x.id===v)?.name||nameOf(v)}if(['owner','assignee'].includes(k))return nameOf(v);if(k==='role')return ({member:'普通成员',admin:'管理员',superadmin:'超级管理员'}[v]||v);if(k==='projectId')return S.projects?.find(x=>x.id===v)?.name||'临时任务';if(Array.isArray(v))return v.map(x=>['assignees','members'].includes(k)?nameOf(x):String(x)).join('、');if(typeof v==='boolean')return v?'是':'否';return typeof v==='object'?JSON.stringify(v):String(v??'—')};
   const entries=Object.entries(safe),known=entries.filter(([k])=>labels[k]);
   return `<dl class="agent-action-fields">${known.map(([k,v])=>`<div><dt>${labels[k]}</dt><dd>${escapeHTML(display(k,v))}</dd></div>`).join('')}</dl>${!executed&&action==='account.delete'?'<p class="agent-action-impact">将移除该账户。</p>':''}`+(entries.some(([k])=>!labels[k])?`<details class="agent-action-details"><summary>其他参数</summary><pre>${escapeHTML(JSON.stringify(safe,null,2))}</pre></details>`:'');
 }
