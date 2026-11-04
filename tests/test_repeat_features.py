@@ -56,6 +56,25 @@ class RepeatFeatureTests(unittest.TestCase):
         self.assertTrue(self.store.collection_enabled('2026-12-31'))
         self.assertFalse(self.store.collection_enabled('2026-12-30'))
 
+    def test_auto_report_switch_preserves_schedule_and_diary_rollups(self):
+        day = self.today.isoformat()
+        self.store.action(self.admin, 'automation.update', {
+            'mode': 'dates', 'dates': [day], 'time': '03:15', 'weekdays': [1, 3]})
+        disabled = self.store.action(self.admin, 'automation.update', {'enabled': False})
+        self.assertFalse(self.store.collection_enabled(day))
+        self.assertEqual((disabled['mode'], disabled['dates'], disabled['time'], disabled['weekdays']),
+                         ('dates', [day], '03:15', [1, 3]))
+        with self.assertRaises(Problem):
+            self.store.action(self.member, 'automation.update', {'enabled': True})
+        at = datetime.combine(self.today, datetime.min.time(), ZoneInfo('Asia/Shanghai')).replace(hour=23, minute=45)
+        self.store.schedule(at)
+        self.assertTrue(any(d['author'] == 'test001' and d['date'] == day for d in self.store.all('diaries')),
+                        '关闭项目补报不关闭每日个人日记统计')
+        enabled = self.store.action(self.admin, 'automation.update', {'enabled': True})
+        self.assertTrue(self.store.collection_enabled(day))
+        self.assertEqual(enabled['dates'], [day])
+        self.assertEqual(enabled['time'], '03:15')
+
     def test_calendar_horizon_is_inclusive_and_rejects_later_dates(self):
         # Anchored to CALENDAR_END rather than literal dates, so widening the
         # scheduling range does not require editing this test.

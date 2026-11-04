@@ -1765,14 +1765,32 @@ function renderSettings(){
   $('#settingsView .automation-card')?.classList.toggle('hidden',!admin);
   $('#runAutomationBtn')?.classList.toggle('hidden',!admin);
   renderRepeatStackingSetting();
+  renderProjectAutomationSetting();
   renderWeekStartSetting();
   renderCreationPolicy();
+}
+function settingSwitch(id,label,checked){
+  return `<label class="settings-switch"><span>${escapeHTML(label)}</span><span class="settings-switch-control"><input type="checkbox" role="switch" id="${id}"${checked?' checked':''}><span class="settings-switch-track" aria-hidden="true"></span></span></label>`;
+}
+function bindSettingSwitch(input,save,current){
+  input.onchange=async()=>{
+    if(input.disabled)return;
+    input.disabled=true;
+    try{await save(input.checked)}catch(e){input.checked=current()}
+    finally{input.disabled=false;if(UI.view==='settings')$('#'+input.id)?.focus()}
+  };
+}
+function renderProjectAutomationSetting(){
+  const box=$('#projectAutomationToggle');if(!box)return;
+  box.innerHTML='';if(!S.user?.admin)return;
+  box.innerHTML=settingSwitch('projectAutomationEnabled','自动补报',S.automation?.enabled!==false);
+  bindSettingSwitch(box.querySelector('input'),enabled=>act('automation.update',{enabled}),()=>S.automation?.enabled!==false);
 }
 function renderRepeatStackingSetting(){
   const box=$('#repeatStackingCard');if(!box)return;
   const allowed=S.user?.role==='superadmin';box.classList.toggle('hidden',!allowed);if(!allowed)return;
-  box.innerHTML=`<div><span class="eyebrow">固定任务</span><h2>递延合并</h2></div><label class="repeat-stacking-choice"><input type="checkbox" id="repeatStackingEnabled"${S.repeatStacking?' checked':''}>合并未完成期次</label>`;
-  const input=box.querySelector('input');input.onchange=async()=>{const enabled=input.checked;input.disabled=true;try{await act('repeat.stacking.update',{enabled})}catch(e){input.checked=Boolean(S.repeatStacking)}finally{input.disabled=false;if(UI.view==='settings')$('#repeatStackingEnabled')?.focus()}};
+  box.innerHTML=`<div><span class="eyebrow">固定任务</span><h2>递延合并</h2></div>${settingSwitch('repeatStackingEnabled','合并未完成期次',S.repeatStacking)}`;
+  bindSettingSwitch(box.querySelector('input'),enabled=>act('repeat.stacking.update',{enabled}),()=>Boolean(S.repeatStacking));
 }
 function renderWeekStartSetting(){
   const box=$('#weekStartCard');if(!box)return;

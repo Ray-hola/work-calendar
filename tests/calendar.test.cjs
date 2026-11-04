@@ -2062,13 +2062,36 @@ test('a stacked period is one deferred card while all period histories remain av
   a.run("S.tasks[2].status='done'");assert.equal(a.run('isDeferredTask(S.tasks[2])'),false);
 });
 
-test('only superadmin sees the stacking checkbox and failed saves restore its state',async()=>{
+test('only superadmin sees the stacking switch and failed saves restore its state',async()=>{
   const a=app(),input={checked:false,disabled:false},box={innerHTML:'',hidden:null,classList:{toggle:(name,value)=>{box.hidden=value}},querySelector:()=>input};
   a.context.document={querySelector:s=>s==='#repeatStackingCard'?box:null};
   for(const role of ['member','admin']){a.run(`S.user={role:'${role}'};renderRepeatStackingSetting()`);assert.equal(box.hidden,true);assert.equal(box.innerHTML,'');}
   a.run("S.user={role:'superadmin'};S.repeatStacking=false;renderRepeatStackingSetting();act=async()=>{throw new Error('offline')}");
-  assert.equal(box.hidden,false);assert.match(box.innerHTML,/type="checkbox"/);assert.ok(!box.innerHTML.includes('<p'));
+  assert.equal(box.hidden,false);assert.match(box.innerHTML,/type="checkbox" role="switch"/);assert.ok(!box.innerHTML.includes('<p'));
   input.checked=true;await input.onchange();assert.equal(input.checked,false);assert.equal(input.disabled,false);
+});
+
+test('project auto-report switch honors roles, defaults on and changes only enabled',async()=>{
+  const a=app(),input={id:'projectAutomationEnabled',checked:false,disabled:false},box={innerHTML:'',querySelector:()=>input};
+  a.context.document={querySelector:s=>s==='#projectAutomationToggle'?box:null};
+  a.run("S.user={id:'member',admin:0};renderProjectAutomationSetting()");assert.equal(box.innerHTML,'');
+  a.run("S.user={id:'admin',admin:1};S.automation={mode:'weekly',time:'03:15',weekdays:[1,3]};renderProjectAutomationSetting()");
+  assert.match(box.innerHTML,/role="switch" id="projectAutomationEnabled" checked/);
+  const calls=[];a.context.save=async(action,data)=>calls.push({action,data:JSON.parse(JSON.stringify(data))});a.run('act=save');
+  input.checked=false;await input.onchange();assert.deepEqual(calls,[{action:'automation.update',data:{enabled:false}}]);
+  assert.deepEqual(a.json('S.automation'),{mode:'weekly',time:'03:15',weekdays:[1,3]},'开关不覆盖周期、时间或日期');
+  a.run("S.automation.enabled=false;renderProjectAutomationSetting();act=async()=>{throw Error('offline')}");
+  assert.ok(!box.innerHTML.includes(' checked'));input.checked=true;await input.onchange();
+  assert.equal(input.checked,false);assert.equal(input.disabled,false);
+});
+
+test('settings switches lock until the save completes and restore focus to the rendered control',async()=>{
+  const a=app(),input={id:'toggle',checked:true,disabled:false},replacement={focus(){this.focused=true}};
+  let resolve,called=0;const pending=new Promise(done=>{resolve=done});
+  a.context.document={querySelector:()=>replacement};a.context.input=input;
+  a.context.save=()=>{called++;return pending};a.run("UI.view='settings';bindSettingSwitch(input,save,()=>false)");
+  const first=input.onchange();assert.equal(input.disabled,true);await input.onchange();assert.equal(called,1);
+  resolve();await first;assert.equal(input.disabled,false);assert.equal(replacement.focused,true);
 });
 
 test('stacked history separates original periods and folds one grouped operation without repeating time',()=>{

@@ -10748,11 +10748,23 @@ body.is-resizing-agent { user-select: none; }
 .week-task-title .week-task-name { flex: 1 1 auto; min-width: 0; }
 .week-task-title .stack-badge { flex: none; margin: 1px 0 0; padding: 1px 4px; font-size: 10px; }
 
-.repeat-stacking-card { align-items: center; gap: 16px; }
-.repeat-stacking-choice { display: inline-flex; align-items: center; gap: 9px; min-height: 36px; font-size: 13px; cursor: pointer; }
-.repeat-stacking-choice input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
-.repeat-stacking-choice:has(input:disabled) { opacity: .6; cursor: wait; }
-@media (max-width: 560px) { .repeat-stacking-card { align-items: flex-start; } }
+/* Binary settings save immediately; multi-value rules keep segmented choices. */
+.repeat-stacking-card { display: flex; align-items: center; gap: 16px; }
+.settings-switch { display: inline-flex; align-items: center; gap: 10px; font-size: 13px; cursor: pointer; }
+.settings-switch-control { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 36px; flex: none; }
+.settings-switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; z-index: 1; }
+.settings-switch-track { position: relative; width: 36px; height: 22px; border: 1px solid var(--line-strong); border-radius: 99px; background: var(--surface-sunk); transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease); }
+.settings-switch-track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: transform var(--t-fast) var(--ease), background var(--t-fast) var(--ease); }
+.settings-switch input:checked + .settings-switch-track { background: var(--accent); border-color: var(--accent); }
+.settings-switch input:checked + .settings-switch-track::after { transform: translateX(14px); background: var(--surface); }
+.settings-switch input:focus-visible + .settings-switch-track { outline: 2px solid var(--accent); outline-offset: 3px; }
+.settings-switch:has(input:disabled) { opacity: .6; cursor: wait; }
+.settings-switch input:disabled { cursor: wait; }
+.project-automation-card { display: block; }
+.automation-setting-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.automation-setting-head > div:first-child { min-width: 0; }
+.project-automation-card .automation-actions { margin-top: 14px; }
+.project-automation-card .secondary-btn { margin-top: 0; }
 
 #settingsView .automation-card + .automation-card { margin-top: 18px; }
 
