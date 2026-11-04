@@ -528,15 +528,27 @@ function weekTaskChip(t,iso){
 
     +`<span class="week-task-meta">${escapeHTML(meta)}${!cont&&isMultiDay(t)?` · ${spanDays(t)} 天`:''}</span></button>`;
 }
-function weekDayColumn(iso,tasks,canAdd){
+/* A past day keeps a trace of what moved on: its unfinished occurrences were
+   carried forward and leave the board, which used to make the day look empty.
+   Nothing is added to a day that is over, and an empty one stays small. */
+function weekDayColumn(iso,tasks,canAdd,carried=0){
   const today=iso===S.today,past=iso<S.today,out=iso>DATE_HORIZON,day=sortTasks(tasks.filter(t=>taskActiveOn(t,iso)));
   const shown=day.slice(0,WEEK_DAY_LIMIT),more=day.length-shown.length,done=day.filter(t=>t.status==='done').length;
-  return `<section class="week-day${today?' today':''}${past?' past':''}${out?' out':''}" data-date="${iso}">`
+  const quiet=past&&!day.length&&!carried;
+  return `<section class="week-day${today?' today':''}${past?' past':''}${out?' out':''}${quiet?' is-quiet':''}" data-date="${iso}">`
     +`<header class="week-day-head"><button class="week-day-open" type="button" data-date="${iso}" aria-label="${escapeHTML(`${wd(iso)} ${fmt(iso)}，${day.length} 项任务`)}"><span>${wd(iso)}</span><strong>${new Date(`${iso}T12:00:00`).getDate()}</strong>${today?'<em>今天</em>':''}</button>`
     +`${day.length?`<small>${done}/${day.length}</small>`:''}</header>`
     +`<div class="week-day-tasks">${shown.map(t=>weekTaskChip(t,iso)).join('')}`
-    +`${more>0?`<button class="week-day-more" type="button" data-date="${iso}">还有 ${more} 项</button>`:''}</div>`
-    +`${canAdd&&!out?`<button class="week-day-add" type="button" data-date="${iso}" aria-label="在 ${escapeHTML(fmt(iso))} 新增任务">${icon('plus')}</button>`:''}</section>`;
+    +`${more>0?`<button class="week-day-more" type="button" data-date="${iso}">还有 ${more} 项</button>`:''}`
+    +`${past&&carried?`<p class="week-day-carried">${icon('arrow-right')}${carried} 项未完成，已递延</p>`:''}</div>`
+    +`${canAdd&&!out&&!past?`<button class="week-day-add" type="button" data-date="${iso}" aria-label="在 ${escapeHTML(fmt(iso))} 新增任务">${icon('plus')}</button>`:''}</section>`;
+}
+function weekDeferralCounts(){
+  // A deferral is a historical event, even when its successor is now done.
+  // Superseded alone also includes merged periods and reopened work.
+  const deferred=new Set((S.logs||[]).filter(l=>l.kind==='defer').map(l=>l.taskId)),counts=new Map();
+  scheduleTasks(true).filter(t=>deferred.has(t.id)).forEach(t=>counts.set(t.date,(counts.get(t.date)||0)+1));
+  return counts;
 }
 function renderCalendar(){
   const horizon=weekOffsetFor(DATE_HORIZON);
@@ -548,7 +560,9 @@ function renderCalendar(){
   $('#nextWeekBtn').disabled=UI.selectedWeek>=horizon;
   const board=$('#weekCarousel');
   board.dataset.turn=UI.weekDir||'';UI.weekDir='';
-  board.innerHTML=`<div class="week-grid">${days.map(iso=>weekDayColumn(iso,tasks,canAdd)).join('')}</div>`;
+  const carried=weekDeferralCounts();
+  board.innerHTML=`<div class="week-grid">${days.map(iso=>weekDayColumn(iso,tasks,canAdd,carried.get(iso)||0)).join('')}</div>`;
+
   $$('#weekCarousel .week-task').forEach(b=>b.onclick=()=>openDrawer(b.dataset.id));
   $$('#weekCarousel .week-day-open, #weekCarousel .week-day-more').forEach(b=>b.onclick=()=>renderDayDetail(b.dataset.date));
   $$('#weekCarousel .week-day-add').forEach(b=>b.onclick=()=>newTask(null,b.dataset.date));
@@ -601,6 +615,7 @@ function logTime(iso){const m=String(iso||'').match(/^\d{4}-(\d{2})-(\d{2})T(\d{
 function openDrawer(id){
   const alias=S.tasks.find(x=>x.id===id);if(alias&&isSuperseded(alias)&&alias.supersededBy&&(['todo','doing'].includes(alias.status)||alias.stackCompletedBy)){const target=S.tasks.find(x=>x.id===alias.supersededBy);if(target&&target.id!==id)return openDrawer(target.id)}
   const t=S.tasks.find(x=>x.id===id);if(!t)return;
+  if($('#taskDrawer').classList.contains('hidden'))UI.drawerReturnFocus=document.activeElement;
   clearFresh(taskLineageIds(t));
   const [c,l]=status(t),p=S.projects.find(p=>p.id===t.projectId),archived=['done','deferred','skipped'].includes(t.status),pendingApproval=['pending_approval','awaiting_approval','submitted'].includes(t.status),rejected=['rejected','returned'].includes(t.status),lineageIds=taskLineageIds(t);
   const manage=canManageProject(p)&&p.status==='active'&&!archived&&!pendingApproval&&!rejected,perform=!S.user.admin&&!archived&&t.assignee===S.user.id;
@@ -637,8 +652,8 @@ function openDrawer(id){
     +`${reopenNote?'上次完成总结':'最新完成总结'}</span><p>${escapeHTML(completionSummary)}${completionActual?` · 实际 `
     +`${completionActual} 分钟`:''}</p></div>`:''}${reopenNote}${editSummary}<div class="detail-grid"><div><span>状态`
     +`</span><strong><i class="status-dot ${c}"></i>${l}</strong></div><div><span>预计时长</span><strong>${t.duration} 分钟`
-    +`</strong></div>${t.stackCount>1?`<div><span>合并期次</span><strong class="stack-period-list">${stackPeriodDates(t).map(d=>`<span>${escapeHTML(fmt(d))}</span>`).join('')}</strong></div>`:''}<div><span>${isMultiDay(t)?`任务周期 · ${spanDays(t)} 天`:'安排日期'}</span><strong>${escapeHTML(t.date)}`
-    +`${isMultiDay(t)?` → ${escapeHTML(taskEnd(t))}`:''}</strong></div><div><span>DDL</span><strong class="`
+    +`</strong></div>${t.stackCount>1?`<div><span>合并期次</span><strong class="stack-period-list">${stackPeriodDates(t).map(d=>`<span>${escapeHTML(fmt(d))}</span>`).join('')}</strong></div>`:''}<div><span>${isMultiDay(t)?`任务周期 · ${spanDays(t)} 天`:'安排日期'}</span><strong>${escapeHTML(fmt(t.date))}`
+    +`${isMultiDay(t)?` → ${escapeHTML(fmt(taskEnd(t)))}`:''}</strong></div><div><span>DDL</span><strong class="`
     +`${t.status==='done'?'':daysCount(S.today,taskEnd(t))<0?'overdue-text':''}">${escapeHTML(ddlText(t))}</strong>`
     +`</div><div><span>负责人</span><strong>${escapeHTML(nameOf(t.assignee))}</strong></div>`
     +`${!t.projectId&&t.creator&&t.creator!==t.assignee?`<div><span>指派人</span><strong>${escapeHTML(nameOf(t.creator))}`
@@ -831,6 +846,8 @@ function renderProjects(){
   if(UI.space){$('#projectGrid').innerHTML='';renderProjectSpace(UI.space);return}
   const admin=Boolean(S.user?.admin),folder=UI.folder&&(S.folders||[]).find(f=>f.id===UI.folder);
   if(!folder)UI.folder='';
+  $('#addProjectBtn')?.classList?.toggle('hidden',projectMode()==='none');
+
   const pool=visibleProjects().filter(p=>!folder||p.folderId===folder.id),mode=folderSortMode();
   const projects=mode==='nav'?navSequence().filter(p=>pool.includes(p)):sortFolderProjects(pool,mode);
   $('#projectsView .eyebrow').textContent=folder?`项目目录 · ${projects.length} 个项目`
@@ -871,13 +888,16 @@ function projectCardHTML(p,inSpace=false){
     const fresh=freshRefs().has(p.id),joined=p.status==='active'&&!manage&&(p.members||{})[S.user.id]==='accepted';
     return `<article class="project-card project-node${fresh?' is-new':''}" data-fresh="${fresh?escapeHTML(p.id):''}"`
       +`${inSpace?'':` data-project="${escapeHTML(p.id)}"`}>`
-      +`<div class="project-node-heading"><div><div class="project-title"><h3>${inSpace?'':`<button type="button" class="project-title-link" data-open-project="${escapeHTML(p.id)}">`}${escapeHTML(p.name)}`
-      +`${fresh?'<span class="new-chip">新</span>':''}${inSpace?'':'</button>'}</h3><span class="project-status">${projectStatus(p)}</span></div>`
-      +`<p>${escapeHTML(p.desc||'暂无描述')}</p></div><div class="project-node-actions">`
+      /* Inside the project's own space the page already carries its name,
+         status, people and dates, so the card keeps only actions and tasks. */
+      +`<div class="project-node-heading">${inSpace?'':`<div><div class="project-title"><h3><button type="button" `
+      +`class="project-title-link" data-open-project="${escapeHTML(p.id)}">${escapeHTML(p.name)}`
+      +`${fresh?'<span class="new-chip">新</span>':''}</button></h3><span class="project-status">${projectStatus(p)}</span></div>`
+      +`<p>${escapeHTML(p.desc||'暂无描述')}</p></div>`}<div class="project-node-actions">`
       +`${manage?`<button class="primary-btn add-project-task" data-project="${escapeHTML(p.id)}">`
       +`${icon('plus')}新建并指派任务</button><button class="secondary-btn project-settings" data-id="`
       +`${escapeHTML(p.id)}">项目设置</button>`:''}`
-      +`${manage&&hasSlot?`<button class="secondary-btn invite-members" data-id="${escapeHTML(p.id)}">添加协作者`
+      +`${manage&&hasSlot&&!inSpace?`<button class="secondary-btn invite-members" data-id="${escapeHTML(p.id)}">添加协作者`
       +`</button>`:''}`
       +`${joined&&creationRules().projectTask!=='none'?`<button class="secondary-btn add-project-task" data-project="`
       +`${escapeHTML(p.id)}">${entryLabel(creationRules().projectTask,'任务')}</button>`:''}`
@@ -889,10 +909,10 @@ function projectCardHTML(p,inSpace=false){
       +`${p.status==='pending_completion'&&admin?`<button class="secondary-btn approve-project-completion" data-id="`
       +`${escapeHTML(p.id)}">审批项目完成</button>`:''}`
       +`${canManageProject(p)?`<button class="ghost-btn delete-project" data-id="${escapeHTML(p.id)}">删除项目`
-      +`</button>`:''}</div></div><div class="project-members"><span>Owner · ${escapeHTML(nameOf(p.owner))}　协作者：`
+      +`</button>`:''}</div></div>${inSpace?'':`<div class="project-members"><span>Owner · ${escapeHTML(nameOf(p.owner))}　协作者：`
       +`${accepted.filter(id=>id!==p.owner).map(id=>escapeHTML(nameOf(id))).join('、')||'暂无'}${pending.length?`　待确认：`
       +`${pending.map(id=>escapeHTML(nameOf(id))).join('、')}`:''}</span><span>${canManageProject(p)?'项目':'我的任务'} `
-      +`${done}/${tasks.length} 已完成 · 截止 ${escapeHTML(p.end||'未设置')}</span></div>`
+      +`${done}/${tasks.length} 已完成 · 截止 ${escapeHTML(p.end||'未设置')}</span></div>`}`
       +`<div class="project-task-tree" data-project="${escapeHTML(p.id)}"><div class="project-tree-label">`
       +`${canManageProject(p)?'项目任务':'分配给我的任务'} <span>${tasks.length}</span>${sorter}</div>`
       +`${tasks.map(t=>projectChildRow(t,escapeHTML(nameOf(t.assignee)),{title:t.assignee,
@@ -1202,16 +1222,22 @@ function renderProjectSpace(id){
       +projectFiles(p,true);return;
   }
   const manage=canManageProject(p),folder=(S.folders||[]).find(f=>f.id===p.folderId);
+  /* 申请项目 / 新建项目 is for the overview; inside one project it only repeats the top bar. */
+  $('#addProjectBtn')?.classList?.toggle('hidden',true);
   $('#projectsView .eyebrow').textContent=`项目空间 · ${folder?folder.name:'未归类'}`;
+
   $('#projectsView h1').textContent=p.name;
-  box.innerHTML=projectLifecycle(p,manage)+projectBackground(p,manage)+projectStaffing(p,manage)
+  box.innerHTML=(p.desc?`<p class="space-description">${escapeHTML(p.desc)}</p>`:'')+projectLifecycle(p,manage)+projectBackground(p,manage)+projectStaffing(p,manage)
     +`<section class="space-section space-tasks"><div class="space-head"><h2>项目任务</h2></div>${projectCardHTML(p,true)}</section>`
     +projectFiles(p);
   bindProjectCards();bindProjectSpace(p);
 }
 /* 项目周期: 立项 → 执行 → 结项, with how far the dates and the work have come. */
 function projectLifecycle(p,manage){
-  const created=String(p.createdAt||'').slice(0,10)||p.start,start=p.start||created,end=p.end;
+  /* A project entered with a start date already past was set up after it began;
+     立项 is never later than 执行. */
+  const made=String(p.createdAt||'').slice(0,10),created=made&&p.start?(made<p.start?made:p.start):made||p.start,start=p.start||created,end=p.end;
+
   const tasks=S.tasks.filter(t=>t.projectId===p.id&&!t.repeatId&&!isSuperseded(t)&&t.status!=='skipped');
   const done=tasks.filter(t=>t.status==='done').length;
   const span=end?Math.max(1,daysCount(start,end)):0,passed=span?Math.min(span,Math.max(0,daysCount(start,S.today))):0;
@@ -1993,7 +2019,10 @@ function deleteAccount(id){
   };
 }
 async function act(action,data){try{await api('/api/action',{action,data});await refresh();toast('操作已完成')}catch(e){toast(e.message);throw e}}
-function openModal(html){UI.docDirty=false;if(UI.briefSource){UI.briefSource.closest('.archive-file')?.classList.remove('is-out');UI.briefSource=null}UI.briefTyping?.finish();UI.briefTyping=null;document.querySelectorAll('.brief-folder').forEach(x=>x.remove());['#modalBackdrop','#modalBackdrop .modal','#modalContent'].forEach(s=>$(s)?.getAnimations?.().forEach(a=>a.cancel()));$('#modalContent').innerHTML=html;$('#modalBackdrop .modal')?.classList?.remove('is-wide','is-flown');$('#modalBackdrop').classList.remove('hidden')};function closeModal(){if(UI.docDirty&&!confirm('修改还没保存，确定关闭？'))return;UI.docDirty=false;if(typeof foldBrief==='function'&&foldBrief())return;$('#modalBackdrop').classList.add('hidden')};function closeDrawer(){$('#taskDrawer').classList.add('hidden')}
+function restorePanelFocus(target){
+  if(target?.isConnected&&!target.closest('.hidden'))target.focus?.({preventScroll:true});
+}
+function openModal(html){if($('#modalBackdrop').classList.contains('hidden'))UI.modalReturnFocus=document.activeElement;UI.docDirty=false;if(UI.briefSource){UI.briefSource.closest('.archive-file')?.classList.remove('is-out');UI.briefSource=null}UI.briefTyping?.finish();UI.briefTyping=null;document.querySelectorAll('.brief-folder').forEach(x=>x.remove());['#modalBackdrop','#modalBackdrop .modal','#modalContent'].forEach(s=>$(s)?.getAnimations?.().forEach(a=>a.cancel()));$('#modalContent').innerHTML=html;$('#modalBackdrop .modal')?.classList?.remove('is-wide','is-flown');$('#modalBackdrop').classList.remove('hidden')};function closeModal(){if(UI.docDirty&&!confirm('修改还没保存，确定关闭？'))return;UI.docDirty=false;if(typeof foldBrief==='function'&&foldBrief())return;$('#modalBackdrop').classList.add('hidden');restorePanelFocus(UI.modalReturnFocus)};function closeDrawer(){$('#taskDrawer').classList.add('hidden');restorePanelFocus(UI.drawerReturnFocus)}
 function newTask(projectId,initialDate){
   const admin=Boolean(S.user.admin),paths=taskProjects(),projects=paths.map(x=>x.p),temp=tempTaskMode(),locked=typeof projectId==='string';
   if(!projects.length&&temp==='none'){toast('你所在的规则组不能新建任务');return}
@@ -2846,6 +2875,30 @@ $('#prevDay').onclick=()=>{UI.dayOffset=(UI.dayOffset||0)-1;renderToday()};
 $('#nextDay').onclick=()=>{if(displayDay()>=DATE_HORIZON){toast(`日期范围目前只支持到 `
   +`${DATE_HORIZON}`);return}UI.dayOffset=(UI.dayOffset||0)+1;renderToday()};
 $('#inboxBtn').onclick=()=>switchView('inbox');document.querySelector('.icon-btn[title="搜索"]').onclick=openSearch;
+/* Single-key shortcuts, as the sidebar's 快捷键 hint promises. They never fire
+   while typing, with a modifier held, or behind an open dialog or drawer. */
+const SHORTCUTS=[['?','快捷键列表'],['/','搜索任务与项目'],['N','新建任务'],['T','今日任务'],['W','周视图'],['P','项目空间'],['I','收件箱'],['Esc','关闭弹窗或面板']];
+function openShortcuts(){
+  openModal(`<div class="eyebrow">键盘</div><h2>快捷键</h2><dl class="shortcut-list">${SHORTCUTS.map(([k,v])=>`<dt><kbd>${k}</kbd></dt><dd>${v}</dd>`).join('')}</dl>`
+    +`<div class="modal-footer"><button class="primary-btn" id="closeShortcuts">知道了</button></div>`);
+  $('#closeShortcuts').onclick=closeModal;
+}
+function shortcutKey(e){
+  if(e.defaultPrevented||e.isComposing||e.ctrlKey||e.metaKey||e.altKey||!S.user||document.body.classList.contains('auth-locked'))return;
+  if(e.key==='Escape'){
+    if(!$('#modalBackdrop').classList.contains('hidden')){e.preventDefault();closeModal();return}
+    if(!$('#taskDrawer').classList.contains('hidden')){e.preventDefault();closeDrawer();return}
+  }
+  if(e.target.closest?.('input,textarea,select,[contenteditable],[contenteditable="plaintext-only"]'))return;
+  if(!$('#modalBackdrop').classList.contains('hidden')||!$('#taskDrawer').classList.contains('hidden'))return;
+  const key=e.key.length===1?e.key.toLowerCase():e.key;
+  const run={'?':openShortcuts,'/':openSearch,n:()=>{if(!$('#addTaskBtn').classList.contains('hidden'))newTask()},
+    t:()=>switchView('today'),w:()=>switchView('calendar'),p:()=>switchView('projects'),i:()=>switchView('inbox')}[key];
+  if(run){e.preventDefault();run()}
+}
+document.addEventListener('keydown',shortcutKey);
+$('#shortcutHelp').onclick=openShortcuts;
+
 $('#closeDrawer').onclick=closeDrawer;$('#closeModal').onclick=closeModal;
 $('#modalBackdrop').onclick=e=>{if(e.target.id==='modalBackdrop')closeModal()};
 $('#taskDrawer').onclick=e=>{if(e.target.id==='taskDrawer')closeDrawer()};

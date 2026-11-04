@@ -455,7 +455,7 @@ test('a running project offers 完成项目 to its Owner and the admins, finishe
 
 test('project completion request opens a required report form before submitting', () => {
   const a=app(); const elements={};
-  const el=s=>elements[s]||(elements[s]={innerHTML:'',value:'',classList:{remove(){},add(){},toggle(){}},addEventListener(){}});
+  const el=s=>elements[s]||(elements[s]={innerHTML:'',value:'',classList:{remove(){},add(){},toggle(){},contains(){return true}},addEventListener(){}});
   a.context.document={querySelector:el,querySelectorAll:()=>[]};
   a.run(`S.today='2026-11-02';S.user={id:'test001',admin:0};
     S.projects=[{id:'p',name:'项目',owner:'test001',status:'active',end:'2026-11-30'}];
@@ -1190,7 +1190,7 @@ test('the drawer button and the edit form never share an element id', () => {
 test('editing keeps the current assignee selectable even when the pool omits them', () => {
   const a = app();
   const elements = {};
-  a.context.document = {querySelector: s => elements[s] || (elements[s] = {classList:{add(){},remove(){}},closest:()=>null}), querySelectorAll: () => []};
+  a.context.document = {querySelector: s => elements[s] || (elements[s] = {classList:{add(){},remove(){},contains(){return true}},closest:()=>null}), querySelectorAll: () => []};
   a.run(`S.today='2026-10-28';S.users=[{id:'superadmin',admin:1,active:1},{id:'admin002',admin:1,active:1},{id:'test002',admin:0,active:1}];
     S.projects=[];S.tasks=[{id:'t',name:'个人事项',assignee:'admin002',date:'2026-10-28',duration:30,priority:'P1'}];S.user={id:'superadmin',admin:1};`);
   a.run("editTaskRequest('t',true)");
@@ -1252,7 +1252,7 @@ test('project tasks sort by priority, start, end, or the saved manual order', ()
    record, and the project Owner or an admin can send it back. */
 test('a finished task offers its assignee an edit and its Owner a send-back', () => {
   const a = app();
-  const els = {'#drawerContent': {innerHTML: ''}, '#taskDrawer': {classList: {remove() {}}}};
+  const els = {'#drawerContent': {innerHTML: ''}, '#taskDrawer': {classList: {remove() {},contains(){return true}}}};
   a.context.document = {querySelector: s => els[s] || null, querySelectorAll: () => []};
   a.run(`S.today='2026-09-12';S.logs=[];S.editRequests=[];S.users=[];
          S.projects=[{id:'p',name:'项目',owner:'test002',status:'active',members:{test001:'accepted',test002:'accepted'}}];
@@ -2101,4 +2101,93 @@ test('a merged period badge sits beside the clamped week chip name, never inside
   assert.ok(/<span class="week-task-title"><span class="week-task-name">[^<]*<\/span><span class="stack-badge"[^>]*>×3<\/span><\/span>/.test(chip));
   const plain = a.run(`weekTaskChip({id:'u',name:'普通任务',assignee:'member',priority:'P1',status:'todo',date:'2026-11-04'},'2026-11-04')`);
   assert.ok(!plain.includes('week-task-title') && plain.includes('<span class="week-task-name">普通任务</span>'));
+});
+
+test('a past day traces what was carried on and offers no add button; an empty one stays small', () => {
+  const a = app();
+  a.run("S.users=[{id:'member',active:1}];S.today='2026-11-04';S.user={id:'member'}");
+  const past = a.run("weekDayColumn('2026-11-02',[],true,2)");
+  assert.ok(past.includes('2 项未完成，已递延') && !past.includes('week-day-add') && !past.includes('is-quiet'));
+  const empty = a.run("weekDayColumn('2026-11-01',[],true,0)");
+  assert.ok(empty.includes('is-quiet') && !empty.includes('week-day-add'));
+  const today = a.run("weekDayColumn('2026-11-04',[],true,3)");
+  assert.ok(today.includes('week-day-add') && !today.includes('已递延'), '今天和以后照常可以加任务');
+});
+
+test('a project set up after it began shows 立项 no later than 执行', () => {
+  const a = app();
+  a.run("S.today='2026-11-04';S.tasks=[];S.folders=[]");
+  const html = a.run("projectLifecycle({id:'p',start:'2026-10-25',end:'2026-11-29',createdAt:'2026-11-04T09:00:00+08:00',status:'active',owner:'x'},false)");
+  const days = [...html.matchAll(/<small>([^<]*)<\/small>/g)].map(m => m[1]);
+  assert.deepEqual(days.slice(0, 2), ['10月25日', '10月25日']);
+});
+
+test('the shortcut hint opens a real list and single keys stay out of the way while typing', () => {
+  const key = source.match(/function shortcutKey\(e\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/closest\?\.\('input,textarea,select,\[contenteditable\]/.test(key), '输入框里打字不触发');
+  assert.ok(/e\.ctrlKey\|\|e\.metaKey\|\|e\.altKey/.test(key), '带修饰键时不抢浏览器快捷键');
+  for (const k of ["'?':openShortcuts", "'/':openSearch", "t:()=>switchView('today')", "w:()=>switchView('calendar')", "p:()=>switchView('projects')", "i:()=>switchView('inbox')"])
+    assert.ok(key.includes(k), k);
+  assert.ok(/\$\('#shortcutHelp'\)\.onclick=openShortcuts/.test(source));
+});
+
+test('the project space card drops what the page already shows', () => {
+  const a = app(); const elements = {};
+  a.context.document = {querySelector: s => elements[s] || (elements[s] = {innerText: '', classList: {toggle() {}}}), querySelectorAll: () => []};
+  a.run(`S.today='2026-11-04';S.notifications=[];S.folders=[];S.files=[];S.tasks=[];S.repeats=[];
+    S.users=[{id:'superadmin',admin:1,active:1},{id:'test001',active:1},{id:'test002',active:1},{id:'test003',active:1}];
+    S.projects=[{id:'p',name:'独一无二的名字',desc:'只出现一次的描述',owner:'test001',status:'active',start:'2026-11-01',
+      members:{test001:'accepted',test002:'accepted'}}];S.user={id:'test001',admin:0};UI.space='p';renderProjects()`);
+  const space = elements['#projectSpace'].innerHTML;
+  assert.equal(space.split('只出现一次的描述').length-1,1,'项目简介在空间顶部保留一处');
+  assert.ok(space.indexOf('只出现一次的描述')<space.indexOf('项目背景'));
+  assert.ok(!a.run('projectCardHTML(S.projects[0],true)').includes('只出现一次的描述'),'任务卡不再重复简介');
+  assert.equal(space.split('invite-members').length - 1, 0, '添加协作者只留在项目人力里');
+  assert.ok(space.includes('spaceInvite') && space.includes('add-project-task'));
+  assert.ok(!space.includes('project-members'));
+});
+
+test('week history retains deferral events after completion without treating merged or reopened rows as deferrals', () => {
+  const a=app();
+  a.run(`S.today='2026-11-04';S.user={id:'member'};S.projects=[];UI.member='all';
+    S.tasks=[{id:'old',assignee:'member',date:'2026-11-03',status:'deferred',superseded:true},
+      {id:'leaf',originId:'old',assignee:'member',date:'2026-11-04',status:'todo'},
+      {id:'merged',assignee:'member',date:'2026-11-03',status:'todo',superseded:true},
+      {id:'reopened',assignee:'member',date:'2026-11-03',status:'done',superseded:true},
+      {id:'other',assignee:'other',date:'2026-11-03',status:'deferred',superseded:true}];
+    S.logs=[{taskId:'old',kind:'defer'},{taskId:'old',kind:'defer'},
+      {taskId:'reopened',kind:'reopen'},{taskId:'other',kind:'defer'}]`);
+  assert.deepEqual(a.json('[...weekDeferralCounts()]'),[['2026-11-03',1]],'按任务去重且遵循成员范围');
+  a.run("S.tasks[0].status='done';S.tasks[0].carriedCompletion=true;S.tasks[1].status='done'");
+  assert.deepEqual(a.json('[...weekDeferralCounts()]'),[['2026-11-03',1]]);
+  const html=a.run("weekDayColumn('2026-11-03',[],true,weekDeferralCounts().get('2026-11-03'))");
+  assert.ok(html.includes('1 项未完成，已递延')&&!html.includes('is-quiet'));
+  a.run("S.user={id:'admin',admin:1}");assert.deepEqual(a.json('[...weekDeferralCounts()]'),[['2026-11-03',2]]);
+  a.run("UI.member='member'");assert.deepEqual(a.json('[...weekDeferralCounts()]'),[['2026-11-03',1]]);
+});
+
+test('Escape closes the top task overlay while typing and restores its opener without closing the layer below', () => {
+  const a=app(),elements={};let focused='';
+  const element=(id,hidden=false)=>elements[id]||(elements[id]={isConnected:true,innerHTML:'',classList:{
+    hidden,contains(){return this.hidden},add(){this.hidden=true},remove(){this.hidden=false}},
+    closest(){return null},focus(){focused=id}});
+  a.context.document={body:{classList:{contains:()=>false}},activeElement:element('task-opener'),querySelector:s=>element(s,true),querySelectorAll:()=>[]};
+  a.context.confirm=()=>true;
+  const shortcut=source.match(/function shortcutKey\(e\)\{[\s\S]*?\n\}/)[0];
+  vm.runInContext(shortcut,a.context);
+  a.run("S.user={id:'member'};UI.drawerReturnFocus=document.activeElement");
+  element('#taskDrawer').classList.hidden=false;
+  a.context.document.activeElement=element('drawer-button');
+  a.run("openModal('confirmation')");
+  a.context.event={key:'Escape',target:{closest:()=>({tagName:'TEXTAREA'})},preventDefault(){this.defaultPrevented=true}};
+  a.run('shortcutKey(event)');
+  assert.ok(elements['#modalBackdrop'].classList.hidden);assert.equal(focused,'drawer-button');
+  assert.equal(elements['#taskDrawer'].classList.hidden,false);assert.equal(a.context.event.defaultPrevented,true);
+  a.context.event.defaultPrevented=false;a.run('shortcutKey(event)');
+  assert.ok(elements['#taskDrawer'].classList.hidden);assert.equal(focused,'task-opener');
+  a.run("openModal('unsaved');UI.docDirty=true");a.context.confirm=()=>false;
+  a.context.event.defaultPrevented=false;a.run('shortcutKey(event)');
+  assert.equal(elements['#modalBackdrop'].classList.hidden,false,'保留未保存内容的关闭确认');
+  a.context.event={key:'n',target:{closest:()=>({})},preventDefault(){throw Error('typing intercepted')}};
+  a.run('shortcutKey(event)');
 });
