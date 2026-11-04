@@ -2102,3 +2102,45 @@ test('a merged period badge sits beside the clamped week chip name, never inside
   const plain = a.run(`weekTaskChip({id:'u',name:'普通任务',assignee:'member',priority:'P1',status:'todo',date:'2026-11-04'},'2026-11-04')`);
   assert.ok(!plain.includes('week-task-title') && plain.includes('<span class="week-task-name">普通任务</span>'));
 });
+
+test('a past day traces what was carried on and offers no add button; an empty one stays small', () => {
+  const a = app();
+  a.run("S.users=[{id:'member',active:1}];S.today='2026-11-04';S.user={id:'member'}");
+  const past = a.run("weekDayColumn('2026-11-02',[],true,2)");
+  assert.ok(past.includes('2 项未完成，已递延') && !past.includes('week-day-add') && !past.includes('is-quiet'));
+  const empty = a.run("weekDayColumn('2026-11-01',[],true,0)");
+  assert.ok(empty.includes('is-quiet') && !empty.includes('week-day-add'));
+  const today = a.run("weekDayColumn('2026-11-04',[],true,3)");
+  assert.ok(today.includes('week-day-add') && !today.includes('已递延'), '今天和以后照常可以加任务');
+});
+
+test('a project set up after it began shows 立项 no later than 执行', () => {
+  const a = app();
+  a.run("S.today='2026-11-04';S.tasks=[];S.folders=[]");
+  const html = a.run("projectLifecycle({id:'p',start:'2026-10-25',end:'2026-11-29',createdAt:'2026-11-04T09:00:00+08:00',status:'active',owner:'x'},false)");
+  const days = [...html.matchAll(/<small>([^<]*)<\/small>/g)].map(m => m[1]);
+  assert.deepEqual(days.slice(0, 2), ['10月25日', '10月25日']);
+});
+
+test('the shortcut hint opens a real list and single keys stay out of the way while typing', () => {
+  const key = source.match(/function shortcutKey\(e\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/closest\?\.\('input,textarea,select,\[contenteditable\]/.test(key), '输入框里打字不触发');
+  assert.ok(/e\.ctrlKey\|\|e\.metaKey\|\|e\.altKey/.test(key), '带修饰键时不抢浏览器快捷键');
+  for (const k of ["'?':openShortcuts", "'/':openSearch", "t:()=>switchView('today')", "w:()=>switchView('calendar')", "p:()=>switchView('projects')", "i:()=>switchView('inbox')"])
+    assert.ok(key.includes(k), k);
+  assert.ok(/\$\('#shortcutHelp'\)\.onclick=openShortcuts/.test(source));
+});
+
+test('the project space card drops what the page already shows', () => {
+  const a = app(); const elements = {};
+  a.context.document = {querySelector: s => elements[s] || (elements[s] = {innerText: '', classList: {toggle() {}}}), querySelectorAll: () => []};
+  a.run(`S.today='2026-11-04';S.notifications=[];S.folders=[];S.files=[];S.tasks=[];S.repeats=[];
+    S.users=[{id:'superadmin',admin:1,active:1},{id:'test001',active:1},{id:'test002',active:1},{id:'test003',active:1}];
+    S.projects=[{id:'p',name:'独一无二的名字',desc:'只出现一次的描述',owner:'test001',status:'active',start:'2026-11-01',
+      members:{test001:'accepted',test002:'accepted'}}];S.user={id:'test001',admin:0};UI.space='p';renderProjects()`);
+  const space = elements['#projectSpace'].innerHTML;
+  assert.ok(!space.includes('只出现一次的描述'), '描述不再在任务卡里重复');
+  assert.equal(space.split('invite-members').length - 1, 0, '添加协作者只留在项目人力里');
+  assert.ok(space.includes('spaceInvite') && space.includes('add-project-task'));
+  assert.ok(!space.includes('project-members'));
+});

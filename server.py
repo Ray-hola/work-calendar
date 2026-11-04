@@ -1935,7 +1935,7 @@ class Store:
             t['status']='done';t['completedAt']=timestamp();t['completedBy']=user['id']
             self._settle_lineage(t,user['id'])
             if not t.get('projectId') and t.get('creator') not in (None,user['id']):
-                self.notify(t['creator'],'任务已完成',f'{user["id"]} 完成了「{t["name"]}」。\n完成总结：{summary}','progress',t['id'])
+                self.notify(t['creator'],'任务已完成',f'{self.display_name(user["id"])} 完成了「{t["name"]}」。\n完成总结：{summary}','progress',t['id'])
         elif action=='task.defer':
             target=valid_date(d.get('date'))
             if target<=t['date']:raise Problem(400,'递延日期必须晚于原日期')
@@ -1960,9 +1960,9 @@ class Store:
         A merged group is one notice, its scope named, however many periods it holds."""
         if t.get('projectId'):
             p=self.get('projects',t['projectId'])
-            if p['owner']!=user['id']:self.notify(p['owner'],'项目任务进度',f'{user["id"]} 将「{t["name"]}」{scope}记录为 {t["status"]}。'+json.dumps(log,ensure_ascii=False),'progress',t['id'])
+            if p['owner']!=user['id']:self.notify(p['owner'],'项目任务进度',f'{self.display_name(user["id"])} 将「{t["name"]}」{scope}记录为 {status_label(t["status"])}。'+json.dumps(log,ensure_ascii=False),'progress',t['id'])
         elif action!='task.complete' and t.get('creator') not in (None,user['id']):
-            self.notify(t['creator'],'临时任务进度',f'{user["id"]} 将「{t["name"]}」{scope}记录为 {status_label(t["status"])}。',
+            self.notify(t['creator'],'临时任务进度',f'{self.display_name(user["id"])} 将「{t["name"]}」{scope}记录为 {status_label(t["status"])}。',
                         'progress',t['id'])
 
     def _repeat_progress(self, user, action, data):
@@ -2157,11 +2157,11 @@ class Store:
     def make_task(self, user, data, collaborator=False, announce=True):
         task=self.put('tasks',self.build_task(user,data,collaborator))
         if announce and task['assignee']!=user['id']:
-            self.notify(task['assignee'],'收到任务指派',f'{user["id"]} 指派「{task["name"]}」，安排日期 {task["date"]}。',
+            self.notify(task['assignee'],'收到任务指派',f'{self.display_name(user["id"])} 指派「{task["name"]}」，安排日期 {task["date"]}。',
                         'task',task['id'],fresh=True)
         if collaborator:
             p=self.get('projects',task['projectId'])
-            if p['owner']!=task['assignee']:self.notify(p['owner'],'协作者新建任务',f'{user["id"]} 在「{p["name"]}」新建「{task["name"]}」，安排日期 {task["date"]}。','task',task['id'])
+            if p['owner']!=task['assignee']:self.notify(p['owner'],'协作者新建任务',f'{self.display_name(user["id"])} 在「{p["name"]}」新建「{task["name"]}」，安排日期 {task["date"]}。','task',task['id'])
         return task
 
     def request_task(self, user, data):
@@ -2171,7 +2171,7 @@ class Store:
         approver=self.get('projects',pid)['owner'] if pid else 'superadmin'
         fields=('name','desc','priority','projectId','duration','date','time','deadline','assignee','type')
         req=self.put('task_requests',{'requester':user['id'],'approver':approver,'projectId':pid,'draft':{k:draft[k] for k in fields},'status':'pending','createdAt':timestamp()})
-        self.notify(approver,'任务创建申请',f'{user["id"]} 申请新建「{draft["name"]}」，安排日期 {draft["date"]}。','task_request',req['id'])
+        self.notify(approver,'任务创建申请',f'{self.display_name(user["id"])} 申请新建「{draft["name"]}」，安排日期 {draft["date"]}。','task_request',req['id'])
         return {**req,'requested':True}
 
     def seed(self):
@@ -2988,7 +2988,7 @@ class Store:
                     self.notify(owner,'项目 Owner 指派',f'superadmin 指定你负责「{p["name"]}」，可在项目下创建和分配任务。',
                                 'project',p['id'],fresh=True)
             elif direct:self.invite(p)
-            else:self.notify('superadmin','项目审批申请',f'{user["id"]} 申请创建「{p["name"]}」。','approval',p['id'])
+            else:self.notify('superadmin','项目审批申请',f'{self.display_name(user["id"])} 申请创建「{p["name"]}」。','approval',p['id'])
             return p
         if action=='project.delete':
             # Destructive and irreversible: allowed for superadmin and the
@@ -3025,7 +3025,7 @@ class Store:
             self.audit(user['id'],'project.delete',{'project':p['name'],'projectId':p['id'],**counts})
             for member,status in (p.get('members') or {}).items():
                 if member!=user['id'] and status=='accepted':
-                    self.notify(member,'项目已删除',f'{user["id"]} 删除了项目「{p["name"]}」及其全部子任务。','project',None)
+                    self.notify(member,'项目已删除',f'{self.display_name(user["id"])} 删除了项目「{p["name"]}」及其全部子任务。','project',None)
             return {'id':p['id'],'deleted':True,**counts}
         if action=='project.review':
             self.admin(user);p=self.get('projects',d['id'])
@@ -3048,7 +3048,7 @@ class Store:
             self.finish_project(user,p)
             for member,state in (p.get('members') or {}).items():
                 if state=='accepted' and member!=user['id']:
-                    self.notify(member,'项目已完成',f'{user["id"]} 已将「{p["name"]}」标记为完成。','project',p['id'])
+                    self.notify(member,'项目已完成',f'{self.display_name(user["id"])} 已将「{p["name"]}」标记为完成。','project',p['id'])
             return p
         if action=='project.complete_request':
             p=self.get('projects',d['id']);self.project_owner(user,p)
@@ -3061,7 +3061,7 @@ class Store:
             p['status']='pending_completion';p['completionReport']=report;p['completionRequestedBy']=user['id'];p['completionRequestedAt']=timestamp();self.put('projects',p)
             left=f'\n仍有 {len(open_tasks)} 项未完成任务，结项后不再继续。' if open_tasks else ''
             self.notify('superadmin','项目完成待审批',
-                        f'{user["id"]} 申请将项目「{p["name"]}」结项，请审批。{left}\n结项报告：{report}',
+                        f'{self.display_name(user["id"])} 申请将项目「{p["name"]}」结项，请审批。{left}\n结项报告：{report}',
                         'project_completion',p['id'])
             return p
         if action=='project.complete_review':
@@ -3243,13 +3243,13 @@ class Store:
                 self.trim_project_repeats(p,'项目已结束' if p['status'] in ('done','archived') else '项目周期已调整')
                 if p['status']=='active':self.materialize(now().date(), CALENDAR_END)
             if p['owner']!=old['owner']:
-                self.notify(p['owner'],'项目 Owner 指派',f'{user["id"]} 将「{p["name"]}」交给你负责，可在项目下创建和分配任务。',
+                self.notify(p['owner'],'项目 Owner 指派',f'{self.display_name(user["id"])} 将「{p["name"]}」交给你负责，可在项目下创建和分配任务。',
                             'project',p['id'],fresh=True)
-                self.notify(old['owner'],'项目 Owner 变更',f'{user["id"]} 已将「{p["name"]}」的 Owner 改为 {p["owner"]}，你仍是项目协作者。','project',p['id'])
+                self.notify(old['owner'],'项目 Owner 变更',f'{self.display_name(user["id"])} 已将「{p["name"]}」的 Owner 改为 {self.display_name(p["owner"])}，你仍是项目协作者。','project',p['id'])
             elif p['name']!=old['name'] or (p['start'],p['end'])!=(old.get('start'),old.get('end')):
                 for member,state in (p.get('members') or {}).items():
                     if state=='accepted' and member!=user['id']:
-                        self.notify(member,'项目信息调整',f'{user["id"]} 调整了「{p["name"]}」：周期 {p["start"]} → {p["end"] or "长期"}。','project',p['id'])
+                        self.notify(member,'项目信息调整',f'{self.display_name(user["id"])} 调整了「{p["name"]}」：周期 {p["start"]} → {p["end"] or "长期"}。','project',p['id'])
             return p
         if action=='request.respond':
             r=self.get('requests',d['id'])
@@ -3260,7 +3260,7 @@ class Store:
             r['status']='accepted' if d.get('accept') else 'rejected';r['read']=True;p['members'][user['id']]=r['status'];self.put('projects',p);self.put('requests',r)
             for n in self.all('notifications'):
                 if n['to']==user['id'] and n.get('kind')=='request' and n.get('reference')==p['id'] and not n.get('read'):n['read']=True;self.put('notifications',n)
-            self.notify(p['owner'],'协作邀请结果',f'{user["id"]} '+('接受' if d.get('accept') else '拒绝')+f'加入「{p["name"]}」。','request',p['id']);return
+            self.notify(p['owner'],'协作邀请结果',f'{self.display_name(user["id"])} '+('接受' if d.get('accept') else '拒绝')+f'加入「{p["name"]}」。','request',p['id']);return
         if action=='request.read':
             r=self.get('requests',d['id'])
             if r['to']!=user['id']:raise Problem(403,'不能更改其他用户的协作邀请')
@@ -3291,7 +3291,7 @@ class Store:
                 req.update(status='approved',taskId=task['id'],reviewedBy=user['id'],reviewedAt=timestamp())
                 self.notify(req['requester'],'任务申请已通过',f'「{task["name"]}」已加入日程，安排日期 {task["date"]}。','task',task['id'])
                 if task['assignee']!=req['requester']:
-                    body=f'{req["requester"]} 申请、{user["id"]} 批准的「{task["name"]}」，安排日期 {task["date"]}。'
+                    body=f'{self.display_name(req["requester"])} 申请、{self.display_name(user["id"])} 批准的「{task["name"]}」，安排日期 {task["date"]}。'
                     self.notify(task['assignee'],'收到任务指派',body,'task',task['id'],fresh=True)
             else:
                 req.update(status='rejected',reason=required(d,'reason'),reviewedBy=user['id'],reviewedAt=timestamp())
@@ -3331,7 +3331,7 @@ class Store:
             req=self.put('edit_requests', {'taskId':t['id'],'requester':user['id'],'approver':approver,
                                            'changes':changes,'reason':reason,'status':'pending','read':False,
                                            'createdAt':timestamp()})
-            self.notify(approver, '任务修改待审批', f'{user["id"]} 申请修改「{t["name"]}」。\n修改理由：{reason}', 'task_edit_approval', req['id'])
+            self.notify(approver, '任务修改待审批', f'{self.display_name(user["id"])} 申请修改「{t["name"]}」。\n修改理由：{reason}', 'task_edit_approval', req['id'])
             self.put('logs', {'taskId':t['id'],'actor':user['id'],'kind':'edit_request','requestId':req['id'],
                               'changes':changes,'reason':reason,'createdAt':timestamp(),'date':now().date().isoformat()})
             return req
@@ -3360,7 +3360,7 @@ class Store:
                                   'date':now().date().isoformat()})
                 recipients={req['requester'], old.get('assignee'), t.get('assignee')}
                 for recipient in sorted(x for x in recipients if x and x!=user['id']):
-                    self.notify(recipient, '任务修改已通过', f'「{t["name"]}」的修改申请已由 {user["id"]} 通过，新的负责人：{t["assignee"]}，日期：{t["date"]}。', 'task_edit_approval', req['id'])
+                    self.notify(recipient, '任务修改已通过', f'「{t["name"]}」的修改申请已由 {self.display_name(user["id"])} 通过，新的负责人：{self.display_name(t["assignee"])}，日期：{t["date"]}。', 'task_edit_approval', req['id'])
                 return t
             reason=required(d, 'reason')
             req.update(status='rejected', rejection=reason, reviewedBy=user['id'], reviewedAt=timestamp(), read=True)
@@ -3368,7 +3368,7 @@ class Store:
             self.put('logs', {'taskId':t['id'],'actor':user['id'],'kind':'edit_approval','decision':'rejected',
                               'requestId':req['id'],'reason':reason,'createdAt':timestamp(),
                               'date':now().date().isoformat()})
-            self.notify(req['requester'], '任务修改被驳回', f'「{t["name"]}」的修改申请被 {user["id"]} 驳回。\n驳回理由：{reason}', 'task_edit_rejected', req['id'])
+            self.notify(req['requester'], '任务修改被驳回', f'「{t["name"]}」的修改申请被 {self.display_name(user["id"])} 驳回。\n驳回理由：{reason}', 'task_edit_rejected', req['id'])
             return req
         if action=='task.start':
             t=self.get('tasks',d['id']);self.performer(user,t)
@@ -3380,7 +3380,7 @@ class Store:
             if t.get('projectId'):
                 p=self.get('projects',t['projectId'])
                 if p['owner']!=user['id']:
-                    self.notify(p['owner'],'项目任务开始',f'{user["id"]} 已开始「{t["name"]}」。','progress',t['id'])
+                    self.notify(p['owner'],'项目任务开始',f'{self.display_name(user["id"])} 已开始「{t["name"]}」。','progress',t['id'])
             return t
         if action=='task.update':
             t=self.get('tasks',d['id']);old=dict(t)
@@ -3411,7 +3411,7 @@ class Store:
             if t['priority'] not in ('P0','P1','P2') or t['status'] not in ('todo','doing'):raise Problem(400,'状态或优先级不合法')
             self.put('tasks',t);self.put('logs',{'taskId':t['id'],'actor':user['id'],'kind':'adjust','before':old,'after':t,'createdAt':timestamp(),'date':now().date().isoformat()})
             for recipient in {old['assignee'],t['assignee']}:
-                if recipient!=user['id']:self.notify(recipient,'任务被调整',f'{user["id"]} 调整「{t["name"]}」：{old["assignee"]} → {t["assignee"]}，{old["date"]} → {t["date"]}。','task',t['id'])
+                if recipient!=user['id']:self.notify(recipient,'任务被调整',f'{self.display_name(user["id"])} 调整「{t["name"]}」：{self.display_name(old["assignee"])} → {self.display_name(t["assignee"])}，{old["date"]} → {t["date"]}。','task',t['id'])
             return t
         if action in ('task.complete','task.defer','task.skip'):
             return self._repeat_progress(user,action,d)
@@ -3433,7 +3433,7 @@ class Store:
             self.put('logs',{'taskId':t['id'],'actor':user['id'],'kind':'complete_edit',**self._stack_log_data(t),'summary':t['completionSummary'],'actual':t['completionActual'],'feeling':t['completionFeeling'],'before':before,'date':t['date'],'createdAt':timestamp()})
             if t.get('projectId'):
                 owner=self.get('projects',t['projectId'])['owner']
-                if owner!=user['id']:self.notify(owner,'完成记录已修改',f'{user["id"]} 修改了「{t["name"]}」的完成记录。\n完成总结：{t["completionSummary"]}','progress',t['id'])
+                if owner!=user['id']:self.notify(owner,'完成记录已修改',f'{self.display_name(user["id"])} 修改了「{t["name"]}」的完成记录。\n完成总结：{t["completionSummary"]}','progress',t['id'])
             return t
         if action=='task.reopen':
             # The Owner (or an admin) sends finished work back with a reason.
@@ -3456,7 +3456,7 @@ class Store:
             self.put('tasks',t)
             self.put('logs',{'taskId':t['id'],'actor':user['id'],'kind':'reopen',**self._stack_log_data(t),'reason':reason,'date':today,'createdAt':timestamp()})
             if t['assignee']!=user['id']:
-                self.notify(t['assignee'],'任务被打回',f'「{t["name"]}」被 {user["id"]} 打回，请继续处理。\n原因：{reason}','task_rejected',t['id'])
+                self.notify(t['assignee'],'任务被打回',f'「{t["name"]}」被 {self.display_name(user["id"])} 打回，请继续处理。\n原因：{reason}','task_rejected',t['id'])
             return t
 
         if action=='repeat.create':
@@ -3647,7 +3647,7 @@ class Store:
             if any(not str(content.get(k,'')).strip() for k in fields):raise Problem(400,'请完整填写报告；没有风险时可填写“无”')
             report=self.put('reports',{'id':f'{kind}:{pid}:{user["id"]}:{day}','kind':kind,'projectId':pid,'author':user['id'],'date':day,'content':content,'confirmed':True,'createdAt':timestamp()})
             if kind=='collaborator':
-                body=f'{user["id"]} / {p["name"]}\n'+ '\n'.join(f'{k}：{v}' for k,v in content.items())
+                body=f'{self.display_name(user["id"])} / {p["name"]}\n'+ '\n'.join(f'{k}：{v}' for k,v in content.items())
                 self.notify(p['owner'],f'协作者进度 · {day}',body,'report',report['id'])
             self.refresh_brief(day)
             return report
@@ -4068,6 +4068,9 @@ class Store:
                     continue
                 if day>at.date():continue
                 last_day=min(at.date(),project_end) if project_end else at.date()
+                # Days missed while the service was down are caught up in one
+                # pass; their 23:30 gaps go to the Owner as one notice, not one each.
+                gaps=[]
                 while day<=last_day:
                     daystr=day.isoformat()
                     collection_day = day + timedelta(days=1)
@@ -4080,7 +4083,7 @@ class Store:
                         owner_report=next((r for r in self.all('reports') if r['projectId']==p['id'] and r['date']==daystr and r['kind']=='owner' and datetime.fromisoformat(r['createdAt'])<=due),None)
                         content,missing=self.aggregate(p,daystr,due)
                         if stage=='missing':
-                            if missing:self.notify(p['owner'],f'23:30 协作进度缺失 · {daystr}',f'「{p["name"]}」未提交：'+ '、'.join(missing),'missing',p['id']);count+=1
+                            if missing:gaps.append((daystr,missing))
                         elif stage=='final':
                             # Only missing reports generate a midnight fallback. Submitted
                             # owner/collaborator reports are delivered when saved and are
@@ -4090,7 +4093,16 @@ class Store:
                                 self.put('reports',{'id':key,'kind':'automatic','stage':'final','projectId':p['id'],'author':'system','date':daystr,'content':content,'confirmed':False,'createdAt':at.isoformat(),'cutoff':due.isoformat()});count+=1
                         self.db.execute('INSERT INTO jobs VALUES (?,?)',(key,at.isoformat()))
                     day+=timedelta(days=1)
+                if len(gaps)==1:
+                    daystr,missing=gaps[0]
+                    self.notify(p['owner'],f'23:30 协作进度缺失 · {daystr}',f'「{p["name"]}」未提交：'+'、'.join(map(self.display_name,missing)),'missing',p['id']);count+=1
+                elif gaps:
+                    lines=[f'{d[5:]}：'+'、'.join(map(self.display_name,m)) for d,m in gaps[-14:]]
+                    more=f'\n另有更早 {len(gaps)-14} 天未列出。' if len(gaps)>14 else ''
+                    self.notify(p['owner'],f'协作进度缺失 · {gaps[0][0]} 至 {gaps[-1][0]}',
+                                f'「{p["name"]}」有 {len(gaps)} 天没有收齐协作进度：\n'+'\n'.join(lines)+more,'missing',p['id']);count+=1
             # One team brief per finished day goes to the superadmin and into
+
             # the archive room. Days missed while the service was down are
             # filed quietly; only the latest one is announced.
             for brief_day in sorted(x for x in candidate_days if x and x < at.date().isoformat()):

@@ -1646,6 +1646,50 @@ class ProjectSpaceTests(unittest.TestCase):
                 self.store.read_file(outsider, file['id'])
 
 
+class NoticeWordingTests(unittest.TestCase):
+    """Notices name people the way the team does and do not pile up."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.store = Store(Path(self.temp.name) / 'notices.sqlite3', seed=False)
+        for name in ['superadmin', 'test001', 'test002', 'test003']:
+            self.store.create_user(name, 'test-only-password', admin=name == 'superadmin')
+        for uid, label in (('test001', '林默'), ('test002', '周一'), ('test003', '陈曦')):
+            self.store.db.execute('UPDATE users SET display_name=? WHERE id=?', (label, uid))
+        self.store.db.commit()
+        self.admin = self.store.user('superadmin')
+
+    def tearDown(self):
+        self.store.close()
+        self.temp.cleanup()
+
+    def test_notices_use_display_names_and_status_words(self):
+        day = now().date().isoformat()
+        project = self.store.action(self.admin, 'project.create', {
+            'name': 'P', 'owner': 'test001', 'members': ['test002'], 'start': day, 'cycle': 'infinite'})
+        task = self.store.action(self.store.user('test001'), 'task.create', {
+            'name': '写周报', 'assignee': 'test002', 'projectId': project['id'], 'date': day})
+        given = next(n for n in self.store.all('notifications') if n['to'] == 'test002' and n['reference'] == task['id'])
+        self.assertTrue(given['body'].startswith('林默 指派'), given['body'])
+        later = (now().date() + timedelta(days=1)).isoformat()
+        self.store.action(self.store.user('test002'), 'task.defer', {'id': task['id'], 'date': later, 'reason': '等待', 'remaining': '剩下的'})
+        progress = [n for n in self.store.all('notifications') if n['to'] == 'test001' and n['title'] == '项目任务进度'][-1]
+        self.assertTrue(progress['body'].startswith('周一 将「写周报」记录为 已递延'), progress['body'])
+        self.assertNotIn('test00', progress['body'].split('{')[0])
+
+    def test_days_missed_while_down_come_as_one_notice(self):
+        start = (now().date() - timedelta(days=5)).isoformat()
+        project = self.store.action(self.admin, 'project.create', {
+            'name': '补报项目', 'owner': 'test001', 'members': ['test002', 'test003'], 'start': start, 'cycle': 'infinite'})
+        self.store.db.commit()
+        self.store.schedule(now() + timedelta(hours=1))
+        gaps = [n for n in self.store.all('notifications') if n['to'] == 'test001' and n.get('kind') == 'missing']
+        self.assertEqual(len(gaps), 1, [n['title'] for n in gaps])
+        self.assertIn('天没有收齐协作进度', gaps[0]['body'])
+        self.assertIn('周一、陈曦', gaps[0]['body'])
+        self.assertNotIn('test002', gaps[0]['body'])
+
+
 if __name__ == '__main__':
+
 
     unittest.main()

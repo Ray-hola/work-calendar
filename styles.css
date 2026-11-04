@@ -373,10 +373,54 @@ select {
 }
 
 .help-row {
+  display: block;
+  width: 100%;
+  font: inherit;
   font-size: 12px;
-  padding: 0 6px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
   color: var(--faint);
+  text-align: left;
+  cursor: pointer;
 }
+
+.help-row:hover,
+.help-row:focus-visible {
+  color: var(--ink-2);
+  background: var(--rail-hover);
+}
+
+.shortcut-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px 16px;
+  margin: 18px 0 0;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.shortcut-list dt {
+  text-align: right;
+}
+
+.shortcut-list kbd {
+  display: inline-block;
+  min-width: 22px;
+  padding: 2px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--surface-sunk);
+  font: 600 12px/1.4 var(--font-sans);
+  text-align: center;
+}
+
+.shortcut-list dd {
+  margin: 0;
+  align-self: center;
+}
+
 
 .help-row span {
   border: 1px solid var(--ink-2);
@@ -3205,6 +3249,21 @@ select {
 
 .week-day-more:hover {
   color: var(--ink);
+}
+
+.week-day-carried {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 2px 0;
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.week-day-carried .icon {
+  width: 12px;
+  height: 12px;
+  flex: none;
 }
 
 .week-day-add {
@@ -9684,6 +9743,21 @@ select:focus {
     content: '—';
     color: var(--line-strong);
   }
+  .week-day.is-quiet {
+    padding: 6px 0;
+  }
+  .week-day.is-quiet .week-day-open {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 6px;
+  }
+  .week-day.is-quiet .week-day-open strong {
+    font-size: 16px;
+  }
+  .week-day.is-quiet .week-day-tasks:empty::before {
+    content: none;
+  }
+
   .week-day-add,
   .week-day:first-child .week-day-add {
     position: static;
