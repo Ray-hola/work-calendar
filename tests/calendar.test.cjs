@@ -2093,3 +2093,12 @@ test('AI confirmation binds and displays the same grouped-period scope as direct
   const html=a.run("agentActionHTML('task.complete',agentTaskScope('task.complete',{id:'p2',summary:'done'}))");
   assert.ok(html.includes('巡检 ×2'));assert.ok(html.includes('11月2日、11月3日'));assert.ok(!html.includes('<pre>'));
 });
+
+test('a merged period badge sits beside the clamped week chip name, never inside it', () => {
+  const a = app();
+  a.run("S.users=[{id:'member',active:1}];S.today='2026-11-04'");
+  const chip = a.run(`weekTaskChip({id:'t',name:'${'很长的固定任务名称'.repeat(4)}',assignee:'member',priority:'P1',status:'todo',date:'2026-11-04',stackCount:3},'2026-11-04')`);
+  assert.ok(/<span class="week-task-title"><span class="week-task-name">[^<]*<\/span><span class="stack-badge"[^>]*>×3<\/span><\/span>/.test(chip));
+  const plain = a.run(`weekTaskChip({id:'u',name:'普通任务',assignee:'member',priority:'P1',status:'todo',date:'2026-11-04'},'2026-11-04')`);
+  assert.ok(!plain.includes('week-task-title') && plain.includes('<span class="week-task-name">普通任务</span>'));
+});

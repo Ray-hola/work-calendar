@@ -151,10 +151,11 @@ class RepeatStackingTests(unittest.TestCase):
     def test_failure_after_first_deferred_period_rolls_back_the_whole_group(self):
         self.rule();self.advance(2);self.enable();card=self.pending()[0];before=self.store.all('tasks');logs=self.store.all('logs')
         progress=self.store._task_progress;calls=[]
-        def fail_second(user,action,data):
+        def fail_second(user,action,data,**options):
             calls.append(data['id'])
             if len(calls)==2:raise Problem(409,'simulated conflict')
-            return progress(user,action,data)
+            return progress(user,action,data,**options)
+
         with patch.object(self.store,'_task_progress',side_effect=fail_second):
             with self.assertRaises(Problem):self.store.action(self.member,'task.defer',{'id':card['id'],'date':(self.at.date()+timedelta(days=1)).isoformat(),'reason':'later','remaining':'same'})
         self.assertEqual(len(calls),2);self.assertEqual(self.store.all('tasks'),before);self.assertEqual(self.store.all('logs'),logs)
@@ -222,7 +223,22 @@ class RepeatStackingTests(unittest.TestCase):
         self.assertEqual([x['stackCount'] for x in completions],[3,4])
         self.assertEqual(completions[0],original)
 
+    def test_the_project_owner_hears_once_about_a_whole_group(self):
+        project=self.store.action(self.admin,'project.create',{'name':'P','owner':'other','members':['member'],'start':self.base.date().isoformat(),'cycle':'infinite'})
+        self.rule(projectId=project['id']);self.advance(2);self.enable()
+        notices=lambda:[n for n in self.store.all('notifications') if n['to']=='other' and n['title']=='项目任务进度']
+        card=self.pending()[0];self.assertEqual(card['stackCount'],3)
+        self.store.action(self.member,'task.defer',{'id':card['id'],'stackPeriods':card['stackPeriods'],'date':(self.at.date()+timedelta(days=1)).isoformat(),'reason':'later','remaining':'same'})
+        self.assertEqual(len(notices()),1,'整组递延只通知一次')
+        self.assertIn('（合并 3 期）',notices()[0]['body'])
+        self.advance(3);card=self.pending()[0]
+        self.store.action(self.member,'task.complete',{'id':card['id'],'stackPeriods':card['stackPeriods'],'summary':'done','actual':30})
+        self.assertEqual(len(notices()),2,'整组完成也只通知一次')
+        self.assertIn('（合并 4 期）',notices()[1]['body'])
+        self.assertIn('"stackCount": 4',notices()[1]['body'],'通知附带的记录写明期数')
+
     def test_group_deferral_logs_share_a_batch_with_frozen_periods(self):
+
         self.rule();self.advance(2);self.enable();card=self.pending()[0]
         self.store.action(self.member,'task.defer',{'id':card['id'],'date':(self.at.date()+timedelta(days=1)).isoformat(),'reason':'later','remaining':'same'})
         events=[x for x in self.store.all('logs') if x.get('stackBatchId')]

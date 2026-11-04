@@ -1924,7 +1924,7 @@ class Store:
                           'nextTaskId': copy['id'], 'date': now().date().isoformat(), 'createdAt': timestamp()})
         return copy
 
-    def _task_progress(self, user, action, d):
+    def _task_progress(self, user, action, d, announce=True):
         t=self.get('tasks',d['id']);self.performer(user,t)
         log={'taskId':t['id'],'actor':user['id'],'date':t['date'],'createdAt':timestamp(),'estimated':t['duration'],'type':t['type']}
         if action=='task.complete':
@@ -1952,13 +1952,18 @@ class Store:
             if not t['fixed']:raise Problem(400,'只有固定安排可以跳过本次')
             log.update(kind='skip',reason=str(d.get('reason','临时跳过')));t['status']='skipped'
         self.put('tasks',t);self.put('logs',log)
+        if announce:self._announce_progress(user,action,t,log)
+        return t
+
+    def _announce_progress(self, user, action, t, log, scope=''):
+        """Tell the project Owner, or a temp task's creator, what was recorded.
+        A merged group is one notice, its scope named, however many periods it holds."""
         if t.get('projectId'):
             p=self.get('projects',t['projectId'])
-            if p['owner']!=user['id']:self.notify(p['owner'],'项目任务进度',f'{user["id"]} 将「{t["name"]}」记录为 {t["status"]}。'+json.dumps(log,ensure_ascii=False),'progress',t['id'])
+            if p['owner']!=user['id']:self.notify(p['owner'],'项目任务进度',f'{user["id"]} 将「{t["name"]}」{scope}记录为 {t["status"]}。'+json.dumps(log,ensure_ascii=False),'progress',t['id'])
         elif action!='task.complete' and t.get('creator') not in (None,user['id']):
-            self.notify(t['creator'],'临时任务进度',f'{user["id"]} 将「{t["name"]}」记录为 {status_label(t["status"])}。',
+            self.notify(t['creator'],'临时任务进度',f'{user["id"]} 将「{t["name"]}」{scope}记录为 {status_label(t["status"])}。',
                         'progress',t['id'])
-        return t
 
     def _repeat_progress(self, user, action, data):
         task=self.get('tasks',data['id'])
@@ -1977,8 +1982,9 @@ class Store:
         for member in group:self.performer(user,member)
         representative=group[-1]
         history={'stackCount':len(periods),'stackPeriods':sorted(periods),'stackDates':sorted(self._repeat_period_date(by_id[p],by_id) for p in periods if p in by_id)}
+        scope=f'（合并 {len(periods)} 期）'
         if action=='task.complete':
-            result=self._task_progress(user,action,{**data,'id':representative['id']})
+            result=self._task_progress(user,action,{**data,'id':representative['id']},announce=False)
             for member in group[:-1]:
                 member.update(status='done',completedAt=result['completedAt'],completedBy=user['id'],carriedCompletion=True,stackCompletedBy=result['id'])
                 self.put('tasks',member);self._settle_lineage(member,user['id'])
@@ -1986,16 +1992,19 @@ class Store:
             self.put('tasks',result)
             event=next(x for x in reversed(self.all('logs')) if x.get('taskId')==result['id'] and x.get('kind')=='complete')
             event.update(history);self.put('logs',event)
+            self._announce_progress(user,action,result,event,scope)
             return {**result,'stackCount':len(periods)}
         # Defer every period atomically, retaining the bundle even when the user
         # picks a future day. Disabling the setting still reveals each period.
         batch=uid();result=None
         for member in group:
-            result=self._task_progress(user,action,{**data,'id':member['id']})
+            result=self._task_progress(user,action,{**data,'id':member['id']},announce=False)
             copy=self.get('tasks',result['supersededBy']);copy['stackBatchId']=batch;self.put('tasks',copy)
             event=next(x for x in reversed(self.all('logs')) if x.get('taskId')==result['id'] and x.get('kind')=='defer')
             event.update(history,stackBatchId=batch);self.put('logs',event)
+        self._announce_progress(user,action,result,event,scope)
         return result
+
 
     def _join_member(self, project, member, request_fields, title, body):
         """Put `member` on the project, settle their open invitation and tell them."""

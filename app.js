@@ -523,7 +523,9 @@ function weekTaskChip(t,iso){
   const cont=iso>t.date,[c,l]=status(t);
   const meta=cont?`续 · ${nameOf(t.assignee)}`:`${escapeHTML(t.time||'09:00')} · ${nameOf(t.assignee)}`;
   return `<button class="week-task ${escapeHTML(t.priority)} ${c}${cont?' cont':''}" type="button" data-id="${escapeHTML(t.id)}" title="${escapeHTML(`${t.name} · ${nameOf(t.assignee)} · ${l}`)}">`
-    +`<span class="week-task-name">${escapeHTML(t.name)}${stackBadge(t)}</span>`
+    +`${t.stackCount>1?`<span class="week-task-title"><span class="week-task-name">${escapeHTML(t.name)}</span>${stackBadge(t)}</span>`
+    :`<span class="week-task-name">${escapeHTML(t.name)}</span>`}`
+
     +`<span class="week-task-meta">${escapeHTML(meta)}${!cont&&isMultiDay(t)?` · ${spanDays(t)} 天`:''}</span></button>`;
 }
 function weekDayColumn(iso,tasks,canAdd){
