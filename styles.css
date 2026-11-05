@@ -11522,6 +11522,13 @@ body.is-resizing-agent { user-select: none; }
    first step of an empty page); a quiet outline for commands that run now; text
    buttons for add and edit, with add in the accent ink; delete stays muted until
    armed, then turns red. Going elsewhere is a row with a chevron, not a button. */
+/* Roles differ in colour and emphasis, never in the height of peer actions. */
+#settingsView .primary-btn,
+#settingsView .secondary-btn,
+#settingsView .text-btn {
+  height: 32px;
+}
+
 #settingsView .primary-btn {
   box-shadow: none;
 }
@@ -11536,7 +11543,6 @@ body.is-resizing-agent { user-select: none; }
 }
 
 #settingsView .secondary-btn {
-  height: 32px;
   padding: 0 12px;
   border-color: var(--line-strong);
   border-radius: 8px;

@@ -2309,6 +2309,48 @@ test('settings speak plainly: neutral "not allowed", one-choice-at-a-time week s
   assert.ok(/已完成 · /.test(source) && /action:'scheduler\.run'/.test(source));
 });
 
+/* Source-level CSS contract: read the real classes emitted for each action
+   row and apply the matching simple selectors in specificity/order. This
+   checks the height regression without claiming browser layout acceptance. */
+function settingsButtonHeight(classes,container){
+  const css=fs.readFileSync(path.join(__dirname,'../styles.css'),'utf8').replace(/\/\*[\s\S]*?\*\//g,'');
+  const scopes=new Set(['','#settingsView',`.${container}`,`#settingsView .${container}`]);
+  let winner=null;
+  for(const rule of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)){
+    const height=rule[2].match(/(?:^|;)\s*height\s*:\s*(\d+)px\s*(?:;|$)/);if(!height)continue;
+    for(const selector of rule[1].split(',').map(s=>s.trim())){
+      const normalized=selector.replace(/\s+/g,' '),split=normalized.lastIndexOf(' ');
+      const scope=split<0?'':normalized.slice(0,split),target=normalized.slice(split+1);
+      if(!scopes.has(scope)||! /^(?:\.[\w-]+)+$/.test(target)||!target.slice(1).split('.').every(c=>classes.includes(c)))continue;
+      const specificity=(selector.match(/#/g)||[]).length*100+(selector.match(/\./g)||[]).length*10;
+      if(!winner||specificity>=winner.specificity)winner={specificity,height:Number(height[1])};
+    }
+  }
+  assert.ok(winner,`no height found for ${classes.join(' ')}`);return winner.height;
+}
+function buttonHeights(html,container){
+  return [...html.matchAll(/<button\b[^>]*class="([^"]+)"[^>]*>/g)].map(m=>settingsButtonHeight(m[1].split(/\s+/),container));
+}
+test('settings source editor cancel and submit use the same compact height',()=>{
+  const a=planningApp();a.run("aiEditing={kind:'chat'}");
+  const html=a.run('aiSourceEditor(null)');
+  assert.deepEqual(buttonHeights(html,'ai-editor-actions'),[32,32]);
+});
+test('settings test edit and destructive confirmation actions have equal heights',()=>{
+  const a=aiEditorApp();a.run('renderAiSettingsPage()');
+  const actions=[...a.box.innerHTML.matchAll(/<div class="ai-source-actions">([\s\S]*?)<\/div>/g)];
+  assert.equal(actions.length,2);
+  for(const [,html] of actions){
+    assert.deepEqual(buttonHeights(html,'ai-source-actions'),[32,32,32]);
+    assert.deepEqual(buttonHeights(html.replace('text-btn is-danger','text-btn is-danger is-armed'),'ai-source-actions'),[32,32,32]);
+  }
+});
+test('settings empty state primary and alternative actions have equal heights',()=>{
+  const a=aiEditorApp();a.run('aiSettings.sources=[];renderAiSettingsPage()');
+  const html=a.box.innerHTML.match(/<div class="ai-empty-actions">([\s\S]*?)<\/div>/)[1];
+  assert.deepEqual(buttonHeights(html,'ai-empty-actions'),[32,32]);
+});
+
 test('week history retains deferral events after completion without treating merged or reopened rows as deferrals', () => {
   const a=app();
   a.run(`S.today='2026-11-04';S.user={id:'member'};S.projects=[];UI.member='all';
