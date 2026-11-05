@@ -1876,6 +1876,7 @@ function renderSettingsPage(){
 }
 /* The list shows where each page stands without opening it. */
 function renderSettingsSummaries(){
+  const accounts=$('#accountSummary');if(accounts)accounts.textContent=`${(S.users||[]).filter(u=>u.active).length} 个账户`;
   const prompt=$('#promptSummary');if(prompt)prompt.textContent=S.meetingPrompt&&S.meetingPrompt!==MEETING_PROMPT_DEFAULT?'已自定义':'内置模板';
   const ai=$('#aiSummary');if(!ai)return;
   if(!aiSettings&&S.user?.admin){loadAiSettings();return}
@@ -1932,19 +1933,22 @@ function renderAiSettingsPage(){
   const {sources,scenes,sceneInfo,contextChars}=aiSettings;
   const card=s=>{
     if(aiEditing?.id===s.id)return aiSourceEditor(s);
-    const t=aiTests[s.id]||{};
+    const t=aiTests[s.id]||{},kind=s.kind==='speech'?'语音转写':aiProviderName(s.provider);
+    /* Which jobs rely on it, so a change or a delete is not a surprise. */
+    const used=sceneInfo.filter(i=>(scenes[i.id]||{}).source===s.id).map(i=>i.name);
     return `<article class="ai-source" data-source="${escapeHTML(s.id)}"><div class="ai-source-main"><div class="ai-source-title"><strong>${escapeHTML(s.name)}</strong>`
-      +`<span class="ai-chip${s.kind==='speech'?' is-speech':''}">${s.kind==='speech'?'语音转写':escapeHTML(aiProviderName(s.provider))}</span></div>`
+      +`${s.kind==='speech'||s.name!==kind?`<span class="ai-chip${s.kind==='speech'?' is-speech':''}">${escapeHTML(kind)}</span>`:''}</div>`
       +`<div class="ai-source-meta"><span>${escapeHTML(aiHost(s.baseUrl))}</span><span>${s.apiKeySet?'密钥 '+escapeHTML(s.apiKeyMasked):'未设置密钥'}</span>`
       +`<span>${s.models?.length?`${s.models.length} 个模型`:'还没有模型列表'}</span></div>`
+      +`<p class="ai-source-usage">${used.length?`用于 ${escapeHTML(used.join('、'))}`:'暂未使用'}</p>`
       +`${t.text?`<p class="ai-source-status is-${t.state}" role="status">${escapeHTML(t.text)}</p>`:''}</div>`
       +`<div class="ai-source-actions"><button type="button" class="secondary-btn" data-ai-test="${escapeHTML(s.id)}"${t.busy?' disabled aria-busy="true"':''}>${t.busy?'测试中…':'测试'}</button>`
-      +`<button type="button" class="ghost-btn" data-ai-edit="${escapeHTML(s.id)}">编辑</button><button type="button" class="ghost-btn" data-ai-delete="${escapeHTML(s.id)}">删除</button></div></article>`;
+      +`<button type="button" class="text-btn" data-ai-edit="${escapeHTML(s.id)}">编辑</button><button type="button" class="text-btn is-danger" data-ai-delete="${escapeHTML(s.id)}">删除</button></div></article>`;
   };
   const sceneRow=info=>{
     const c=scenes[info.id]||{},speech=info.id==='transcribe',pool=sources.filter(s=>(s.kind==='speech')===speech),follow=['plan','minutes'].includes(info.id);
     const source=pool.find(s=>s.id===c.source),models=aiSceneModels(source,c.model),pending=aiEditing?.scene===info.id;
-    const controls=!pool.length?`<button type="button" class="secondary-btn" data-ai-add="${speech?'speech':'chat'}">${icon('plus')}添加${speech?'语音转写':'对话模型'}来源</button>`
+    const controls=!pool.length?`<span class="ai-scene-empty">添加${speech?'语音转写':'对话模型'}来源后可选</span>`
       :`<label class="ai-field"><span>来源</span><select data-scene-source="${info.id}">${follow?`<option value=""${c.follows?' selected':''}>跟随对话助手</option>`:''}`
         +`${speech?`<option value=""${!c.source?' selected':''}>停用</option>`:!c.source&&!follow?'<option value="" selected disabled>选择来源</option>':''}`
         +`${pool.map(s=>`<option value="${escapeHTML(s.id)}"${!c.follows&&s.id===c.source?' selected':''}>${escapeHTML(s.name)}</option>`).join('')}</select></label>`
@@ -1957,9 +1961,12 @@ function renderAiSettingsPage(){
   };
   const adding=aiEditing&&!aiEditing.id&&!aiEditing.scene;
   box.innerHTML=`<section class="settings-sheet"><h2 class="settings-group-title">来源</h2><p class="settings-sheet-lead">每个来源是一组 API 地址和密钥，密钥只保存在服务端。`
-    +`保存后会立即测试，并取回这个来源能用的模型。</p><div class="ai-sources">${sources.map(card).join('')||'<p class="muted ai-empty">还没有来源。</p>'}`
-    +`${adding?aiSourceEditor(null):''}</div>${adding?'':`<div class="ai-add-row"><button type="button" class="ghost-btn" data-ai-add="chat">${icon('plus')}添加对话模型来源</button>`
-    +`<button type="button" class="ghost-btn" data-ai-add="speech">${icon('plus')}添加语音转写来源</button></div>`}</section>`
+    +`保存后会立即测试，并取回这个来源能用的模型。</p><div class="ai-sources">${sources.map(card).join('')}`
+    +`${!sources.length&&!adding?`<div class="ai-empty-state"><strong>还没有模型来源</strong><p>先添加一个对话模型来源，AI 助手、规划任务和会议纪要都会用到它。</p>`
+      +`<div class="ai-empty-actions"><button type="button" class="primary-btn" data-ai-add="chat">${icon('plus')}添加对话模型来源</button>`
+      +`<button type="button" class="text-btn" data-ai-add="speech">添加语音转写来源</button></div></div>`:''}`
+    +`${adding?aiSourceEditor(null):''}</div>${adding||!sources.length?'':`<div class="ai-add-row"><button type="button" class="text-btn is-add" data-ai-add="chat">${icon('plus')}添加对话模型来源</button>`
+    +`<button type="button" class="text-btn is-add" data-ai-add="speech">${icon('plus')}添加语音转写来源</button></div>`}</section>`
     +`<section class="settings-sheet"><h2 class="settings-group-title">使用场景</h2><p class="settings-sheet-lead">每个场景选一个来源和模型；规划任务和会议纪要可以跟随对话助手。</p>`
     +`${sceneInfo.map(sceneRow).join('')}</section>`
     +`<section class="settings-sheet"><h2 class="settings-group-title">对话</h2><div class="setting-row" data-ai="context"><div class="setting-text"><h3><span>单次对话容量</span>`
@@ -2156,7 +2163,7 @@ function renderMeetingPromptSetting(){
   const existing=box.querySelector('#meetingPromptSettingInput');if(existing&&(existing.value!==existing.dataset.saved||existing===document.activeElement||existing.dataset.saving==='true'))return;
   const value=S.meetingPrompt||MEETING_PROMPT_DEFAULT;
   box.innerHTML=`<textarea aria-label="会议纪要系统提示词" id="meetingPromptSettingInput" class="settings-prompt" rows="7" maxlength="12000">${escapeHTML(value)}</textarea>`
-    +`<div class="setting-actions"><small class="muted">保存后，新生成的纪要会用这段提示词。</small><button type="button" class="secondary-btn" id="saveMeetingPrompt">保存</button></div>`;
+    +`<div class="setting-actions"><small class="muted">保存后，新生成的纪要会用这段提示词。</small><button type="button" class="primary-btn" id="saveMeetingPrompt">保存</button></div>`;
   const input=$('#meetingPromptSettingInput'),save=$('#saveMeetingPrompt');let saved=value,saving=false;input.dataset.saved=saved;
   const sync=()=>{save.disabled=saving||!input.value.trim()||input.value===saved;};input.oninput=sync;sync();
   const owner=S.user.id;
@@ -2270,7 +2277,7 @@ function renderCreationPolicy(){
   const inGroup=gid=>S.users.filter(u=>roleOf(u)==='member'&&groupOf(u)===gid);
   const tag=(label,value,labels)=>`<span class="rule-tag is-${escapeHTML(value)}"><small>${label}</small>${labels[value]||''}</span>`;
   const row=g=>{const list=inGroup(g.id);return `<div class="rule-row" data-group="${escapeHTML(g.id)}" role="button" tabindex="0" aria-label="编辑「${escapeHTML(g.name)}」"><div class="rule-row-name"><strong>${escapeHTML(g.name)}</strong></div><div class="rule-row-tags">${CREATION_KINDS.map(k=>tag(KIND_LABELS[k],g[k],RULE_LABELS)).join('')}${tag('AI 助手',g.agent||'read',AGENT_ACCESS_LABELS)}</div><div class="rule-row-people" title="${escapeHTML(list.map(u=>nameOf(u.id)).join('、'))}">${list.slice(0,4).map(u=>avatarHTML(u.id)).join('')}<span>${list.length} 人</span></div><span class="task-arrow">${icon('chevron-right')}</span></div>`};
-  box.innerHTML=`<div class="rule-list">${policy.groups.map(row).join('')}</div><button class="ghost-btn rule-add" id="addCreationGroup">${icon('plus')}新建规则组</button>`;
+  box.innerHTML=`<div class="rule-list">${policy.groups.map(row).join('')}</div><button type="button" class="text-btn is-add rule-add" id="addCreationGroup">${icon('plus')}新建规则组</button>`;
   $$('#creationPolicy .rule-row').forEach(r=>{r.onclick=()=>editRuleGroup(r.dataset.group);r.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();editRuleGroup(r.dataset.group)}}});
   $('#addCreationGroup').onclick=()=>editRuleGroup(null);
 }
@@ -3410,7 +3417,10 @@ $('#runAutomationBtn').onclick=async()=>{
 };
 $('#settingsSearch')?.addEventListener('input',applySettingsFilter);
 $('#settingsSearch')?.addEventListener('keydown',e=>{if(e.key==='Escape'&&e.target.value){e.preventDefault();e.stopPropagation();e.target.value='';applySettingsFilter()}});
-$$('#settingsView [data-settings-go]').forEach(b=>b.onclick=()=>switchView(b.dataset.settingsGo));
+$$('#settingsView [data-settings-go]').forEach(row=>{
+  row.onclick=()=>switchView(row.dataset.settingsGo);
+  row.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();switchView(row.dataset.settingsGo)}};
+});
 $$('#settingsView [data-settings-page]').forEach(row=>{
   row.onclick=()=>openSettingsPage(row.dataset.settingsPage);
   row.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openSettingsPage(row.dataset.settingsPage)}};

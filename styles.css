@@ -11207,6 +11207,14 @@ body.is-resizing-agent { user-select: none; }
   transform: translateX(2px);
 }
 
+/* A row that opens a page keeps its chevron on the right at every width;
+   stacked under the description it reads as a stray glyph. */
+.setting-row.is-link,
+.setting-row.is-link .setting-control {
+  grid-template-columns: minmax(0, 1fr) auto;
+  justify-content: flex-end;
+}
+
 .settings-back {
   display: inline-flex;
   align-items: center;
@@ -11484,4 +11492,198 @@ body.is-resizing-agent { user-select: none; }
   padding: 0 12px;
   border-radius: 8px;
   font-size: 12px;
+}
+
+/* 系统设置 · button roles. One filled primary per editing context (save, or the
+   first step of an empty page); a quiet outline for commands that run now; text
+   buttons for add and edit, with add in the accent ink; delete stays muted until
+   armed, then turns red. Going elsewhere is a row with a chevron, not a button. */
+#settingsView .primary-btn {
+  box-shadow: none;
+}
+
+#settingsView .primary-btn::after {
+  display: none;
+}
+
+#settingsView .primary-btn:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+#settingsView .secondary-btn {
+  height: 32px;
+  padding: 0 12px;
+  border-color: var(--line-strong);
+  border-radius: 8px;
+  font-size: 12.5px;
+  box-shadow: none;
+}
+
+#settingsView .secondary-btn:hover {
+  transform: none;
+  background: var(--surface-sunk);
+}
+
+.text-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+
+.text-btn:hover,
+.text-btn:focus-visible {
+  background: var(--surface-sunk);
+  color: var(--ink);
+  outline: none;
+}
+
+.text-btn:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent-line);
+}
+
+.text-btn .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.text-btn.is-add {
+  margin-left: -9px;
+  color: var(--accent-dark);
+}
+
+.text-btn.is-add:hover {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+.text-btn.is-danger {
+  color: var(--muted);
+}
+
+.text-btn.is-danger:hover {
+  background: var(--c-coral-soft);
+  color: var(--danger);
+}
+
+.text-btn.is-danger.is-armed {
+  background: var(--danger);
+  color: var(--surface);
+}
+
+/* The way back is a control, not an eyebrow. */
+#settingsView .page-intro .eyebrow:has(.settings-back) {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+#settingsView .page-intro .eyebrow:has(.settings-back)::before {
+  display: none;
+}
+
+.settings-back {
+  height: 30px;
+  margin-left: -10px;
+  padding: 0 10px 0 6px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.settings-back:hover {
+  background: var(--surface-sunk);
+  color: var(--ink);
+}
+
+.settings-back .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.ai-source-usage {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.ai-source-actions {
+  gap: 2px;
+}
+
+.ai-empty-state {
+  padding: 22px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 14px;
+  background: var(--surface-sunk);
+}
+
+.ai-empty-state strong {
+  font-size: 14px;
+}
+
+.ai-empty-state p {
+  margin: 6px 0 14px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.ai-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-scene-empty {
+  align-self: center;
+  font-size: 12.5px;
+  color: var(--faint);
+}
+
+.ai-scene-controls .ai-field.is-short {
+  flex: 0 0 72px;
+}
+
+.ai-scene-controls .ai-field:not(.is-short) {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+/* Model ids are long (Qwen/Qwen3-ASR-0.6B): give the controls the wider share
+   on desktop, and one select per line on a phone, so a chosen id reads whole. */
+@media (min-width: 901px) {
+  .ai-scene {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .ai-scene-controls .ai-field:not(.is-short) {
+    flex-basis: 100%;
+  }
+}
+
+/* Selected choices sit raised on a sunk track instead of a dark fill, so the
+   only colour left among the controls is a switch that is on. */
+#settingsView .rule-seg {
+  background: var(--surface-sunk);
+  border-color: transparent;
+}
+
+#settingsView .rule-opt.is-on {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(64,54,42,.10), 0 0 0 1px var(--line-strong);
 }
