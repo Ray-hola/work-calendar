@@ -252,11 +252,11 @@ test('rule groups live in 系统设置: a list of groups, each made or changed o
   assert.ok(/class="rule-person/.test(card) && /rulePickAll/.test(card), '成员直接在卡片上点选，可以全选');
   assert.ok(!/<select/.test(list + card), '规则组不用下拉框');
   assert.ok(!/group:/.test(item), '账户行的权限组下拉只剩 superadmin / admin / 普通用户');
-  assert.ok(/<h2>规则组<\/h2>/.test(list), '叫「规则组」，不和权限组混淆');
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  const accounts = html.match(/<section id="accountsView"[\s\S]*?<\/section>/)[0], settings = html.match(/<section id="settingsView"[\s\S]*?<\/section>/)[0];
+  assert.ok(/<h3><span>规则组<\/span>/.test(html), '叫「规则组」，不和权限组混淆');
+  const accounts = html.match(/<section id="accountsView"[\s\S]*?<\/section>/)[0], settings = html.match(/<section id="settingsView"[\s\S]*?(?=<section id="\w+View")/)[0];
   assert.ok(!/creationPolicy|automation-card/.test(accounts), '账户管理只留账户本身');
-  assert.ok(/creationPolicy/.test(settings) && /automation-card/.test(settings), '规则组和日记自动化都在系统设置');
+  assert.ok(/creationPolicy/.test(settings) && /collectionSchedule/.test(settings), '规则组和日记自动化都在系统设置');
 });
 
 test('every drafted card says what will happen to it before anything is sent', () => {
@@ -2149,7 +2149,7 @@ test('the shortcut hint opens a real list and single keys stay out of the way wh
   const key = source.match(/function shortcutKey\(e\)\{[\s\S]*?\n\}/)[0];
   assert.ok(/closest\?\.\('input,textarea,select,\[contenteditable\]/.test(key), '输入框里打字不触发');
   assert.ok(/e\.ctrlKey\|\|e\.metaKey\|\|e\.altKey/.test(key), '带修饰键时不抢浏览器快捷键');
-  for (const k of ["'?':openShortcuts", "'/':openSearch", "t:()=>switchView('today')", "w:()=>switchView('calendar')", "p:()=>switchView('projects')", "i:()=>switchView('inbox')"])
+  for (const k of ["'?':openShortcuts", "'/':()=>UI.view==='settings'", "t:()=>switchView('today')", "w:()=>switchView('calendar')", "p:()=>switchView('projects')", "i:()=>switchView('inbox')"])
     assert.ok(key.includes(k), k);
   assert.ok(/\$\('#shortcutHelp'\)\.onclick=openShortcuts/.test(source));
 });
@@ -2207,9 +2207,9 @@ test('settings speak plainly: neutral "not allowed", one-choice-at-a-time week s
   assert.ok(/\.rule-tag\.is-read \{ color: var\(--c-blue-ink\)/.test(css), 'AI 查询与审批不再同色');
   const week = source.match(/function renderWeekStartSetting\(\)\{[\s\S]*?\n\}/)[0];
   assert.ok(/box\.dataset\.saving/.test(week) && /x\.disabled=true/.test(week), '保存期间不能连点');
-  const collect = source.match(/function collectionSettings\(\)\{[\s\S]*?\n\}/)[0];
-  assert.ok(collect.includes('<h2>项目补报时间</h2>') && collect.includes('data-mode') && collect.includes('data-weekday'));
-  assert.ok(/检查完成：/.test(source) && /action:'scheduler\.run'/.test(source));
+  const collect = source.match(/function renderCollectionSchedule\(\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(collect.includes('data-mode') && collect.includes('data-weekday'), '补报时间就地设置');
+  assert.ok(/已完成 · /.test(source) && /action:'scheduler\.run'/.test(source));
 });
 
 test('week history retains deferral events after completion without treating merged or reopened rows as deferrals', () => {
@@ -2388,4 +2388,27 @@ test('system prompt settings save directly, retain edits made during save, and h
   assert.equal(a.run('S.meetingPrompt'),'修改后的模板');assert.equal(input.value,'保存过程中继续编辑');assert.equal(save.disabled,false);
   assert.equal(requests[0].action,'meeting.prompt.update');assert.equal(requests[0].data.prompt,'修改后的模板');
   a.run("S.user={id:'member',admin:false};renderMeetingPromptSetting()");assert.equal(box.innerHTML,'');
+});
+
+test('settings rows filter by search, mark what differs from the default, and hide what the account may not change', () => {
+  const a = app();
+  const cls = () => { const set = new Set(); return {add: c => set.add(c), remove: c => set.delete(c), contains: c => set.has(c), toggle: (c, on) => { (on === undefined ? !set.has(c) : on) ? set.add(c) : set.delete(c); return set.has(c) }} };
+  const row = (setting, role, title, keywords) => { const r = {dataset: {setting, role, keywords}, classList: cls(), slot: {innerHTML: ''}};
+    r.querySelector = sel => sel === '.setting-text' ? {textContent: title} : sel === '.setting-reset-slot' ? r.slot : null; return r };
+  const rows = [row('rules', 'superadmin', '规则组', '权限'), row('week', 'admin', '每周从哪天开始', '周视图'), row('collection', 'admin', '补报时间', '补报 周期')];
+  const group = {id: 'g', classList: cls(), dataset: {nav: '设置', navIcon: 'archive'}, querySelector: sel => rows.find(r => !r.classList.contains('is-forbidden') && (!sel.includes('is-filtered') || !r.classList.contains('is-filtered'))) || null};
+  const search = {value: ''}, empty = {classList: cls(), textContent: ''};
+  a.context.document = {querySelector: s => ({'#settingsSearch': search, '#settingsEmpty': empty})[s] || null,
+    querySelectorAll: s => s.includes('.setting-row') ? rows : s.includes('.settings-group') ? [group] : [], getElementById: () => group};
+  a.run(`S.user={id:'admin',admin:1,role:'admin'};S.weekStart=1;S.automation={enabled:true,mode:'daily',time:'00:00'};S.meetingPrompt='';
+    renderRepeatStackingSetting=renderProjectAutomationSetting=renderCollectionSchedule=renderWeekStartSetting=renderCreationPolicy=renderMeetingPromptSetting=()=>{};renderSettings()`);
+  assert.ok(rows[0].classList.contains('is-forbidden'), '规则组只给 superadmin');
+  assert.ok(rows[1].classList.contains('is-modified') && rows[1].slot.innerHTML.includes('恢复默认'), '周起始日改过，显示恢复默认');
+  assert.ok(!rows[2].classList.contains('is-modified'));
+  search.value = '补报'; a.run('applySettingsFilter()');
+  assert.ok(rows[1].classList.contains('is-filtered') && !rows[2].classList.contains('is-filtered'));
+  assert.ok(empty.classList.contains('hidden'));
+  search.value = '不存在的设置'; a.run('applySettingsFilter()');
+  assert.ok(!empty.classList.contains('hidden') && empty.textContent.includes('不存在的设置'));
+  assert.deepEqual(a.json("SETTING_DEFAULTS.week.reset()"), ['week_start.update', {day: 6}]);
 });
