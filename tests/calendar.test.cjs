@@ -2455,6 +2455,14 @@ test('meeting creation is guarded while a request is pending',async()=>{
   const first=nodes['#saveMeeting'].onclick();await nodes['#saveMeeting'].onclick();release();await first;
   assert.equal(calls.length,1);
 });
+test('meeting edits made during save remain dirty and keep their newer input',async()=>{
+  const h=meetingApp(),pane={dataset:{dirty:'true'}};h.nodes['#meetingEditor']=pane;
+  let release,submitted;h.a.context.fetch=async(path,options)=>{submitted=JSON.parse(options.body);await new Promise(r=>release=r);return {ok:true,text:async()=>JSON.stringify({id:'m1',revision:1,...submitted.data})}};
+  h.nodes['#meetingTranscript'].value='提交版本';const save=h.nodes['#saveMeeting'].onclick();await settle();
+  h.nodes['#meetingTitle'].value='保存期间的新标题';h.nodes['#meetingTranscript'].value='继续编辑的原稿';release();await save;
+  assert.equal(submitted.data.rawTranscript,'提交版本');assert.equal(h.nodes['#meetingTranscript'].value,'继续编辑的原稿');
+  assert.equal(pane.dataset.dirty,'true');assert.equal(pane.dataset.metadataDirty,'true');
+});
 
 function meetingServerApp(){
   const a=meetingApp(),audio=[],recorders=[],timers=new Map();let timer=0,stops=0,revision=0;
