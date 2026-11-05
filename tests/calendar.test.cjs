@@ -1906,6 +1906,28 @@ test('speech settings offer disable and refresh shared dictation status after sa
   assert.equal(b.run('refreshes'),1);
 });
 
+test('reasoning controls show the effective setting and inheritance without a speech control', () => {
+  const a=aiEditorApp();a.run(`aiSettings.sceneInfo=[{id:'chat',name:'对话',desc:''},{id:'plan',name:'规划',desc:''},{id:'transcribe',name:'语音',desc:''}];
+    aiSettings.sources.push({id:'speech',kind:'speech',name:'ASR',models:['whisper-1']});
+    aiSettings.scenes={chat:{source:'a',model:'a',reasoningEffort:'high'},plan:{source:'a',model:'a',follows:true,reasoningEffort:'high'},transcribe:{source:'speech',model:'whisper-1'}};
+    renderAiSettingsPage()`);
+  assert.match(a.box.innerHTML,/<select data-scene-reasoning="chat"[^>]*>[\s\S]*?<option value="high" selected>高<\/option>/);
+  assert.match(a.box.innerHTML,/<select data-scene-reasoning="plan"[^>]* disabled>/);
+  assert.doesNotMatch(a.box.innerHTML,/data-scene-reasoning="transcribe"/);
+  a.run('delete aiSettings.scenes.chat.reasoningEffort;renderAiSettingsPage()');
+  assert.match(a.box.innerHTML,/<option value="auto" selected>默认<\/option>/);
+});
+
+test('reasoning selection saves only the changed field through the scene queue', async () => {
+  const a=aiEditorApp(),input={dataset:{sceneReasoning:'chat'},value:'high'};
+  a.box.querySelectorAll=s=>s==='[data-scene-reasoning]'?[input]:[];
+  a.run('agentLoadServerConfig=()=>{};flashSaved=()=>{};renderAiSettingsPage()');
+  input.onchange();await new Promise(setImmediate);
+  assert.deepEqual(a.pending[0].body,{action:'ai.scene.set',data:{scene:'chat',reasoningEffort:'high'}});
+  a.pending[0].reply({...a.json('aiSettings'),scenes:{chat:{source:'a',model:'a',reasoningEffort:'high'}}});
+  await a.run('aiSceneQueue');assert.equal(a.run('aiSettings.scenes.chat.reasoningEffort'),'high');
+});
+
 test('the assistant no longer carries its own connection form; its gear opens settings', () => {
   const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8');
   assert.ok(!/id="agentConfig"|id="agentAsrEndpoint"/.test(html));

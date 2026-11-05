@@ -173,3 +173,5 @@ A typical change:
 ## Contributing and license
 
 Issues and pull requests are welcome; read [`CONTRIBUTING.md`](CONTRIBUTING.md) first. Work Calendar is released under the [MIT License](LICENSE).
+
+Reasoning effort can be selected per chat, planning, or meeting-minutes scene in AI settings. Following the chat scene also inherits its effort. Default leaves the provider setting unchanged; explicit levels require a model/gateway supporting `reasoning_effort` and omit temperature for compatibility. Higher effort can increase latency and token usage. Speech transcription is unaffected.

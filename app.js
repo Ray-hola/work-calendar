@@ -1903,6 +1903,7 @@ function renderPromptPage(){
    against what is saved and refreshes that source's model list; only the
    newest test of a source may report, and editing it voids the one running. */
 const AI_CONTEXT_CHOICES={16000:'精简 · 1.6 万字符',32000:'标准 · 3.2 万字符',64000:'充足 · 6.4 万字符'};
+const AI_REASONING_CHOICES={auto:'默认',none:'关闭',minimal:'极低',low:'低',medium:'中',high:'高',xhigh:'极高',max:'最高'};
 let aiSettings=null,aiEditing=null;const aiTests={};
 let aiSettingsLoad=null,aiSettingsEpoch=0,aiSceneQueue=Promise.resolve(),aiScenePending=0,aiSceneRevision=0;
 async function loadAiSettings(){
@@ -1951,7 +1952,8 @@ function renderAiSettingsPage(){
         +`<label class="ai-field"><span>模型</span>${c.follows||speech&&!c.source?`<input value="${escapeHTML(c.model||'')}" disabled aria-label="模型">`
           :models.length&&!pending?`<select data-scene-model="${info.id}">${models.map(m=>`<option${m===c.model?' selected':''}>${escapeHTML(m)}</option>`).join('')}<option value="__custom">手动填写…</option></select>`
           :`<input data-scene-model-input="${info.id}" value="${escapeHTML(c.model||'')}" placeholder="填写模型 ID，回车保存" aria-label="模型 ID">`}</label>`
-        +`${speech?`<label class="ai-field is-short"><span>语言</span><input data-scene-language="${info.id}" value="${escapeHTML(c.language||'zh')}" maxlength="12"${!c.source?' disabled':''}></label>`:''}`;
+        +`${speech?`<label class="ai-field is-short"><span>语言</span><input data-scene-language="${info.id}" value="${escapeHTML(c.language||'zh')}" maxlength="12"${!c.source?' disabled':''}></label>`
+          :`<label class="ai-field"><span>思考强度</span><select data-scene-reasoning="${info.id}" title="需模型支持；默认使用服务商设置"${c.follows||!c.source||!c.model?' disabled':''}>${Object.entries(AI_REASONING_CHOICES).map(([v,label])=>`<option value="${v}"${v===(c.reasoningEffort||'auto')?' selected':''}>${label}</option>`).join('')}</select></label>`}`;
     return `<div class="setting-row ai-scene" data-scene="${info.id}"><div class="setting-text"><h3><span>${escapeHTML(info.name)}</span><span class="setting-meta">`
       +`<span class="setting-status" aria-live="polite"></span></span></h3><p>${escapeHTML(info.desc)}</p></div><div class="ai-scene-controls">${controls}</div></div>`;
   };
@@ -2061,6 +2063,8 @@ function bindAiSettingsPage(box){
   });
   box.querySelectorAll('[data-scene-language]').forEach(input=>input.onchange=()=>{const scene=input.dataset.sceneLanguage,c=sceneOf(scene);
     if(c.source&&c.model)aiSaveScene(scene,{source:c.source,model:c.model,language:input.value.trim()||'zh'})});
+  box.querySelectorAll('[data-scene-reasoning]').forEach(input=>input.onchange=()=>{
+    aiSaveScene(input.dataset.sceneReasoning,{reasoningEffort:input.value})});
   const context=box.querySelector('#aiContextChars');
   if(context)context.onchange=async()=>{try{aiSettings=await api('/api/action',{action:'ai.context.set',data:{contextChars:Number(context.value)}});renderAiSettingsPage();
     flashSaved($('#settingsPage [data-ai="context"] .setting-status'))}catch(e){toast(e.message);renderAiSettingsPage()}};
