@@ -41,7 +41,7 @@ class MeetingTests(unittest.TestCase):
 
     def test_owner_creates_meeting_with_default_template_and_members_can_read(self):
         meeting = self.store.action(self.admin, 'meeting.create', {'projectId': self.project['id'], 'title': '周会', 'agenda': '发布计划'})
-        self.assertEqual(meeting['promptTemplate'], self.store.default_meeting_prompt())
+        self.assertNotIn('promptTemplate', meeting)
         listed = self.store.action(self.member, 'meeting.list', {'projectId': self.project['id']})
         self.assertEqual([x['title'] for x in listed], ['周会'])
 
@@ -54,7 +54,8 @@ class MeetingTests(unittest.TestCase):
         self.assertEqual(self.store.get('meetings', meeting['id'])['rawTranscript'], '确认周五发布')
 
     def test_minutes_generation_uses_template_and_keeps_raw_transcript(self):
-        meeting = self.store.action(self.admin, 'meeting.create', {'projectId': self.project['id'], 'title': '周会', 'agenda': '发布计划', 'promptTemplate': '标题={{title}}\n议程={{agenda}}\n原稿={{transcript}}'})
+        self.store.action(self.admin, 'meeting.prompt.update', {'prompt': '标题={{title}}\n议程={{agenda}}\n原稿={{transcript}}'})
+        meeting = self.store.action(self.admin, 'meeting.create', {'projectId': self.project['id'], 'title': '周会', 'agenda': '发布计划'})
         self.store.action(self.member, 'meeting.transcript.update', {'id': meeting['id'], 'rawTranscript': '确认周五发布'})
         result = self.store.action(self.member, 'meeting.minutes.generate', {'id': meeting['id']})
         self.assertIn('会议结论', result['minutes'])
@@ -62,6 +63,39 @@ class MeetingTests(unittest.TestCase):
         self.assertIn('标题=周会', _MinutesStub.payload['messages'][0]['content'])
         self.assertIn('原稿=确认周五发布', _MinutesStub.payload['messages'][0]['content'])
         self.assertEqual(_MinutesStub.calls, 1)
+
+    def test_system_prompt_is_admin_only_validated_and_persistent(self):
+        for prompt in ('', ' ' * 4, 'x' * 12001):
+            with self.assertRaises(Problem): self.store.action(self.admin, 'meeting.prompt.update', {'prompt': prompt})
+        with self.assertRaises(Problem): self.store.action(self.member, 'meeting.prompt.update', {'prompt': '越权修改'})
+        self.store.action(self.admin, 'meeting.prompt.update', {'prompt': '只写决策和待办'})
+        self.assertEqual(self.store.snapshot(self.admin)['meetingPrompt'], '只写决策和待办')
+        self.assertIsNone(self.store.snapshot(self.member)['meetingPrompt'])
+        self.store.close()
+        self.store = Store(Path(self.tmp.name) / 'meeting.sqlite3', seed=False)
+        self.assertEqual(self.store.meeting_prompt(), '只写决策和待办')
+
+    def test_existing_meeting_uses_latest_system_prompt_and_cannot_override_it(self):
+        meeting = self.store.action(self.admin, 'meeting.create', {'projectId': self.project['id'], 'title': '周会', 'rawTranscript': '小王周四交付', 'promptTemplate': '创建时绕过'})
+        self.assertEqual(meeting['rawTranscript'], '小王周四交付')
+        self.assertNotIn('promptTemplate', meeting)
+        # A legacy per-meeting prompt must never shadow the global setting.
+        meeting['promptTemplate'] = '旧会议模板'
+        self.store.put('meetings', meeting)
+        self.store.action(self.member, 'meeting.transcript.update', {'id': meeting['id'], 'rawTranscript': '小王周四交付', 'promptTemplate': '成员绕过'})
+        self.assertEqual(self.store.get('meetings', meeting['id'])['promptTemplate'], '旧会议模板')
+        self.store.action(self.admin, 'meeting.prompt.update', {'prompt': '新的全局整理规则'})
+        self.store.action(self.member, 'meeting.minutes.generate', {'id': meeting['id']})
+        messages = _MinutesStub.payload['messages']
+        self.assertEqual(messages[0], {'role': 'system', 'content': '新的全局整理规则'})
+        self.assertIn('小王周四交付', messages[1]['content'])
+        self.assertNotIn('旧会议模板', json.dumps(messages, ensure_ascii=False))
+
+    def test_default_prompt_without_variables_still_sends_source_transcript(self):
+        meeting = self.store.action(self.admin, 'meeting.create', {'projectId': self.project['id'], 'title': '周会', 'rawTranscript': '周五发布'})
+        self.store.action(self.member, 'meeting.minutes.generate', {'id': meeting['id']})
+        self.assertEqual(_MinutesStub.payload['messages'][0]['content'], self.store.default_meeting_prompt())
+        self.assertEqual(json.loads(_MinutesStub.payload['messages'][1]['content'])['transcript'], '周五发布')
 
     def test_minutes_requires_transcript_and_does_not_expose_api_key(self):
         meeting = self.store.action(self.admin, 'meeting.create', {'projectId': self.project['id'], 'title': '空会'})

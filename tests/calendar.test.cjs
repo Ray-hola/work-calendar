@@ -2329,24 +2329,63 @@ test('returning to assistant dictation cannot route its results to a previous fo
   assert.equal(a.input.value,'新问题');assert.equal(a.context.field.value,'');
 });
 
-test('project meeting UI exposes raw transcript, live capture and prompt template controls', () => {
-  assert.ok(/function projectMeetings\(p,manage\)/.test(source));
-  assert.ok(/id=\"meetingTranscript\"/.test(source));
-  assert.ok(/id=\"meetingPrompt\"/.test(source));
-  assert.ok(/function meetingToggleLive\(id,input\)/.test(source));
-  assert.ok(/continuous=true/.test(source));
+
+function meetingApp(){
+  const a=app(),nodes={},calls=[],instances=[];
+  for(const id of ['meetingTitle','meetingScheduledAt','meetingParticipants','meetingAgenda','meetingTranscript','saveMeeting','generateMeetingMinutes','meetingLiveBtn','meetingLiveState','cancelAction','meetingMinutes'])nodes['#'+id]={value:'',isConnected:true,addEventListener(){},dispatchEvent(){},replaceChildren(){},dataset:{}};
+  a.context.nodes=nodes;a.context.calls=calls;
+  a.context.document={querySelector:s=>nodes[s],createTextNode:s=>s};
+  a.context.window={SpeechRecognition:class {constructor(){instances.push(this)} start(){} stop(){}}};
+  a.context.Event=class {};
+  a.context.setTimeout=()=>1;a.context.clearTimeout=()=>{};
+  a.run(`toast=()=>{};agentVoiceLang=()=> 'zh-CN';openModal=()=>{};closeModal=()=>{meetingStopLive()};renderProjectSpace=()=>{};canManageProject=()=>true;
+    fetch=async(url,options)=>{const body=JSON.parse(options.body);calls.push(body);const result=body.action==='meeting.create'?{id:'m1',...body.data}:body.action==='meeting.minutes.generate'?{id:'m1',minutes:'已整理'}:{...body.data};return {ok:true,text:async()=>JSON.stringify(result)}};
+    S.meetings=[];openMeetingEditor({id:'p1',name:'项目'});`);
+  nodes['#meetingTitle'].value='周会';return {a,nodes,calls,instances};
+}
+test('project files share one create menu and respect meeting creation permission',()=>{
+  const a=app();a.run("S.user={id:'owner',admin:false};S.files=[];S.meetings=[{id:'m1',projectId:'p1',title:'周会'}]");
+  const owner=a.run("projectFiles({id:'p1',owner:'owner'})");
+  assert.match(owner, /<summary[^>]*>.*新增文件/);assert.match(owner,/id="uploadFileFromMenu"/);assert.match(owner,/id="createMeetingFromFiles"/);
+  assert.match(owner,/项目文件 <span>1<\/span>/);assert.doesNotMatch(owner,/file-subheading|项目会议/);
+  a.run("S.user={id:'member',admin:false}");assert.doesNotMatch(a.run("projectFiles({id:'p1',owner:'owner'})"),/id="createMeetingFromFiles"/);
+  assert.doesNotMatch(a.run("projectFiles({id:'p1',owner:'owner'},true)"),/fileCreateMenu/);
+});
+test('meeting editor stores pasted source and generates minutes on first creation',async()=>{
+  const {nodes,calls}=meetingApp();nodes['#meetingTranscript'].value='确认周五发布';
+  await nodes['#generateMeetingMinutes'].onclick();
+  assert.deepEqual(calls.map(x=>x.action),['meeting.create','meeting.minutes.generate']);
+  assert.equal(calls[0].data.rawTranscript,'确认周五发布');assert.equal(nodes['#meetingMinutes'].textContent,'已整理');
+  assert.doesNotMatch(source.slice(source.indexOf('function openMeetingEditor'),source.indexOf('const meetingLive=')),/id="meetingPrompt/);
+});
+test('live recording followed by save updates the same meeting and ignores stale results',async()=>{
+  const {a,nodes,calls,instances}=meetingApp();await nodes['#meetingLiveBtn'].onclick();
+  assert.equal(instances.length,1);const stale=instances[0].onresult;
+  stale({resultIndex:0,results:[{isFinal:true,0:{transcript:'第一句'}}]});
+  stale({resultIndex:0,results:[{isFinal:true,0:{transcript:'第二句'}}]});
+  assert.equal(nodes['#meetingTranscript'].value,'第一句\n第二句');
+  await nodes['#saveMeeting'].onclick();stale({resultIndex:0,results:[{isFinal:true,0:{transcript:'旧会话'}}]});
+  assert.equal(calls.filter(x=>x.action==='meeting.create').length,1);
+  assert.equal(calls.at(-1).data.rawTranscript,'第一句\n第二句');
+  assert.equal(nodes['#meetingTranscript'].value,'第一句\n第二句');assert.equal(a.run('meetingLive.active'),false);
+});
+test('meeting creation is guarded while a request is pending',async()=>{
+  const {a,nodes,calls}=meetingApp();let release;a.context.pause=new Promise(r=>release=r);
+  a.run("fetch=async(url,options)=>{const body=JSON.parse(options.body);calls.push(body);await pause;return {ok:true,text:async()=>JSON.stringify({id:'m1',...body.data})}}");
+  const first=nodes['#saveMeeting'].onclick();await nodes['#saveMeeting'].onclick();release();await first;
+  assert.equal(calls.length,1);
 });
 
-test('meeting live capture autosaves transcript and ignores stale recognition sessions', () => {
-  const live = source.match(/function meetingToggleLive\(id,input\)\{[\s\S]*?\n\}\n\n/)[0];
-  assert.ok(/meetingScheduleSave\(\)/.test(live));
-  assert.ok(/generation!==meetingLive\.generation/.test(live));
-  assert.ok(/meeting\.transcript\.update/.test(source));
-});
-
-test('meeting minutes generation sends the editable prompt template through the server action', () => {
-  assert.ok(/meeting\.minutes\.generate/.test(source));
-  assert.ok(/const meta=values\(\)/.test(source));
-  assert.ok(/promptTemplate/.test(source));
-  assert.ok(/default_meeting_prompt/.test(source) || /MEETING_PROMPT_DEFAULT/.test(source));
+test('system prompt settings save directly, retain edits made during save, and hide for members',async()=>{
+  const a=app(),input={value:'全局模板',dataset:{}},save={},box={dataset:{owner:'admin'},classList:{toggle(){}},querySelector:()=>null};
+  const nodes={'#meetingPromptSetting':box,'#meetingPromptSettingInput':input,'#saveMeetingPrompt':save};
+  a.context.document={querySelector:s=>nodes[s],activeElement:null};
+  let release;const pending=new Promise(r=>release=r);const requests=[];
+  a.context.fetch=async(url,options)=>{requests.push(JSON.parse(options.body));await pending;return {ok:true,text:async()=>JSON.stringify({value:'修改后的模板'})}};
+  a.run("S.user={id:'admin',admin:true};S.meetingPrompt='全局模板';toast=()=>{};renderMeetingPromptSetting()");
+  assert.equal(save.disabled,true);input.value='修改后的模板';input.oninput();assert.equal(save.disabled,false);
+  const saving=save.onclick();input.value='保存过程中继续编辑';input.oninput();assert.equal(save.disabled,true);release();await saving;
+  assert.equal(a.run('S.meetingPrompt'),'修改后的模板');assert.equal(input.value,'保存过程中继续编辑');assert.equal(save.disabled,false);
+  assert.equal(requests[0].action,'meeting.prompt.update');assert.equal(requests[0].data.prompt,'修改后的模板');
+  a.run("S.user={id:'member',admin:false};renderMeetingPromptSetting()");assert.equal(box.innerHTML,'');
 });
