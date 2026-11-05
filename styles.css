@@ -11509,3 +11509,431 @@ body.is-resizing-agent { user-select: none; }
   border-radius: 8px;
   font-size: 12px;
 }
+
+/* 项目空间 · 导航 → 项目 → 文件 ------------------------------------------------
+   全部项目 and a folder show each project as a short summary; the project's
+   page holds its work, behind tabs, with one primary action in view. */
+#projectGrid {
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+#projectGrid .temp-task-node {
+  grid-column: 1 / -1;
+}
+
+.project-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 18px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  transition: border-color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+}
+
+.summary-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.summary-head h3 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.summary-head .project-title-link {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-card.project-summary .summary-desc {
+  margin: 0;
+  min-height: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.summary-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-progress .progress {
+  flex: 1;
+}
+
+.summary-progress .progress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.summary-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.summary-people {
+  display: flex;
+  align-items: center;
+  margin-right: auto;
+  padding-left: 2px;
+}
+
+.summary-people .avatar {
+  width: 24px;
+  height: 24px;
+  margin-left: -2px;
+  font-size: 10px;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+.summary-people b {
+  margin-left: 6px;
+  font-weight: 500;
+}
+
+.summary-mine {
+  color: var(--accent-dark);
+  font-weight: 600;
+}
+
+/* The eyebrow names the levels above; each one opens. */
+.space-crumb {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.space-crumb:hover,
+.space-crumb:focus-visible {
+  color: var(--accent-dark);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* One line of facts and the project's actions, then the tabs. */
+#projectSpace {
+  display: block;
+}
+
+#projectSpace > .space-description {
+  margin: -14px 2px 14px;
+}
+
+.space-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  margin-bottom: 18px;
+}
+
+.space-facts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 12.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.space-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.space-more {
+  position: relative;
+}
+
+.space-more summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.space-more summary::-webkit-details-marker {
+  display: none;
+}
+
+.space-more summary .icon {
+  width: 14px;
+  height: 14px;
+  margin-left: 2px;
+}
+
+.space-more[open] summary .icon {
+  transform: rotate(180deg);
+}
+
+.space-more .space-file-options {
+  min-width: 156px;
+}
+
+.space-more .space-file-options .is-danger {
+  margin-top: 4px;
+  border-top: 1px solid var(--line-soft);
+  border-radius: 0 0 6px 6px;
+  color: var(--danger);
+}
+
+.space-more .space-file-options .is-danger:hover {
+  background: var(--c-coral-soft);
+}
+
+.space-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line-soft);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.space-tab {
+  position: relative;
+  flex: none;
+  padding: 10px 12px 11px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.space-tab span {
+  margin-left: 2px;
+  font-size: 11.5px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.space-tab:hover {
+  color: var(--ink);
+}
+
+.space-tab[aria-selected="true"] {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.space-tab[aria-selected="true"]::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--ink);
+}
+
+.space-tab:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+
+.space-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.space-panel[hidden] {
+  display: none;
+}
+
+/* Files and meetings share one list. A row's delete waits for the pointer. */
+.space-files .file-list {
+  display: grid;
+}
+
+.space-files .file-row {
+  grid-template-columns: 44px minmax(0, 1fr) auto 28px;
+  width: 100%;
+  padding: 9px 6px;
+  border-radius: 8px;
+  border-top: 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.space-files .file-row:hover {
+  background: var(--surface-sunk);
+}
+
+.space-files .meeting-row {
+  display: grid;
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.space-files .file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.space-files .file-row small {
+  font-size: 11.5px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.file-ext.is-meeting {
+  background: var(--c-blue-soft);
+  color: var(--c-blue-ink);
+}
+
+.space-files .meeting-arrow {
+  display: grid;
+  place-items: center;
+}
+
+.space-files .file-delete {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  color: var(--faint);
+  opacity: 0;
+}
+
+.space-files .file-row:hover .file-delete,
+.space-files .file-delete:focus-visible {
+  opacity: 1;
+}
+
+.space-files .file-delete:hover {
+  color: var(--danger);
+  background: transparent;
+}
+
+@media (hover: none) {
+  .space-files .file-delete { opacity: 1; }
+}
+
+.space-empty {
+  margin: 0;
+  padding: 26px 0 8px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.space-files .space-drop-hint {
+  padding: 10px 0 0;
+  border: 0;
+  background: none;
+  font-size: 11.5px;
+}
+
+.space-files.is-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: -6px;
+  background: var(--accent-soft);
+}
+
+/* 分工 reads as text until it is edited. */
+#projectSpace .staff-role {
+  background: transparent;
+  border-color: transparent;
+}
+
+#projectSpace .staff-role:hover {
+  border-color: var(--line);
+}
+
+#projectSpace .staff-role:focus {
+  border-color: var(--accent-line);
+  background: var(--surface);
+  outline: none;
+}
+
+/* Below the side-by-side width the directory is the 全部项目 page itself;
+   inside a project the crumbs lead back up, so the tree steps aside. */
+@media (max-width: 1180px) {
+  #projectsView.is-in-project .project-nav-rail {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  #projectGrid {
+    grid-template-columns: 1fr;
+  }
+
+  #projectSpace > .space-description {
+    margin-top: -8px;
+  }
+
+  .space-actions {
+    width: 100%;
+  }
+
+  .space-actions .primary-btn {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .space-files .file-row {
+    grid-template-columns: 40px minmax(0, 1fr) 28px;
+    row-gap: 2px;
+  }
+
+  .space-files .file-ext {
+    grid-row: 1 / span 2;
+  }
+
+  .space-files .file-row small {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .space-files .file-row > :last-child {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+  }
+}
