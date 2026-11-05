@@ -306,6 +306,42 @@ test('a project page places task actions under the project and distinguishes adm
   }
 });
 
+test('project summaries label collaborator progress as personal instead of project completion',()=>{
+  const a=app(),elements={};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={innerHTML:'',classList:{toggle(){}}}),querySelectorAll:()=>[]};
+  a.run(`S.today='2026-11-04';S.projects=[{id:'p',name:'项目',owner:'owner',status:'active',members:{owner:'accepted',member:'accepted'}}];
+    S.users=[{id:'owner',active:1},{id:'member',active:1}];S.tasks=[
+      {id:'done',projectId:'p',assignee:'member',status:'done',date:'2026-11-04'},
+      {id:'todo',projectId:'p',assignee:'other',status:'todo',date:'2026-11-04'}];`);
+  a.run("S.user={id:'owner',admin:false};renderProjects()");
+  assert.match(elements['#projectGrid'].innerHTML,/项目 1\/2 完成/);
+  a.run("S.user={id:'member',admin:false};renderProjects()");
+  assert.match(elements['#projectGrid'].innerHTML,/我的任务 1\/1 完成/);
+  assert.doesNotMatch(elements['#projectGrid'].innerHTML,/项目 1\/1 完成/);
+});
+
+test('project content tabs keep the dedicated meetings workspace and keyboard navigation',()=>{
+  const a=app();
+  const sourceText=source;
+  assert.match(sourceText,/const SPACE_TABS=\{[^}]*meetings:'会议'/);
+  assert.match(sourceText,/panel\('meetings',projectMeetings\(p/);
+  assert.match(sourceText,/function bindProjectAreaTabs\(p\)/);
+  assert.match(sourceText,/function bindProjectContentTabs\(\)/);
+  assert.doesNotMatch(sourceText,/function bindSpaceTabs\(/,'同名 tab binder 不能覆盖会议空间入口');
+  const binder=sourceText.match(/function bindProjectContentTabs\(\)\{[\s\S]*?\n\}/)[0];
+  assert.match(binder,/ArrowRight/);assert.match(binder,/ArrowLeft/);assert.match(binder,/Home/);assert.match(binder,/End/);
+  assert.match(sourceText,/bindProjectAreaTabs\(p\);bindProjectSpace\(p\);return;/,'归档会议也要能打开只读详情');
+});
+
+test('project lifecycle labels collaborator task progress as personal',()=>{
+  const a=app();
+  a.run(`S.today='2026-11-04';S.user={id:'member',admin:false};S.tasks=[
+    {id:'done',projectId:'p',assignee:'member',status:'done',date:'2026-11-04'},
+    {id:'todo',projectId:'p',assignee:'other',status:'todo',date:'2026-11-04'}];`);
+  const html=a.run("projectLifecycle({id:'p',owner:'owner',start:'2026-11-01',end:'2026-11-30',status:'active'},false)");
+  assert.match(html,/我的任务/);assert.doesNotMatch(html,/>任务<\/span>/);
+});
+
 test('daily work renders one parent card per project with nested clickable task cards', () => {
   const a=app();
   a.run(`S.today='2026-09-12';S.user={id:'test001',admin:0};S.projects=[
@@ -2448,7 +2484,9 @@ test('project files share one create menu and respect meeting creation permissio
   const a=app();a.run("S.user={id:'owner',admin:false};S.files=[];S.meetings=[{id:'m1',projectId:'p1',title:'周会'}]");
   const owner=a.run("projectFiles({id:'p1',owner:'owner'})");
   assert.match(owner, /<summary[^>]*>.*新增文件/);assert.match(owner,/id="uploadFileFromMenu"/);assert.match(owner,/id="createMeetingFromFiles"/);
-  assert.match(owner,/项目文件 <span>0<\/span>/);assert.doesNotMatch(owner,/file-subheading|项目会议/);
+  assert.match(owner,/项目文件 <span>1<\/span>/);assert.match(owner,/data-meeting="m1"/);
+  const filesOnly=a.run("projectFiles({id:'p1',owner:'owner'},false,false)");
+  assert.match(filesOnly,/项目文件 <span>0<\/span>/);assert.doesNotMatch(filesOnly,/data-meeting="m1"/);
   a.run("S.user={id:'member',admin:false}");assert.doesNotMatch(a.run("projectFiles({id:'p1',owner:'owner'})"),/id="createMeetingFromFiles"/);
   assert.doesNotMatch(a.run("projectFiles({id:'p1',owner:'owner'},true)"),/fileCreateMenu/);
 });

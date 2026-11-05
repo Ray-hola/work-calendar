@@ -895,7 +895,9 @@ function sortFolderProjects(list,mode){
 /* 全部项目 and a folder list each project as a summary: where it stands and who
    is on it. Its tasks, files and actions live on the project's own page. */
 function projectSummaryHTML(p){
-  const tasks=S.tasks.filter(t=>t.projectId===p.id&&!t.repeatId&&!isSuperseded(t)&&t.status!=='skipped');
+  const personal=!S.user?.admin&&p.owner!==S.user?.id;
+  const tasks=S.tasks.filter(t=>t.projectId===p.id&&!t.repeatId&&!isSuperseded(t)&&t.status!=='skipped'
+    &&(!personal||t.assignee===S.user?.id));
   const done=tasks.filter(t=>t.status==='done').length,pct=tasks.length?Math.round(done/tasks.length*100):0;
   const mine=tasks.filter(t=>t.assignee===S.user?.id&&['todo','doing'].includes(t.status)).length;
   const people=Object.entries(p.members||{}).filter(([,v])=>v==='accepted').map(([id])=>id)
@@ -907,7 +909,7 @@ function projectSummaryHTML(p){
     +`<span class="project-status">${projectStatus(p)}</span></div>`
     +`<p class="summary-desc">${escapeHTML(p.desc||'暂无描述')}</p>`
     +`<div class="summary-progress"><div class="progress"><i style="width:${pct}%"></i></div>`
-    +`<span>${tasks.length?`${done}/${tasks.length} 完成`:'暂无任务'}</span></div>`
+    +`<span>${tasks.length?`${personal?'我的任务':'项目'} ${done}/${tasks.length} 完成`:'暂无任务'}</span></div>`
     +`<div class="summary-foot"><span class="summary-people" title="${escapeHTML(people.map(nameOf).join('、'))}">`
     +`${people.slice(0,4).map(id=>avatarHTML(id)).join('')}${people.length>4?`<b>+${people.length-4}</b>`:''}</span>`
     +`${mine?`<span class="summary-mine">我的待办 ${mine}</span>`:''}`
@@ -1490,6 +1492,7 @@ function meetingToggleBrowserLive(id,input){
 const SPACE_TABS={tasks:'任务',files:'文件',meetings:'会议',people:'成员',about:'概况'};
 function renderProjectSpace(id){
   const archive=(S.fileArchives||[]).find(x=>x.id===id),p=S.projects.find(x=>x.id===id)||archive,box=$('#projectSpace');if(!p||!box)return;
+  box.dataset=box.dataset||{};
   const area=UI.spaceArea||'overview';
   if(area!=='overview'){
     $('#projectsView h1').textContent=p.name;
@@ -1507,14 +1510,15 @@ function renderProjectSpace(id){
     box.innerHTML=projectSpaceTabs(p)+`<p class="space-description">项目文件归档 · ${escapeHTML(projectStatus(p))} · Owner ${escapeHTML(nameOf(p.owner))}。文件与会议保留供项目成员读取。</p>`
 
       +projectFiles(p,true);
-    bindProjectAreaTabs(p);return;
+    bindProjectAreaTabs(p);bindProjectSpace(p);return;
   }
   const manage=canManageProject(p),folder=(S.folders||[]).find(f=>f.id===p.folderId);
   $('#projectsView .eyebrow').innerHTML=`${crumb('全部项目','')}${folder?` / ${crumb(folder.name,folder.id)}`:''}`;bindCrumbs();
   $('#projectsView h1').textContent=p.name;
   const tab=SPACE_TABS[UI.spaceTab]?UI.spaceTab:'tasks';
   const tasks=S.tasks.filter(t=>t.projectId===p.id&&!t.repeatId&&!isSuperseded(t));
-  const counts={tasks:tasks.length,files:(S.files||[]).filter(f=>f.projectId===p.id).length+(S.meetings||[]).filter(m=>m.projectId===p.id).length,
+  const counts={tasks:tasks.length,files:(S.files||[]).filter(f=>f.projectId===p.id).length,
+    meetings:(S.meetings||[]).filter(m=>m.projectId===p.id).length,
     people:Object.values(p.members||{}).filter(v=>v==='accepted').length,about:''};
   const work=tasks.filter(t=>t.status!=='skipped'),done=work.filter(t=>t.status==='done').length;
   const panel=(key,html)=>`<div class="space-panel" role="tabpanel" id="spacePanel-${key}" aria-labelledby="spaceTab-${key}"`
@@ -1522,12 +1526,12 @@ function renderProjectSpace(id){
   box.innerHTML=(p.desc?`<p class="space-description">${escapeHTML(p.desc)}</p>`:'')
     +`<div class="space-bar"><div class="space-facts"><span class="project-status">${projectStatus(p)}</span>`
     +`<span>Owner · ${escapeHTML(nameOf(p.owner))}</span><span>${p.start?escapeHTML(fmt(p.start)):'未定'} – ${p.end?escapeHTML(fmt(p.end)):'长期'}</span>`
-    +`<span>${done}/${work.length} 完成</span></div><div class="space-actions">${projectActionsHTML(p)}</div></div>`
+    +`<span>${!S.user?.admin&&p.owner!==S.user?.id?'我的任务':'项目'} ${done}/${work.length} 完成</span></div><div class="space-actions">${projectActionsHTML(p)}</div></div>`
     +`<div class="space-tabs" role="tablist" aria-label="项目内容">${Object.entries(SPACE_TABS).map(([key,label])=>
       `<button type="button" role="tab" class="space-tab" id="spaceTab-${key}" data-space-tab="${key}" aria-controls="spacePanel-${key}"`
       +` aria-selected="${key===tab}" tabindex="${key===tab?0:-1}">${label}${counts[key]===''?'':` <span>${counts[key]}</span>`}</button>`).join('')}</div>`
     +panel('tasks',`<section class="space-section space-tasks">${projectCardHTML(p)}</section>`)
-    +panel('files',projectFiles(p))
+    +panel('files',projectFiles(p,false,false))
     +panel('meetings',projectMeetings(p,Boolean(archive)))
     +panel('people',projectStaffing(p,manage))
     +panel('about',projectLifecycle(p,manage)+projectBackground(p,manage));
@@ -1557,6 +1561,7 @@ function projectLifecycle(p,manage){
      立项 is never later than 执行. */
   const made=String(p.createdAt||'').slice(0,10),created=made&&p.start?(made<p.start?made:p.start):made||p.start,start=p.start||created,end=p.end;
 
+  const personal=!S.user?.admin&&p.owner!==S.user?.id;
   const tasks=S.tasks.filter(t=>t.projectId===p.id&&!t.repeatId&&!isSuperseded(t)&&t.status!=='skipped');
   const done=tasks.filter(t=>t.status==='done').length;
   const span=end?Math.max(1,daysCount(start,end)):0,passed=span?Math.min(span,Math.max(0,daysCount(start,S.today))):0;
@@ -1568,7 +1573,7 @@ function projectLifecycle(p,manage){
   return `<section class="space-section space-cycle"><div class="space-steps">${steps.map(([label,day],i)=>`<div class="space-step`
     +`${i<stage?' is-past':i===stage?' is-now':''}"><i></i><strong>${label}</strong><small>${escapeHTML(/^\d{4}-/.test(day||'')?fmt(day):day||'')}</small></div>`).join('')}</div>`
     +`<div class="space-meters">${span?meter('时间',passed,span,`第 ${passed} / ${span} 天`):''}`
-    +`${meter('任务',done,tasks.length,`${done} / ${tasks.length} 已完成`)}</div>`
+    +`${meter(personal?'我的任务':'任务',done,tasks.length,`${done} / ${tasks.length} 已完成`)}</div>`
     +`${manage&&folders.length?`<div class="space-meta"><label class="space-folder">放在文件夹<select id="spaceFolder"><option value="">未归类</option>`
     +`${folders.map(f=>`<option value="${escapeHTML(f.id)}"${f.id===p.folderId?' selected':''}>${escapeHTML(f.name)}</option>`).join('')}`
     +`</select></label></div>`:''}</section>`;
@@ -1606,7 +1611,7 @@ const MAX_FILE_MB=20;
 /* Files and meetings form one list, newest first, with dates read as dates. */
 const whenText=iso=>{const day=String(iso||'').slice(0,10),time=String(iso||'').slice(11,16);
   return /^\d{4}-\d\d-\d\d$/.test(day)?`${fmt(day)}${time?` ${time}`:''}`:'未安排'};
-function projectFiles(p,readonly=false){
+function projectFiles(p,readonly=false,includeMeetings=true){
   const canDrop=f=>!readonly&&(S.user?.admin||p.owner===S.user?.id||f.uploader===S.user?.id);
   const file=f=>`<div class="file-row"><span class="file-ext">${escapeHTML(fileExt(f.name))}</span><a class="file-name" href="/api/files/`
     +`${encodeURIComponent(f.id)}" download="${escapeHTML(f.name)}">${escapeHTML(f.name)}</a><small>${escapeHTML(fileSize(f.size))} · `
@@ -1617,7 +1622,7 @@ function projectFiles(p,readonly=false){
     +`<span class="file-name">${escapeHTML(m.title)}</span><small>${escapeHTML(whenText(m.scheduledAt))} · ${m.minutes?'纪要已整理':'待整理'}`
     +`${m.rawTranscript?` · 原稿 ${m.rawTranscript.length} 字`:''}</small><span class="meeting-arrow">${icon('chevron-right')}</span></button>`;
   const rows=[...(S.files||[]).filter(f=>f.projectId===p.id).map(f=>({at:f.createdAt,html:file(f)})),
-    ...(S.meetings||[]).filter(m=>m.projectId===p.id).map(m=>({at:m.scheduledAt||m.createdAt,html:meeting(m)}))]
+    ...(includeMeetings?(S.meetings||[]).filter(m=>m.projectId===p.id).map(m=>({at:m.scheduledAt||m.createdAt,html:meeting(m)})):[])]
     .sort((a,b)=>String(b.at||'').localeCompare(String(a.at||'')));
   return `<section class="space-section space-files" id="spaceFiles"><div class="space-head"><h2>项目文件 <span>${rows.length}</span></h2>`
     +`${readonly?'':`<details class="space-file-create" id="fileCreateMenu"><summary class="secondary-btn">${icon('plus')}新增文件</summary><div class="space-file-options"><button type="button" id="uploadFileFromMenu">${icon('file')}上传文件</button>${canManageProject(p)?`<button type="button" id="createMeetingFromFiles">${icon('chat')}新增会议</button>`:''}</div></details><input type="file" id="spaceFileInput" multiple hidden>`}</div>`
@@ -3404,7 +3409,7 @@ function flyArchive(folder){
 }
 /* Archives are edited in place: every collected block is plain editable text
    on the page itself, and 保存 lights up once something changes. */
-const docText=el=>el.innerText.replace(/\u00a0/g,' ').replace(/\n{3,}/g,'\n\n').trim();
+const docText=el=>String(el?.innerText??el?.textContent??el?.value??'').replace(/\u00a0/g,' ').replace(/\n{3,}/g,'\n\n').trim();
 const docEdit=(value,attrs)=>`<div class="doc-edit" contenteditable="plaintext-only" spellcheck="false" ${attrs}>${escapeHTML(value??'')}</div>`;
 /* 随记 under the three fixed blocks is the holder's own blank page: nothing
    fills it in, and it stays out of the team brief. */
