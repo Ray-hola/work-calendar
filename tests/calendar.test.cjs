@@ -252,11 +252,11 @@ test('rule groups live in 系统设置: a list of groups, each made or changed o
   assert.ok(/class="rule-person/.test(card) && /rulePickAll/.test(card), '成员直接在卡片上点选，可以全选');
   assert.ok(!/<select/.test(list + card), '规则组不用下拉框');
   assert.ok(!/group:/.test(item), '账户行的权限组下拉只剩 superadmin / admin / 普通用户');
-  assert.ok(/<h2>规则组<\/h2>/.test(list), '叫「规则组」，不和权限组混淆');
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-  const accounts = html.match(/<section id="accountsView"[\s\S]*?<\/section>/)[0], settings = html.match(/<section id="settingsView"[\s\S]*?<\/section>/)[0];
+  assert.ok(/<h3><span>规则组<\/span>/.test(html), '叫「规则组」，不和权限组混淆');
+  const accounts = html.match(/<section id="accountsView"[\s\S]*?<\/section>/)[0], settings = html.match(/<section id="settingsView"[\s\S]*?(?=<section id="\w+View")/)[0];
   assert.ok(!/creationPolicy|automation-card/.test(accounts), '账户管理只留账户本身');
-  assert.ok(/creationPolicy/.test(settings) && /automation-card/.test(settings), '规则组和日记自动化都在系统设置');
+  assert.ok(/creationPolicy/.test(settings) && /collectionSchedule/.test(settings), '规则组和日记自动化都在系统设置');
 });
 
 test('every drafted card says what will happen to it before anything is sent', () => {
@@ -2149,7 +2149,7 @@ test('the shortcut hint opens a real list and single keys stay out of the way wh
   const key = source.match(/function shortcutKey\(e\)\{[\s\S]*?\n\}/)[0];
   assert.ok(/closest\?\.\('input,textarea,select,\[contenteditable\]/.test(key), '输入框里打字不触发');
   assert.ok(/e\.ctrlKey\|\|e\.metaKey\|\|e\.altKey/.test(key), '带修饰键时不抢浏览器快捷键');
-  for (const k of ["'?':openShortcuts", "'/':openSearch", "t:()=>switchView('today')", "w:()=>switchView('calendar')", "p:()=>switchView('projects')", "i:()=>switchView('inbox')"])
+  for (const k of ["'?':openShortcuts", "'/':()=>UI.view==='settings'", "t:()=>switchView('today')", "w:()=>switchView('calendar')", "p:()=>switchView('projects')", "i:()=>switchView('inbox')"])
     assert.ok(key.includes(k), k);
   assert.ok(/\$\('#shortcutHelp'\)\.onclick=openShortcuts/.test(source));
 });
@@ -2207,9 +2207,9 @@ test('settings speak plainly: neutral "not allowed", one-choice-at-a-time week s
   assert.ok(/\.rule-tag\.is-read \{ color: var\(--c-blue-ink\)/.test(css), 'AI 查询与审批不再同色');
   const week = source.match(/function renderWeekStartSetting\(\)\{[\s\S]*?\n\}/)[0];
   assert.ok(/box\.dataset\.saving/.test(week) && /x\.disabled=true/.test(week), '保存期间不能连点');
-  const collect = source.match(/function collectionSettings\(\)\{[\s\S]*?\n\}/)[0];
-  assert.ok(collect.includes('<h2>项目补报时间</h2>') && collect.includes('data-mode') && collect.includes('data-weekday'));
-  assert.ok(/检查完成：/.test(source) && /action:'scheduler\.run'/.test(source));
+  const collect = source.match(/function renderCollectionSchedule\(\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(collect.includes('data-mode') && collect.includes('data-weekday'), '补报时间就地设置');
+  assert.ok(/已完成 · /.test(source) && /action:'scheduler\.run'/.test(source));
 });
 
 test('week history retains deferral events after completion without treating merged or reopened rows as deferrals', () => {
@@ -2379,7 +2379,7 @@ test('meeting creation is guarded while a request is pending',async()=>{
 test('system prompt settings save directly, retain edits made during save, and hide for members',async()=>{
   const a=app(),input={value:'全局模板',dataset:{}},save={},box={dataset:{owner:'admin'},classList:{toggle(){}},querySelector:()=>null};
   const nodes={'#meetingPromptSetting':box,'#meetingPromptSettingInput':input,'#saveMeetingPrompt':save};
-  a.context.document={querySelector:s=>nodes[s],activeElement:null};
+  a.context.document={querySelector:s=>nodes[s],querySelectorAll:()=>[],activeElement:null};
   let release;const pending=new Promise(r=>release=r);const requests=[];
   a.context.fetch=async(url,options)=>{requests.push(JSON.parse(options.body));await pending;return {ok:true,text:async()=>JSON.stringify({value:'修改后的模板'})}};
   a.run("S.user={id:'admin',admin:true};S.meetingPrompt='全局模板';toast=()=>{};renderMeetingPromptSetting()");
@@ -2388,4 +2388,85 @@ test('system prompt settings save directly, retain edits made during save, and h
   assert.equal(a.run('S.meetingPrompt'),'修改后的模板');assert.equal(input.value,'保存过程中继续编辑');assert.equal(save.disabled,false);
   assert.equal(requests[0].action,'meeting.prompt.update');assert.equal(requests[0].data.prompt,'修改后的模板');
   a.run("S.user={id:'member',admin:false};renderMeetingPromptSetting()");assert.equal(box.innerHTML,'');
+});
+
+test('settings rows filter by search, mark what differs from the default, and hide what the account may not change', () => {
+  const a = app();
+  const cls = () => { const set = new Set(); return {add: c => set.add(c), remove: c => set.delete(c), contains: c => set.has(c), toggle: (c, on) => { (on === undefined ? !set.has(c) : on) ? set.add(c) : set.delete(c); return set.has(c) }} };
+  const row = (setting, role, title, keywords) => { const r = {dataset: {setting, role, keywords}, classList: cls(), slot: {innerHTML: ''}};
+    r.querySelector = sel => sel === '.setting-text' ? {textContent: title} : sel === '.setting-reset-slot' ? r.slot : null; return r };
+  const rows = [row('rules', 'superadmin', '规则组', '权限'), row('week', 'admin', '每周从哪天开始', '周视图'), row('collection', 'admin', '补报时间', '补报 周期')];
+  const group = {id: 'g', classList: cls(), dataset: {nav: '设置', navIcon: 'archive'}, querySelector: sel => rows.find(r => !r.classList.contains('is-forbidden') && (!sel.includes('is-filtered') || !r.classList.contains('is-filtered'))) || null};
+  const search = {value: ''}, empty = {classList: cls(), textContent: ''};
+  a.context.document = {querySelector: s => ({'#settingsSearch': search, '#settingsEmpty': empty})[s] || null,
+    querySelectorAll: s => s.includes('.setting-row') ? rows : s.includes('.settings-group') ? [group] : [], getElementById: () => group};
+  a.run(`S.user={id:'admin',admin:1,role:'admin'};S.weekStart=1;S.automation={enabled:true,mode:'daily',time:'00:00'};S.meetingPrompt='';
+    renderRepeatStackingSetting=renderProjectAutomationSetting=renderCollectionSchedule=renderWeekStartSetting=renderCreationPolicy=renderMeetingPromptSetting=()=>{};renderSettings()`);
+  assert.ok(rows[0].classList.contains('is-forbidden'), '规则组只给 superadmin');
+  assert.ok(rows[1].classList.contains('is-modified') && rows[1].slot.innerHTML.includes('恢复默认'), '周起始日改过，显示恢复默认');
+  assert.ok(!rows[2].classList.contains('is-modified'));
+  search.value = '补报'; a.run('applySettingsFilter()');
+  assert.ok(rows[1].classList.contains('is-filtered') && !rows[2].classList.contains('is-filtered'));
+  assert.ok(empty.classList.contains('hidden'));
+  search.value = '不存在的设置'; a.run('applySettingsFilter()');
+  assert.ok(!empty.classList.contains('hidden') && empty.textContent.includes('不存在的设置'));
+  assert.deepEqual(a.json("SETTING_DEFAULTS.week.reset()"), ['week_start.update', {day: 6}]);
+});
+
+function settingsClassList(){
+  const set=new Set();return {add:x=>set.add(x),remove:x=>set.delete(x),contains:x=>set.has(x),toggle:(x,on)=>{if(on===undefined)on=!set.has(x);on?set.add(x):set.delete(x)}};
+}
+function collectionEditorApp(){
+  const a=app(),calls=[],dates={value:''},time={value:''},hint={textContent:''},retry={classList:settingsClassList()};
+  const controls=(key,values)=>values.map(v=>({dataset:{[key]:String(v)},classList:settingsClassList(),setAttribute(){}}));
+  const modes=controls('mode',['daily','weekly','dates']),days=controls('weekday',[0,1,2,3,4,5,6]),parts={weekly:{classList:settingsClassList()},dates:{classList:settingsClassList()}};
+  const box={dataset:{},renders:0,contains:()=>false,
+    set innerHTML(value){this.html=value;this.renders++;dates.value=value.match(/id="collectionDates"[^>]*value="([^"]*)"/)[1];time.value=value.match(/id="collectionTime"[^>]*value="([^"]*)"/)[1]},get innerHTML(){return this.html},
+    querySelector:s=>({'#collectionDates':dates,'#collectionTime':time,'.collection-hint':hint,'#collectionRetry':retry,'[data-part="weekly"]':parts.weekly,'[data-part="dates"]':parts.dates}[s]),
+    querySelectorAll:s=>s==='[data-mode]'?modes:s==='[data-weekday]'?days:[]};
+  a.context.document={querySelector:s=>s==='#collectionSchedule'?box:null,querySelectorAll:()=>[],activeElement:null};
+  a.context.fetch=(url,options)=>new Promise(resolve=>{const body=JSON.parse(options.body);calls.push({body,complete:(ok=true)=>resolve({ok,text:async()=>JSON.stringify(ok?body.data:{error:'测试保存失败'})})})});
+  a.run("S.user={id:'admin',admin:true};S.automation={mode:'daily',time:'09:00',weekdays:[],dates:[]};flashSaved=()=>{};renderCollectionSchedule()");
+  return {a,calls,box,dates,time,hint,retry,modes,days};
+}
+const nextMicrotask=()=>new Promise(resolve=>setImmediate(resolve));
+
+test('collection saves serialize rapid changes and keep the last edit through refresh',async()=>{
+  const f=collectionEditorApp();f.time.value='10:00';const first=f.time.onchange();f.time.value='11:00';const last=f.time.onchange();await nextMicrotask();
+  assert.equal(f.calls.length,1);f.a.run('renderCollectionSchedule()');assert.equal(f.box.renders,1);assert.equal(f.time.value,'11:00');
+  f.calls[0].complete();await first;await nextMicrotask();assert.equal(f.calls.length,2);assert.equal(f.calls[1].body.data.time,'11:00');
+  assert.equal(f.box.collectionEditor.dirty,true);f.calls[1].complete();await last;
+  assert.equal(f.a.run('S.automation.time'),'11:00');assert.equal(f.box.collectionEditor.dirty,false);assert.equal(f.box.collectionEditor.pending,0);
+});
+test('collection date drafts and failed submissions survive rendering and can retry',async()=>{
+  const f=collectionEditorApp();await f.modes[2].onclick();f.dates.value='2026-12-15';f.dates.oninput();f.a.run('renderCollectionSchedule()');
+  assert.equal(f.dates.value,'2026-12-15');assert.equal(f.box.renders,1);
+  const failed=f.dates.onchange();await nextMicrotask();f.calls[0].complete(false);await failed;f.a.run('renderCollectionSchedule()');
+  assert.equal(f.dates.value,'2026-12-15');assert.equal(f.hint.textContent,'测试保存失败');assert.equal(f.retry.classList.contains('hidden'),false);
+  const retry=f.retry.onclick();await nextMicrotask();f.calls[1].complete();await retry;
+  assert.equal(f.a.run('S.automation.dates[0]'),'2026-12-15');assert.equal(f.box.collectionEditor.dirty,false);
+});
+test('resetting collection discards incomplete weekly draft and queues behind earlier saves',async()=>{
+  const f=collectionEditorApp();f.time.value='10:00';const first=f.time.onchange();await f.modes[1].onclick();assert.equal(f.calls.length,1);
+  const reset=f.box.collectionEditor.reset();assert.equal(f.time.value,'00:00');assert.equal(f.modes[0].classList.contains('is-on'),true);
+  f.calls[0].complete();await first;await nextMicrotask();assert.equal(f.calls.length,2);assert.equal(f.calls[1].body.data.mode,'daily');assert.deepEqual(f.calls[1].body.data.weekdays,[]);
+  f.calls[1].complete();await reset;assert.equal(f.box.collectionEditor.dirty,false);assert.equal(f.a.run('S.automation.time'),'00:00');
+});
+test('queued collection edits do not execute as another account',async()=>{
+  const f=collectionEditorApp();f.time.value='10:00';const first=f.time.onchange();f.time.value='11:00';const second=f.time.onchange();await nextMicrotask();
+  f.a.run("S.user={id:'other',admin:true}");f.calls[0].complete();await first;await second;assert.equal(f.calls.length,1);assert.equal(f.a.run('S.automation.time'),'09:00');
+});
+test('prompt reset replaces dirty editor and its saved baseline without racing an active save',async()=>{
+  const a=app(),input={value:'自定义模板',dataset:{}},save={},box={dataset:{owner:'admin'},classList:{toggle(){}},querySelector:()=>null};
+  const nodes={'#meetingPromptSetting':box,'#meetingPromptSettingInput':input,'#saveMeetingPrompt':save};
+  a.context.document={querySelector:s=>nodes[s],querySelectorAll:()=>[],activeElement:null};const calls=[];
+  a.context.fetch=(url,options)=>new Promise(resolve=>{const body=JSON.parse(options.body);calls.push({body,finish:()=>resolve({ok:true,text:async()=>JSON.stringify({value:body.data.prompt})})})});
+  a.run("S.user={id:'admin',admin:true};S.meetingPrompt='自定义模板';flashSaved=()=>{};renderMeetingPromptSetting()");
+  input.value='未保存的草稿';input.oninput();const reset=box.resetPrompt();assert.equal(input.disabled,true);assert.equal(calls.length,1);
+  await save.onclick();assert.equal(calls.length,1);calls[0].finish();await reset;
+  assert.equal(input.value,a.run('MEETING_PROMPT_DEFAULT'));assert.equal(input.dataset.saved,input.value);assert.equal(save.disabled,true);assert.equal(input.disabled,false);
+});
+test('archived meeting opens escaped read-only transcript and minutes without mutation controls',()=>{
+  const a=app();a.context.document={querySelector:()=>({})};a.run("openModal=html=>{globalThis.archivedHTML=html};S.fileArchives=[{id:'p1'}];S.meetings=[{id:'m1',projectId:'p1',title:'周会',rawTranscript:'<script>bad</script>',minutes:'结论'}];openMeetingEditor({id:'p1',name:'项目'},'m1')");
+  const html=a.context.archivedHTML;assert.match(html,/<textarea readonly/);assert.match(html,/&lt;script&gt;/);assert.match(html,/结论/);assert.doesNotMatch(html,/id="(?:saveMeeting|meetingLiveBtn|generateMeetingMinutes)"/);
 });

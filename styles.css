@@ -10839,3 +10839,333 @@ body.is-resizing-agent { user-select: none; }
 .space-file-options button { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; border-radius: 6px; padding: 9px 10px; background: transparent; color: var(--ink); text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
 .space-file-options button:hover, .space-file-options button:focus-visible { background: var(--surface-sunk); }
 .project-file-meetings { margin-top: 6px; }
+
+/* 23 · 系统设置 — categories, search, one row per setting ------------------- */
+.settings-layout {
+  display: grid;
+  grid-template-columns: 188px minmax(0, 1fr);
+  gap: 44px;
+  align-items: start;
+}
+
+.settings-nav {
+  position: sticky;
+  top: 84px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 9px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
+}
+
+.settings-nav-item .icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.settings-nav-item:hover {
+  background: var(--surface-sunk);
+  color: var(--ink);
+}
+
+.settings-nav-item.is-on {
+  background: var(--surface-sunk);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.settings-nav-item.is-empty {
+  opacity: .38;
+}
+
+.settings-main {
+  min-width: 0;
+}
+
+.settings-search {
+  position: sticky;
+  top: 72px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface);
+  color: var(--faint);
+  box-shadow: 0 12px 18px -16px rgba(64, 54, 42, .35);
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+}
+
+.settings-search:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-soft), 0 12px 18px -16px rgba(64, 54, 42, .35);
+}
+
+.settings-search .icon-slot,
+.settings-search .icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.settings-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+
+.settings-empty {
+  margin: 0;
+  padding: 56px 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.settings-group {
+  padding-top: 34px;
+  scroll-margin-top: 136px;
+}
+
+.settings-group-title {
+  margin: 0 0 4px;
+  font: 600 19px/1.3 var(--font-serif);
+  color: var(--ink);
+}
+
+.setting-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px 40px;
+  padding: 18px 4px 18px 18px;
+  border-top: 1px solid var(--line-soft);
+  transition: opacity var(--t) var(--ease);
+}
+
+.settings-group-title + .setting-row {
+  border-top: 0;
+}
+
+.setting-row.is-wide {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* A setting that differs from its default carries a bar, as in an editor. */
+.setting-row::before {
+  content: '';
+  position: absolute;
+  top: 20px;
+  bottom: 20px;
+  left: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background var(--t) var(--ease);
+}
+
+.setting-row.is-modified::before {
+  background: var(--c-blue);
+}
+
+.setting-row.is-forbidden,
+.setting-row.is-filtered,
+.settings-group.is-forbidden,
+.settings-group.is-filtered {
+  display: none;
+}
+
+.setting-row.is-muted .setting-body {
+  opacity: .45;
+}
+
+.setting-text h3 {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.setting-text p {
+  max-width: 62ch;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--muted);
+}
+
+.setting-meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.setting-status {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--success);
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity .2s var(--ease), transform .2s var(--ease);
+}
+
+.setting-status.is-on {
+  opacity: 1;
+  transform: none;
+}
+
+.setting-reset {
+  padding: 0;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--c-blue-ink);
+}
+
+.setting-reset:hover {
+  text-decoration: underline;
+}
+
+.setting-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.setting-control .settings-switch > span:first-child {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.setting-body {
+  min-width: 0;
+}
+
+.setting-row .rule-list {
+  margin-top: 2px;
+}
+
+.rule-add {
+  margin-top: 10px;
+}
+
+.setting-row .collection-form {
+  max-width: 520px;
+}
+
+.settings-input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 13px;
+}
+
+.settings-input.is-time {
+  width: 132px;
+}
+
+.settings-input:focus {
+  outline: none;
+  border-color: var(--accent-line);
+}
+
+.collection-hint:empty {
+  display: none;
+}
+
+.collection-hint {
+  margin: 0;
+  font-size: 12px;
+}
+
+.setting-row .settings-prompt {
+  margin-top: 4px;
+}
+
+.setting-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+@media (max-width: 900px) {
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .settings-nav {
+    top: 60px;
+    z-index: 5;
+    flex-direction: row;
+    gap: 4px;
+    margin: 0 calc(var(--page-x) * -1);
+    padding: 8px var(--page-x);
+    overflow-x: auto;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line-soft);
+    scrollbar-width: none;
+  }
+
+  .settings-nav-item {
+    flex: none;
+    height: 32px;
+  }
+
+  .settings-nav-item.is-on {
+    box-shadow: inset 0 -2px 0 var(--accent);
+  }
+
+  .settings-search {
+    position: static;
+    margin-top: 14px;
+  }
+
+  .settings-group {
+    scroll-margin-top: 120px;
+  }
+
+  .setting-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .setting-control {
+    justify-content: flex-start;
+  }
+}

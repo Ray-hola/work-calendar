@@ -1226,7 +1226,13 @@ function editFolder(id){
   if(drop)drop.onclick=async()=>{try{await act('folder.delete',{id:f.id});closeModal()}catch(e){}};
 }
 const MEETING_PROMPT_DEFAULT='你是会议纪要整理助手。请只根据原始转录整理，不要补造事实。输出简洁的 Markdown，包含：会议结论、待办事项（负责人/截止时间/事项）、风险与待确认问题。若原稿没有对应信息，写“未提及”。';
+function openArchivedMeeting(p,id){
+  const m=(S.meetings||[]).find(x=>x.id===id&&x.projectId===p.id);if(!m)return;
+  openModal(`<div class="eyebrow">${escapeHTML(p.name)} · 归档会议</div><h2>${escapeHTML(m.title)}</h2><p class="muted">${escapeHTML(m.scheduledAt||'未安排')} · ${escapeHTML((m.participants||[]).join('、'))}</p><p>${escapeHTML(m.agenda||'')}</p><label class="form-field">原始转录<textarea readonly rows="10">${escapeHTML(m.rawTranscript||'')}</textarea></label><section class="meeting-minutes-preview"><h3>会议纪要</h3><div class="meeting-minutes-body">${escapeHTML(m.minutes||'尚未生成')}</div></section><div class="modal-footer"><button type="button" class="secondary-btn" id="cancelAction">关闭</button></div>`);
+  $('#cancelAction').onclick=closeModal;
+}
 function openMeetingEditor(p,meetingId=null){
+  if((S.fileArchives||[]).some(x=>x.id===p.id)){openArchivedMeeting(p,meetingId);return}
   const current=meetingId?(S.meetings||[]).find(m=>m.id===meetingId):null,manage=canManageProject(p);if(!current&&!manage){toast('只有项目 Owner 或管理员可以新增会议');return}
   const m=current||{title:'',scheduledAt:'',participants:[],agenda:'',rawTranscript:'',minutes:'',status:'scheduled'};
   openModal(`<div class="eyebrow">${escapeHTML(p.name)} · 项目会议</div><h2>${current?escapeHTML(m.title):'新增会议'}</h2><div class="meeting-editor-grid"><label class="form-field">会议名称<input id="meetingTitle" maxlength="120" value="${escapeHTML(m.title)}"></label><label class="form-field">安排时间<input id="meetingScheduledAt" type="datetime-local" value="${escapeHTML(m.scheduledAt||'')}"></label></div><label class="form-field">参会人（用逗号分隔）<input id="meetingParticipants" value="${escapeHTML((m.participants||[]).join('、'))}"></label><label class="form-field">会议议程<textarea id="meetingAgenda" rows="3">${escapeHTML(m.agenda||'')}</textarea></label><label class="form-field">原始转录<textarea id="meetingTranscript" rows="10" maxlength="200000" placeholder="可粘贴实时转录原稿，或使用下方实时录入">${escapeHTML(m.rawTranscript||'')}</textarea></label><div class="meeting-live-bar"><button type="button" class="secondary-btn" id="meetingLiveBtn">开始实时录入</button><span id="meetingLiveState" class="muted"></span></div><section class="meeting-minutes-preview"><div class="space-head"><h3>整理后的会议纪要</h3><button type="button" class="secondary-btn" id="generateMeetingMinutes" ${current&&m.rawTranscript?'':'disabled'}>根据模板生成</button></div><div id="meetingMinutes" class="meeting-minutes-body">${m.minutes?escapeHTML(m.minutes):'<span class="muted">尚未生成</span>'}</div></section><div class="modal-footer"><button type="button" class="secondary-btn" id="cancelAction">关闭</button><button type="button" class="primary-btn" id="saveMeeting">${current?'保存会议':'创建会议'}</button></div>`);
@@ -1298,8 +1304,9 @@ function renderProjectSpace(id){
   if(archive){
     $('#projectsView .eyebrow').textContent='项目空间 · 归档文件';$('#projectsView h1').textContent=p.name;
     box.innerHTML=`<section class="space-section"><div class="space-head"><h2>项目文件归档</h2></div>`
-      +`<p class="muted">${escapeHTML(projectStatus(p))} · Owner ${escapeHTML(nameOf(p.owner))}。附件保留供项目成员读取。</p></section>`
-      +projectFiles(p,true);return;
+      +`<p class="muted">${escapeHTML(projectStatus(p))} · Owner ${escapeHTML(nameOf(p.owner))}。文件与会议保留供项目成员读取。</p></section>`
+      +projectFiles(p,true);
+    $$('#projectSpace .meeting-row').forEach(b=>b.onclick=()=>openArchivedMeeting(p,b.dataset.meeting));return;
   }
   const manage=canManageProject(p),folder=(S.folders||[]).find(f=>f.id===p.folderId);
   /* 申请项目 / 新建项目 is for the overview; inside one project it only repeats the top bar. */
@@ -1380,7 +1387,7 @@ function projectFiles(p,readonly=false){
     +`${readonly?'':`<details class="space-file-create" id="fileCreateMenu"><summary class="secondary-btn">${icon('plus')}新增文件</summary><div class="space-file-options"><button type="button" id="uploadFileFromMenu">${icon('upload')}上传文件</button>${canManageProject(p)?`<button type="button" id="createMeetingFromFiles">${icon('chat')}新增会议</button>`:''}</div></details><input type="file" id="spaceFileInput" multiple hidden>`}</div>`
     +`${files.length?`<div class="file-list">${files.map(row).join('')}</div>`:''}`
     +`${meetings.length?`<div class="meeting-list project-file-meetings">${meetings.map(meetingRow).join('')}</div>`:''}`
-    +`<p class="space-drop-hint">${readonly?'归档文件仅供下载。':`拖入文件，或从「新增文件」上传。单个文件不超过 ${MAX_FILE_MB}MB。`}</p></section>`;
+    +`<p class="space-drop-hint">${readonly?'附件可下载，会议可只读查看。':`拖入文件，或从「新增文件」上传。单个文件不超过 ${MAX_FILE_MB}MB。`}</p></section>`;
 }
 async function uploadProjectFiles(p,list){
   const files=[...list];if(!files.length)return;
@@ -1835,15 +1842,99 @@ function groupOf(x){const policy=S.creationPolicy,gid=policy?.assign?.[x.id];ret
 async function saveCreationPolicy(patch={}){const p=S.creationPolicy;await api('/api/action',{action:'creation.update',data:{groups:patch.groups||p.groups,assign:patch.assign||p.assign}});await refresh()}
 /* 系统设置 holds what used to sit under 账户管理: the rule groups (superadmin)
    and the diary automation (admins). */
+/* 系统设置, laid out like an editor's settings: categories on the left that
+   follow the scroll, a search box that filters rows, one row per setting with
+   its control on the right. Changes save as they are made; each row says
+   "已保存" in place, and a row that differs from the default shows a bar and
+   恢复默认. Rows the account may not change are left out. */
+const SETTING_DEFAULTS={
+  week:{modified:()=>weekStartDay()!==6,reset:()=>['week_start.update',{day:6}]},
+  stacking:{modified:()=>Boolean(S.repeatStacking),reset:()=>['repeat.stacking.update',{enabled:false}]},
+  auto:{modified:()=>S.automation?.enabled===false,reset:()=>['automation.update',{enabled:true}]},
+  collection:{modified:()=>(S.automation?.mode||'daily')!=='daily'||(S.automation?.time||'00:00')!=='00:00',reset:()=>['automation.update',{mode:'daily',time:'00:00'}]},
+  prompt:{modified:()=>Boolean(S.meetingPrompt)&&S.meetingPrompt!==MEETING_PROMPT_DEFAULT,reset:()=>['meeting.prompt.update',{prompt:MEETING_PROMPT_DEFAULT}]}
+};
 function renderSettings(){
-  const admin=Boolean(S.user?.admin);
-  $('#settingsView .automation-card')?.classList.toggle('hidden',!admin);
-  $('#runAutomationBtn')?.classList.toggle('hidden',!admin);
+  const admin=Boolean(S.user?.admin),superadmin=S.user?.role==='superadmin';
+  $$('#settingsView .setting-row').forEach(row=>row.classList.toggle('is-forbidden',row.dataset.role==='superadmin'?!superadmin:!admin));
   renderRepeatStackingSetting();
   renderProjectAutomationSetting();
+  renderCollectionSchedule();
   renderWeekStartSetting();
   renderCreationPolicy();
   renderMeetingPromptSetting();
+  renderSettingIndicators();
+  $('#settingsView .setting-row[data-setting="collection"]')?.classList.toggle('is-muted',S.automation?.enabled===false);
+  renderSettingsNav();applySettingsFilter();
+}
+function renderSettingIndicators(){
+  $$('#settingsView .setting-row').forEach(row=>{
+    const rule=SETTING_DEFAULTS[row.dataset.setting],changed=Boolean(rule?.modified()),slot=row.querySelector('.setting-reset-slot');
+    row.classList.toggle('is-modified',changed);
+    const saving=row.dataset.setting==='prompt'&&$('#meetingPromptSettingInput')?.dataset.saving==='true';
+    if(slot)slot.innerHTML=changed?`<button type="button" class="setting-reset" data-reset="${row.dataset.setting}"${saving?' disabled':''}>恢复默认</button>`:'';
+  });
+  $$('#settingsView [data-reset]').forEach(b=>b.onclick=async()=>{
+    if(b.disabled)return;
+    if(b.dataset.reset==='prompt'){await $('#meetingPromptSetting')?.resetPrompt?.();return}
+    if(b.dataset.reset==='collection'){await $('#collectionSchedule')?.collectionEditor?.reset();return}
+    const [action,data]=SETTING_DEFAULTS[b.dataset.reset].reset();b.disabled=true;
+    try{await act(action,data,{quiet:true});flashSaved($(`#settingsView .setting-row[data-setting="${b.dataset.reset}"] .setting-status`),'已恢复默认')}catch(e){}finally{b.disabled=false}
+  });
+}
+/* "已保存" beside the row's title, for a moment. */
+function flashSaved(target,text='已保存'){
+  const status=target?.classList?.contains('setting-status')?target:target?.closest?.('.setting-row')?.querySelector('.setting-status');
+  if(!status)return;
+  status.textContent=text;status.classList.add('is-on');clearTimeout(status._hide);
+  status._hide=setTimeout(()=>status.classList.remove('is-on'),1800);
+}
+function renderSettingsNav(){
+  const nav=$('#settingsNav');if(!nav)return;
+  const groups=$$('#settingsView .settings-group').filter(g=>g.querySelector('.setting-row:not(.is-forbidden)'));
+  $$('#settingsView .settings-group').forEach(g=>g.classList.toggle('is-forbidden',!groups.includes(g)));
+  const active=UI.settingsSection&&groups.some(g=>g.id===UI.settingsSection)?UI.settingsSection:groups[0]?.id;
+  nav.innerHTML=groups.map(g=>`<button type="button" class="settings-nav-item${g.id===active?' is-on':''}" data-target="${g.id}"`
+    +`${g.id===active?' aria-current="true"':''}>${icon(g.dataset.navIcon)}<span>${escapeHTML(g.dataset.nav)}</span></button>`).join('');
+  $$('#settingsNav [data-target]').forEach(b=>b.onclick=()=>{
+    const group=document.getElementById(b.dataset.target);if(!group)return;
+    UI.settingsLock=Date.now();setSettingsSection(group.id);
+    group.scrollIntoView({block:'start',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
+  });
+  watchSettingsScroll(groups);
+}
+function setSettingsSection(id){
+  UI.settingsSection=id;
+  $$('#settingsNav [data-target]').forEach(b=>{const on=b.dataset.target===id;b.classList.toggle('is-on',on);on?b.setAttribute('aria-current','true'):b.removeAttribute('aria-current')});
+}
+/* The category under the top of the page lights up as one scrolls; a click on
+   the nav holds its choice while the smooth scroll passes the others. */
+function watchSettingsScroll(groups){
+  if(typeof IntersectionObserver!=='function')return;
+  UI.settingsObserver?.disconnect();
+  UI.settingsObserver=new IntersectionObserver(entries=>{
+    if(Date.now()-(UI.settingsLock||0)<700)return;
+    const top=entries.filter(e=>e.isIntersecting).sort((a,b)=>a.boundingClientRect.top-b.boundingClientRect.top)[0];
+    if(top)setSettingsSection(top.target.id);
+  },{rootMargin:'-120px 0px -55% 0px'});
+  groups.forEach(g=>UI.settingsObserver.observe(g));
+}
+/* Search matches a row's title, description and a few extra words. */
+function applySettingsFilter(){
+  const input=$('#settingsSearch'),query=String(input?.value||'').trim().toLowerCase();
+  let shown=0;
+  $$('#settingsView .setting-row').forEach(row=>{
+    const text=`${row.querySelector('.setting-text')?.textContent||''} ${row.dataset.keywords||''}`.toLowerCase();
+    const hit=!query||text.includes(query);row.classList.toggle('is-filtered',!hit);
+    if(hit&&!row.classList.contains('is-forbidden'))shown++;
+  });
+  $$('#settingsView .settings-group').forEach(g=>g.classList.toggle('is-filtered',Boolean(query)&&!g.querySelector('.setting-row:not(.is-filtered):not(.is-forbidden)')));
+  $$('#settingsNav [data-target]').forEach(b=>b.classList.toggle('is-empty',Boolean(document.getElementById(b.dataset.target)?.classList.contains('is-filtered'))));
+  /* While searching, the highlight follows the first category that still has a match. */
+  const first=$$('#settingsView .settings-group').find(g=>!g.classList.contains('is-filtered')&&!g.classList.contains('is-forbidden'));
+  if(query&&first&&document.getElementById(UI.settingsSection||'')?.classList.contains('is-filtered'))setSettingsSection(first.id);
+  const empty=$('#settingsEmpty');
+  if(empty?.classList){empty.classList.toggle('hidden',shown>0);empty.textContent=shown?'':`没有和「${String(input?.value||'').trim()}」相关的设置`}
 }
 function renderMeetingPromptSetting(){
   const box=$('#meetingPromptSetting');if(!box)return;
@@ -1851,10 +1942,22 @@ function renderMeetingPromptSetting(){
   if(box.dataset.owner!==S.user.id){box.innerHTML='';box.dataset.owner=S.user.id}
   const existing=box.querySelector('#meetingPromptSettingInput');if(existing&&(existing.value!==existing.dataset.saved||existing===document.activeElement||existing.dataset.saving==='true'))return;
   const value=S.meetingPrompt||MEETING_PROMPT_DEFAULT;
-  box.innerHTML=`<div class="automation-setting-head"><div><span class="eyebrow">会议</span><h2>会议纪要系统提示词</h2></div><button type="button" class="secondary-btn" id="saveMeetingPrompt">保存提示词</button></div><textarea aria-label="会议纪要系统提示词" id="meetingPromptSettingInput" class="settings-prompt" rows="7" maxlength="12000">${escapeHTML(value)}</textarea><p class="muted">可用变量：{{title}}、{{agenda}}、{{transcript}}</p>`;
+  box.innerHTML=`<textarea aria-label="会议纪要系统提示词" id="meetingPromptSettingInput" class="settings-prompt" rows="7" maxlength="12000">${escapeHTML(value)}</textarea>`
+    +`<div class="setting-actions"><small class="muted">可用变量：{{title}}、{{agenda}}、{{transcript}}</small><button type="button" class="secondary-btn" id="saveMeetingPrompt">保存</button></div>`;
   const input=$('#meetingPromptSettingInput'),save=$('#saveMeetingPrompt');let saved=value,saving=false;input.dataset.saved=saved;
   const sync=()=>{save.disabled=saving||!input.value.trim()||input.value===saved;};input.oninput=sync;sync();
-  save.onclick=async()=>{if(saving)return;const submitted=input.value;saving=true;input.dataset.saving='true';sync();try{const result=await api('/api/action',{action:'meeting.prompt.update',data:{prompt:submitted}});saved=result.value;input.dataset.saved=saved;S.meetingPrompt=saved;toast('会议纪要提示词已保存')}catch(e){toast(e.message)}finally{saving=false;input.dataset.saving='false';sync()}};
+  const owner=S.user.id;
+  const submit=async(submitted,reset=false)=>{
+    if(saving)return;saving=true;input.dataset.saving='true';input.disabled=reset;sync();renderSettingIndicators();
+    try{
+      const result=await api('/api/action',{action:'meeting.prompt.update',data:{prompt:submitted}});
+      if(S.user?.id!==owner)return;
+      saved=result.value;input.dataset.saved=saved;S.meetingPrompt=saved;if(reset)input.value=saved;
+      flashSaved(box,reset?'已恢复默认':'已保存');
+    }catch(e){toast(e.message)}finally{saving=false;input.disabled=false;input.dataset.saving='false';sync();renderSettingIndicators()}
+  };
+  save.onclick=()=>submit(input.value);
+  box.resetPrompt=()=>submit(MEETING_PROMPT_DEFAULT,true);
 }
 function settingSwitch(id,label,checked){
   return `<label class="settings-switch"><span>${escapeHTML(label)}</span><span class="settings-switch-control"><input type="checkbox" role="switch" id="${id}"${checked?' checked':''}><span class="settings-switch-track" aria-hidden="true"></span></span></label>`;
@@ -1863,34 +1966,85 @@ function bindSettingSwitch(input,save,current){
   input.onchange=async()=>{
     if(input.disabled)return;
     input.disabled=true;
-    try{await save(input.checked)}catch(e){input.checked=current()}
+    try{await save(input.checked);flashSaved($('#'+input.id))}catch(e){input.checked=current()}
     finally{input.disabled=false;if(UI.view==='settings')$('#'+input.id)?.focus()}
   };
 }
 function renderProjectAutomationSetting(){
   const box=$('#projectAutomationToggle');if(!box)return;
   box.innerHTML='';if(!S.user?.admin)return;
-  box.innerHTML=settingSwitch('projectAutomationEnabled','自动补报',S.automation?.enabled!==false);
-  bindSettingSwitch(box.querySelector('input'),enabled=>act('automation.update',{enabled}),()=>S.automation?.enabled!==false);
+  box.innerHTML=settingSwitch('projectAutomationEnabled','开启',S.automation?.enabled!==false);
+  bindSettingSwitch(box.querySelector('input'),enabled=>act('automation.update',{enabled},{quiet:true}),()=>S.automation?.enabled!==false);
 }
 function renderRepeatStackingSetting(){
   const box=$('#repeatStackingCard');if(!box)return;
-  const allowed=S.user?.role==='superadmin';box.classList.toggle('hidden',!allowed);if(!allowed)return;
-  box.innerHTML=`<div><span class="eyebrow">固定任务</span><h2>递延合并</h2></div>${settingSwitch('repeatStackingEnabled','合并未完成期次',S.repeatStacking)}`;
-  bindSettingSwitch(box.querySelector('input'),enabled=>act('repeat.stacking.update',{enabled}),()=>Boolean(S.repeatStacking));
+  const allowed=S.user?.role==='superadmin';box.classList.toggle('hidden',!allowed);if(!allowed){box.innerHTML='';return}
+  box.innerHTML=settingSwitch('repeatStackingEnabled','合并',S.repeatStacking);
+  bindSettingSwitch(box.querySelector('input'),enabled=>act('repeat.stacking.update',{enabled},{quiet:true}),()=>Boolean(S.repeatStacking));
 }
+/* 补报时间, set in place. A choice that is not complete yet (每周 with no day,
+   指定日期 with none) waits on the page and is saved once it is. */
+function renderCollectionSchedule(){
+  const box=$('#collectionSchedule');if(!box)return;
+  if(!S.user?.admin){box.innerHTML='';box.collectionEditor=null;return}
+  const previous=box.collectionEditor;
+  if(previous?.owner===S.user.id&&(previous.dirty||previous.pending||box.contains(document.activeElement)))return;
+  const cfg=S.automation||{},modes={daily:'每天',weekly:'每周几',dates:'指定日期'};
+  let mode=cfg.mode==='specific'?'dates':modes[cfg.mode]?cfg.mode:'daily';
+  const picked=new Set(cfg.weekdays||[]),days=['一','二','三','四','五','六','日'];
+  box.innerHTML=`<div class="collection-form"><div class="rule-line"><span>周期</span><div class="rule-seg" role="radiogroup" aria-label="补报周期">`
+    +`${Object.entries(modes).map(([v,l])=>`<button type="button" class="rule-opt${v===mode?' is-on':''}" role="radio" aria-checked="${v===mode}" data-mode="${v}">${l}</button>`).join('')}</div></div>`
+    +`<div class="rule-line${mode==='weekly'?'':' hidden'}" data-part="weekly"><span>星期</span><div class="rule-seg is-multi" role="group" aria-label="每周补报日">`
+    +`${days.map((d,i)=>`<button type="button" class="rule-opt${picked.has(i)?' is-on':''}" aria-pressed="${picked.has(i)}" data-weekday="${i}">${d}</button>`).join('')}</div></div>`
+    +`<div class="rule-line${mode==='dates'?'':' hidden'}" data-part="dates"><span>日期</span><input id="collectionDates" class="settings-input" value="${escapeHTML((cfg.dates||[]).join(', '))}" placeholder="2026-12-01, 2026-12-15" aria-label="指定补报日期"></div>`
+    +`<div class="rule-line"><span>时间</span><input id="collectionTime" class="settings-input is-time" type="time" value="${escapeHTML(cfg.time||'00:00')}" aria-label="补报时间"></div>`
+    +`<p class="collection-hint muted" aria-live="polite"></p><button type="button" class="ghost-btn hidden" id="collectionRetry">重试保存</button></div>`;
+  const hint=box.querySelector('.collection-hint'),retry=box.querySelector('#collectionRetry'),dateInput=box.querySelector('#collectionDates'),timeInput=box.querySelector('#collectionTime');
+  const editor=box.collectionEditor={owner:S.user.id,dirty:false,pending:0,revision:0,tail:Promise.resolve()};
+  const current=()=>S.user?.id===editor.owner&&box.collectionEditor===editor;
+  const changed=()=>{editor.dirty=true;editor.revision++;retry.classList.add('hidden')};
+  const paint=()=>{
+    box.querySelectorAll('[data-mode]').forEach(b=>{const on=b.dataset.mode===mode;b.classList.toggle('is-on',on);b.setAttribute('aria-checked',String(on))});
+    box.querySelectorAll('[data-weekday]').forEach(b=>{const on=picked.has(Number(b.dataset.weekday));b.classList.toggle('is-on',on);b.setAttribute('aria-pressed',String(on))});
+    box.querySelector('[data-part="weekly"]').classList.toggle('hidden',mode!=='weekly');box.querySelector('[data-part="dates"]').classList.toggle('hidden',mode!=='dates');
+  };
+  const save=(reset=false)=>{
+    const dates=dateInput.value.split(/[,，\s]+/).map(x=>x.trim()).filter(Boolean);
+    if(mode==='weekly'&&!picked.size){hint.textContent='请选择星期';return Promise.resolve()}
+    if(mode==='dates'&&!dates.length){hint.textContent='请填写日期';return Promise.resolve()}
+    const revision=editor.revision,data={mode,time:timeInput.value||'00:00',weekdays:[...picked].sort(),dates};
+    editor.pending++;hint.textContent='保存中…';
+    // Requests are serialized; a newer edit is never overwritten by an older response.
+    const request=editor.tail.then(async()=>{
+      if(!current())return;
+      try{
+        const result=await api('/api/action',{action:'automation.update',data});if(!current())return;
+        S.automation=result;renderSettingIndicators();
+        if(revision===editor.revision){editor.dirty=false;hint.textContent='';retry.classList.add('hidden');flashSaved(box,reset?'已恢复默认':'已保存')}
+      }catch(e){if(current()&&revision===editor.revision){hint.textContent=e.message||'保存失败';retry.classList.remove('hidden')}}
+      finally{editor.pending--}
+    });
+    editor.tail=request;return request;
+  };
+  box.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{if(b.dataset.mode===mode)return;mode=b.dataset.mode;changed();paint();return save()});
+  box.querySelectorAll('[data-weekday]').forEach(b=>b.onclick=()=>{const i=Number(b.dataset.weekday);picked.has(i)?picked.delete(i):picked.add(i);changed();paint();return save()});
+  timeInput.oninput=dateInput.oninput=changed;
+  timeInput.onchange=dateInput.onchange=()=>{changed();return save()};
+  retry.onclick=()=>save();
+  editor.reset=()=>{mode='daily';picked.clear();dateInput.value='';timeInput.value='00:00';changed();paint();return save(true)};
+}
+
 function renderWeekStartSetting(){
   const box=$('#weekStartCard');if(!box)return;
   box.classList.toggle('hidden',!S.user?.admin);if(!S.user?.admin)return;
   const order=[1,2,3,4,5,6,0],day=weekStartDay();
-  box.innerHTML=`<div><span class="eyebrow">周视图</span><h2>每周从哪天开始</h2><p class="muted">周视图、档案室的周范围和本周周报都从这一天算起，`
-    +`全员生效。</p></div><div class="rule-seg week-start-seg" role="radiogroup" aria-label="每周开始日">${order.map(d=>`<button type="button" `
+  box.innerHTML=`<div class="rule-seg week-start-seg" role="radiogroup" aria-label="每周开始日">${order.map(d=>`<button type="button" `
     +`class="rule-opt${d===day?' is-on':''}" role="radio" aria-checked="${d===day}" data-day="${d}">${WEEKDAY_SHORT[d]}</button>`).join('')}</div>`;
   box.querySelectorAll('[data-day]').forEach(b=>b.onclick=async()=>{
     const next=Number(b.dataset.day);if(next===weekStartDay()||box.dataset.saving)return;
     /* One change at a time: the choice shows at once and the row waits for the save. */
     box.dataset.saving='1';box.querySelectorAll('[data-day]').forEach(x=>{const on=x===b;x.classList.toggle('is-on',on);x.setAttribute('aria-checked',String(on));x.disabled=true});
-    try{await act('week_start.update',{day:next});toast(`每周改为从${WEEKDAY_SHORT[next]}开始`)}catch(e){renderWeekStartSetting()}
+    try{await act('week_start.update',{day:next},{quiet:true});flashSaved($('#weekStartCard'))}catch(e){renderWeekStartSetting()}
     finally{delete box.dataset.saving}
   });
 }
@@ -1903,7 +2057,7 @@ function renderCreationPolicy(){
   const inGroup=gid=>S.users.filter(u=>roleOf(u)==='member'&&groupOf(u)===gid);
   const tag=(label,value,labels)=>`<span class="rule-tag is-${escapeHTML(value)}"><small>${label}</small>${labels[value]||''}</span>`;
   const row=g=>{const list=inGroup(g.id);return `<div class="rule-row" data-group="${escapeHTML(g.id)}" role="button" tabindex="0" aria-label="编辑「${escapeHTML(g.name)}」"><div class="rule-row-name"><strong>${escapeHTML(g.name)}</strong></div><div class="rule-row-tags">${CREATION_KINDS.map(k=>tag(KIND_LABELS[k],g[k],RULE_LABELS)).join('')}${tag('AI 助手',g.agent||'read',AGENT_ACCESS_LABELS)}</div><div class="rule-row-people" title="${escapeHTML(list.map(u=>nameOf(u.id)).join('、'))}">${list.slice(0,4).map(u=>avatarHTML(u.id)).join('')}<span>${list.length} 人</span></div><span class="task-arrow">${icon('chevron-right')}</span></div>`};
-  box.innerHTML=`<div class="creation-head"><div><span class="eyebrow">成员权限</span><h2>规则组</h2></div><button class="secondary-btn" id="addCreationGroup">${icon('plus')}新建规则组</button></div><div class="rule-list">${policy.groups.map(row).join('')}</div>`;
+  box.innerHTML=`<div class="rule-list">${policy.groups.map(row).join('')}</div><button class="ghost-btn rule-add" id="addCreationGroup">${icon('plus')}新建规则组</button>`;
   $$('#creationPolicy .rule-row').forEach(r=>{r.onclick=()=>editRuleGroup(r.dataset.group);r.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();editRuleGroup(r.dataset.group)}}});
   $('#addCreationGroup').onclick=()=>editRuleGroup(null);
 }
@@ -2143,7 +2297,7 @@ function deleteAccount(id){
     catch(e){btn.disabled=false;btn.textContent='永久删除账户'}
   };
 }
-async function act(action,data){try{await api('/api/action',{action,data});await refresh();toast('操作已完成')}catch(e){toast(e.message);throw e}}
+async function act(action,data,{quiet=false}={}){try{await api('/api/action',{action,data});await refresh();if(!quiet)toast('操作已完成')}catch(e){toast(e.message);throw e}}
 function restorePanelFocus(target){
   if(target?.isConnected&&!target.closest('.hidden'))target.focus?.({preventScroll:true});
 }
@@ -2275,27 +2429,6 @@ function fixedTask(){
       span:Math.max(1,Number($('#repeatSpan').value||1)),
       dates,start,end,time:$('#repeatTime').value,
       duration:Number($('#repeatDuration').value),priority:'P1',skipDates,projectId:$('#repeatProject').value||null});closeModal()}catch(e){}};
-}
-function collectionSettings(){
-  const cfg=S.automation||{},mode=cfg.mode||'daily',days=['周一','周二','周三','周四','周五','周六','周日'],selected=cfg.weekdays||[0,1,2,3,4];
-  /* Same controls as the rule groups: one row of choices for how often, toggles
-     for the weekdays, named after the card that opens it. */
-  const modes={daily:'每天',weekly:'每周几',dates:'指定日期'};let current=modes[mode]?mode:'daily';const picked=new Set(selected);
-  openModal(`<div class="eyebrow">日记自动化规则</div><h2>项目补报时间</h2><p class="muted">到点时，前一天 Owner 没交项目日报的项目，会自动汇总成一份补报，交给 Owner 确认。</p>`
-    +`<div class="collection-form"><div class="rule-line"><span>补报周期</span><div class="rule-seg" role="radiogroup" aria-label="补报周期">${Object.entries(modes).map(([v,l])=>`<button type="button" `
-    +`class="rule-opt${v===current?' is-on':''}" role="radio" aria-checked="${v===current}" data-mode="${v}">${l}</button>`).join('')}</div></div>`
-    +`<div class="rule-line" id="collectionWeekdayFields"><span>星期</span><div class="rule-seg is-multi" role="group" aria-label="每周补报日">${days.map((d,i)=>`<button type="button" `
-    +`class="rule-opt${picked.has(i)?' is-on':''}" aria-pressed="${picked.has(i)}" data-weekday="${i}">${d.slice(1)}</button>`).join('')}</div></div>`
-    +`<label class="form-field hidden" id="collectionDatesField">指定日期（逗号分隔）<input id="collectionDates" value="${escapeHTML((cfg.dates||[]).join(', '))}" placeholder="2026-09-20, 2026-10-01"></label>`
-    +`<label class="form-field">补报时间<input id="collectionTime" type="time" value="${escapeHTML(cfg.time||'00:00')}"></label></div>`
-    +`<div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="saveCollection">保存</button></div>`);
-  const sync=()=>{$('#collectionWeekdayFields').classList.toggle('hidden',current!=='weekly');$('#collectionDatesField').classList.toggle('hidden',current!=='dates');
-    $$('#modalContent [data-mode]').forEach(b=>{const on=b.dataset.mode===current;b.classList.toggle('is-on',on);b.setAttribute('aria-checked',String(on))})};
-  $$('#modalContent [data-mode]').forEach(b=>b.onclick=()=>{current=b.dataset.mode;sync()});
-  $$('#modalContent [data-weekday]').forEach(b=>b.onclick=()=>{const i=Number(b.dataset.weekday);picked.has(i)?picked.delete(i):picked.add(i);
-    b.classList.toggle('is-on',picked.has(i));b.setAttribute('aria-pressed',String(picked.has(i)))});
-  sync();$('#cancelAction').onclick=closeModal;
-  $('#saveCollection').onclick=async()=>{const m=current,weekdays=[...picked].sort(),dates=$('#collectionDates').value.split(/[,，\s]+/).map(x=>x.trim()).filter(Boolean);if(m==='weekly'&&!weekdays.length){toast('请选择每周补报日');return}if(m==='dates'&&!dates.length){toast('请填写指定补报日期');return}try{await act('automation.update',{mode:m,time:$('#collectionTime').value,weekdays,dates});closeModal();toast('项目补报时间已保存')}catch(e){}};
 }
 function renderAll(){
   $$('.admin-only-nav').forEach(n=>n.classList.toggle('hidden',!S.user?.admin));
@@ -3017,7 +3150,7 @@ $('#nextDay').onclick=()=>{if(displayDay()>=DATE_HORIZON){toast(`日期范围目
 $('#inboxBtn').onclick=()=>switchView('inbox');document.querySelector('.icon-btn[title="搜索"]').onclick=openSearch;
 /* Single-key shortcuts, as the sidebar's 快捷键 hint promises. They never fire
    while typing, with a modifier held, or behind an open dialog or drawer. */
-const SHORTCUTS=[['?','快捷键列表'],['/','搜索任务与项目'],['N','新建任务'],['T','今日任务'],['W','周视图'],['P','项目空间'],['I','收件箱'],['Esc','关闭弹窗或面板']];
+const SHORTCUTS=[['?','快捷键列表'],['/','搜索任务与项目；在系统设置里搜索设置'],['N','新建任务'],['T','今日任务'],['W','周视图'],['P','项目空间'],['I','收件箱'],['Esc','关闭弹窗或面板']];
 function openShortcuts(){
   openModal(`<div class="eyebrow">键盘</div><h2>快捷键</h2><dl class="shortcut-list">${SHORTCUTS.map(([k,v])=>`<dt><kbd>${k}</kbd></dt><dd>${v}</dd>`).join('')}</dl>`
     +`<div class="modal-footer"><button class="primary-btn" id="closeShortcuts">知道了</button></div>`);
@@ -3032,7 +3165,7 @@ function shortcutKey(e){
   if(e.target.closest?.('input,textarea,select,[contenteditable],[contenteditable="plaintext-only"]'))return;
   if(!$('#modalBackdrop').classList.contains('hidden')||!$('#taskDrawer').classList.contains('hidden'))return;
   const key=e.key.length===1?e.key.toLowerCase():e.key;
-  const run={'?':openShortcuts,'/':openSearch,n:()=>{if(!$('#addTaskBtn').classList.contains('hidden'))newTask()},
+  const run={'?':openShortcuts,'/':()=>UI.view==='settings'&&$('#settingsSearch')?$('#settingsSearch').focus():openSearch(),n:()=>{if(!$('#addTaskBtn').classList.contains('hidden'))newTask()},
     t:()=>switchView('today'),w:()=>switchView('calendar'),p:()=>switchView('projects'),i:()=>switchView('inbox')}[key];
   if(run){e.preventDefault();run()}
 }
@@ -3054,14 +3187,22 @@ document.addEventListener('keydown',e=>{
   else if(e.key==='ArrowRight'){e.preventDefault();turnWeek(1)}});
 $('#addProjectBtn').onclick=newProject;$('#addProjectTopBtn').onclick=newProject;
 $('#addTaskBtn').onclick=newTask;$('#emptyAddBtn').onclick=newTask;$('#timelineAddProjectBtn').onclick=newProject;
-$('#createFixedBtn').onclick=fixedTask;$('#collectionSettingsBtn').onclick=collectionSettings;
+$('#createFixedBtn').onclick=fixedTask;
 $('#forceAssignBtn').onclick=()=>switchView('projects');/* 立即运行一次检查 does what the scheduler does every half minute anyway, so it
    needs no confirmation; it says what it found instead of a bare 操作已完成. */
 $('#runAutomationBtn').onclick=async()=>{
   const b=$('#runAutomationBtn');if(b.disabled)return;b.disabled=true;
   try{const r=await api('/api/action',{action:'scheduler.run',data:{}});await refresh();
-    toast(r?.created?`检查完成：生成或发出 ${r.created} 项`:'检查完成：没有需要处理的')}catch(e){toast(e.message)}finally{b.disabled=false}
+    flashSaved(b,r?.created?`已完成 · 生成或发出 ${r.created} 项`:'已完成 · 没有需要处理的')}catch(e){toast(e.message)}finally{b.disabled=false}
 };
+$('#settingsSearch')?.addEventListener('input',applySettingsFilter);
+$('#settingsSearch')?.addEventListener('keydown',e=>{if(e.key==='Escape'&&e.target.value){e.preventDefault();e.stopPropagation();e.target.value='';applySettingsFilter()}});
+$$('#settingsView [data-settings-go]').forEach(b=>b.onclick=async()=>{
+  if(b.dataset.settingsGo==='accounts'){switchView('accounts');return}
+  /* The AI connection lives in the assistant's panel; open it there. */
+  $('#agentPanel')?.classList.remove('hidden');if(typeof applyAgentPanelSize==='function')applyAgentPanelSize();
+  await agentLoadServerConfig();agentSetConfigVisible(true);
+});
 
 $('#markAllReadBtn').onclick=()=>act('inbox.read',{all:true});
 $('#manageInboxBtn').onclick=()=>{UI.inboxManage=!UI.inboxManage;UI.inboxPicked=new Set();renderInbox()};
