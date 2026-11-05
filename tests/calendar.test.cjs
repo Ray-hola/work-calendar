@@ -1391,7 +1391,7 @@ test('a day sits at the same place on the ruler for ticks and the week band', ()
 
 test('the project space lists folders on the left and opens a project with its background, people and files', () => {
   const a=app(); const elements={};
-  a.context.document={querySelector:s=>elements[s]||(elements[s]={innerText:'',classList:{toggle(){}}}),querySelectorAll:()=>[]};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={innerText:'',dataset:{},classList:{toggle(){}}}),querySelectorAll:()=>[]};
   a.run(`S.today='2026-11-03';S.notifications=[];S.folders=[{id:'f1',name:'年度战略'},{id:'f2',name:'空文件夹'}];
     S.users=[{id:'superadmin',admin:1,active:1},{id:'test001',active:1},{id:'test002',active:1}];
     S.projects=[
@@ -1538,7 +1538,7 @@ test('a background save receipt preserves newer edits and allows retry after a f
 
 test('archived attachments have a read-only navigation and achievements entry without active project actions',()=>{
   const a=app(),elements={};
-  a.context.document={querySelector:s=>elements[s]||(elements[s]={classList:{toggle(){}}}),querySelectorAll:()=>[]};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={dataset:{},classList:{toggle(){}}}),querySelectorAll:()=>[]};
   a.run(`S.today='2026-11-03';S.user={id:'test001',admin:0};UI.view='projects';S.projects=[];
     S.fileArchives=[{id:'old',name:'已交付项目',owner:'test001',status:'done'}];
     S.files=[{id:'f',projectId:'old',name:'交付.pdf',size:20,uploader:'test001',createdAt:'2026-11-03T09:00:00+08:00'}];
@@ -1555,7 +1555,7 @@ test('archived attachments have a read-only navigation and achievements entry wi
 test('a folder lists its projects in a chosen order', () => {
   const a=app(); const elements={};
   const store={};a.context.localStorage={getItem:k=>store[k]??null,setItem:(k,v)=>{store[k]=String(v)}};
-  a.context.document={querySelector:s=>elements[s]||(elements[s]={innerText:'',classList:{toggle(){}}}),querySelectorAll:()=>[]};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={innerText:'',dataset:{},classList:{toggle(){}}}),querySelectorAll:()=>[]};
   a.run(`S.today='2026-11-03';S.notifications=[];S.folders=[{id:'f',name:'战略'}];S.user={id:'superadmin',admin:1};
     S.users=[{id:'superadmin',admin:1,active:1},{id:'test001',active:1}];S.tasks=[];
     const base={owner:'test001',status:'active',folderId:'f',members:{test001:'accepted'}};
@@ -2253,7 +2253,7 @@ test('the shortcut hint opens a real list and single keys stay out of the way wh
 
 test('the project space card drops what the page already shows', () => {
   const a = app(); const elements = {};
-  a.context.document = {querySelector: s => elements[s] || (elements[s] = {innerText: '', classList: {toggle() {}}}), querySelectorAll: () => []};
+  a.context.document = {querySelector: s => elements[s] || (elements[s] = {innerText: '', dataset:{}, classList: {toggle() {}}}), querySelectorAll: () => []};
   a.run(`S.today='2026-11-04';S.notifications=[];S.folders=[];S.files=[];S.tasks=[];S.repeats=[];
     S.users=[{id:'superadmin',admin:1,active:1},{id:'test001',active:1},{id:'test002',active:1},{id:'test003',active:1}];
     S.projects=[{id:'p',name:'独一无二的名字',desc:'只出现一次的描述',owner:'test001',status:'active',start:'2026-11-01',
@@ -2444,7 +2444,7 @@ test('project files share one create menu and respect meeting creation permissio
   const a=app();a.run("S.user={id:'owner',admin:false};S.files=[];S.meetings=[{id:'m1',projectId:'p1',title:'周会'}]");
   const owner=a.run("projectFiles({id:'p1',owner:'owner'})");
   assert.match(owner, /<summary[^>]*>.*新增文件/);assert.match(owner,/id="uploadFileFromMenu"/);assert.match(owner,/id="createMeetingFromFiles"/);
-  assert.match(owner,/项目文件 <span>1<\/span>/);assert.doesNotMatch(owner,/file-subheading|项目会议/);
+  assert.match(owner,/项目文件 <span>0<\/span>/);assert.doesNotMatch(owner,/file-subheading|项目会议/);
   a.run("S.user={id:'member',admin:false}");assert.doesNotMatch(a.run("projectFiles({id:'p1',owner:'owner'})"),/id="createMeetingFromFiles"/);
   assert.doesNotMatch(a.run("projectFiles({id:'p1',owner:'owner'},true)"),/fileCreateMenu/);
 });
@@ -2466,11 +2466,139 @@ test('live recording followed by save updates the same meeting and ignores stale
   assert.equal(calls.at(-1).data.rawTranscript,'第一句\n第二句');
   assert.equal(nodes['#meetingTranscript'].value,'第一句\n第二句');assert.equal(a.run('meetingLive.active'),false);
 });
+test('browser fallback keeps its last interim words when recording is stopped',async()=>{
+  const {nodes,instances,a}=meetingApp();await nodes['#meetingLiveBtn'].onclick();
+  instances[0].onresult({resultIndex:0,results:[{isFinal:false,0:{transcript:'尚未定稿的尾句'}}]});
+  await a.run('meetingStopLive()');assert.equal(nodes['#meetingTranscript'].value,'尚未定稿的尾句');
+});
 test('meeting creation is guarded while a request is pending',async()=>{
   const {a,nodes,calls}=meetingApp();let release;a.context.pause=new Promise(r=>release=r);
   a.run("fetch=async(url,options)=>{const body=JSON.parse(options.body);calls.push(body);await pause;return {ok:true,text:async()=>JSON.stringify({id:'m1',...body.data})}}");
   const first=nodes['#saveMeeting'].onclick();await nodes['#saveMeeting'].onclick();release();await first;
   assert.equal(calls.length,1);
+});
+test('meeting edits made during save remain dirty and keep their newer input',async()=>{
+  const h=meetingApp(),pane={dataset:{dirty:'true'}};h.nodes['#meetingEditor']=pane;
+  let release,submitted;h.a.context.fetch=async(path,options)=>{submitted=JSON.parse(options.body);await new Promise(r=>release=r);return {ok:true,text:async()=>JSON.stringify({id:'m1',revision:1,...submitted.data})}};
+  h.nodes['#meetingTranscript'].value='提交版本';const save=h.nodes['#saveMeeting'].onclick();await settle();
+  h.nodes['#meetingTitle'].value='保存期间的新标题';h.nodes['#meetingTranscript'].value='继续编辑的原稿';release();await save;
+  assert.equal(submitted.data.rawTranscript,'提交版本');assert.equal(h.nodes['#meetingTranscript'].value,'继续编辑的原稿');
+  assert.equal(pane.dataset.dirty,'true');assert.equal(pane.dataset.metadataDirty,'true');
+});
+
+function meetingServerApp(){
+  const a=meetingApp(),audio=[],recorders=[],timers=new Map();let timer=0,stops=0,revision=0;
+  a.a.context.Blob=Blob;a.a.context.AbortController=AbortController;
+  a.a.context.navigator={mediaDevices:{getUserMedia:async()=>({getTracks:()=>[{stop(){stops++}}]})}};
+  a.a.context.MediaRecorder=class {
+    static isTypeSupported(){return true}
+    constructor(){this.id=recorders.length;this.mimeType='audio/webm';this.state='inactive';recorders.push(this)}
+    start(){this.state='recording'}
+    stop(){this.state='inactive';this.ondataavailable({data:new Blob([`header-${this.id}:audio`],{type:this.mimeType})});this.onstop()}
+  };
+  a.a.context.setTimeout=f=>{timers.set(++timer,f);return timer};a.a.context.clearTimeout=id=>timers.delete(id);
+  a.a.context.fetch=async(path,options)=>{
+    if(path==='/api/transcribe')return new Promise(resolve=>audio.push({blob:options.body,
+      reply:text=>resolve({ok:true,json:async()=>({text})}),fail:()=>resolve({ok:false,json:async()=>({error:'网络失败'})})}));
+    const body=JSON.parse(options.body);a.calls.push(body);
+    const result=body.action==='speech.status'?{configured:true}:body.action==='meeting.create'?{id:'m1',revision:0,...body.data}:{...body.data,revision:++revision};
+    return {ok:true,text:async()=>JSON.stringify(result)};
+  };
+  return {...a,audio,recorders,timers,get stops(){return stops},tick(){const [id,f]=timers.entries().next().value;timers.delete(id);f()}};
+}
+const settle=()=>new Promise(setImmediate);
+test('meeting server transcription writes and saves complete clips while recording continues',async()=>{
+  const h=meetingServerApp();await h.nodes['#meetingLiveBtn'].onclick();
+  assert.equal(h.recorders.length,1);h.tick();await settle();
+  assert.equal(h.recorders.length,2,'each clip has its own recorder/container');
+  assert.equal(await h.audio[0].blob.text(),'header-0:audio');
+  h.audio[0].reply('第一段');await settle();
+  assert.equal(h.nodes['#meetingTranscript'].value,'第一段');
+  assert.equal(h.a.run('meetingLive.active'),true,'result arrives before stop');
+  assert.ok(h.calls.some(x=>x.action==='meeting.transcript.update'&&x.data.recording&&x.data.rawTranscript==='第一段'));
+  const stop=h.a.run('meetingStopLive()');await settle();
+  h.audio[1].reply('尾段');await stop;
+  assert.equal(h.nodes['#meetingTranscript'].value,'第一段\n尾段');assert.ok(h.stops>0);
+  assert.equal(h.a.run('meetingLive.session'),null);
+  assert.equal(h.calls.at(-1).data.recording,false);
+});
+test('an empty audio segment does not silently stop continuous capture',async()=>{
+  const h=meetingServerApp();await h.nodes['#meetingLiveBtn'].onclick();
+  h.recorders[0].stop=function(){this.state='inactive';this.onstop()};h.tick();await settle();
+  assert.equal(h.recorders.length,2);assert.equal(h.audio.length,0);assert.equal(h.a.run('meetingLive.active'),true);
+  const stop=h.a.run('meetingStopLive()');await settle();h.audio[0].reply('有效尾段');await stop;
+  assert.equal(h.nodes['#meetingTranscript'].value,'有效尾段');
+});
+test('failed clips remain retryable and a failed save never appends text twice',async()=>{
+  const h=meetingServerApp();await h.nodes['#meetingLiveBtn'].onclick();h.tick();await settle();
+  h.audio[0].fail();await settle();
+  assert.equal(h.a.run('meetingLive.session.queue.length'),2,'failed clip and final capture are retained');
+  assert.equal(h.a.run('meetingLive.active'),false);
+  const retry=h.a.run("meetingToggleLive('m1',nodes['#meetingTranscript'])");await settle();
+  h.audio[1].reply('恢复第一段');await settle();h.audio[2].reply('恢复尾段');await retry;
+  assert.equal(h.nodes['#meetingTranscript'].value,'恢复第一段\n恢复尾段');
+});
+test('retry after a failed transcript save does not transcribe or append the same clip again',async()=>{
+  const h=meetingServerApp();await h.nodes['#meetingLiveBtn'].onclick();
+  const fetch=h.a.context.fetch;let fail=true;
+  h.a.context.fetch=async(path,options)=>{
+    if(path==='/api/action'&&JSON.parse(options.body).action==='meeting.transcript.update'&&fail){fail=false;return {ok:false,text:async()=>JSON.stringify({error:'保存失败'})}}
+    return fetch(path,options);
+  };
+  h.tick();await settle();h.audio[0].reply('只追加一次');await settle();
+  assert.equal(h.nodes['#meetingTranscript'].value,'只追加一次');
+  const retry=h.a.run("meetingToggleLive('m1',nodes['#meetingTranscript'])");await settle();
+  assert.equal(h.audio.length,2,'first clip reuses its existing text; only tail needs ASR');
+  h.audio[1].reply('尾段');await retry;
+  assert.equal(h.nodes['#meetingTranscript'].value,'只追加一次\n尾段');
+});
+test('late microphone permission releases tracks if the meeting editor has closed',async()=>{
+  const h=meetingServerApp();let release;
+  h.a.context.navigator.mediaDevices.getUserMedia=()=>new Promise(r=>release=r);
+  const starting=h.nodes['#meetingLiveBtn'].onclick();await settle();h.nodes['#meetingTranscript'].isConnected=false;
+  let stops=0;release({getTracks:()=>[{stop(){stops++}}]});await starting;
+  assert.equal(stops,1);assert.equal(h.recorders.length,0);assert.equal(h.a.run('meetingLive.session'),null);
+});
+test('slow transcription bounds the audio queue and pauses the microphone',async()=>{
+  const h=meetingServerApp();await h.nodes['#meetingLiveBtn'].onclick();
+  h.tick();await settle();h.tick();h.tick();
+  assert.equal(h.recorders.length,3);assert.equal(h.a.run('meetingLive.session.queue.length'),3);
+  assert.equal(h.a.run('meetingLive.active'),false);assert.ok(h.stops>0);
+  const stop=h.a.run('meetingStopLive()');h.audio[0].reply('一');await settle();h.audio[1].reply('二');await settle();h.audio[2].reply('三');await stop;
+  assert.equal(h.nodes['#meetingTranscript'].value,'一\n二\n三');
+});
+test('account cancellation releases the mic and discards late transcription without saving it',async()=>{
+  const h=meetingServerApp();await h.nodes['#meetingLiveBtn'].onclick();h.tick();await settle();
+  h.a.run("meetingCancelCapture();S.user={id:'another'}");const before=h.calls.length;
+  h.audio[0].reply('旧账户音频');await settle();
+  assert.equal(h.nodes['#meetingTranscript'].value,'');assert.equal(h.calls.length,before);assert.ok(h.stops>0);
+});
+test('project resources are grouped by project and escaped, with direct download links',()=>{
+  const a=app();a.run(`S.files=[{id:'f/x',projectId:'p',name:'<file>.pdf'},{id:'hidden',projectId:'q',name:'private'}];
+    S.meetings=[{id:'m',projectId:'p',title:'<会议>'}];`);
+  const html=a.run("projectNavContents({id:'p'})");assert.match(html,/\/api\/files\/f%2Fx/);assert.match(html,/&lt;file&gt;.pdf/);
+  assert.match(html,/data-meeting="m"/);assert.match(html,/&lt;会议&gt;/);assert.doesNotMatch(html,/private|\/api\/files\/hidden/);
+});
+test('meeting workspace separates files and respects creation and archive permissions',()=>{
+  const a=app();a.run("S.user={id:'owner',admin:false};S.meetings=[{id:'m',projectId:'p',title:'周会'}]");
+  const html=a.run("projectMeetings({id:'p',owner:'owner'})");assert.match(html,/id="meetingEditor"/);assert.match(html,/newProjectMeeting/);
+  assert.match(a.run("projectSpaceTabs({id:'p'})"),/概览[\s\S]*会议[\s\S]*文件/);
+  assert.doesNotMatch(a.run("projectMeetings({id:'p',owner:'owner'},true)"),/newProjectMeeting/);
+  a.run("S.user={id:'member',admin:false}");assert.doesNotMatch(a.run("projectMeetings({id:'p',owner:'owner'})"),/newProjectMeeting/);
+});
+test('project refresh retains the inline meeting editor and warns before discarding its draft',()=>{
+  const h=meetingApp(),pane={innerHTML:'',dataset:{}},box={innerHTML:'',dataset:{}};
+  h.nodes['#meetingEditor']=pane;h.nodes['#projectSpace']=box;h.nodes['#projectMeetingList']={innerHTML:''};
+  h.nodes['#projectsView h1']={};h.nodes['#projectsView .eyebrow']={};
+  h.a.context.document.querySelectorAll=()=>[];h.a.context.confirm=()=>false;
+  h.a.run(`S.user={id:'owner'};S.projects=[{id:'p1',name:'项目',owner:'owner'}];S.fileArchives=[];
+    S.meetings=[{id:'m1',projectId:'p1',title:'周会',rawTranscript:'',participants:[]}];UI.space='p1';UI.spaceArea='meetings';
+    renderProjectSpace=${source.match(/function renderProjectSpace\(id\)\{[\s\S]*?\n\}/)[0]};
+    renderProjectSpace('p1');openMeetingEditor(S.projects[0],'m1');`);
+  assert.match(pane.innerHTML,/id="meetingTranscript"/);
+  const before=pane.innerHTML;h.nodes['#meetingTranscript'].value='尚未保存';pane.dataset.dirty='true';
+  h.a.run("renderProjectSpace('p1')");assert.equal(pane.innerHTML,before);assert.equal(h.nodes['#meetingTranscript'].value,'尚未保存');
+  h.a.run("projectArea(S.projects[0],'files')");assert.equal(h.a.run('UI.spaceArea'),'meetings');
 });
 
 test('system prompt settings save directly, retain edits made during save, and hide for members',async()=>{

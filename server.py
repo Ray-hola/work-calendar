@@ -525,6 +525,8 @@ class Store:
     def meeting_update_transcript(self, user, data):
         meeting = self.get('meetings', required(data, 'id'))
         self._meeting_project(user, meeting['projectId'])
+        if 'expectedRevision' in data and data['expectedRevision'] != meeting.get('revision', 0):
+            raise Problem(409, '会议已被修改，请先复制未保存的原稿，再重新打开会议')
         text = str(data.get('rawTranscript') or '')
         if len(text) > 200000:
             raise Problem(400, '会议原稿不能超过 200000 字')
@@ -534,6 +536,7 @@ class Store:
         if isinstance(data.get('participants'), list): meeting['participants'] = [str(x).strip() for x in data['participants'] if str(x).strip()][:50]
         meeting['status'] = 'recording' if data.get('recording') else ('ended' if meeting.get('status') == 'recording' else meeting.get('status', 'scheduled'))
         meeting['updatedAt'] = timestamp()
+        meeting['revision'] = meeting.get('revision', 0) + 1
         if data.get('recording') and not meeting.get('startedAt'): meeting['startedAt'] = timestamp()
         return self.put('meetings', meeting)
 
