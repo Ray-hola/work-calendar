@@ -117,7 +117,7 @@ MAX_AUDIO_BYTES = 8_000_000
 # Like the audio route, the bound is raised per-route in do_POST.
 FILES_PATH = '/api/files'
 MAX_FILE_BYTES = 20_000_000
-TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'task_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages', 'messages', 'folders', 'files', 'agent_conversations', 'agent_drafts', 'agent_receipts')
+TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'task_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages', 'messages', 'folders', 'files', 'agent_conversations', 'agent_drafts', 'agent_receipts', 'meetings')
 
 # Who may start what.  superadmin sorts members into rule groups (规则组, kept
 # apart from the superadmin/admin/member roles); each group says, for a new
@@ -285,6 +285,9 @@ class Store:
                     'weekdays': [0, 1, 2, 3, 4, 5, 6], 'dates': []
                 }
             }, ensure_ascii=False)))
+            self.db.commit()
+        if not self.db.execute("SELECT 1 FROM settings WHERE id='meeting_prompt'").fetchone():
+            self.db.execute('INSERT INTO settings(id,data) VALUES(?,?)', ('meeting_prompt', json.dumps({'id':'meeting_prompt','value':self.default_meeting_prompt()}, ensure_ascii=False)))
             self.db.commit()
         self.scrub_assistant_records()
         self.forget_delivered_diaries()
@@ -467,6 +470,95 @@ class Store:
         self.put('settings', {'id': 'asr', 'value': value, 'updatedAt': timestamp()})
         self.audit(user['id'], 'agent.asr_config', {'baseUrl': base, 'model': model})
         return self.asr_config(user)
+
+    def meeting_prompt(self):
+        value = next((x.get('value') for x in self.all('settings') if x.get('id') == 'meeting_prompt'), None)
+        return str(value or self.default_meeting_prompt()).strip()[:12000]
+
+    def set_meeting_prompt(self, user, data):
+        self.admin(user)
+        prompt = str(data.get('prompt') or '').strip()
+        if not prompt: raise Problem(400, '会议纪要提示词不能为空')
+        if len(prompt) > 12000: raise Problem(400, '会议纪要提示词过长')
+        return self.put('settings', {'id':'meeting_prompt','value':prompt,'updatedAt':timestamp(),'by':user['id']})
+
+    def _meeting_project(self, user, project_id):
+        p = self.get('projects', project_id)
+        if not self.can_view_project(user, p):
+            raise Problem(403, '无权访问该项目的会议')
+        return p
+
+    @staticmethod
+    def default_meeting_prompt():
+        return ('你是会议纪要整理助手。请只根据原始转录整理，不要补造事实。'
+                '输出简洁的 Markdown，包含：会议结论、待办事项（负责人/截止时间/事项）、'
+                '风险与待确认问题。若原稿没有对应信息，写“未提及”。')
+
+    def meeting_list(self, user, data):
+        project_id = str(data.get('projectId') or '').strip()
+        self._meeting_project(user, project_id)
+        return [m for m in self.all('meetings') if m.get('projectId') == project_id]
+
+    def meeting_create(self, user, data):
+        project_id = required(data, 'projectId')
+        p = self._meeting_project(user, project_id)
+        self.project_owner(user, p)
+        title = required(data, 'title')[:120]
+        participants = data.get('participants') if isinstance(data.get('participants'), list) else []
+        participants = [str(x).strip() for x in participants if str(x).strip()][:50]
+        record = {'projectId': project_id, 'title': title,
+                  'scheduledAt': str(data.get('scheduledAt') or '').strip()[:40],
+                  'participants': participants, 'agenda': str(data.get('agenda') or '').strip()[:10000],
+                  'rawTranscript': str(data.get('rawTranscript') or '')[:200000], 'minutes': '',
+                  'status': 'recording' if data.get('rawTranscript') else 'scheduled', 'createdBy': user['id'], 'createdAt': timestamp(), 'updatedAt': timestamp()}
+        return self.put('meetings', record)
+
+    def meeting_update_transcript(self, user, data):
+        meeting = self.get('meetings', required(data, 'id'))
+        self._meeting_project(user, meeting['projectId'])
+        text = str(data.get('rawTranscript') or '')
+        if len(text) > 200000:
+            raise Problem(400, '会议原稿不能超过 200000 字')
+        meeting['rawTranscript'] = text
+        for key, limit in (('title', 120), ('agenda', 10000), ('scheduledAt', 40)):
+            if key in data: meeting[key] = str(data.get(key) or '').strip()[:limit]
+        if isinstance(data.get('participants'), list): meeting['participants'] = [str(x).strip() for x in data['participants'] if str(x).strip()][:50]
+        meeting['status'] = 'recording' if data.get('recording') else ('ended' if meeting.get('status') == 'recording' else meeting.get('status', 'scheduled'))
+        meeting['updatedAt'] = timestamp()
+        if data.get('recording') and not meeting.get('startedAt'): meeting['startedAt'] = timestamp()
+        return self.put('meetings', meeting)
+
+    def meeting_generate_minutes(self, user, data):
+        meeting = self.get('meetings', required(data, 'id'))
+        self._meeting_project(user, meeting['projectId'])
+        transcript = str(meeting.get('rawTranscript') or '').strip()
+        if not transcript:
+            raise Problem(400, '请先录入或粘贴会议原稿')
+        prompt = self.meeting_prompt()
+        if len(prompt) > 12000: raise Problem(400, '提示词模板过长')
+        cfg = dict(self._llm_record().get('value') or {})
+        base = self.llm_root(cfg.get('baseUrl')); key = str(cfg.get('apiKey') or '')
+        model = str(cfg.get('model') or '').strip()
+        if not base or not model: raise Problem(409, '请先配置 AI 模型后再生成会议纪要')
+        content = prompt.replace('{{title}}', str(meeting.get('title') or '')).replace('{{agenda}}', str(meeting.get('agenda') or '未提及')).replace('{{transcript}}', transcript)
+        if len(content) > MAX_MESSAGE_CHARS: raise Problem(400, '会议内容过长，请先分段整理')
+        # Always provide source data, even when the global prompt has no placeholders.
+        source = json.dumps({'title': meeting.get('title'), 'agenda': meeting.get('agenda'), 'transcript': transcript}, ensure_ascii=False)
+        if len(content) + len(source) > MAX_MESSAGE_CHARS: raise Problem(400, '会议内容过长，请先分段整理')
+        payload = self.llm_payload(model, [{'role':'system','content':content}, {'role':'user','content':source}], probe=False)
+        req = urllib.request.Request(base + '/chat/completions', data=json.dumps(payload, ensure_ascii=False).encode(), method='POST', headers=self.llm_headers(base, key))
+        try:
+            with urllib.request.urlopen(req, timeout=120) as response: reply=json.loads(response.read(2_000_000).decode('utf-8'))
+        except urllib.error.HTTPError as exc:
+            detail=exc.read(4000).decode('utf-8', errors='replace'); detail=detail.replace(key, '[已隐藏]') if key else detail
+            raise Problem(502, f'会议纪要模型返回 HTTP {exc.code}：{detail[:300]}')
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise Problem(502, f'会议纪要模型连接失败：{str(exc)[:200]}')
+        minutes=self.llm_text(reply)
+        if not minutes: raise Problem(502, '会议纪要模型没有返回文本')
+        meeting['minutes']=minutes[:50000]; meeting['status']='ended'; meeting['endedAt']=timestamp(); meeting['updatedAt']=timestamp(); self.put('meetings', meeting)
+        self.audit(user['id'], 'meeting.minutes.generate', {'meetingId': meeting['id'], 'projectId': meeting['projectId']})
+        return meeting
 
     def speech_status(self, user):
         """Safe shared dictation capability, independent of AI assistant access."""
@@ -2298,7 +2390,7 @@ class Store:
             task_requests=[r for r in self.all('task_requests') if user['admin'] or r.get('requester')==user['id'] or r.get('projectId') in owned]
             automation=next((x.get('value',{}) for x in self.all('settings') if x.get('id')=='automation'),{})
             return {'user':user,'users':self.users(),'today':at.date().isoformat(),'weekStart':self.week_start(),'repeatStacking':self.repeat_stacking(),'projects':projects,
-'folders':folders,'fileArchives':file_archives,'files':[f for f in all_files if f.get('projectId') in file_pids],'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees'] or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':[n for n in self.all('notifications') if n['to']==user['id'] and '12:00 初稿' not in str(n.get('title',''))], 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'taskRequests':task_requests, 'creationRules':self.creation_rules(user), 'creationPolicy':self.creation_policy() if user.get('role')=='superadmin' else None, 'accountOrder':next((x.get('value') or [] for x in self.all('settings') if x.get('id')=='account_order'),[]) if user['admin'] else [], 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or self.get('projects',s['projectId'])['owner']==user['id'])], 'chat':self.chat_summary(user),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.all('audit')[-60:] if user['admin'] else []}
+'folders':folders,'fileArchives':file_archives,'files':[f for f in all_files if f.get('projectId') in file_pids],'meetings':[m for m in self.all('meetings') if any(p['id']==m.get('projectId') for p in projects)],'meetingPrompt':self.meeting_prompt() if user['admin'] else None,'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees'] or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':[n for n in self.all('notifications') if n['to']==user['id'] and '12:00 初稿' not in str(n.get('title',''))], 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'taskRequests':task_requests, 'creationRules':self.creation_rules(user), 'creationPolicy':self.creation_policy() if user.get('role')=='superadmin' else None, 'accountOrder':next((x.get('value') or [] for x in self.all('settings') if x.get('id')=='account_order'),[]) if user['admin'] else [], 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or self.get('projects',s['projectId'])['owner']==user['id'])], 'chat':self.chat_summary(user),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.all('audit')[-60:] if user['admin'] else []}
 
     def diary_statistics(self, viewer, start=None, end=None):
         """Return daily completion/load summaries for the diary dashboard.
@@ -2731,6 +2823,11 @@ class Store:
         return len(pending)
 
     def _action(self, user, action, d):
+        if action=='meeting.prompt.update': return self.set_meeting_prompt(user, d)
+        if action=='meeting.list': return self.meeting_list(user, d)
+        if action=='meeting.create': return self.meeting_create(user, d)
+        if action=='meeting.transcript.update': return self.meeting_update_transcript(user, d)
+        if action=='meeting.minutes.generate': return self.meeting_generate_minutes(user, d)
         if action=='chat.list':
             return self.chat_list(user, d)
         if action=='chat.send':
