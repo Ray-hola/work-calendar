@@ -59,6 +59,13 @@ OPENCODE_GO_CATALOG = (
 OPENCODE_GO_MODELS = tuple(x['id'] for x in OPENCODE_GO_CATALOG if x['protocol'] == 'chat')
 OPENCODE_GO_DEFAULT_MODEL = 'glm-5.3-flash'
 # Total serialized input budget, including instructions, tools, history and results.
+# The jobs AI does here; each picks its own source and model (系统设置 → AI 接入与模型).
+AI_SCENES = {
+    'chat': ('对话助手', '查询、回答，以及经确认后代为操作'),
+    'plan': ('规划任务', '把一句话拆成项目和任务卡片'),
+    'minutes': ('会议纪要', '把会议原稿整理成纪要'),
+    'transcribe': ('语音转写', '把录音转成文字，供各处语音输入使用'),
+}
 CONTEXT_CHOICES = (16_000, 32_000, 64_000)
 CONTEXT_DEFAULT = 32_000
 LEGACY_CONTEXT_CHOICES = {80_000: 16_000, 200_000: 32_000, 500_000: 64_000, 0: 64_000}
@@ -539,10 +546,8 @@ class Store:
                 raise Problem(400, '请先录入或粘贴会议原稿')
             prompt = self.meeting_prompt()
             if len(prompt) > 12000: raise Problem(400, '提示词模板过长')
-            cfg = dict(self._llm_record().get('value') or {})
-            base = self.llm_root(cfg.get('baseUrl')); key = str(cfg.get('apiKey') or '')
-            model = str(cfg.get('model') or '').strip()
-            if not base or not model: raise Problem(409, '请先配置 AI 模型后再生成会议纪要')
+            connection = self.scene_connection('minutes')
+            base, key, model = connection['base'], connection['key'], connection['model']
             content = prompt.replace('{{title}}', str(meeting.get('title') or '')).replace('{{agenda}}', str(meeting.get('agenda') or '未提及')).replace('{{transcript}}', transcript)
             if len(content) > MAX_MESSAGE_CHARS: raise Problem(400, '会议内容过长，请先分段整理')
             # Always provide source data, even when the global prompt has no placeholders.
@@ -575,8 +580,8 @@ class Store:
     def speech_status(self, user):
         """Safe shared dictation capability, independent of AI assistant access."""
         self.user(user['id'])
-        value=self._asr_record().get('value') or {}
-        return {'configured':bool(value.get('baseUrl'))}
+        try:self.scene_connection('transcribe');return {'configured':True}
+        except Problem:return {'configured':False}
 
     def transcribe(self, user, body, content_type=''):
         """Forward a recorded clip to the configured speech-to-text service.
@@ -590,13 +595,10 @@ class Store:
             raise Problem(400, '没有收到音频内容')
         if len(body) > MAX_AUDIO_BYTES:
             raise Problem(413, '录音过长，请缩短后再试')
-        record = self._asr_record(); cfg = dict(record.get('value') or {})
-        base = str(cfg.get('baseUrl') or '').rstrip('/')
-        model = str(cfg.get('model') or '').strip() or 'Qwen/Qwen3-ASR-0.6B'
-        key = str(cfg.get('apiKey') or '')
-        language = str(cfg.get('language') or 'zh').strip()
-        if not base:
-            raise Problem(409, '请先由 superadmin 配置语音转写服务')
+        try:connection = self.scene_connection('transcribe')
+        except Problem:raise Problem(409, '请先由 superadmin 配置语音转写服务')
+        base = str(connection['source']['baseUrl'] or '').rstrip('/')
+        model, key, language = connection['model'], connection['key'], connection['language'].strip()
         endpoint = base if base.endswith('/audio/transcriptions') else base + '/audio/transcriptions'
         # Build the multipart body by hand: this file is dependency-free on
         # purpose, so there is no `requests` to lean on for one upload.
@@ -643,11 +645,181 @@ class Store:
                 text = message.get('content') or ''
         return {'text': str(text or '').strip()}
 
+    # ---- AI 来源与场景 ----------------------------------------------------
+    # A source is a place models come from: an address and a key.  The record
+    # kept since the first release (settings 'llm') is the source 'main', the
+    # speech service ('asr') is 'speech', and any others live in 'ai_sources'.
+    # Each scene names a source and a model; a scene left unset follows 对话助手,
+    # and 对话助手 left unset uses the original record, so installs that never
+    # open the new page behave exactly as before.
+    def _extra_sources(self):
+        row = self.db.execute("SELECT data FROM settings WHERE id='ai_sources'").fetchone()
+        value = json.loads(row['data']).get('value') if row else None
+        return [dict(x) for x in value if isinstance(x, dict) and x.get('id')] if isinstance(value, list) else []
+
+    def ai_scenes(self):
+        row = self.db.execute("SELECT data FROM settings WHERE id='ai_scenes'").fetchone()
+        value = json.loads(row['data']).get('value') if row else None
+        return {k: dict(v) for k, v in value.items() if k in AI_SCENES and isinstance(v, dict)} if isinstance(value, dict) else {}
+
+    def ai_sources(self):
+        """Every source, keys included; callers that answer the browser mask them."""
+        llm = dict(self._llm_record().get('value') or {})
+        asr = dict(self._asr_record().get('value') or {})
+        sources = []
+        if llm.get('baseUrl'):
+            sources.append({'id': 'main', 'name': llm.get('sourceName') or '默认来源', 'provider': llm.get('provider') or 'custom',
+                            'baseUrl': llm['baseUrl'], 'apiKey': llm.get('apiKey') or '', 'kind': 'chat',
+                            'models': list(llm.get('models') or (OPENCODE_GO_MODELS if llm.get('provider') == 'opencode-go' else []))})
+        if asr.get('baseUrl'):
+            sources.append({'id': 'speech', 'name': asr.get('sourceName') or '语音转写服务', 'provider': 'custom', 'baseUrl': asr['baseUrl'],
+                            'apiKey': asr.get('apiKey') or '', 'kind': 'speech',
+                            'models': list(asr.get('models', [asr.get('model') or 'Qwen/Qwen3-ASR-0.6B']))})
+        return sources + [{**x, 'kind': x.get('kind') or 'chat'} for x in self._extra_sources()]
+
+    def ai_source(self, id):
+        source = next((s for s in self.ai_sources() if s['id'] == id), None)
+        if not source:
+            raise Problem(404, 'AI 来源不存在')
+        return source
+
+    def save_source_models(self, id, models):
+        models = [str(m)[:200] for m in models if str(m).strip()][:500]
+        if id in ('main', 'speech'):
+            record = self._llm_record() if id == 'main' else self._asr_record()
+            value = dict(record.get('value') or {}); value['models'] = models
+            self.put('settings', {'id': 'llm' if id == 'main' else 'asr', 'value': value, 'updatedAt': timestamp()})
+        else:
+            extras = self._extra_sources()
+            for x in extras:
+                if x['id'] == id: x['models'] = models
+            self.put('settings', {'id': 'ai_sources', 'value': extras, 'updatedAt': timestamp()})
+
+    def scene_choice(self, scene):
+        """The source and model a scene uses: its own, else 对话助手's, else the original record."""
+        scenes = self.ai_scenes()
+        if scene == 'transcribe' and scenes.get(scene, {}).get('disabled'):
+            return {'disabled': True}
+        choice = scenes.get(scene) or (scenes.get('chat') if scene in ('plan', 'minutes') else None)
+        if choice and choice.get('source'):
+            return choice
+        if scene == 'transcribe':
+            asr = dict(self._asr_record().get('value') or {})
+            return {'source': 'speech', 'model': asr.get('model') or 'Qwen/Qwen3-ASR-0.6B', 'language': asr.get('language') or 'zh'} if asr.get('baseUrl') else {}
+        llm = dict(self._llm_record().get('value') or {})
+        return {'source': 'main', 'model': llm.get('model') or ''} if llm.get('baseUrl') else {}
+
+    def scene_connection(self, scene):
+        """(api root, key, model, source, language) for a scene, or Problem 409 naming what is missing."""
+        choice = self.scene_choice(scene)
+        source = next((s for s in self.ai_sources() if s['id'] == choice.get('source')), None)
+        model = str(choice.get('model') or '').strip()
+        if not source or not model:
+            raise Problem(409, f'请先在「系统设置 → AI 接入与模型」为「{AI_SCENES[scene][0]}」选择来源和模型')
+        return {'base': self.llm_root(source['baseUrl']), 'key': str(source.get('apiKey') or ''), 'model': model,
+                'source': source, 'language': str(choice.get('language') or 'zh')}
+
+    def ai_settings(self, user):
+        """What the AI page shows: sources without keys, and each scene's choice."""
+        self.admin(user)
+        mask = lambda key: (('•' * len(key)) if len(key) <= 4 else ('•' * (len(key) - 4) + key[-4:])) if key else ''
+        explicit = self.ai_scenes()
+        return {'sources': [{k: v for k, v in s.items() if k != 'apiKey'} | {'apiKeySet': bool(s.get('apiKey')), 'apiKeyMasked': mask(str(s.get('apiKey') or ''))}
+                            for s in self.ai_sources()],
+                'scenes': {k: {**self.scene_choice(k), 'explicit': k in explicit,
+                               'follows': k in ('plan', 'minutes') and k not in explicit} for k in AI_SCENES},
+                'sceneInfo': [{'id': k, 'name': v[0], 'desc': v[1]} for k, v in AI_SCENES.items()],
+                'contextChars': self.context_budget()}
+
+    def save_ai_source(self, user, data):
+        self.admin(user)
+        id = str(data.get('id') or '').strip()
+        provider = str(data.get('provider') or 'custom').strip()[:40]
+        base = str(data.get('baseUrl') or '').strip().rstrip('/') or (OPENCODE_GO_BASE_URL if provider == 'opencode-go' else '')
+        name = str(data.get('name') or '').strip()[:40]
+        parsed = urllib.parse.urlparse(base)
+        if parsed.scheme not in ('http', 'https') or not parsed.netloc or len(base) > 500:
+            raise Problem(400, 'API 地址必须是 http(s) 地址')
+        if 'apiKey' in data and len(str(data.get('apiKey') or '')) > 500:
+            raise Problem(400, 'API Key 长度超出限制')
+        def keyed(previous):
+            value = dict(previous); value['apiKey'] = connection_key(previous, data, base)
+            if str(data.get('apiKey') or '').strip(): value['apiKey'] = str(data['apiKey']).strip()
+            if data.get('clearApiKey') is True: value.pop('apiKey', None)
+            return value
+        if id == 'main' or (not id and not self._llm_record().get('value', {}).get('baseUrl') and data.get('kind') != 'speech'):
+            value = keyed(dict(self._llm_record().get('value') or {}))
+            if self.llm_root(value.get('baseUrl') or '') != self.llm_root(base): value['models'] = []
+            value.update(baseUrl=base, provider=provider, sourceName=name or '默认来源')
+            self.put('settings', {'id': 'llm', 'value': value, 'updatedAt': timestamp()}); id = 'main'
+        elif id == 'speech' or (not id and data.get('kind') == 'speech' and not self._asr_record().get('value', {}).get('baseUrl')):
+            value = keyed(dict(self._asr_record().get('value') or {}))
+            if self.llm_root(value.get('baseUrl') or '') != self.llm_root(base): value['models'] = []
+            value.update(baseUrl=base, sourceName=name or '语音转写服务'); value.setdefault('model', 'Qwen/Qwen3-ASR-0.6B'); value.setdefault('language', 'zh')
+            self.put('settings', {'id': 'asr', 'value': value, 'updatedAt': timestamp()}); id = 'speech'
+        else:
+            extras = self._extra_sources(); current = next((x for x in extras if x['id'] == id), None)
+            if id and not current: raise Problem(404, 'AI 来源不存在')
+            value = keyed(current or {'id': 'src-' + uid()[:10], 'models': []})
+            if current and self.llm_root(current.get('baseUrl') or '') != self.llm_root(base): value['models'] = []
+            value.update(baseUrl=base, provider=provider, name=name or provider, kind='speech' if data.get('kind') == 'speech' else 'chat')
+            extras = [value if x['id'] == value['id'] else x for x in extras] if current else extras + [value]
+            self.put('settings', {'id': 'ai_sources', 'value': extras, 'updatedAt': timestamp()}); id = value['id']
+        self.audit(user['id'], 'ai.source.save', {'id': id, 'baseUrl': base})
+        return self.ai_settings(user)
+
+    def delete_ai_source(self, user, data):
+        self.admin(user)
+        id = required(data, 'id')
+        self.ai_source(id)
+        using = [AI_SCENES[k][0] for k in AI_SCENES if self.scene_choice(k).get('source') == id]
+        if using:
+            raise Problem(409, f'「{"、".join(using)}」正在使用这个来源，先给它们换一个来源再删除')
+        if id == 'main':
+            self.put('settings', {'id': 'llm', 'value': {k: v for k, v in (self._llm_record().get('value') or {}).items() if k in ('contextChars', 'temperature')}, 'updatedAt': timestamp()})
+        elif id == 'speech':
+            self.put('settings', {'id': 'asr', 'value': {}, 'updatedAt': timestamp()})
+        else:
+            self.put('settings', {'id': 'ai_sources', 'value': [x for x in self._extra_sources() if x['id'] != id], 'updatedAt': timestamp()})
+        self.audit(user['id'], 'ai.source.delete', {'id': id})
+        return self.ai_settings(user)
+
+    def set_ai_scene(self, user, data):
+        self.admin(user)
+        scene = required(data, 'scene')
+        if scene not in AI_SCENES: raise Problem(400, '没有这个使用场景')
+        scenes = self.ai_scenes()
+        source = str(data.get('source') or '').strip()
+        if not source:
+            if scene == 'transcribe':
+                scenes[scene] = {'disabled': True}  # Do not fall back to the legacy ASR source.
+            elif scene in ('plan', 'minutes'):
+                scenes.pop(scene, None)  # 跟随对话助手
+            else: raise Problem(400, '请选择来源')
+        else:
+            picked = self.ai_source(source)
+            if (picked.get('kind') == 'speech') != (scene == 'transcribe'):
+                raise Problem(400, '语音转写只能用语音来源，其他场景只能用对话来源')
+            model = str(data.get('model') or '').strip()
+            if not model or len(model) > 200: raise Problem(400, '请选择或填写模型')
+            choice = {'source': source, 'model': model}
+            if scene == 'transcribe': choice['language'] = (str(data.get('language') or 'zh').strip() or 'zh')[:32]
+            scenes[scene] = choice
+        self.put('settings', {'id': 'ai_scenes', 'value': scenes, 'updatedAt': timestamp()})
+        self.audit(user['id'], 'ai.scene.set', {'scene': scene, 'source': source})
+        return self.ai_settings(user)
+
     def llm_config(self, user):
+
         """Return the connection settings safe for the browser to display."""
         self.authorize_agent_tool(user, 'agent.config.read')
         value = dict(self._llm_record().get('value') or {})
-        key = str(value.get('apiKey') or '')
+        # The chip in the assistant shows 对话助手's model and its source's list.
+        chat = self.scene_choice('chat')
+        chat_source = next((s for s in self.ai_sources() if s['id'] == chat.get('source')), {})
+        key = str(chat_source.get('apiKey') or '')
+        value.update(baseUrl=chat_source.get('baseUrl'), model=chat.get('model') or '',
+                     provider=chat_source.get('provider'), models=chat_source.get('models') or [])
         # Members may use the configured proxy but do not need to know the
         # provider URL or selected model. Configuration remains a superadmin
         # concern; only safe status metadata is returned to other roles.
@@ -869,13 +1041,34 @@ class Store:
             current_user = self.user(user['id'])
             self.admin(current_user)
             saved = dict(self._llm_record().get('value') or {})
-        provider = str(data.get('provider') or 'custom').strip()
-        base = str(data.get('baseUrl') or '').strip() or (OPENCODE_GO_BASE_URL if provider == 'opencode-go' else '')
+            # A saved source is tested with its own address and key; its model
+            # list is refreshed when the test passes.
+            source = self.ai_source(str(data['sourceId'])) if data.get('sourceId') else None
+        if source:
+            provider, base, key = source.get('provider') or 'custom', source.get('baseUrl') or '', str(source.get('apiKey') or '')
+        else:
+            provider = str(data.get('provider') or 'custom').strip()
+            base = str(data.get('baseUrl') or '').strip() or (OPENCODE_GO_BASE_URL if provider == 'opencode-go' else '')
         parsed = urllib.parse.urlparse(base)
         if parsed.scheme not in ('http', 'https') or not parsed.netloc:
             return {'ok': False, 'models': [], 'reason': '请填写 http(s) 开头的 API 地址'}
-        key = connection_key(saved, data, base)
+        if not source:
+            key = connection_key(saved, data, base)
         root, headers = self.llm_root(base), self.llm_headers(base, key)
+        def persist_models(models):
+            if not source: return True
+            with self.lock, self.db:
+                self.admin(self.user(user['id']))
+                current = next((s for s in self.ai_sources() if s['id'] == source['id']), None)
+                # Network work runs outside the lock. An edit or deletion must
+                # invalidate this result before it can mutate the catalogue.
+                fields = ('baseUrl', 'apiKey', 'provider', 'kind')
+                if current is None or any(current.get(k) != source.get(k) for k in fields):
+                    return False
+                self.save_source_models(source['id'], models)
+                return True
+
+        stale = {'ok': False, 'models': [], 'reason': '来源已修改或删除，请重新测试'}
         model = str(data.get('model') or '').strip()
         started = _time.monotonic()
 
@@ -902,6 +1095,13 @@ class Store:
         models = [m for m in models if len(m) <= 200][:500]
         # A catalogue is a candidate list, never evidence that a key works.
         candidates = models or (list(OPENCODE_GO_MODELS) if provider == 'opencode-go' else [])
+        if source and source.get('kind') == 'speech':
+            # A speech service answers no chat; reaching its model list is the test.
+            ms = int((_time.monotonic() - started) * 1000)
+            if listing_error:
+                return {'ok': False, 'models': [], 'reason': listing_error, 'ms': ms}
+            if not persist_models(models): return stale
+            return {'ok': True, 'models': models, 'ms': ms, 'message': f'连接成功 · {len(models)} 个模型'}
         if not model:
             model = next((m for m in candidates if not re.search(r'embed|whisper|tts|dall-e|image|moderation|rerank|audio|vision-exp', m, re.I)), '')
         if not model:
@@ -914,9 +1114,9 @@ class Store:
         ms = int((_time.monotonic() - started) * 1000)
         if reply_error:
             return {'ok': False, 'models': models, 'reason': f'模型「{model}」验证失败：{reply_error}', 'ms': ms}
-        with self.lock:
-            self.admin(self.user(user['id']))
+        if not persist_models(models or candidates): return stale
         return {'ok': True, 'models': models or candidates, 'testedModel': model, 'ms': ms,
+
                 'message': f'模型「{model}」验证成功 · {len(models)} 个可用模型' if models
                 else f'模型「{model}」验证成功（未取得模型列表）'}
 
@@ -1036,11 +1236,10 @@ class Store:
         tool_definitions = workspace_tools(allowed if operator else [])
         budget, peak = self.context_budget(), 0
         trace, incomplete, pending_reads = [], False, {}
-        record = self._llm_record(); cfg = dict(record.get('value') or {})
-        base = str(cfg.get('baseUrl') or '').rstrip('/'); model = str(cfg.get('model') or '')
-        key = str(cfg.get('apiKey') or '')
-        if not base or not model:
-            raise Problem(409, '请先由 superadmin 配置 LLM API')
+        cfg = dict(self._llm_record().get('value') or {})
+        # 规划任务 and 对话助手 may use different sources and models.
+        connection = self.scene_connection('plan' if planning else 'chat')
+        base, model, key = connection['base'], connection['model'], connection['key']
         session_id = str(data.get('sessionId') or AGENT_LEGACY_CONVERSATION).strip()
         if not session_id or len(session_id) > 128 or any(ch not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.:' for ch in session_id):
             raise Problem(400, 'Agent 会话 ID 格式无效')
@@ -2864,11 +3063,31 @@ class Store:
             # The model switch in the assistant's header: only the model changes.
             self.admin(user);model=required(d,'model').strip()
             if len(model)>200:raise Problem(400,'模型名称过长')
+            scenes=self.ai_scenes()
+            if 'chat' in scenes:
+                scenes['chat']['model']=model;self.put('settings',{'id':'ai_scenes','value':scenes,'updatedAt':timestamp()})
+                return self.llm_config(user)
             record=self._llm_record();value=dict(record.get('value') or {})
             if not value.get('baseUrl'):raise Problem(409,'请先在 AI 接入配置里填写 API 地址')
             value['model']=model;self.put('settings',{'id':'llm','value':value,'updatedAt':timestamp()})
             return self.llm_config(user)
+        if action=='ai.settings.get':
+            return self.ai_settings(user)
+        if action=='ai.source.save':
+            return self.save_ai_source(user, d)
+        if action=='ai.source.delete':
+            return self.delete_ai_source(user, d)
+        if action=='ai.scene.set':
+            return self.set_ai_scene(user, d)
+        if action=='ai.context.set':
+            self.admin(user)
+            chars=int(d.get('contextChars'));chars=LEGACY_CONTEXT_CHOICES.get(chars,chars)
+            if chars not in CONTEXT_CHOICES:raise Problem(400,'上下文上限无效')
+            record=self._llm_record();value=dict(record.get('value') or {});value['contextChars']=chars
+            self.put('settings',{'id':'llm','value':value,'updatedAt':timestamp()})
+            return self.ai_settings(user)
         if action=='agent.config.set':
+
 
             return self.set_llm_config(user, d)
         if action=='agent.asr.get':

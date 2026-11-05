@@ -1756,86 +1756,161 @@ test('resizing height on a narrow screen preserves the desired width', () => {
   assert.deepEqual(a.json("agentPanelDimensions('history',1440,1050)"),{width:840,height:582});
 });
 
-function configApp(){
-  const a=planningApp(),nodes={};
-  for(const id of ['agentConfig','agentConfigTest','agentProvider','agentEndpoint','agentApiKey','agentModelSelect','agentCustomModel','agentConfigStatus','agentContextChars']){
-    const classes=new Set();
-    nodes['#'+id]={value:'',options:[],disabled:false,innerHTML:'',textContent:'',className:'',
-      classList:{contains:k=>classes.has(k),add:k=>classes.add(k),remove:k=>classes.delete(k),toggle(k,on){if(on??!classes.has(k))classes.add(k);else classes.delete(k)}},
-      setAttribute(){},removeAttribute(){}};
-  }
-  a.context.document={querySelector:s=>nodes[s]||null};
-  a.context.localStorage={getItem:()=>null,setItem:()=>{}};
-  a.context.AbortController=AbortController;
-  nodes['#agentProvider'].value='custom';nodes['#agentEndpoint'].value='https://old.example/v1';
-  nodes['#agentCustomModel'].value='old-model';nodes['#agentModelSelect'].classList.add('hidden');
-  a.run("agentModels=['old-model','other-model'];agentModelsSource=agentConfigConnection()");
-  const pending=[];
-  a.context.fetch=(path,options)=>new Promise(resolve=>pending.push({options,body:JSON.parse(options.body),reply:data=>resolve({ok:true,text:async()=>JSON.stringify(data)})}));
-  return {...a,nodes,pending};
+/* AI 接入与模型: a source is tested against what is saved; only the newest test
+   of a source may report, and an edit or an account change voids the one running. */
+function aiApp(){
+  const a=planningApp(),pending=[];
+  a.context.document={querySelector:()=>null};
+  a.run("UI.settingsPage='ai';S.user={id:'superadmin',admin:1,role:'superadmin'};renderAiSettingsPage=()=>{};renderSettingsSummaries=()=>{};"
+    +"aiSettings={sources:[{id:'main',name:'默认来源',models:['old']}],scenes:{},sceneInfo:[],contextChars:32000}");
+  a.context.fetch=(path,options)=>new Promise(resolve=>pending.push({body:JSON.parse(options.body),reply:(data,ok=true)=>resolve({ok,text:async()=>JSON.stringify(data)})}));
+  return {...a,pending};
 }
 
-test('connection test responses cannot replace a changed provider, URL, key or model',async()=>{
-  for(const field of ['provider','endpoint','key','model']){
-    const a=configApp(),first=a.run('agentTestConfig()');
-    assert.equal(a.nodes['#agentConfigTest'].disabled,true);
-    if(field==='provider'){a.nodes['#agentProvider'].value='deepseek';a.run('agentSyncProviderUI(true)');a.nodes['#agentCustomModel'].value='deepseek-chat'}
-    if(field==='endpoint'){a.nodes['#agentEndpoint'].value='https://new.example/v1';a.run('agentInvalidateConfigTest(true)')}
-    if(field==='key'){a.nodes['#agentApiKey'].value='replacement';a.run('agentInvalidateConfigTest(true)')}
-    if(field==='model'){a.nodes['#agentCustomModel'].value='new-model';a.run('agentInvalidateConfigTest()')}
-    assert.equal(a.pending[0].options.signal.aborted,true);
-    const selected=a.run('agentPickedModel()');
-    a.pending[0].reply({ok:true,models:['wrong-model'],testedModel:'wrong-model',message:'旧连接成功'});await first;
-    assert.equal(a.run('agentPickedModel()'),selected,field);
-    assert.ok(!a.json('agentModels').includes('wrong-model'),field);
-    assert.equal(a.nodes['#agentConfigStatus'].textContent,'');
+test('a source test uses the saved source and reports its outcome', async () => {
+  const a=aiApp(),run=a.run("aiTestSource('main')");
+  assert.deepEqual(a.pending[0].body,{action:'agent.config.test',data:{sourceId:'main'}});
+  assert.equal(a.run("aiTests.main.busy"),true);
+  a.pending[0].reply({ok:false,reason:'HTTP 401 · 密钥无效'});await run;
+  assert.deepEqual(a.json('aiTests.main'),{run:1,state:'fail',text:'HTTP 401 · 密钥无效'});
+});
+
+test('only the newest test of a source may report', async () => {
+  const a=aiApp(),first=a.run("aiTestSource('main')"),second=a.run("aiTestSource('main')");
+  a.pending[1].reply({ok:false,reason:'新结果'});await second;
+  a.pending[0].reply({ok:false,reason:'旧结果'});await first;
+  assert.equal(a.run('aiTests.main.text'),'新结果');
+});
+
+test('editing a source or switching account voids the test in flight', async () => {
+  for(const change of ["aiTests.main={run:aiTests.main.run+1}","S.user={id:'test001'}"]){
+    const a=aiApp(),run=a.run("aiTestSource('main')");a.run(change);
+    a.pending[0].reply({ok:false,reason:'过期的结果'});await run;
+    assert.notEqual(a.run('aiTests.main.text'),'过期的结果',change);
   }
 });
 
-test('only the newest connection test may finish loading or update the current picker',async()=>{
-  const a=configApp(),first=a.run('agentTestConfig()'),second=a.run('agentTestConfig()');
-  a.pending[0].reply({ok:true,models:['stale'],message:'旧结果'});await first;
-  assert.equal(a.nodes['#agentConfigTest'].disabled,true,'旧请求的 finally 不能结束新请求的加载状态');
-  a.pending[1].reply({ok:true,models:['new-a','new-b'],testedModel:'new-b',message:'新模型验证成功'});await second;
-  assert.equal(a.nodes['#agentConfigTest'].disabled,false);
-  assert.equal(a.run('agentPickedModel()'),'new-b');
-  assert.deepEqual(a.json('agentModels'),['new-a','new-b']);
-  assert.equal(a.nodes['#agentConfigStatus'].textContent,'新模型验证成功');
+test('a scene keeps its model when the new source offers it, else takes a chat model', () => {
+  const a=aiApp();
+  assert.deepEqual(a.json("aiSceneModels({models:['a','b']},'c')"),['a','b','c'],'正在用的模型留在列表里');
+  assert.deepEqual(a.json("aiSceneModels(null,'')"),[]);
+  const page=source.match(/function bindAiSettingsPage\(box\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/list\.includes\(current\)\?current:agentPreferredModel\(list\)/.test(page));
+  assert.ok(/if\(!id\)\{aiSaveScene\(scene,\{source:''\}\)/.test(page),'规划和纪要可以改回跟随对话助手');
 });
 
-test('closing or reopening the configuration invalidates pending test success and failure',async()=>{
-  for(const reopen of [false,true]){
-    const a=configApp(),pending=a.run('agentTestConfig()');
-    a.run('agentSetConfigVisible(false)');if(reopen)a.run('agentSetConfigVisible(true)');
-    a.pending[0].reply({ok:false,models:['stale'],reason:'旧密钥错误'});await pending;
-    assert.ok(!a.json('agentModels').includes('stale'));
-    assert.equal(a.nodes['#agentConfigStatus'].textContent,'');
+test('scene changes are sent in order and only the final selection is rendered', async () => {
+  const a=aiApp();a.run('agentLoadServerConfig=()=>{};flashSaved=()=>{};var renders=[];renderAiSettingsPage=()=>renders.push(aiSettings.scenes.chat.model)');
+  const settings=a.json('aiSettings');
+  const first=a.run("aiSaveScene('chat',{source:'main',model:'first'})");
+  const second=a.run("aiSaveScene('chat',{source:'main',model:'second'})");
+  await new Promise(setImmediate);
+  assert.equal(a.pending.length,1,'only one mutation may be in flight');
+  assert.equal(a.pending[0].body.data.model,'first');
+  a.pending[0].reply({...settings,scenes:{chat:{source:'main',model:'first'}}});await first;
+  await new Promise(setImmediate);
+  assert.deepEqual(a.json('renders'),[],'do not redraw an obsolete selection');
+  assert.equal(a.pending[1].body.data.model,'second');
+  a.pending[1].reply({...settings,scenes:{chat:{source:'main',model:'second'}}});await second;
+  assert.deepEqual(a.json('renders'),['second']);
+  assert.equal(a.run('aiScenePending'),0);
+});
+
+test('a failed scene save does not block the next save or claim success', async () => {
+  const a=aiApp();a.run('agentLoadServerConfig=()=>{};var successes=0;flashSaved=()=>successes++');
+  const settings=a.json('aiSettings'),first=a.run("aiSaveScene('chat',{source:'main',model:'bad'})");
+  await new Promise(setImmediate);a.pending[0].reply({error:'失败'},false);await first;
+  assert.equal(a.run('successes'),0);
+  const second=a.run("aiSaveScene('chat',{source:'main',model:'good'})");
+  await new Promise(setImmediate);a.pending[1].reply({...settings,scenes:{chat:{source:'main',model:'good'}}});await second;
+  assert.equal(a.run('successes'),1);
+  assert.equal(a.run('aiSettings.scenes.chat.model'),'good');
+});
+
+test('account changes discard pending scene responses and unsent changes', async () => {
+  const a=aiApp(),before=a.json('aiSettings');
+  const first=a.run("aiSaveScene('chat',{source:'main',model:'first'})");
+  const second=a.run("aiSaveScene('chat',{source:'main',model:'second'})");
+  await new Promise(setImmediate);a.run("S.user={id:'test001'}");
+  a.pending[0].reply({...before,scenes:{chat:{model:'first'}}});await Promise.all([first,second]);
+  assert.equal(a.pending.length,1);
+  assert.deepEqual(a.json('aiSettings'),before);
+});
+
+test('a settings read started before a scene change cannot restore the old selection', async () => {
+  const a=aiApp();a.run('agentLoadServerConfig=()=>{};flashSaved=()=>{}');
+  const before=a.json('aiSettings'),load=a.run('loadAiSettings()');
+  const save=a.run("aiSaveScene('chat',{source:'main',model:'new'})");
+  await new Promise(setImmediate);
+  a.pending[1].reply({...before,scenes:{chat:{source:'main',model:'new'}}});await save;
+  a.pending[0].reply(before);await load;
+  assert.equal(a.run('aiSettings.scenes.chat.model'),'new');
+});
+
+function aiEditorApp(){
+  const a=planningApp(),pending=[];
+  let form=null,html='';
+  const box={querySelectorAll:()=>[],querySelector:s=>s==='.ai-source-editor'?form:null,
+    get innerHTML(){return html},set innerHTML(value){
+      html=value;const match=value.match(/<form class="ai-source-editor" data-editor="([^"]*)" data-kind="([^"]*)"/);
+      if(!match){form=null;return}
+      const field=name=>({value:(value.match(new RegExp('name="'+name+'"[^>]*value="([^"]*)"'))||[])[1]||'',focus(){a.context.document.activeElement=this}});
+      const elements=Object.fromEntries(['name','baseUrl','apiKey'].map(k=>[k,field(k)])),submit={disabled:false};
+      form={dataset:{editor:match[1],kind:match[2]},elements,querySelector:()=>submit,contains:node=>Object.values(elements).includes(node),replaceWith:node=>{form=node}};
+    }};
+  a.context.document={querySelector:s=>s==='#settingsPage'?box:null,activeElement:null};
+  a.context.fetch=(url,options)=>new Promise(resolve=>pending.push({body:JSON.parse(options.body),reply:data=>resolve({ok:true,text:async()=>JSON.stringify(data)})}));
+  a.run(`UI.view='settings';UI.settingsPage='ai';renderSettingsSummaries=()=>{};
+    aiSettings={sources:[{id:'a',name:'A',kind:'chat',provider:'custom',baseUrl:'http://a.example/v1',models:['a']},
+    {id:'b',name:'B',kind:'chat',provider:'custom',baseUrl:'http://b.example/v1',models:[]}],scenes:{},sceneInfo:[],contextChars:32000};`);
+  return {...a,pending,box,get form(){return form}};
+}
+
+test('a completed source test preserves another editor, its key, focus and submit state', async () => {
+  for(const ok of [true,false]){
+    const a=aiEditorApp(),settings=a.json('aiSettings'),probe=a.run("aiTestSource('a')");
+    a.run("aiEditing={id:'b'};renderAiSettingsPage()");
+    const editor=a.form;
+    editor.elements.name.value='New B';editor.elements.baseUrl.value='http://draft.example/v1';editor.elements.apiKey.value='unsaved-key';
+    editor.elements.apiKey.focus();editor.elements.apiKey.selectionStart=3;editor.querySelector().disabled=true;
+    a.pending[0].reply({ok,message:'成功',reason:'失败'});
+    if(ok){await new Promise(setImmediate);assert.equal(a.pending[1].body.action,'ai.settings.get');
+      a.run('renderAiSettingsPage()');assert.equal(a.form,editor,'refresh while the settings read is pending also keeps the editor');
+      a.pending[1].reply(settings)}
+    await probe;
+    assert.equal(a.form,editor);assert.equal(editor.elements.name.value,'New B');
+    assert.equal(editor.elements.baseUrl.value,'http://draft.example/v1');assert.equal(editor.elements.apiKey.value,'unsaved-key');
+    assert.equal(a.context.document.activeElement,editor.elements.apiKey);assert.equal(editor.elements.apiKey.selectionStart,3);
+    assert.equal(editor.querySelector().disabled,true);
+    a.run('aiEditing=null;renderAiSettingsPage()');assert.equal(a.form,null,'cancel discards the editor');
   }
 });
 
-test('an account change or an unannounced input change also rejects a stale test receipt',async()=>{
-  for(const change of ["S.user={id:'test001'}","document.querySelector('#agentEndpoint').value='https://other.example/v1'"]){
-    const a=configApp(),pending=a.run('agentTestConfig()');a.run(change);
-    a.pending[0].reply({ok:true,models:['stale'],message:'旧结果'});await pending;
-    assert.equal(a.nodes['#agentConfigStatus'].textContent,'');assert.ok(!a.json('agentModels').includes('stale'));
-  }
+test('new source drafts survive refresh but do not leak into a different editor', () => {
+  const a=aiEditorApp();a.run("aiEditing={kind:'chat'};renderAiSettingsPage()");
+  const draft=a.form;draft.elements.apiKey.value='draft-key';
+  a.run('renderAiSettingsPage()');assert.equal(a.form,draft);
+  a.run("aiEditing={id:'b'};renderAiSettingsPage()");
+  assert.notEqual(a.form,draft);assert.equal(a.form.elements.apiKey.value,'');
 });
 
-test('configuration save excludes model catalogues from a different connection',async()=>{
-  const a=configApp();a.nodes['#agentEndpoint'].value='https://new.example/v1';
-  const saving=a.run('agentSaveConfig()');
-  assert.deepEqual(a.pending[0].body.data.models,[]);
-  a.pending[0].reply({configured:true,model:'old-model'});await saving;
+test('speech settings offer disable and refresh shared dictation status after saving', async () => {
+  const a=aiEditorApp();a.run(`aiSettings.sources.push({id:'speech',kind:'speech',name:'ASR',models:['whisper-1']});
+    aiSettings.sceneInfo=[{id:'transcribe',name:'语音转写',desc:''}];aiSettings.scenes.transcribe={disabled:true};renderAiSettingsPage()`);
+  assert.match(a.box.innerHTML,/<option value="" selected>停用<\/option>/);
+  assert.match(a.box.innerHTML,/<input value="" disabled aria-label="模型">/);
+  const b=aiApp();b.run('agentLoadServerConfig=()=>{};var refreshes=0;loadSpeechStatus=()=>refreshes++;flashSaved=()=>{}');
+  const settings=b.json('aiSettings'),save=b.run("aiSaveScene('transcribe',{source:''})");
+  await new Promise(setImmediate);assert.deepEqual(b.pending[0].body.data,{scene:'transcribe',source:''});
+  b.pending[0].reply({...settings,scenes:{transcribe:{disabled:true}}});await save;
+  assert.equal(b.run('refreshes'),1);
 });
 
-test('a failed model verification retains its reason and offers a retry with discovered models',async()=>{
-  const a=configApp(),first=a.run('agentTestConfig()');
-  a.pending[0].reply({ok:false,models:['working-model'],reason:'HTTP 401 · 密钥无效'});await first;
-  assert.equal(a.nodes['#agentConfigStatus'].textContent,'HTTP 401 · 密钥无效');
-  assert.ok(a.nodes['#agentConfigStatus'].className.includes('is-fail'));
-  a.nodes['#agentModelSelect'].value='working-model';const second=a.run('agentTestConfig()');
-  a.pending[1].reply({ok:true,models:['working-model'],testedModel:'working-model',message:'验证成功'});await second;
-  assert.equal(a.nodes['#agentConfigStatus'].textContent,'验证成功');
+test('the assistant no longer carries its own connection form; its gear opens settings', () => {
+  const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8');
+  assert.ok(!/id="agentConfig"|id="agentAsrEndpoint"/.test(html));
+  assert.ok(/data-settings-page="ai"/.test(html)&&/data-settings-page="prompt"/.test(html),'AI 和纪要提示词各自是子页面');
+  assert.ok(/agentConfigBtn'\)\?\.addEventListener\('click',\(\)=>openSettingsPage\('ai'\)\)/.test(source));
 });
 
 test('retrieval badges show compact outcomes without displaying query text or data',()=>{
