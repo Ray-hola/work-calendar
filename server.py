@@ -673,7 +673,8 @@ class Store:
                             'models': list(llm.get('models') or (OPENCODE_GO_MODELS if llm.get('provider') == 'opencode-go' else []))})
         if asr.get('baseUrl'):
             sources.append({'id': 'speech', 'name': asr.get('sourceName') or '语音转写服务', 'provider': 'custom', 'baseUrl': asr['baseUrl'],
-                            'apiKey': asr.get('apiKey') or '', 'kind': 'speech', 'models': [asr.get('model') or 'Qwen/Qwen3-ASR-0.6B']})
+                            'apiKey': asr.get('apiKey') or '', 'kind': 'speech',
+                            'models': list(asr.get('models', [asr.get('model') or 'Qwen/Qwen3-ASR-0.6B']))})
         return sources + [{**x, 'kind': x.get('kind') or 'chat'} for x in self._extra_sources()]
 
     def ai_source(self, id):
@@ -684,10 +685,11 @@ class Store:
 
     def save_source_models(self, id, models):
         models = [str(m)[:200] for m in models if str(m).strip()][:500]
-        if id == 'main':
-            record = self._llm_record(); value = dict(record.get('value') or {}); value['models'] = models
-            self.put('settings', {'id': 'llm', 'value': value, 'updatedAt': timestamp()})
-        elif id != 'speech':
+        if id in ('main', 'speech'):
+            record = self._llm_record() if id == 'main' else self._asr_record()
+            value = dict(record.get('value') or {}); value['models'] = models
+            self.put('settings', {'id': 'llm' if id == 'main' else 'asr', 'value': value, 'updatedAt': timestamp()})
+        else:
             extras = self._extra_sources()
             for x in extras:
                 if x['id'] == id: x['models'] = models
@@ -696,6 +698,8 @@ class Store:
     def scene_choice(self, scene):
         """The source and model a scene uses: its own, else 对话助手's, else the original record."""
         scenes = self.ai_scenes()
+        if scene == 'transcribe' and scenes.get(scene, {}).get('disabled'):
+            return {'disabled': True}
         choice = scenes.get(scene) or (scenes.get('chat') if scene in ('plan', 'minutes') else None)
         if choice and choice.get('source'):
             return choice
@@ -750,6 +754,7 @@ class Store:
             self.put('settings', {'id': 'llm', 'value': value, 'updatedAt': timestamp()}); id = 'main'
         elif id == 'speech' or (not id and data.get('kind') == 'speech' and not self._asr_record().get('value', {}).get('baseUrl')):
             value = keyed(dict(self._asr_record().get('value') or {}))
+            if self.llm_root(value.get('baseUrl') or '') != self.llm_root(base): value['models'] = []
             value.update(baseUrl=base, sourceName=name or '语音转写服务'); value.setdefault('model', 'Qwen/Qwen3-ASR-0.6B'); value.setdefault('language', 'zh')
             self.put('settings', {'id': 'asr', 'value': value, 'updatedAt': timestamp()}); id = 'speech'
         else:
@@ -786,8 +791,11 @@ class Store:
         scenes = self.ai_scenes()
         source = str(data.get('source') or '').strip()
         if not source:
-            if scene not in ('plan', 'minutes'): raise Problem(400, '请选择来源')
-            scenes.pop(scene, None)  # 跟随对话助手
+            if scene == 'transcribe':
+                scenes[scene] = {'disabled': True}  # Do not fall back to the legacy ASR source.
+            elif scene in ('plan', 'minutes'):
+                scenes.pop(scene, None)  # 跟随对话助手
+            else: raise Problem(400, '请选择来源')
         else:
             picked = self.ai_source(source)
             if (picked.get('kind') == 'speech') != (scene == 'transcribe'):
@@ -806,12 +814,12 @@ class Store:
         """Return the connection settings safe for the browser to display."""
         self.authorize_agent_tool(user, 'agent.config.read')
         value = dict(self._llm_record().get('value') or {})
-        key = str(value.get('apiKey') or '')
         # The chip in the assistant shows 对话助手's model and its source's list.
         chat = self.scene_choice('chat')
         chat_source = next((s for s in self.ai_sources() if s['id'] == chat.get('source')), {})
-        value.update(baseUrl=chat_source.get('baseUrl') or value.get('baseUrl'), model=chat.get('model') or '',
-                     provider=chat_source.get('provider') or value.get('provider'), models=chat_source.get('models') or value.get('models'))
+        key = str(chat_source.get('apiKey') or '')
+        value.update(baseUrl=chat_source.get('baseUrl'), model=chat.get('model') or '',
+                     provider=chat_source.get('provider'), models=chat_source.get('models') or [])
         # Members may use the configured proxy but do not need to know the
         # provider URL or selected model. Configuration remains a superadmin
         # concern; only safe status metadata is returned to other roles.
@@ -1047,6 +1055,20 @@ class Store:
         if not source:
             key = connection_key(saved, data, base)
         root, headers = self.llm_root(base), self.llm_headers(base, key)
+        def persist_models(models):
+            if not source: return True
+            with self.lock, self.db:
+                self.admin(self.user(user['id']))
+                current = next((s for s in self.ai_sources() if s['id'] == source['id']), None)
+                # Network work runs outside the lock. An edit or deletion must
+                # invalidate this result before it can mutate the catalogue.
+                fields = ('baseUrl', 'apiKey', 'provider', 'kind')
+                if current is None or any(current.get(k) != source.get(k) for k in fields):
+                    return False
+                self.save_source_models(source['id'], models)
+                return True
+
+        stale = {'ok': False, 'models': [], 'reason': '来源已修改或删除，请重新测试'}
         model = str(data.get('model') or '').strip()
         started = _time.monotonic()
 
@@ -1078,6 +1100,7 @@ class Store:
             ms = int((_time.monotonic() - started) * 1000)
             if listing_error:
                 return {'ok': False, 'models': [], 'reason': listing_error, 'ms': ms}
+            if not persist_models(models): return stale
             return {'ok': True, 'models': models, 'ms': ms, 'message': f'连接成功 · {len(models)} 个模型'}
         if not model:
             model = next((m for m in candidates if not re.search(r'embed|whisper|tts|dall-e|image|moderation|rerank|audio|vision-exp', m, re.I)), '')
@@ -1091,10 +1114,7 @@ class Store:
         ms = int((_time.monotonic() - started) * 1000)
         if reply_error:
             return {'ok': False, 'models': models, 'reason': f'模型「{model}」验证失败：{reply_error}', 'ms': ms}
-        with self.lock, self.db:
-            self.admin(self.user(user['id']))
-            if source:
-                self.save_source_models(source['id'], models or candidates)
+        if not persist_models(models or candidates): return stale
         return {'ok': True, 'models': models or candidates, 'testedModel': model, 'ms': ms,
 
                 'message': f'模型「{model}」验证成功 · {len(models)} 个可用模型' if models

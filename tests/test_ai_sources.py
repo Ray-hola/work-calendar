@@ -133,6 +133,84 @@ class AiSourceTests(unittest.TestCase):
         with self.assertRaises(Problem):
             self.act('ai.context.set', {'contextChars': 5})
 
+    def test_chat_metadata_never_falls_back_to_another_sources_catalogue_or_key(self):
+        self.store.save_source_models('main', ['old-model'])
+        view = self.act('ai.source.save', {'name': 'Local', 'baseUrl': 'http://local.example/v1'})
+        source = next(s for s in view['sources'] if s['name'] == 'Local')
+        self.act('ai.scene.set', {'scene': 'chat', 'source': source['id'], 'model': 'local-model'})
+        config = self.act('agent.config.get', {})
+        self.assertEqual((config['baseUrl'], config['model'], config['models']),
+                         ('http://local.example/v1', 'local-model', []))
+        self.assertFalse(config['apiKeySet'])
+        self.assertEqual(config['apiKeyMasked'], '')
+        self.act('ai.source.save', {'id': source['id'], 'baseUrl': 'http://local.example/v1', 'apiKey': 'new-secret'})
+        self.assertTrue(self.act('agent.config.get', {})['apiKeyMasked'].endswith('cret'))
+        self.assertEqual(self.act('agent.config.get', {}, self.member)['models'], [])
+
+    def test_speech_probes_persist_catalogues_for_builtin_and_extra_sources(self):
+        self.act('ai.source.save', {'kind': 'speech', 'name': 'First', 'baseUrl': 'http://asr.example/v1'})
+        view = self.act('ai.source.save', {'kind': 'speech', 'name': 'Second', 'baseUrl': 'http://asr2.example/v1'})
+        ids = [s['id'] for s in view['sources'] if s['kind'] == 'speech']
+        for id in ids:
+            with self.subTest(id=id):
+                with mock.patch('server.urllib.request.urlopen', _provider({'/models': {'data': [{'id': 'whisper-1'}, {'id': 'whisper-large'}]}}, [])):
+                    result = self.act('agent.config.test', {'sourceId': id})
+                self.assertTrue(result['ok'])
+                fresh = self.act('ai.settings.get', {})
+                self.assertEqual(next(s['models'] for s in fresh['sources'] if s['id'] == id), ['whisper-1', 'whisper-large'])
+                self.act('ai.source.save', {'id': id, 'kind': 'speech', 'baseUrl': 'http://changed.example/v1'})
+                self.assertEqual(self.store.ai_source(id)['models'], [])
+
+    def test_speech_can_be_disabled_reenabled_and_deleted_without_legacy_fallback(self):
+        self.act('ai.source.save', {'kind': 'speech', 'baseUrl': 'http://asr.example/v1'})
+        self.assertTrue(self.store.speech_status(self.member)['configured'])
+        self.act('ai.scene.set', {'scene': 'transcribe', 'source': ''})
+        self.assertFalse(self.store.speech_status(self.member)['configured'])
+        with mock.patch('server.urllib.request.urlopen') as network:
+            with self.assertRaises(Problem): self.store.transcribe(self.member, b'audio')
+            network.assert_not_called()
+        self.assertTrue(self.act('ai.settings.get', {})['scenes']['transcribe']['disabled'])
+        self.act('ai.scene.set', {'scene': 'transcribe', 'source': 'speech', 'model': 'whisper-1'})
+        self.assertTrue(self.store.speech_status(self.member)['configured'])
+        self.act('ai.scene.set', {'scene': 'transcribe', 'source': ''})
+        self.act('ai.source.delete', {'id': 'speech'})
+        self.assertFalse(self.store.speech_status(self.member)['configured'])
+        self.assertNotIn('speech', [s['id'] for s in self.store.ai_sources()])
+        # Adding a replacement must not silently undo an explicit disable.
+        self.act('ai.source.save', {'kind': 'speech', 'baseUrl': 'http://replacement.example/v1'})
+        self.assertFalse(self.store.speech_status(self.member)['configured'])
+
+    def test_source_edits_during_a_probe_cannot_restore_an_old_catalogue(self):
+        for kind in ('chat', 'speech'):
+            for change in ('address', 'key'):
+                with self.subTest(kind=kind, change=change):
+                    if kind == 'speech':
+                        self.act('ai.source.save', {'id': 'speech', 'kind': 'speech', 'baseUrl': 'http://asr.example/v1'})
+                    id = 'speech' if kind == 'speech' else 'main'
+                    source = self.store.ai_source(id)
+                    self.store.save_source_models(id, [])
+                    def listing(request):
+                        payload = {'id': id, 'kind': kind, 'baseUrl': source['baseUrl']}
+                        payload.update({'baseUrl': 'https://changed.example/v1'} if change == 'address' else {'apiKey': 'replacement-key'})
+                        self.act('ai.source.save', payload)
+                        return {'data': [{'id': 'old-result'}]}
+                    with mock.patch('server.urllib.request.urlopen', _provider({'/models': listing, '/chat/completions': _chat('好')}, [])):
+                        result = self.act('agent.config.test', {'sourceId': id})
+                    self.assertFalse(result['ok'])
+                    self.assertIn('重新测试', result['reason'])
+                    self.assertEqual(self.store.ai_source(id)['models'], [])
+
+    def test_a_deleted_source_is_not_recreated_by_its_pending_probe(self):
+        self.act('ai.source.save', {'kind': 'speech', 'baseUrl': 'http://asr.example/v1'})
+        self.act('ai.scene.set', {'scene': 'transcribe', 'source': ''})
+        def listing(request):
+            self.act('ai.source.delete', {'id': 'speech'})
+            return {'data': [{'id': 'old-result'}]}
+        with mock.patch('server.urllib.request.urlopen', _provider({'/models': listing}, [])):
+            result = self.act('agent.config.test', {'sourceId': 'speech'})
+        self.assertFalse(result['ok'])
+        self.assertNotIn('speech', [s['id'] for s in self.store.ai_sources()])
+
 
 if __name__ == '__main__':
     unittest.main()

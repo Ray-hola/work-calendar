@@ -1763,7 +1763,7 @@ function aiApp(){
   a.context.document={querySelector:()=>null};
   a.run("UI.settingsPage='ai';S.user={id:'superadmin',admin:1,role:'superadmin'};renderAiSettingsPage=()=>{};renderSettingsSummaries=()=>{};"
     +"aiSettings={sources:[{id:'main',name:'默认来源',models:['old']}],scenes:{},sceneInfo:[],contextChars:32000}");
-  a.context.fetch=(path,options)=>new Promise(resolve=>pending.push({body:JSON.parse(options.body),reply:data=>resolve({ok:true,text:async()=>JSON.stringify(data)})}));
+  a.context.fetch=(path,options)=>new Promise(resolve=>pending.push({body:JSON.parse(options.body),reply:(data,ok=true)=>resolve({ok,text:async()=>JSON.stringify(data)})}));
   return {...a,pending};
 }
 
@@ -1797,6 +1797,113 @@ test('a scene keeps its model when the new source offers it, else takes a chat m
   const page=source.match(/function bindAiSettingsPage\(box\)\{[\s\S]*?\n\}/)[0];
   assert.ok(/list\.includes\(current\)\?current:agentPreferredModel\(list\)/.test(page));
   assert.ok(/if\(!id\)\{aiSaveScene\(scene,\{source:''\}\)/.test(page),'规划和纪要可以改回跟随对话助手');
+});
+
+test('scene changes are sent in order and only the final selection is rendered', async () => {
+  const a=aiApp();a.run('agentLoadServerConfig=()=>{};flashSaved=()=>{};var renders=[];renderAiSettingsPage=()=>renders.push(aiSettings.scenes.chat.model)');
+  const settings=a.json('aiSettings');
+  const first=a.run("aiSaveScene('chat',{source:'main',model:'first'})");
+  const second=a.run("aiSaveScene('chat',{source:'main',model:'second'})");
+  await new Promise(setImmediate);
+  assert.equal(a.pending.length,1,'only one mutation may be in flight');
+  assert.equal(a.pending[0].body.data.model,'first');
+  a.pending[0].reply({...settings,scenes:{chat:{source:'main',model:'first'}}});await first;
+  await new Promise(setImmediate);
+  assert.deepEqual(a.json('renders'),[],'do not redraw an obsolete selection');
+  assert.equal(a.pending[1].body.data.model,'second');
+  a.pending[1].reply({...settings,scenes:{chat:{source:'main',model:'second'}}});await second;
+  assert.deepEqual(a.json('renders'),['second']);
+  assert.equal(a.run('aiScenePending'),0);
+});
+
+test('a failed scene save does not block the next save or claim success', async () => {
+  const a=aiApp();a.run('agentLoadServerConfig=()=>{};var successes=0;flashSaved=()=>successes++');
+  const settings=a.json('aiSettings'),first=a.run("aiSaveScene('chat',{source:'main',model:'bad'})");
+  await new Promise(setImmediate);a.pending[0].reply({error:'失败'},false);await first;
+  assert.equal(a.run('successes'),0);
+  const second=a.run("aiSaveScene('chat',{source:'main',model:'good'})");
+  await new Promise(setImmediate);a.pending[1].reply({...settings,scenes:{chat:{source:'main',model:'good'}}});await second;
+  assert.equal(a.run('successes'),1);
+  assert.equal(a.run('aiSettings.scenes.chat.model'),'good');
+});
+
+test('account changes discard pending scene responses and unsent changes', async () => {
+  const a=aiApp(),before=a.json('aiSettings');
+  const first=a.run("aiSaveScene('chat',{source:'main',model:'first'})");
+  const second=a.run("aiSaveScene('chat',{source:'main',model:'second'})");
+  await new Promise(setImmediate);a.run("S.user={id:'test001'}");
+  a.pending[0].reply({...before,scenes:{chat:{model:'first'}}});await Promise.all([first,second]);
+  assert.equal(a.pending.length,1);
+  assert.deepEqual(a.json('aiSettings'),before);
+});
+
+test('a settings read started before a scene change cannot restore the old selection', async () => {
+  const a=aiApp();a.run('agentLoadServerConfig=()=>{};flashSaved=()=>{}');
+  const before=a.json('aiSettings'),load=a.run('loadAiSettings()');
+  const save=a.run("aiSaveScene('chat',{source:'main',model:'new'})");
+  await new Promise(setImmediate);
+  a.pending[1].reply({...before,scenes:{chat:{source:'main',model:'new'}}});await save;
+  a.pending[0].reply(before);await load;
+  assert.equal(a.run('aiSettings.scenes.chat.model'),'new');
+});
+
+function aiEditorApp(){
+  const a=planningApp(),pending=[];
+  let form=null,html='';
+  const box={querySelectorAll:()=>[],querySelector:s=>s==='.ai-source-editor'?form:null,
+    get innerHTML(){return html},set innerHTML(value){
+      html=value;const match=value.match(/<form class="ai-source-editor" data-editor="([^"]*)" data-kind="([^"]*)"/);
+      if(!match){form=null;return}
+      const field=name=>({value:(value.match(new RegExp('name="'+name+'"[^>]*value="([^"]*)"'))||[])[1]||'',focus(){a.context.document.activeElement=this}});
+      const elements=Object.fromEntries(['name','baseUrl','apiKey'].map(k=>[k,field(k)])),submit={disabled:false};
+      form={dataset:{editor:match[1],kind:match[2]},elements,querySelector:()=>submit,contains:node=>Object.values(elements).includes(node),replaceWith:node=>{form=node}};
+    }};
+  a.context.document={querySelector:s=>s==='#settingsPage'?box:null,activeElement:null};
+  a.context.fetch=(url,options)=>new Promise(resolve=>pending.push({body:JSON.parse(options.body),reply:data=>resolve({ok:true,text:async()=>JSON.stringify(data)})}));
+  a.run(`UI.view='settings';UI.settingsPage='ai';renderSettingsSummaries=()=>{};
+    aiSettings={sources:[{id:'a',name:'A',kind:'chat',provider:'custom',baseUrl:'http://a.example/v1',models:['a']},
+    {id:'b',name:'B',kind:'chat',provider:'custom',baseUrl:'http://b.example/v1',models:[]}],scenes:{},sceneInfo:[],contextChars:32000};`);
+  return {...a,pending,box,get form(){return form}};
+}
+
+test('a completed source test preserves another editor, its key, focus and submit state', async () => {
+  for(const ok of [true,false]){
+    const a=aiEditorApp(),settings=a.json('aiSettings'),probe=a.run("aiTestSource('a')");
+    a.run("aiEditing={id:'b'};renderAiSettingsPage()");
+    const editor=a.form;
+    editor.elements.name.value='New B';editor.elements.baseUrl.value='http://draft.example/v1';editor.elements.apiKey.value='unsaved-key';
+    editor.elements.apiKey.focus();editor.elements.apiKey.selectionStart=3;editor.querySelector().disabled=true;
+    a.pending[0].reply({ok,message:'成功',reason:'失败'});
+    if(ok){await new Promise(setImmediate);assert.equal(a.pending[1].body.action,'ai.settings.get');
+      a.run('renderAiSettingsPage()');assert.equal(a.form,editor,'refresh while the settings read is pending also keeps the editor');
+      a.pending[1].reply(settings)}
+    await probe;
+    assert.equal(a.form,editor);assert.equal(editor.elements.name.value,'New B');
+    assert.equal(editor.elements.baseUrl.value,'http://draft.example/v1');assert.equal(editor.elements.apiKey.value,'unsaved-key');
+    assert.equal(a.context.document.activeElement,editor.elements.apiKey);assert.equal(editor.elements.apiKey.selectionStart,3);
+    assert.equal(editor.querySelector().disabled,true);
+    a.run('aiEditing=null;renderAiSettingsPage()');assert.equal(a.form,null,'cancel discards the editor');
+  }
+});
+
+test('new source drafts survive refresh but do not leak into a different editor', () => {
+  const a=aiEditorApp();a.run("aiEditing={kind:'chat'};renderAiSettingsPage()");
+  const draft=a.form;draft.elements.apiKey.value='draft-key';
+  a.run('renderAiSettingsPage()');assert.equal(a.form,draft);
+  a.run("aiEditing={id:'b'};renderAiSettingsPage()");
+  assert.notEqual(a.form,draft);assert.equal(a.form.elements.apiKey.value,'');
+});
+
+test('speech settings offer disable and refresh shared dictation status after saving', async () => {
+  const a=aiEditorApp();a.run(`aiSettings.sources.push({id:'speech',kind:'speech',name:'ASR',models:['whisper-1']});
+    aiSettings.sceneInfo=[{id:'transcribe',name:'语音转写',desc:''}];aiSettings.scenes.transcribe={disabled:true};renderAiSettingsPage()`);
+  assert.match(a.box.innerHTML,/<option value="" selected>停用<\/option>/);
+  assert.match(a.box.innerHTML,/<input value="" disabled aria-label="模型">/);
+  const b=aiApp();b.run('agentLoadServerConfig=()=>{};var refreshes=0;loadSpeechStatus=()=>refreshes++;flashSaved=()=>{}');
+  const settings=b.json('aiSettings'),save=b.run("aiSaveScene('transcribe',{source:''})");
+  await new Promise(setImmediate);assert.deepEqual(b.pending[0].body.data,{scene:'transcribe',source:''});
+  b.pending[0].reply({...settings,scenes:{transcribe:{disabled:true}}});await save;
+  assert.equal(b.run('refreshes'),1);
 });
 
 test('the assistant no longer carries its own connection form; its gear opens settings', () => {

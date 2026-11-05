@@ -1904,10 +1904,17 @@ function renderPromptPage(){
    newest test of a source may report, and editing it voids the one running. */
 const AI_CONTEXT_CHOICES={16000:'精简 · 1.6 万字符',32000:'标准 · 3.2 万字符',64000:'充足 · 6.4 万字符'};
 let aiSettings=null,aiEditing=null;const aiTests={};
+let aiSettingsLoad=null,aiSettingsEpoch=0,aiSceneQueue=Promise.resolve(),aiScenePending=0,aiSceneRevision=0;
 async function loadAiSettings(){
-  if(aiSettings?.loading)return;aiSettings={loading:true};
-  try{aiSettings=await api('/api/action',{action:'ai.settings.get',data:{}})}catch(e){aiSettings={error:e.message}}
-  renderSettingsSummaries();if(UI.view==='settings'&&UI.settingsPage==='ai')renderAiSettingsPage();
+  if(aiSettingsLoad)return aiSettingsLoad;
+  const owner=S.user?.id,epoch=aiSettingsEpoch,revision=aiSceneRevision;
+  const current=()=>owner===S.user?.id&&epoch===aiSettingsEpoch;
+  aiSettingsLoad=(async()=>{
+    try{const result=await api('/api/action',{action:'ai.settings.get',data:{}});if(current()&&!aiScenePending&&revision===aiSceneRevision)aiSettings=result}
+    catch(e){if(current()&&!aiSettings)aiSettings={error:e.message}}
+    finally{if(current()){aiSettingsLoad=null;renderSettingsSummaries();if(UI.view==='settings'&&UI.settingsPage==='ai')renderAiSettingsPage()}}
+  })();
+  return aiSettingsLoad;
 }
 const aiProviderName=p=>(LLM_PRESETS[p]?.name||'自定义').replace('（推荐）','');
 const aiHost=url=>{try{return new URL(url).host}catch(_){return url||''}};
@@ -1917,6 +1924,11 @@ function renderAiSettingsPage(){
   const box=$('#settingsPage');if(!box||UI.settingsPage!=='ai')return;
   if(!aiSettings||aiSettings.loading){box.innerHTML='<p class="muted settings-loading">正在读取…</p>';loadAiSettings();return}
   if(aiSettings.error){box.innerHTML=`<p class="muted settings-loading">读取失败：${escapeHTML(aiSettings.error)}</p>`;return}
+  // Keep the actual editor (including password, selection and pending submit)
+  // across unrelated source-test and scene updates. Explicit cancel/save drops it.
+  const editor=box.querySelector('.ai-source-editor'),focused=document.activeElement;
+  const keepEditor=editor&&aiEditing&&!aiEditing.scene&&editor.dataset.editor===(aiEditing.id||'')
+    &&(aiEditing.id||editor.dataset.kind===aiEditing.kind);
   const {sources,scenes,sceneInfo,contextChars}=aiSettings;
   const card=s=>{
     if(aiEditing?.id===s.id)return aiSourceEditor(s);
@@ -1934,12 +1946,12 @@ function renderAiSettingsPage(){
     const source=pool.find(s=>s.id===c.source),models=aiSceneModels(source,c.model),pending=aiEditing?.scene===info.id;
     const controls=!pool.length?`<button type="button" class="secondary-btn" data-ai-add="${speech?'speech':'chat'}">${icon('plus')}添加${speech?'语音转写':'对话模型'}来源</button>`
       :`<label class="ai-field"><span>来源</span><select data-scene-source="${info.id}">${follow?`<option value=""${c.follows?' selected':''}>跟随对话助手</option>`:''}`
-        +`${!c.source&&!follow?'<option value="" selected disabled>选择来源</option>':''}`
+        +`${speech?`<option value=""${!c.source?' selected':''}>停用</option>`:!c.source&&!follow?'<option value="" selected disabled>选择来源</option>':''}`
         +`${pool.map(s=>`<option value="${escapeHTML(s.id)}"${!c.follows&&s.id===c.source?' selected':''}>${escapeHTML(s.name)}</option>`).join('')}</select></label>`
-        +`<label class="ai-field"><span>模型</span>${c.follows?`<input value="${escapeHTML(c.model||'')}" disabled aria-label="模型">`
+        +`<label class="ai-field"><span>模型</span>${c.follows||speech&&!c.source?`<input value="${escapeHTML(c.model||'')}" disabled aria-label="模型">`
           :models.length&&!pending?`<select data-scene-model="${info.id}">${models.map(m=>`<option${m===c.model?' selected':''}>${escapeHTML(m)}</option>`).join('')}<option value="__custom">手动填写…</option></select>`
           :`<input data-scene-model-input="${info.id}" value="${escapeHTML(c.model||'')}" placeholder="填写模型 ID，回车保存" aria-label="模型 ID">`}</label>`
-        +`${speech?`<label class="ai-field is-short"><span>语言</span><input data-scene-language="${info.id}" value="${escapeHTML(c.language||'zh')}" maxlength="12"></label>`:''}`;
+        +`${speech?`<label class="ai-field is-short"><span>语言</span><input data-scene-language="${info.id}" value="${escapeHTML(c.language||'zh')}" maxlength="12"${!c.source?' disabled':''}></label>`:''}`;
     return `<div class="setting-row ai-scene" data-scene="${info.id}"><div class="setting-text"><h3><span>${escapeHTML(info.name)}</span><span class="setting-meta">`
       +`<span class="setting-status" aria-live="polite"></span></span></h3><p>${escapeHTML(info.desc)}</p></div><div class="ai-scene-controls">${controls}</div></div>`;
   };
@@ -1953,7 +1965,9 @@ function renderAiSettingsPage(){
     +`<section class="settings-sheet"><h2 class="settings-group-title">对话</h2><div class="setting-row" data-ai="context"><div class="setting-text"><h3><span>单次对话容量</span>`
     +`<span class="setting-meta"><span class="setting-status" aria-live="polite"></span></span></h3><p>每轮交给对话助手的工作台数据上限。窗口小的模型选「精简」。</p></div>`
     +`<div class="setting-control"><select id="aiContextChars" aria-label="单次对话容量">${Object.entries(AI_CONTEXT_CHOICES).map(([v,l])=>`<option value="${v}"${Number(v)===contextChars?' selected':''}>${l}</option>`).join('')}</select></div></div></section>`;
+  if(keepEditor)box.querySelector('.ai-source-editor')?.replaceWith(editor);
   bindAiSettingsPage(box);
+  if(keepEditor&&editor.contains(focused))focused.focus({preventScroll:true});
 }
 function aiSourceEditor(s){
   const kind=s?.kind||aiEditing?.kind||'chat',provider=s?.provider||(kind==='speech'?'custom':'openai');
@@ -1972,14 +1986,29 @@ async function aiTestSource(id){
   try{
     const r=await api('/api/action',{action:'agent.config.test',data:{sourceId:id}});if(!current())return;
     aiTests[id]={run,state:r.ok?'ok':'fail',text:r.ok?`${r.message}${r.ms?` · ${r.ms} ms`:''}`:r.reason};
-    if(r.ok){aiSettings=null;await loadAiSettings();return}
+    if(r.ok){await loadAiSettings();return}
   }catch(e){if(!current())return;aiTests[id]={run,state:'fail',text:e.message||'测试失败'}}
   if(UI.settingsPage==='ai')renderAiSettingsPage();
 }
 async function aiSaveScene(scene,data){
-  try{aiSettings=await api('/api/action',{action:'ai.scene.set',data:{scene,...data}});aiEditing=null;renderAiSettingsPage();
-    flashSaved($(`#settingsPage [data-scene="${scene}"] .setting-status`));agentLoadServerConfig?.()}
-  catch(e){toast(e.message);renderAiSettingsPage()}
+  const owner=S.user?.id,epoch=aiSettingsEpoch,payload={scene,...data};
+  const current=()=>owner===S.user?.id&&epoch===aiSettingsEpoch;
+  aiScenePending++;aiSceneRevision++;
+  const save=async()=>{
+    if(!current())return;
+    let saved=false;
+    try{
+      const result=await api('/api/action',{action:'ai.scene.set',data:payload});if(!current())return;
+      aiSettings=result;
+      saved=true;
+      if(aiEditing?.scene===scene)aiEditing=null;
+      agentLoadServerConfig?.();if(scene==='transcribe')loadSpeechStatus();
+    }catch(e){if(current())toast(e.message)}
+    finally{if(current()&&!--aiScenePending){renderAiSettingsPage();renderSettingsSummaries();
+      if(saved)flashSaved($(`#settingsPage [data-scene="${scene}"] .setting-status`))}}
+  };
+  aiSceneQueue=aiSceneQueue.then(save,save);
+  return aiSceneQueue;
 }
 function bindAiSettingsPage(box){
   const sceneOf=id=>aiSettings.scenes[id]||{},sourceOf=id=>aiSettings.sources.find(s=>s.id===id);
@@ -2007,7 +2036,7 @@ function bindAiSettingsPage(box){
         const before=new Set((aiSettings.sources||[]).map(s=>s.id));
         aiSettings=await api('/api/action',{action:'ai.source.save',data});aiEditing=null;
         const saved=id||aiSettings.sources.find(s=>!before.has(s.id))?.id||(data.kind==='speech'?'speech':'main');
-        renderAiSettingsPage();renderSettingsSummaries();aiTestSource(saved);
+        renderAiSettingsPage();renderSettingsSummaries();if(data.kind==='speech')loadSpeechStatus();aiTestSource(saved);
       }catch(err){toast(err.message);submit.disabled=false}
     };
   }
@@ -3409,7 +3438,8 @@ let agentServerConfig=null;
 let agentServerAsr=null;
 function agentIsBusy(){return agentState.busy}
 function agentResetUser(){
-  aiSettings=null;agentState.lastTools=[];agentState.lastMessageId=null;
+  aiSettingsEpoch++;aiSettings=null;aiSettingsLoad=null;aiEditing=null;aiSceneQueue=Promise.resolve();aiScenePending=0;
+  agentState.lastTools=[];agentState.lastMessageId=null;
   if(typeof agentCancelVoice==='function')agentCancelVoice();
   agentHalt();agentState.messages=[];agentState.lastInput='';agentState.editing=null;
   agentState.plan=false;agentState.planBoard=null;
