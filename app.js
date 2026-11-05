@@ -1226,7 +1226,13 @@ function editFolder(id){
   if(drop)drop.onclick=async()=>{try{await act('folder.delete',{id:f.id});closeModal()}catch(e){}};
 }
 const MEETING_PROMPT_DEFAULT='你是会议纪要整理助手。请只根据原始转录整理，不要补造事实。输出简洁的 Markdown，包含：会议结论、待办事项（负责人/截止时间/事项）、风险与待确认问题。若原稿没有对应信息，写“未提及”。';
+function openArchivedMeeting(p,id){
+  const m=(S.meetings||[]).find(x=>x.id===id&&x.projectId===p.id);if(!m)return;
+  openModal(`<div class="eyebrow">${escapeHTML(p.name)} · 归档会议</div><h2>${escapeHTML(m.title)}</h2><p class="muted">${escapeHTML(m.scheduledAt||'未安排')} · ${escapeHTML((m.participants||[]).join('、'))}</p><p>${escapeHTML(m.agenda||'')}</p><label class="form-field">原始转录<textarea readonly rows="10">${escapeHTML(m.rawTranscript||'')}</textarea></label><section class="meeting-minutes-preview"><h3>会议纪要</h3><div class="meeting-minutes-body">${escapeHTML(m.minutes||'尚未生成')}</div></section><div class="modal-footer"><button type="button" class="secondary-btn" id="cancelAction">关闭</button></div>`);
+  $('#cancelAction').onclick=closeModal;
+}
 function openMeetingEditor(p,meetingId=null){
+  if((S.fileArchives||[]).some(x=>x.id===p.id)){openArchivedMeeting(p,meetingId);return}
   const current=meetingId?(S.meetings||[]).find(m=>m.id===meetingId):null,manage=canManageProject(p);if(!current&&!manage){toast('只有项目 Owner 或管理员可以新增会议');return}
   const m=current||{title:'',scheduledAt:'',participants:[],agenda:'',rawTranscript:'',minutes:'',status:'scheduled'};
   openModal(`<div class="eyebrow">${escapeHTML(p.name)} · 项目会议</div><h2>${current?escapeHTML(m.title):'新增会议'}</h2><div class="meeting-editor-grid"><label class="form-field">会议名称<input id="meetingTitle" maxlength="120" value="${escapeHTML(m.title)}"></label><label class="form-field">安排时间<input id="meetingScheduledAt" type="datetime-local" value="${escapeHTML(m.scheduledAt||'')}"></label></div><label class="form-field">参会人（用逗号分隔）<input id="meetingParticipants" value="${escapeHTML((m.participants||[]).join('、'))}"></label><label class="form-field">会议议程<textarea id="meetingAgenda" rows="3">${escapeHTML(m.agenda||'')}</textarea></label><label class="form-field">原始转录<textarea id="meetingTranscript" rows="10" maxlength="200000" placeholder="可粘贴实时转录原稿，或使用下方实时录入">${escapeHTML(m.rawTranscript||'')}</textarea></label><div class="meeting-live-bar"><button type="button" class="secondary-btn" id="meetingLiveBtn">开始实时录入</button><span id="meetingLiveState" class="muted"></span></div><section class="meeting-minutes-preview"><div class="space-head"><h3>整理后的会议纪要</h3><button type="button" class="secondary-btn" id="generateMeetingMinutes" ${current&&m.rawTranscript?'':'disabled'}>根据模板生成</button></div><div id="meetingMinutes" class="meeting-minutes-body">${m.minutes?escapeHTML(m.minutes):'<span class="muted">尚未生成</span>'}</div></section><div class="modal-footer"><button type="button" class="secondary-btn" id="cancelAction">关闭</button><button type="button" class="primary-btn" id="saveMeeting">${current?'保存会议':'创建会议'}</button></div>`);
@@ -1298,8 +1304,9 @@ function renderProjectSpace(id){
   if(archive){
     $('#projectsView .eyebrow').textContent='项目空间 · 归档文件';$('#projectsView h1').textContent=p.name;
     box.innerHTML=`<section class="space-section"><div class="space-head"><h2>项目文件归档</h2></div>`
-      +`<p class="muted">${escapeHTML(projectStatus(p))} · Owner ${escapeHTML(nameOf(p.owner))}。附件保留供项目成员读取。</p></section>`
-      +projectFiles(p,true);return;
+      +`<p class="muted">${escapeHTML(projectStatus(p))} · Owner ${escapeHTML(nameOf(p.owner))}。文件与会议保留供项目成员读取。</p></section>`
+      +projectFiles(p,true);
+    $$('#projectSpace .meeting-row').forEach(b=>b.onclick=()=>openArchivedMeeting(p,b.dataset.meeting));return;
   }
   const manage=canManageProject(p),folder=(S.folders||[]).find(f=>f.id===p.folderId);
   /* 申请项目 / 新建项目 is for the overview; inside one project it only repeats the top bar. */
@@ -1380,7 +1387,7 @@ function projectFiles(p,readonly=false){
     +`${readonly?'':`<details class="space-file-create" id="fileCreateMenu"><summary class="secondary-btn">${icon('plus')}新增文件</summary><div class="space-file-options"><button type="button" id="uploadFileFromMenu">${icon('upload')}上传文件</button>${canManageProject(p)?`<button type="button" id="createMeetingFromFiles">${icon('chat')}新增会议</button>`:''}</div></details><input type="file" id="spaceFileInput" multiple hidden>`}</div>`
     +`${files.length?`<div class="file-list">${files.map(row).join('')}</div>`:''}`
     +`${meetings.length?`<div class="meeting-list project-file-meetings">${meetings.map(meetingRow).join('')}</div>`:''}`
-    +`<p class="space-drop-hint">${readonly?'归档文件仅供下载。':`拖入文件，或从「新增文件」上传。单个文件不超过 ${MAX_FILE_MB}MB。`}</p></section>`;
+    +`<p class="space-drop-hint">${readonly?'附件可下载，会议可只读查看。':`拖入文件，或从「新增文件」上传。单个文件不超过 ${MAX_FILE_MB}MB。`}</p></section>`;
 }
 async function uploadProjectFiles(p,list){
   const files=[...list];if(!files.length)return;
@@ -1856,17 +1863,24 @@ function renderSettings(){
   renderWeekStartSetting();
   renderCreationPolicy();
   renderMeetingPromptSetting();
+  renderSettingIndicators();
+  $('#settingsView .setting-row[data-setting="collection"]')?.classList.toggle('is-muted',S.automation?.enabled===false);
+  renderSettingsNav();applySettingsFilter();
+}
+function renderSettingIndicators(){
   $$('#settingsView .setting-row').forEach(row=>{
     const rule=SETTING_DEFAULTS[row.dataset.setting],changed=Boolean(rule?.modified()),slot=row.querySelector('.setting-reset-slot');
     row.classList.toggle('is-modified',changed);
-    if(slot)slot.innerHTML=changed?`<button type="button" class="setting-reset" data-reset="${row.dataset.setting}">恢复默认</button>`:'';
+    const saving=row.dataset.setting==='prompt'&&$('#meetingPromptSettingInput')?.dataset.saving==='true';
+    if(slot)slot.innerHTML=changed?`<button type="button" class="setting-reset" data-reset="${row.dataset.setting}"${saving?' disabled':''}>恢复默认</button>`:'';
   });
   $$('#settingsView [data-reset]').forEach(b=>b.onclick=async()=>{
-    const [action,data]=SETTING_DEFAULTS[b.dataset.reset].reset();
-    try{await act(action,data,{quiet:true});flashSaved($(`#settingsView .setting-row[data-setting="${b.dataset.reset}"] .setting-status`),'已恢复默认')}catch(e){}
+    if(b.disabled)return;
+    if(b.dataset.reset==='prompt'){await $('#meetingPromptSetting')?.resetPrompt?.();return}
+    if(b.dataset.reset==='collection'){await $('#collectionSchedule')?.collectionEditor?.reset();return}
+    const [action,data]=SETTING_DEFAULTS[b.dataset.reset].reset();b.disabled=true;
+    try{await act(action,data,{quiet:true});flashSaved($(`#settingsView .setting-row[data-setting="${b.dataset.reset}"] .setting-status`),'已恢复默认')}catch(e){}finally{b.disabled=false}
   });
-  $('#settingsView .setting-row[data-setting="collection"]')?.classList.toggle('is-muted',S.automation?.enabled===false);
-  renderSettingsNav();applySettingsFilter();
 }
 /* "已保存" beside the row's title, for a moment. */
 function flashSaved(target,text='已保存'){
@@ -1932,7 +1946,18 @@ function renderMeetingPromptSetting(){
     +`<div class="setting-actions"><small class="muted">可用变量：{{title}}、{{agenda}}、{{transcript}}</small><button type="button" class="secondary-btn" id="saveMeetingPrompt">保存</button></div>`;
   const input=$('#meetingPromptSettingInput'),save=$('#saveMeetingPrompt');let saved=value,saving=false;input.dataset.saved=saved;
   const sync=()=>{save.disabled=saving||!input.value.trim()||input.value===saved;};input.oninput=sync;sync();
-  save.onclick=async()=>{if(saving)return;const submitted=input.value;saving=true;input.dataset.saving='true';sync();try{const result=await api('/api/action',{action:'meeting.prompt.update',data:{prompt:submitted}});saved=result.value;input.dataset.saved=saved;S.meetingPrompt=saved;flashSaved(box)}catch(e){toast(e.message)}finally{saving=false;input.dataset.saving='false';sync()}};
+  const owner=S.user.id;
+  const submit=async(submitted,reset=false)=>{
+    if(saving)return;saving=true;input.dataset.saving='true';input.disabled=reset;sync();renderSettingIndicators();
+    try{
+      const result=await api('/api/action',{action:'meeting.prompt.update',data:{prompt:submitted}});
+      if(S.user?.id!==owner)return;
+      saved=result.value;input.dataset.saved=saved;S.meetingPrompt=saved;if(reset)input.value=saved;
+      flashSaved(box,reset?'已恢复默认':'已保存');
+    }catch(e){toast(e.message)}finally{saving=false;input.disabled=false;input.dataset.saving='false';sync();renderSettingIndicators()}
+  };
+  save.onclick=()=>submit(input.value);
+  box.resetPrompt=()=>submit(MEETING_PROMPT_DEFAULT,true);
 }
 function settingSwitch(id,label,checked){
   return `<label class="settings-switch"><span>${escapeHTML(label)}</span><span class="settings-switch-control"><input type="checkbox" role="switch" id="${id}"${checked?' checked':''}><span class="settings-switch-track" aria-hidden="true"></span></span></label>`;
@@ -1961,9 +1986,11 @@ function renderRepeatStackingSetting(){
    指定日期 with none) waits on the page and is saved once it is. */
 function renderCollectionSchedule(){
   const box=$('#collectionSchedule');if(!box)return;
-  if(!S.user?.admin){box.innerHTML='';return}
+  if(!S.user?.admin){box.innerHTML='';box.collectionEditor=null;return}
+  const previous=box.collectionEditor;
+  if(previous?.owner===S.user.id&&(previous.dirty||previous.pending||box.contains(document.activeElement)))return;
   const cfg=S.automation||{},modes={daily:'每天',weekly:'每周几',dates:'指定日期'};
-  let mode=box.dataset.pending||(cfg.mode==='specific'?'dates':modes[cfg.mode]?cfg.mode:'daily');
+  let mode=cfg.mode==='specific'?'dates':modes[cfg.mode]?cfg.mode:'daily';
   const picked=new Set(cfg.weekdays||[]),days=['一','二','三','四','五','六','日'];
   box.innerHTML=`<div class="collection-form"><div class="rule-line"><span>周期</span><div class="rule-seg" role="radiogroup" aria-label="补报周期">`
     +`${Object.entries(modes).map(([v,l])=>`<button type="button" class="rule-opt${v===mode?' is-on':''}" role="radio" aria-checked="${v===mode}" data-mode="${v}">${l}</button>`).join('')}</div></div>`
@@ -1971,26 +1998,42 @@ function renderCollectionSchedule(){
     +`${days.map((d,i)=>`<button type="button" class="rule-opt${picked.has(i)?' is-on':''}" aria-pressed="${picked.has(i)}" data-weekday="${i}">${d}</button>`).join('')}</div></div>`
     +`<div class="rule-line${mode==='dates'?'':' hidden'}" data-part="dates"><span>日期</span><input id="collectionDates" class="settings-input" value="${escapeHTML((cfg.dates||[]).join(', '))}" placeholder="2026-12-01, 2026-12-15" aria-label="指定补报日期"></div>`
     +`<div class="rule-line"><span>时间</span><input id="collectionTime" class="settings-input is-time" type="time" value="${escapeHTML(cfg.time||'00:00')}" aria-label="补报时间"></div>`
-    +`<p class="collection-hint muted" aria-live="polite"></p></div>`;
-  const hint=box.querySelector('.collection-hint');
-  const dates=()=>box.querySelector('#collectionDates').value.split(/[,，\s]+/).map(x=>x.trim()).filter(Boolean);
-  const save=async()=>{
-    if(mode==='weekly'&&!picked.size){box.dataset.pending=mode;hint.textContent='选好星期后自动保存';return}
-    if(mode==='dates'&&!dates().length){box.dataset.pending=mode;hint.textContent='填好日期后自动保存';return}
-    delete box.dataset.pending;hint.textContent='';
-    try{await act('automation.update',{mode,time:box.querySelector('#collectionTime').value||'00:00',weekdays:[...picked].sort(),dates:mode==='dates'?dates():(cfg.dates||[])},{quiet:true});flashSaved(box)}
-    catch(e){renderCollectionSchedule()}
-  };
-  box.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{
-    if(b.dataset.mode===mode)return;mode=b.dataset.mode;
-    box.querySelectorAll('[data-mode]').forEach(x=>{const on=x===b;x.classList.toggle('is-on',on);x.setAttribute('aria-checked',String(on))});
+    +`<p class="collection-hint muted" aria-live="polite"></p><button type="button" class="ghost-btn hidden" id="collectionRetry">重试保存</button></div>`;
+  const hint=box.querySelector('.collection-hint'),retry=box.querySelector('#collectionRetry'),dateInput=box.querySelector('#collectionDates'),timeInput=box.querySelector('#collectionTime');
+  const editor=box.collectionEditor={owner:S.user.id,dirty:false,pending:0,revision:0,tail:Promise.resolve()};
+  const current=()=>S.user?.id===editor.owner&&box.collectionEditor===editor;
+  const changed=()=>{editor.dirty=true;editor.revision++;retry.classList.add('hidden')};
+  const paint=()=>{
+    box.querySelectorAll('[data-mode]').forEach(b=>{const on=b.dataset.mode===mode;b.classList.toggle('is-on',on);b.setAttribute('aria-checked',String(on))});
+    box.querySelectorAll('[data-weekday]').forEach(b=>{const on=picked.has(Number(b.dataset.weekday));b.classList.toggle('is-on',on);b.setAttribute('aria-pressed',String(on))});
     box.querySelector('[data-part="weekly"]').classList.toggle('hidden',mode!=='weekly');box.querySelector('[data-part="dates"]').classList.toggle('hidden',mode!=='dates');
-    save();
-  });
-  box.querySelectorAll('[data-weekday]').forEach(b=>b.onclick=()=>{const i=Number(b.dataset.weekday);picked.has(i)?picked.delete(i):picked.add(i);
-    b.classList.toggle('is-on',picked.has(i));b.setAttribute('aria-pressed',String(picked.has(i)));save()});
-  box.querySelector('#collectionTime').onchange=save;box.querySelector('#collectionDates').onchange=save;
+  };
+  const save=(reset=false)=>{
+    const dates=dateInput.value.split(/[,，\s]+/).map(x=>x.trim()).filter(Boolean);
+    if(mode==='weekly'&&!picked.size){hint.textContent='请选择星期';return Promise.resolve()}
+    if(mode==='dates'&&!dates.length){hint.textContent='请填写日期';return Promise.resolve()}
+    const revision=editor.revision,data={mode,time:timeInput.value||'00:00',weekdays:[...picked].sort(),dates};
+    editor.pending++;hint.textContent='保存中…';
+    // Requests are serialized; a newer edit is never overwritten by an older response.
+    const request=editor.tail.then(async()=>{
+      if(!current())return;
+      try{
+        const result=await api('/api/action',{action:'automation.update',data});if(!current())return;
+        S.automation=result;renderSettingIndicators();
+        if(revision===editor.revision){editor.dirty=false;hint.textContent='';retry.classList.add('hidden');flashSaved(box,reset?'已恢复默认':'已保存')}
+      }catch(e){if(current()&&revision===editor.revision){hint.textContent=e.message||'保存失败';retry.classList.remove('hidden')}}
+      finally{editor.pending--}
+    });
+    editor.tail=request;return request;
+  };
+  box.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{if(b.dataset.mode===mode)return;mode=b.dataset.mode;changed();paint();return save()});
+  box.querySelectorAll('[data-weekday]').forEach(b=>b.onclick=()=>{const i=Number(b.dataset.weekday);picked.has(i)?picked.delete(i):picked.add(i);changed();paint();return save()});
+  timeInput.oninput=dateInput.oninput=changed;
+  timeInput.onchange=dateInput.onchange=()=>{changed();return save()};
+  retry.onclick=()=>save();
+  editor.reset=()=>{mode='daily';picked.clear();dateInput.value='';timeInput.value='00:00';changed();paint();return save(true)};
 }
+
 function renderWeekStartSetting(){
   const box=$('#weekStartCard');if(!box)return;
   box.classList.toggle('hidden',!S.user?.admin);if(!S.user?.admin)return;

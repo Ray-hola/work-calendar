@@ -482,10 +482,11 @@ class Store:
         if len(prompt) > 12000: raise Problem(400, '会议纪要提示词过长')
         return self.put('settings', {'id':'meeting_prompt','value':prompt,'updatedAt':timestamp(),'by':user['id']})
 
-    def _meeting_project(self, user, project_id):
+    def _meeting_project(self, user, project_id, readonly=False):
         p = self.get('projects', project_id)
-        if not self.can_view_project(user, p):
-            raise Problem(403, '无权访问该项目的会议')
+        allowed = self.can_read_project_files(user, p) if readonly else self.can_view_project(user, p)
+        if not allowed:
+            raise Problem(403, '无权访问或修改该项目的会议')
         return p
 
     @staticmethod
@@ -496,7 +497,7 @@ class Store:
 
     def meeting_list(self, user, data):
         project_id = str(data.get('projectId') or '').strip()
-        self._meeting_project(user, project_id)
+        self._meeting_project(user, project_id, readonly=True)
         return [m for m in self.all('meetings') if m.get('projectId') == project_id]
 
     def meeting_create(self, user, data):
@@ -529,24 +530,26 @@ class Store:
         return self.put('meetings', meeting)
 
     def meeting_generate_minutes(self, user, data):
-        meeting = self.get('meetings', required(data, 'id'))
-        self._meeting_project(user, meeting['projectId'])
-        transcript = str(meeting.get('rawTranscript') or '').strip()
-        if not transcript:
-            raise Problem(400, '请先录入或粘贴会议原稿')
-        prompt = self.meeting_prompt()
-        if len(prompt) > 12000: raise Problem(400, '提示词模板过长')
-        cfg = dict(self._llm_record().get('value') or {})
-        base = self.llm_root(cfg.get('baseUrl')); key = str(cfg.get('apiKey') or '')
-        model = str(cfg.get('model') or '').strip()
-        if not base or not model: raise Problem(409, '请先配置 AI 模型后再生成会议纪要')
-        content = prompt.replace('{{title}}', str(meeting.get('title') or '')).replace('{{agenda}}', str(meeting.get('agenda') or '未提及')).replace('{{transcript}}', transcript)
-        if len(content) > MAX_MESSAGE_CHARS: raise Problem(400, '会议内容过长，请先分段整理')
-        # Always provide source data, even when the global prompt has no placeholders.
-        source = json.dumps({'title': meeting.get('title'), 'agenda': meeting.get('agenda'), 'transcript': transcript}, ensure_ascii=False)
-        if len(content) + len(source) > MAX_MESSAGE_CHARS: raise Problem(400, '会议内容过长，请先分段整理')
-        payload = self.llm_payload(model, [{'role':'system','content':content}, {'role':'user','content':source}], probe=False)
-        req = urllib.request.Request(base + '/chat/completions', data=json.dumps(payload, ensure_ascii=False).encode(), method='POST', headers=self.llm_headers(base, key))
+        with self.lock:
+            user = self.user(user['id'])
+            meeting = self.get('meetings', required(data, 'id'))
+            self._meeting_project(user, meeting['projectId'])
+            transcript = str(meeting.get('rawTranscript') or '').strip()
+            if not transcript:
+                raise Problem(400, '请先录入或粘贴会议原稿')
+            prompt = self.meeting_prompt()
+            if len(prompt) > 12000: raise Problem(400, '提示词模板过长')
+            cfg = dict(self._llm_record().get('value') or {})
+            base = self.llm_root(cfg.get('baseUrl')); key = str(cfg.get('apiKey') or '')
+            model = str(cfg.get('model') or '').strip()
+            if not base or not model: raise Problem(409, '请先配置 AI 模型后再生成会议纪要')
+            content = prompt.replace('{{title}}', str(meeting.get('title') or '')).replace('{{agenda}}', str(meeting.get('agenda') or '未提及')).replace('{{transcript}}', transcript)
+            if len(content) > MAX_MESSAGE_CHARS: raise Problem(400, '会议内容过长，请先分段整理')
+            # Always provide source data, even when the global prompt has no placeholders.
+            source = json.dumps({'title': meeting.get('title'), 'agenda': meeting.get('agenda'), 'transcript': transcript}, ensure_ascii=False)
+            if len(content) + len(source) > MAX_MESSAGE_CHARS: raise Problem(400, '会议内容过长，请先分段整理')
+            payload = self.llm_payload(model, [{'role':'system','content':content}, {'role':'user','content':source}], probe=False)
+            req = urllib.request.Request(base + '/chat/completions', data=json.dumps(payload, ensure_ascii=False).encode(), method='POST', headers=self.llm_headers(base, key))
         try:
             with urllib.request.urlopen(req, timeout=120) as response: reply=json.loads(response.read(2_000_000).decode('utf-8'))
         except urllib.error.HTTPError as exc:
@@ -556,9 +559,18 @@ class Store:
             raise Problem(502, f'会议纪要模型连接失败：{str(exc)[:200]}')
         minutes=self.llm_text(reply)
         if not minutes: raise Problem(502, '会议纪要模型没有返回文本')
-        meeting['minutes']=minutes[:50000]; meeting['status']='ended'; meeting['endedAt']=timestamp(); meeting['updatedAt']=timestamp(); self.put('meetings', meeting)
-        self.audit(user['id'], 'meeting.minutes.generate', {'meetingId': meeting['id'], 'projectId': meeting['projectId']})
-        return meeting
+        # External I/O runs without the store lock. Re-read before committing so
+        # edits, membership changes, deletion or another result cannot be lost.
+        with self.lock, self.db:
+            user = self.user(user['id'])
+            current = self.get('meetings', meeting['id'])
+            self._meeting_project(user, current['projectId'])
+            if any(current.get(k) != meeting.get(k) for k in ('projectId', 'title', 'agenda', 'rawTranscript', 'minutes')) or self.meeting_prompt() != prompt:
+                raise Problem(409, '会议内容或模板已变化，请重新生成纪要')
+            current.update(minutes=minutes[:50000], status='ended', endedAt=timestamp(), updatedAt=timestamp())
+            self.put('meetings', current)
+            self.audit(user['id'], 'meeting.minutes.generate', {'meetingId': current['id'], 'projectId': current['projectId']})
+            return current
 
     def speech_status(self, user):
         """Safe shared dictation capability, independent of AI assistant access."""
@@ -2357,7 +2369,8 @@ class Store:
             all_projects=self.all('projects')
             projects=[p for p in all_projects if self.can_view_project(user,p)]
             all_files=self.all('files')
-            file_project_ids={f.get('projectId') for f in all_files}
+            all_meetings=self.all('meetings')
+            file_project_ids={f.get('projectId') for f in all_files} | {m.get('projectId') for m in all_meetings}
             file_archives=[{k:p.get(k) for k in ('id','name','owner','status','end','completedAt','folderId')}
                            for p in all_projects if p['id'] in file_project_ids
                            and not self.can_view_project(user,p) and self.can_read_project_files(user,p)]
@@ -2390,7 +2403,7 @@ class Store:
             task_requests=[r for r in self.all('task_requests') if user['admin'] or r.get('requester')==user['id'] or r.get('projectId') in owned]
             automation=next((x.get('value',{}) for x in self.all('settings') if x.get('id')=='automation'),{})
             return {'user':user,'users':self.users(),'today':at.date().isoformat(),'weekStart':self.week_start(),'repeatStacking':self.repeat_stacking(),'projects':projects,
-'folders':folders,'fileArchives':file_archives,'files':[f for f in all_files if f.get('projectId') in file_pids],'meetings':[m for m in self.all('meetings') if any(p['id']==m.get('projectId') for p in projects)],'meetingPrompt':self.meeting_prompt() if user['admin'] else None,'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees'] or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':[n for n in self.all('notifications') if n['to']==user['id'] and '12:00 初稿' not in str(n.get('title',''))], 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'taskRequests':task_requests, 'creationRules':self.creation_rules(user), 'creationPolicy':self.creation_policy() if user.get('role')=='superadmin' else None, 'accountOrder':next((x.get('value') or [] for x in self.all('settings') if x.get('id')=='account_order'),[]) if user['admin'] else [], 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or self.get('projects',s['projectId'])['owner']==user['id'])], 'chat':self.chat_summary(user),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.all('audit')[-60:] if user['admin'] else []}
+'folders':folders,'fileArchives':file_archives,'files':[f for f in all_files if f.get('projectId') in file_pids],'meetings':[m for m in all_meetings if m.get('projectId') in file_pids],'meetingPrompt':self.meeting_prompt() if user['admin'] else None,'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees'] or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':[n for n in self.all('notifications') if n['to']==user['id'] and '12:00 初稿' not in str(n.get('title',''))], 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'taskRequests':task_requests, 'creationRules':self.creation_rules(user), 'creationPolicy':self.creation_policy() if user.get('role')=='superadmin' else None, 'accountOrder':next((x.get('value') or [] for x in self.all('settings') if x.get('id')=='account_order'),[]) if user['admin'] else [], 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or self.get('projects',s['projectId'])['owner']==user['id'])], 'chat':self.chat_summary(user),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.all('audit')[-60:] if user['admin'] else []}
 
     def diary_statistics(self, viewer, start=None, end=None):
         """Return daily completion/load summaries for the diary dashboard.
@@ -2520,6 +2533,8 @@ class Store:
         if action == 'speech.status':
             with self.lock:
                 return self.speech_status(user)
+        if action == 'meeting.minutes.generate':
+            return self.meeting_generate_minutes(user, data)
         if action == 'agent.chat':
             return self.llm_chat(user, data)
         if action == 'agent.config.test':
@@ -2827,7 +2842,6 @@ class Store:
         if action=='meeting.list': return self.meeting_list(user, d)
         if action=='meeting.create': return self.meeting_create(user, d)
         if action=='meeting.transcript.update': return self.meeting_update_transcript(user, d)
-        if action=='meeting.minutes.generate': return self.meeting_generate_minutes(user, d)
         if action=='chat.list':
             return self.chat_list(user, d)
         if action=='chat.send':

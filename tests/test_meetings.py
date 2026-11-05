@@ -3,6 +3,9 @@ import json
 import tempfile
 import threading
 import unittest
+import concurrent.futures
+import urllib.request
+from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -108,6 +111,87 @@ class MeetingTests(unittest.TestCase):
         self.store.action(self.admin, 'meeting.create', {'projectId': other['id'], 'title': '不应给成员'})
         visible = self.store.snapshot(self.member)['meetings']
         self.assertEqual([m['id'] for m in visible], [own['id']])
+
+    def generate_while(self, meeting, change):
+        """Hold real stub I/O until another worker has completed an operation."""
+        entered, release = threading.Event(), threading.Event()
+        original = urllib.request.urlopen
+        def wait_for_change(*args, **kwargs):
+            entered.set()
+            if not release.wait(5): raise TimeoutError('test release timed out')
+            return original(*args, **kwargs)
+        with patch('server.urllib.request.urlopen', wait_for_change), concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            generation = pool.submit(self.store.action, self.member, 'meeting.minutes.generate', {'id': meeting['id']})
+            try:
+                self.assertTrue(entered.wait(2))
+                pool.submit(change).result(timeout=2)
+            finally:
+                release.set()
+            return generation.result(timeout=3)
+
+    def test_waiting_for_model_does_not_block_snapshot_or_task_writes(self):
+        meeting = self.store.action(self.admin, 'meeting.create', {'projectId': self.project['id'], 'title': '周会', 'rawTranscript': '周五发布'})
+        def concurrent_work():
+            self.store.snapshot(self.member)
+            task = self.store.action(self.admin, 'task.create', {'name': '仍可创建任务', 'assignee': 'member1', 'date': '2026-11-05', 'duration': 30})
+            self.assertTrue(task.get('id'))
+        result = self.generate_while(meeting, concurrent_work)
+        self.assertIn('会议结论', result['minutes'])
+        audits = [x for x in self.store.all('audit') if x['action'] == 'meeting.minutes.generate']
+        self.assertEqual(len(audits), 1)
+
+    def test_generation_never_overwrites_changed_source_template_or_minutes(self):
+        for field in ('rawTranscript', 'title', 'agenda', 'minutes', 'prompt'):
+            with self.subTest(field=field):
+                meeting = self.store.action(self.admin, 'meeting.create', {'projectId': self.project['id'], 'title': '周会', 'rawTranscript': '周五发布'})
+                def change():
+                    with self.store.lock, self.store.db:
+                        if field == 'prompt': self.store.set_meeting_prompt(self.admin, {'prompt': '新模板'})
+                        else:
+                            latest = self.store.get('meetings', meeting['id']); latest[field] = '新的内容'
+                            self.store.put('meetings', latest)
+                with self.assertRaises(Problem) as error: self.generate_while(meeting, change)
+                self.assertEqual(error.exception.status, 409)
+                latest = self.store.get('meetings', meeting['id'])
+                self.assertEqual(latest['minutes'], '新的内容' if field == 'minutes' else '')
+
+    def test_generation_rechecks_deleted_meeting_and_membership(self):
+        for change_kind in ('delete', 'remove_member', 'disable_account', 'archive'):
+            with self.subTest(change=change_kind):
+                with self.store.lock, self.store.db:
+                    p = self.store.get('projects', self.project['id']);p['status']='active';p['members']['member1']='accepted';self.store.put('projects',p)
+                    self.store.db.execute("UPDATE users SET active=1 WHERE id='member1'")
+                meeting = self.store.action(self.admin, 'meeting.create', {'projectId': self.project['id'], 'title': '周会', 'rawTranscript': '周五发布'})
+                def change():
+                    with self.store.lock, self.store.db:
+                        if change_kind == 'delete': self.store.db.execute('DELETE FROM meetings WHERE id=?', (meeting['id'],))
+                        elif change_kind == 'disable_account': self.store.db.execute("UPDATE users SET active=0 WHERE id='member1'")
+                        else:
+                            p = self.store.get('projects', self.project['id'])
+                            if change_kind == 'archive': p['status']='archived'
+                            else: p['members'].pop('member1', None)
+                            self.store.put('projects', p)
+                with self.assertRaises(Problem): self.generate_while(meeting, change)
+                if change_kind == 'delete':
+                    with self.assertRaises(Problem): self.store.get('meetings', meeting['id'])
+                else: self.assertEqual(self.store.get('meetings', meeting['id'])['minutes'], '')
+
+    def test_archived_meeting_only_projects_remain_readable_but_not_editable(self):
+        meeting = self.store.action(self.admin, 'meeting.create', {'projectId': self.project['id'], 'title': '周会', 'rawTranscript': '保留的原稿'})
+        for status, end in (('archived', None), ('done', None), ('active', '2000-01-01')):
+            with self.subTest(status=status, end=end):
+                with self.store.lock, self.store.db:
+                    p=self.store.get('projects',self.project['id']);p['status']=status;p['end']=end;self.store.put('projects',p)
+                for user in (self.member, self.admin):
+                    snapshot=self.store.snapshot(user)
+                    self.assertIn(self.project['id'], [x['id'] for x in snapshot['fileArchives']])
+                    self.assertIn(meeting['id'], [x['id'] for x in snapshot['meetings']])
+                    self.assertEqual(self.store.action(user,'meeting.list',{'projectId':self.project['id']})[0]['rawTranscript'],'保留的原稿')
+                    with self.assertRaises(Problem): self.store.action(user,'meeting.transcript.update',{'id':meeting['id'],'rawTranscript':'不应写入'})
+                    with self.assertRaises(Problem): self.store.action(user,'meeting.minutes.generate',{'id':meeting['id']})
+        self.store.create_user('outsider','password-long',False); outsider=self.store.user('outsider')
+        self.assertEqual(self.store.snapshot(outsider)['meetings'], [])
+        with self.assertRaises(Problem): self.store.action(outsider,'meeting.list',{'projectId':self.project['id']})
 
 
 if __name__ == '__main__': unittest.main()
