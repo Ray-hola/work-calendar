@@ -301,7 +301,7 @@ test('a project page places task actions under the project and distinguishes adm
     const html=elements['#projectSpace'].innerHTML;
     assert.ok(html.includes('Child task'));
     assert.equal(html.includes('assign-project-task'),id!=='test002');
-    assert.equal(html.includes('primary-btn add-project-task'),id!=='test002');
+    assert.equal(elements['#projectActions'].innerHTML.includes('primary-btn add-project-task'),id!=='test002');
     assert.equal(html.includes('添加协作者'),id!=='test002', 'Owner 和管理员都是直接加人，不再发邀请');
   }
 });
@@ -325,12 +325,12 @@ test('project content tabs keep the dedicated meetings workspace and keyboard na
   const sourceText=source;
   assert.match(sourceText,/const SPACE_TABS=\{[^}]*meetings:'会议'/);
   assert.match(sourceText,/panel\('meetings',projectMeetings\(p/);
-  assert.match(sourceText,/function bindProjectAreaTabs\(p\)/);
   assert.match(sourceText,/function bindProjectContentTabs\(\)/);
+  assert.match(sourceText,/archive\?\['files','meetings'\]/,'归档项目只留文件和会议两个标签');
   assert.doesNotMatch(sourceText,/function bindSpaceTabs\(/,'同名 tab binder 不能覆盖会议空间入口');
   const binder=sourceText.match(/function bindProjectContentTabs\(\)\{[\s\S]*?\n\}/)[0];
   assert.match(binder,/ArrowRight/);assert.match(binder,/ArrowLeft/);assert.match(binder,/Home/);assert.match(binder,/End/);
-  assert.match(sourceText,/bindProjectAreaTabs\(p\);bindProjectSpace\(p\);return;/,'归档会议也要能打开只读详情');
+  assert.match(sourceText,/bindProjectSpace\(p\);bindMeetingList\(p\);bindProjectContentTabs\(\)/,'归档会议也要能打开只读详情');
 });
 
 test('project lifecycle labels collaborator task progress as personal',()=>{
@@ -484,13 +484,13 @@ test('a running project offers 完成项目 to its Owner and the admins, finishe
   a.run(`S.today='2026-11-04';S.notifications=[];S.user={id:'test001',admin:0};S.users=[];S.projects=[{id:'p',name:'项目',owner:'test001',status:'active',
     members:{test001:'accepted',test002:'accepted'}}];
     S.tasks=[{id:'t1',projectId:'p',name:'已完成',assignee:'test001',status:'done'}];UI.space='p';renderProjects()`);
-  assert.ok(elements['#projectSpace'].innerHTML.includes('request-project-completion'));
+  assert.ok(elements['#projectActions'].innerHTML.includes('request-project-completion'));
   a.run("S.tasks[0].status='doing';renderProjects()");
-  assert.ok(/request-project-completion[^>]*>.*完成项目/.test(elements['#projectSpace'].innerHTML), '没做完也能提前完成');
+  assert.ok(/request-project-completion[^>]*>.*完成项目/.test(elements['#projectActions'].innerHTML), '没做完也能提前完成');
   a.run("S.user={id:'test002',admin:0};renderProjects()");
-  assert.ok(!elements['#projectSpace'].innerHTML.includes('request-project-completion'), '协作者没有这个按钮');
+  assert.ok(!elements['#projectActions'].innerHTML.includes('request-project-completion'), '协作者没有这个按钮');
   a.run("S.user={id:'superadmin',admin:1};renderProjects()");
-  assert.ok(elements['#projectSpace'].innerHTML.includes('request-project-completion'));
+  assert.ok(elements['#projectActions'].innerHTML.includes('request-project-completion'));
 });
 
 test('project completion request opens a required report form before submitting', () => {
@@ -1585,7 +1585,7 @@ test('archived attachments have a read-only navigation and achievements entry wi
     UI.space='old';renderProjects();`);
   assert.ok(elements['#projectNav'].innerHTML.includes('归档文件'));
   const html=elements['#projectSpace'].innerHTML;
-  assert.ok(html.includes('/api/files/f')&&html.includes('项目文件归档'));
+  assert.ok(html.includes('/api/files/f')&&html.includes('data-space-tab="meetings"'));
   for(const action of ['spaceFileInput','file-delete','spaceBackground','spaceFolder','request-project-completion'])assert.ok(!html.includes(action),action);
   assert.equal(a.run('visibleProjects().length'),0,'归档项目不回到进行中列表');
   a.run("S.user={id:'superadmin',admin:1};S.achievements=[{id:'old',name:'已交付项目',status:'done',tasks:[]}];renderAchievements()");
@@ -2303,7 +2303,7 @@ test('the project space card drops what the page already shows', () => {
   assert.ok(space.indexOf('只出现一次的描述')<space.indexOf('项目背景'));
   assert.ok(!a.run('projectCardHTML(S.projects[0],true)').includes('只出现一次的描述'),'任务卡不再重复简介');
   assert.equal(space.split('invite-members').length - 1, 0, '添加协作者只留在项目人力里');
-  assert.ok(space.includes('spaceInvite') && space.includes('add-project-task'));
+  assert.ok(space.includes('spaceInvite') && elements['#projectActions'].innerHTML.includes('add-project-task'));
   assert.ok(!space.includes('project-members'));
 });
 
@@ -2484,9 +2484,9 @@ test('project files share one create menu and respect meeting creation permissio
   const a=app();a.run("S.user={id:'owner',admin:false};S.files=[];S.meetings=[{id:'m1',projectId:'p1',title:'周会'}]");
   const owner=a.run("projectFiles({id:'p1',owner:'owner'})");
   assert.match(owner, /<summary[^>]*>.*新增文件/);assert.match(owner,/id="uploadFileFromMenu"/);assert.match(owner,/id="createMeetingFromFiles"/);
-  assert.match(owner,/项目文件 <span>1<\/span>/);assert.match(owner,/data-meeting="m1"/);
+  assert.match(owner,/data-meeting="m1"/);
   const filesOnly=a.run("projectFiles({id:'p1',owner:'owner'},false,false)");
-  assert.match(filesOnly,/项目文件 <span>0<\/span>/);assert.doesNotMatch(filesOnly,/data-meeting="m1"/);
+  assert.doesNotMatch(filesOnly,/data-meeting="m1"/);
   a.run("S.user={id:'member',admin:false}");assert.doesNotMatch(a.run("projectFiles({id:'p1',owner:'owner'})"),/id="createMeetingFromFiles"/);
   assert.doesNotMatch(a.run("projectFiles({id:'p1',owner:'owner'},true)"),/fileCreateMenu/);
 });
@@ -2624,7 +2624,7 @@ test('project resources are grouped by project and escaped, with direct download
 test('meeting workspace separates files and respects creation and archive permissions',()=>{
   const a=app();a.run("S.user={id:'owner',admin:false};S.meetings=[{id:'m',projectId:'p',title:'周会'}]");
   const html=a.run("projectMeetings({id:'p',owner:'owner'})");assert.match(html,/id="meetingEditor"/);assert.match(html,/newProjectMeeting/);
-  assert.match(a.run("projectSpaceTabs({id:'p'})"),/概览[\s\S]*会议[\s\S]*文件/);
+  assert.match(a.run("projectSpaceTabs({id:'p'})"),/任务[\s\S]*会议[\s\S]*文件[\s\S]*成员[\s\S]*概况/);
   assert.doesNotMatch(a.run("projectMeetings({id:'p',owner:'owner'},true)"),/newProjectMeeting/);
   a.run("S.user={id:'member',admin:false}");assert.doesNotMatch(a.run("projectMeetings({id:'p',owner:'owner'})"),/newProjectMeeting/);
 });
@@ -2634,6 +2634,7 @@ test('project refresh retains the inline meeting editor and warns before discard
   h.nodes['#projectsView h1']={};h.nodes['#projectsView .eyebrow']={};
   h.a.context.document.querySelectorAll=()=>[];h.a.context.confirm=()=>false;
   h.a.run(`S.user={id:'owner'};S.projects=[{id:'p1',name:'项目',owner:'owner'}];S.fileArchives=[];
+    S.today='2026-11-04';S.tasks=[];
     S.meetings=[{id:'m1',projectId:'p1',title:'周会',rawTranscript:'',participants:[]}];UI.space='p1';UI.spaceArea='meetings';
     renderProjectSpace=${source.match(/function renderProjectSpace\(id\)\{[\s\S]*?\n\}/)[0]};
     renderProjectSpace('p1');openMeetingEditor(S.projects[0],'m1');`);
