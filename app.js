@@ -401,7 +401,7 @@ function switchView(view){
   if(view==='archive')renderArchive();
   if(view==='inbox'){renderInbox();refreshInboxState();}
   if(view==='accounts')renderAccounts();
-  if(view==='settings')renderSettings();
+  if(view==='settings'){if(changed){UI.settingsPage=UI.settingsPageNext||'';UI.settingsPageNext=''}renderSettings()}
   if(view==='chat'){renderChatChannels();loadChat(true);refreshChatPresence();startChatPolling()}else{stopChatPolling()}
   /* The badge hides while you are in the room; leaving it should reveal what is
      still unread there, without waiting for the next poll. updateChatDot is
@@ -1854,7 +1854,190 @@ const SETTING_DEFAULTS={
   collection:{modified:()=>(S.automation?.mode||'daily')!=='daily'||(S.automation?.time||'00:00')!=='00:00',reset:()=>['automation.update',{mode:'daily',time:'00:00'}]},
   prompt:{modified:()=>Boolean(S.meetingPrompt)&&S.meetingPrompt!==MEETING_PROMPT_DEFAULT,reset:()=>['meeting.prompt.update',{prompt:MEETING_PROMPT_DEFAULT}]}
 };
+/* A setting with more than one control opens on its own page inside 系统设置,
+   with a way back, instead of crowding the list. */
+const SETTINGS_PAGES={ai:{title:'AI 接入与模型',render:()=>renderAiSettingsPage()},prompt:{title:'会议纪要提示词',render:()=>renderPromptPage()}};
+function openSettingsPage(page){
+  UI.settingsPageNext=SETTINGS_PAGES[page]?page:'';
+  if(UI.view!=='settings'){switchView('settings');return}
+  UI.settingsPage=UI.settingsPageNext;UI.settingsPageNext='';renderSettings();
+  $('.main-content')?.scrollTo?.({top:0});
+  if(!UI.settingsPage)$(`#settingsView [data-settings-page="${page}"]`)?.focus?.();
+}
+function renderSettingsPage(){
+  const page=SETTINGS_PAGES[UI.settingsPage],box=$('#settingsPage');
+  $('#settingsView .settings-layout')?.classList?.toggle('hidden',Boolean(page));box?.classList?.toggle('hidden',!page);
+  const eyebrow=$('#settingsView .page-intro .eyebrow'),title=$('#settingsView .page-intro h1');
+  if(!page){if(eyebrow)eyebrow.textContent='团队设置 · 修改后对全员生效';if(title)title.textContent='系统设置';return false}
+  if(eyebrow)eyebrow.innerHTML=`<button type="button" class="settings-back" id="settingsBack">${icon('chevron-left')}系统设置</button>`;
+  if(title)title.textContent=page.title;
+  const back=$('#settingsBack');if(back)back.onclick=()=>openSettingsPage('');
+  page.render();return true;
+}
+/* The list shows where each page stands without opening it. */
+function renderSettingsSummaries(){
+  const prompt=$('#promptSummary');if(prompt)prompt.textContent=S.meetingPrompt&&S.meetingPrompt!==MEETING_PROMPT_DEFAULT?'已自定义':'内置模板';
+  const ai=$('#aiSummary');if(!ai)return;
+  if(!aiSettings&&S.user?.admin){loadAiSettings();return}
+  const chat=aiSettings?.scenes?.chat,count=aiSettings?.sources?.length||0;
+  ai.textContent=!aiSettings||aiSettings.error?'':count?`${count} 个来源 · 对话助手 ${chat?.model||'未选模型'}`:'还没有来源';
+}
+function renderPromptPage(){
+  const box=$('#settingsPage');if(!box)return;
+  if(!box.querySelector('#meetingPromptSetting'))box.innerHTML=`<section class="settings-sheet"><p class="settings-sheet-lead">生成会议纪要时，这段话会作为系统提示词交给 AI，`
+    +`对所有项目生效。用下面的变量引用会议内容；原稿也会随请求一并附上。</p><dl class="prompt-vars"><dt>{{title}}</dt><dd>会议标题</dd>`
+    +`<dt>{{agenda}}</dt><dd>议程，没有时写「未提及」</dd><dt>{{transcript}}</dt><dd>会议原稿</dd></dl>`
+    +`<div class="setting-row is-wide" data-setting="prompt" data-role="admin"><div class="setting-text"><h3><span>提示词</span><span class="setting-meta">`
+    +`<span class="setting-status" aria-live="polite"></span><span class="setting-reset-slot"></span></span></h3></div><div id="meetingPromptSetting" class="setting-body"></div></div></section>`;
+  renderMeetingPromptSetting();
+  const row=box.querySelector('.setting-row'),changed=SETTING_DEFAULTS.prompt.modified(),slot=row?.querySelector('.setting-reset-slot');
+  row?.classList.toggle('is-modified',changed);
+  if(slot){slot.innerHTML=changed?'<button type="button" class="setting-reset" id="promptReset">恢复默认</button>':'';
+    $('#promptReset')?.addEventListener('click',async()=>{const [action,data]=SETTING_DEFAULTS.prompt.reset();
+      try{await act(action,data,{quiet:true});const input=$('#meetingPromptSettingInput');if(input){input.value=MEETING_PROMPT_DEFAULT;input.dataset.saved=input.value}
+        box.innerHTML='';renderPromptPage();flashSaved($('#settingsPage .setting-status'),'已恢复默认')}catch(e){}})}
+}
+
+/* 系统设置 → AI 接入与模型. A source is where models come from: an address and
+   a key, kept on the server. Each job picks a source and a model. A test runs
+   against what is saved and refreshes that source's model list; only the
+   newest test of a source may report, and editing it voids the one running. */
+const AI_CONTEXT_CHOICES={16000:'精简 · 1.6 万字符',32000:'标准 · 3.2 万字符',64000:'充足 · 6.4 万字符'};
+let aiSettings=null,aiEditing=null;const aiTests={};
+async function loadAiSettings(){
+  if(aiSettings?.loading)return;aiSettings={loading:true};
+  try{aiSettings=await api('/api/action',{action:'ai.settings.get',data:{}})}catch(e){aiSettings={error:e.message}}
+  renderSettingsSummaries();if(UI.view==='settings'&&UI.settingsPage==='ai')renderAiSettingsPage();
+}
+const aiProviderName=p=>(LLM_PRESETS[p]?.name||'自定义').replace('（推荐）','');
+const aiHost=url=>{try{return new URL(url).host}catch(_){return url||''}};
+/* The models a scene may pick from: its source's list, plus the one in use. */
+function aiSceneModels(source,current){return [...new Set([...(source?.models||[]),...(current?[current]:[])])]}
+function renderAiSettingsPage(){
+  const box=$('#settingsPage');if(!box||UI.settingsPage!=='ai')return;
+  if(!aiSettings||aiSettings.loading){box.innerHTML='<p class="muted settings-loading">正在读取…</p>';loadAiSettings();return}
+  if(aiSettings.error){box.innerHTML=`<p class="muted settings-loading">读取失败：${escapeHTML(aiSettings.error)}</p>`;return}
+  const {sources,scenes,sceneInfo,contextChars}=aiSettings;
+  const card=s=>{
+    if(aiEditing?.id===s.id)return aiSourceEditor(s);
+    const t=aiTests[s.id]||{};
+    return `<article class="ai-source" data-source="${escapeHTML(s.id)}"><div class="ai-source-main"><div class="ai-source-title"><strong>${escapeHTML(s.name)}</strong>`
+      +`<span class="ai-chip${s.kind==='speech'?' is-speech':''}">${s.kind==='speech'?'语音转写':escapeHTML(aiProviderName(s.provider))}</span></div>`
+      +`<div class="ai-source-meta"><span>${escapeHTML(aiHost(s.baseUrl))}</span><span>${s.apiKeySet?'密钥 '+escapeHTML(s.apiKeyMasked):'未设置密钥'}</span>`
+      +`<span>${s.models?.length?`${s.models.length} 个模型`:'还没有模型列表'}</span></div>`
+      +`${t.text?`<p class="ai-source-status is-${t.state}" role="status">${escapeHTML(t.text)}</p>`:''}</div>`
+      +`<div class="ai-source-actions"><button type="button" class="secondary-btn" data-ai-test="${escapeHTML(s.id)}"${t.busy?' disabled aria-busy="true"':''}>${t.busy?'测试中…':'测试'}</button>`
+      +`<button type="button" class="ghost-btn" data-ai-edit="${escapeHTML(s.id)}">编辑</button><button type="button" class="ghost-btn" data-ai-delete="${escapeHTML(s.id)}">删除</button></div></article>`;
+  };
+  const sceneRow=info=>{
+    const c=scenes[info.id]||{},speech=info.id==='transcribe',pool=sources.filter(s=>(s.kind==='speech')===speech),follow=['plan','minutes'].includes(info.id);
+    const source=pool.find(s=>s.id===c.source),models=aiSceneModels(source,c.model),pending=aiEditing?.scene===info.id;
+    const controls=!pool.length?`<button type="button" class="secondary-btn" data-ai-add="${speech?'speech':'chat'}">${icon('plus')}添加${speech?'语音转写':'对话模型'}来源</button>`
+      :`<label class="ai-field"><span>来源</span><select data-scene-source="${info.id}">${follow?`<option value=""${c.follows?' selected':''}>跟随对话助手</option>`:''}`
+        +`${!c.source&&!follow?'<option value="" selected disabled>选择来源</option>':''}`
+        +`${pool.map(s=>`<option value="${escapeHTML(s.id)}"${!c.follows&&s.id===c.source?' selected':''}>${escapeHTML(s.name)}</option>`).join('')}</select></label>`
+        +`<label class="ai-field"><span>模型</span>${c.follows?`<input value="${escapeHTML(c.model||'')}" disabled aria-label="模型">`
+          :models.length&&!pending?`<select data-scene-model="${info.id}">${models.map(m=>`<option${m===c.model?' selected':''}>${escapeHTML(m)}</option>`).join('')}<option value="__custom">手动填写…</option></select>`
+          :`<input data-scene-model-input="${info.id}" value="${escapeHTML(c.model||'')}" placeholder="填写模型 ID，回车保存" aria-label="模型 ID">`}</label>`
+        +`${speech?`<label class="ai-field is-short"><span>语言</span><input data-scene-language="${info.id}" value="${escapeHTML(c.language||'zh')}" maxlength="12"></label>`:''}`;
+    return `<div class="setting-row ai-scene" data-scene="${info.id}"><div class="setting-text"><h3><span>${escapeHTML(info.name)}</span><span class="setting-meta">`
+      +`<span class="setting-status" aria-live="polite"></span></span></h3><p>${escapeHTML(info.desc)}</p></div><div class="ai-scene-controls">${controls}</div></div>`;
+  };
+  const adding=aiEditing&&!aiEditing.id&&!aiEditing.scene;
+  box.innerHTML=`<section class="settings-sheet"><h2 class="settings-group-title">来源</h2><p class="settings-sheet-lead">每个来源是一组 API 地址和密钥，密钥只保存在服务端。`
+    +`保存后会立即测试，并取回这个来源能用的模型。</p><div class="ai-sources">${sources.map(card).join('')||'<p class="muted ai-empty">还没有来源。</p>'}`
+    +`${adding?aiSourceEditor(null):''}</div>${adding?'':`<div class="ai-add-row"><button type="button" class="ghost-btn" data-ai-add="chat">${icon('plus')}添加对话模型来源</button>`
+    +`<button type="button" class="ghost-btn" data-ai-add="speech">${icon('plus')}添加语音转写来源</button></div>`}</section>`
+    +`<section class="settings-sheet"><h2 class="settings-group-title">使用场景</h2><p class="settings-sheet-lead">每个场景选一个来源和模型；规划任务和会议纪要可以跟随对话助手。</p>`
+    +`${sceneInfo.map(sceneRow).join('')}</section>`
+    +`<section class="settings-sheet"><h2 class="settings-group-title">对话</h2><div class="setting-row" data-ai="context"><div class="setting-text"><h3><span>单次对话容量</span>`
+    +`<span class="setting-meta"><span class="setting-status" aria-live="polite"></span></span></h3><p>每轮交给对话助手的工作台数据上限。窗口小的模型选「精简」。</p></div>`
+    +`<div class="setting-control"><select id="aiContextChars" aria-label="单次对话容量">${Object.entries(AI_CONTEXT_CHOICES).map(([v,l])=>`<option value="${v}"${Number(v)===contextChars?' selected':''}>${l}</option>`).join('')}</select></div></div></section>`;
+  bindAiSettingsPage(box);
+}
+function aiSourceEditor(s){
+  const kind=s?.kind||aiEditing?.kind||'chat',provider=s?.provider||(kind==='speech'?'custom':'openai');
+  return `<form class="ai-source-editor" data-editor="${escapeHTML(s?.id||'')}" data-kind="${kind}"><div class="ai-editor-title">${s?'编辑来源':kind==='speech'?'添加语音转写来源':'添加对话模型来源'}</div>`
+    +`<div class="ai-editor-grid">${kind==='speech'?'':`<label class="ai-field"><span>服务商</span><select name="provider">${Object.entries(LLM_PRESETS).map(([k,v])=>`<option value="${k}"${k===provider?' selected':''}>${escapeHTML(v.name)}</option>`).join('')}</select></label>`}`
+    +`<label class="ai-field"><span>名称</span><input name="name" maxlength="40" value="${escapeHTML(s?.name||'')}" placeholder="${kind==='speech'?'例如：本地 Qwen3-ASR':'例如：DeepSeek 主账号'}"></label>`
+    +`<label class="ai-field is-wide"><span>API 地址</span><input name="baseUrl" value="${escapeHTML(s?.baseUrl||(kind==='speech'?'':LLM_PRESETS[provider]?.base||''))}" placeholder="https://api.example.com/v1" autocomplete="url"></label>`
+    +`<label class="ai-field is-wide"><span>API Key</span><input name="apiKey" type="password" autocomplete="off" placeholder="${s?.apiKeySet?`留空沿用已保存的密钥（${escapeHTML(s.apiKeyMasked)}）`:LLM_PRESETS[provider]?.key&&kind!=='speech'?`例如 ${LLM_PRESETS[provider].key}`:'本地服务可以不填'}"></label>`
+    +`${s?.apiKeySet?'<label class="ai-check"><input type="checkbox" name="clearApiKey">移除已保存的密钥</label>':''}</div>`
+    +`<div class="ai-editor-actions"><button type="button" class="secondary-btn" data-ai-cancel>取消</button><button type="submit" class="primary-btn">保存并测试</button></div></form>`;
+}
+/* Run one test of a saved source; a newer test or an edit makes this one stale. */
+async function aiTestSource(id){
+  const run=(aiTests[id]?.run||0)+1,owner=S.user?.id;aiTests[id]={run,busy:true};renderAiSettingsPage();
+  const current=()=>aiTests[id]?.run===run&&owner===S.user?.id;
+  try{
+    const r=await api('/api/action',{action:'agent.config.test',data:{sourceId:id}});if(!current())return;
+    aiTests[id]={run,state:r.ok?'ok':'fail',text:r.ok?`${r.message}${r.ms?` · ${r.ms} ms`:''}`:r.reason};
+    if(r.ok){aiSettings=null;await loadAiSettings();return}
+  }catch(e){if(!current())return;aiTests[id]={run,state:'fail',text:e.message||'测试失败'}}
+  if(UI.settingsPage==='ai')renderAiSettingsPage();
+}
+async function aiSaveScene(scene,data){
+  try{aiSettings=await api('/api/action',{action:'ai.scene.set',data:{scene,...data}});aiEditing=null;renderAiSettingsPage();
+    flashSaved($(`#settingsPage [data-scene="${scene}"] .setting-status`));agentLoadServerConfig?.()}
+  catch(e){toast(e.message);renderAiSettingsPage()}
+}
+function bindAiSettingsPage(box){
+  const sceneOf=id=>aiSettings.scenes[id]||{},sourceOf=id=>aiSettings.sources.find(s=>s.id===id);
+  box.querySelectorAll('[data-ai-test]').forEach(b=>b.onclick=()=>aiTestSource(b.dataset.aiTest));
+  box.querySelectorAll('[data-ai-edit]').forEach(b=>b.onclick=()=>{aiEditing={id:b.dataset.aiEdit};aiTests[b.dataset.aiEdit]={run:(aiTests[b.dataset.aiEdit]?.run||0)+1};renderAiSettingsPage();box.querySelector('.ai-source-editor input[name="name"]')?.focus()});
+  box.querySelectorAll('[data-ai-add]').forEach(b=>b.onclick=()=>{aiEditing={kind:b.dataset.aiAdd};renderAiSettingsPage();box.querySelector('.ai-source-editor input[name="baseUrl"]')?.focus()});
+  box.querySelectorAll('[data-ai-cancel]').forEach(b=>b.onclick=()=>{aiEditing=null;renderAiSettingsPage()});
+  box.querySelectorAll('[data-ai-delete]').forEach(b=>b.onclick=async()=>{
+    const s=sourceOf(b.dataset.aiDelete);
+    /* A second click deletes, so one stray click never does. */
+    if(!b.dataset.armed){b.dataset.armed='1';b.textContent='再点一次删除';b.classList.add('is-armed');setTimeout(()=>{if(b.isConnected){delete b.dataset.armed;b.textContent='删除';b.classList.remove('is-armed')}},3000);return}
+    try{aiSettings=await api('/api/action',{action:'ai.source.delete',data:{id:s.id}});delete aiTests[s.id];renderAiSettingsPage();toast(`已删除「${s.name}」`)}catch(e){toast(e.message)}
+  });
+  const form=box.querySelector('.ai-source-editor');
+  if(form){
+    const provider=form.elements.provider,base=form.elements.baseUrl;
+    if(provider)provider.onchange=()=>{const before=Object.values(LLM_PRESETS).map(p=>p.base);if(!base.value.trim()||before.includes(base.value.trim()))base.value=LLM_PRESETS[provider.value]?.base||''};
+    form.onsubmit=async e=>{
+      e.preventDefault();const id=form.dataset.editor,submit=form.querySelector('[type="submit"]');
+      const data={id:id||undefined,kind:form.dataset.kind,provider:provider?.value||'custom',name:form.elements.name.value.trim(),baseUrl:base.value.trim(),
+        apiKey:form.elements.apiKey.value.trim(),clearApiKey:Boolean(form.elements.clearApiKey?.checked)};
+      if(!data.baseUrl&&data.provider!=='opencode-go'){toast('请填写 API 地址');base.focus();return}
+      submit.disabled=true;
+      try{
+        const before=new Set((aiSettings.sources||[]).map(s=>s.id));
+        aiSettings=await api('/api/action',{action:'ai.source.save',data});aiEditing=null;
+        const saved=id||aiSettings.sources.find(s=>!before.has(s.id))?.id||(data.kind==='speech'?'speech':'main');
+        renderAiSettingsPage();renderSettingsSummaries();aiTestSource(saved);
+      }catch(err){toast(err.message);submit.disabled=false}
+    };
+  }
+  box.querySelectorAll('[data-scene-source]').forEach(sel=>sel.onchange=()=>{
+    const scene=sel.dataset.sceneSource,id=sel.value;
+    if(!id){aiSaveScene(scene,{source:''});return}
+    const source=sourceOf(id),current=sceneOf(scene).model,list=source?.models||[];
+    const model=list.includes(current)?current:agentPreferredModel(list);
+    if(!model){aiEditing={scene};aiSettings.scenes[scene]={...sceneOf(scene),source:id,model:'',follows:false};renderAiSettingsPage();
+      box.querySelector(`[data-scene-model-input="${scene}"]`)?.focus();return}
+    aiSaveScene(scene,{source:id,model,language:sceneOf(scene).language});
+  });
+  box.querySelectorAll('[data-scene-model]').forEach(sel=>sel.onchange=()=>{
+    const scene=sel.dataset.sceneModel,c=sceneOf(scene);
+    if(sel.value==='__custom'){aiEditing={scene};renderAiSettingsPage();box.querySelector(`[data-scene-model-input="${scene}"]`)?.focus();return}
+    aiSaveScene(scene,{source:c.source,model:sel.value,language:c.language});
+  });
+  box.querySelectorAll('[data-scene-model-input]').forEach(input=>{
+    const save=()=>{const scene=input.dataset.sceneModelInput,c=sceneOf(scene),model=input.value.trim();if(!model||!c.source||(model===c.model&&!aiEditing))return;
+      aiSaveScene(scene,{source:c.source,model,language:c.language})};
+    input.onchange=save;input.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();save()}if(e.key==='Escape'&&aiEditing){aiEditing=null;renderAiSettingsPage()}};
+  });
+  box.querySelectorAll('[data-scene-language]').forEach(input=>input.onchange=()=>{const scene=input.dataset.sceneLanguage,c=sceneOf(scene);
+    if(c.source&&c.model)aiSaveScene(scene,{source:c.source,model:c.model,language:input.value.trim()||'zh'})});
+  const context=box.querySelector('#aiContextChars');
+  if(context)context.onchange=async()=>{try{aiSettings=await api('/api/action',{action:'ai.context.set',data:{contextChars:Number(context.value)}});renderAiSettingsPage();
+    flashSaved($('#settingsPage [data-ai="context"] .setting-status'))}catch(e){toast(e.message);renderAiSettingsPage()}};
+}
 function renderSettings(){
+  if(renderSettingsPage())return;
   const admin=Boolean(S.user?.admin),superadmin=S.user?.role==='superadmin';
   $$('#settingsView .setting-row').forEach(row=>row.classList.toggle('is-forbidden',row.dataset.role==='superadmin'?!superadmin:!admin));
   renderRepeatStackingSetting();
@@ -1862,7 +2045,7 @@ function renderSettings(){
   renderCollectionSchedule();
   renderWeekStartSetting();
   renderCreationPolicy();
-  renderMeetingPromptSetting();
+  renderSettingsSummaries();
   renderSettingIndicators();
   $('#settingsView .setting-row[data-setting="collection"]')?.classList.toggle('is-muted',S.automation?.enabled===false);
   renderSettingsNav();applySettingsFilter();
@@ -1872,7 +2055,8 @@ function renderSettingIndicators(){
     const rule=SETTING_DEFAULTS[row.dataset.setting],changed=Boolean(rule?.modified()),slot=row.querySelector('.setting-reset-slot');
     row.classList.toggle('is-modified',changed);
     const saving=row.dataset.setting==='prompt'&&$('#meetingPromptSettingInput')?.dataset.saving==='true';
-    if(slot)slot.innerHTML=changed?`<button type="button" class="setting-reset" data-reset="${row.dataset.setting}"${saving?' disabled':''}>恢复默认</button>`:'';
+    /* A row that opens its own page offers 恢复默认 there, not on the link. */
+    if(slot)slot.innerHTML=changed&&!row.classList.contains('is-link')?`<button type="button" class="setting-reset" data-reset="${row.dataset.setting}"${saving?' disabled':''}>恢复默认</button>`:'';
   });
   $$('#settingsView [data-reset]').forEach(b=>b.onclick=async()=>{
     if(b.disabled)return;
@@ -1943,7 +2127,7 @@ function renderMeetingPromptSetting(){
   const existing=box.querySelector('#meetingPromptSettingInput');if(existing&&(existing.value!==existing.dataset.saved||existing===document.activeElement||existing.dataset.saving==='true'))return;
   const value=S.meetingPrompt||MEETING_PROMPT_DEFAULT;
   box.innerHTML=`<textarea aria-label="会议纪要系统提示词" id="meetingPromptSettingInput" class="settings-prompt" rows="7" maxlength="12000">${escapeHTML(value)}</textarea>`
-    +`<div class="setting-actions"><small class="muted">可用变量：{{title}}、{{agenda}}、{{transcript}}</small><button type="button" class="secondary-btn" id="saveMeetingPrompt">保存</button></div>`;
+    +`<div class="setting-actions"><small class="muted">保存后，新生成的纪要会用这段提示词。</small><button type="button" class="secondary-btn" id="saveMeetingPrompt">保存</button></div>`;
   const input=$('#meetingPromptSettingInput'),save=$('#saveMeetingPrompt');let saved=value,saving=false;input.dataset.saved=saved;
   const sync=()=>{save.disabled=saving||!input.value.trim()||input.value===saved;};input.oninput=sync;sync();
   const owner=S.user.id;
@@ -3197,11 +3381,10 @@ $('#runAutomationBtn').onclick=async()=>{
 };
 $('#settingsSearch')?.addEventListener('input',applySettingsFilter);
 $('#settingsSearch')?.addEventListener('keydown',e=>{if(e.key==='Escape'&&e.target.value){e.preventDefault();e.stopPropagation();e.target.value='';applySettingsFilter()}});
-$$('#settingsView [data-settings-go]').forEach(b=>b.onclick=async()=>{
-  if(b.dataset.settingsGo==='accounts'){switchView('accounts');return}
-  /* The AI connection lives in the assistant's panel; open it there. */
-  $('#agentPanel')?.classList.remove('hidden');if(typeof applyAgentPanelSize==='function')applyAgentPanelSize();
-  await agentLoadServerConfig();agentSetConfigVisible(true);
+$$('#settingsView [data-settings-go]').forEach(b=>b.onclick=()=>switchView(b.dataset.settingsGo));
+$$('#settingsView [data-settings-page]').forEach(row=>{
+  row.onclick=()=>openSettingsPage(row.dataset.settingsPage);
+  row.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openSettingsPage(row.dataset.settingsPage)}};
 });
 
 $('#markAllReadBtn').onclick=()=>act('inbox.read',{all:true});
@@ -3226,7 +3409,7 @@ let agentServerConfig=null;
 let agentServerAsr=null;
 function agentIsBusy(){return agentState.busy}
 function agentResetUser(){
-  agentInvalidateConfigTest();agentModels=[];agentModelsSource=null;agentState.lastTools=[];agentState.lastMessageId=null;
+  aiSettings=null;agentState.lastTools=[];agentState.lastMessageId=null;
   if(typeof agentCancelVoice==='function')agentCancelVoice();
   agentHalt();agentState.messages=[];agentState.lastInput='';agentState.editing=null;
   agentState.plan=false;agentState.planBoard=null;
@@ -3284,7 +3467,7 @@ function agentSamples(context){
 function agentRenderEmptyState(list){
   const samples=agentSamples();
   if(!list)return;
-  if(agentServerConfig&&!agentServerConfig.configured){list.innerHTML=`<div class="agent-setup"><strong>先接入 AI 模型</strong>${S.user?.role==='superadmin'?'':'<p>请联系管理员配置模型。</p>'}${S.user?.role==='superadmin'?'<button type="button" class="secondary-btn" id="agentSetupBtn">配置模型</button>':''}</div>`;$('#agentSetupBtn')?.addEventListener('click',()=>agentSetConfigVisible(true));return}
+  if(agentServerConfig&&!agentServerConfig.configured){list.innerHTML=`<div class="agent-setup"><strong>先接入 AI 模型</strong>${S.user?.role==='superadmin'?'':'<p>请联系管理员配置模型。</p>'}${S.user?.role==='superadmin'?'<button type="button" class="secondary-btn" id="agentSetupBtn">配置模型</button>':''}</div>`;$('#agentSetupBtn')?.addEventListener('click',()=>openSettingsPage('ai'));return}
   list.innerHTML='<div class="agent-samples">'
     +samples.map(s=>`<button type="button" class="agent-sample ${s.plan?'is-plan':''}" data-text="${escapeHTML(s.text)}"${s.plan?' data-plan="1"':''}>`
       +(s.plan?icon('sparkles'):'')+escapeHTML(s.text)+'</button>').join('')
@@ -3525,12 +3708,8 @@ async function agentPersistEdit(){
   finally{if(owner===S.user?.id&&thread===agentState.conversationId){agentState.busy=false;agentUpdateBusy()}}
 }
 function agentOfferSetup(){
-  if(S.user?.role==='superadmin')agentSetConfigVisible(true);
+  if(S.user?.admin)openSettingsPage('ai');
   else toast('模型尚未接入，请联系管理员配置。输入内容已保留。');
-}
-function agentConnectionHint(){
-  const same=String($('#agentEndpoint')?.value||'').replace(/\/chat\/completions\/?$|\/$/g,'')===String(agentServerConfig?.baseUrl||'').replace(/\/chat\/completions\/?$|\/$/g,'');
-  const input=$('#agentApiKey');if(input)input.placeholder=same&&agentServerConfig?.apiKeySet?'留空沿用此地址保存的密钥':'新地址不会沿用原密钥；本地服务可留空';
 }
 function agentSetPane(pane){
   agentState.pane=pane==='chat'?'chat':'cards';if(pane==='chat')agentState.unreadReply=false;
@@ -3685,93 +3864,10 @@ const LLM_PRESETS={
   openrouter:{name:'OpenRouter',base:'https://openrouter.ai/api/v1',key:'sk-or-…'},
   ollama:{name:'本地 Ollama',base:'http://127.0.0.1:11434/v1',key:''},
   custom:{name:'自定义 OpenAI 兼容 API',base:'',key:''}
-};
-/* The models the picker offers: the last test's list, else the saved one,
-   else the preset's. */
-let agentModels=[];
-let agentConfigVersion=0,agentConfigTestController=null,agentModelsSource=null;
-const agentConfigConnection=()=>JSON.stringify(['#agentProvider','#agentEndpoint','#agentApiKey'].map(id=>$(id)?.value.trim()||''));
-function agentInvalidateConfigTest(clearModels=false){
-  agentConfigVersion++;agentConfigTestController?.abort();agentConfigTestController=null;
-  const btn=$('#agentConfigTest');if(btn){btn.disabled=false;btn.removeAttribute('aria-busy')}
-  agentConfigStatus('');
-  if(clearModels){const selected=agentPickedModel();agentModels=[];agentModelsSource=null;agentRenderModelOptions(selected)}
-}
-const agentPresetModels=provider=>provider==='opencode-go'?[...(agentServerConfig?.opencodeGoModels?.length?agentServerConfig.opencodeGoModels:OPENCODE_GO_MODELS)]:[];
-/* A provider's list also carries embedding, speech and image models; the
+};/* A provider's list also carries embedding, speech and image models; the
    first chat-looking one is the better default. */
 const agentPreferredModel=list=>list.find(m=>!/embed|whisper|tts|dall-e|image|moderation|rerank|audio|vision-exp/i.test(m))||list[0]||'';
-function agentConfigStatus(text,state=''){
-  const el=$('#agentConfigStatus');if(!el)return;
-  el.textContent=text||'';el.className=`agent-config-status${state?' is-'+state:''}`;
-}
-function agentSetConfigVisible(show){
-  agentInvalidateConfigTest();
-  $('#agentConfig')?.classList.toggle('hidden',!show);
-  if(!show){$('#agentConfigBtn')?.focus?.();return}
-  const sel=$('#agentProvider');
-  if(sel&&!sel.options.length)sel.innerHTML=Object.entries(LLM_PRESETS).map(([k,v])=>`<option value="${k}">${escapeHTML(v.name)}</option>`).join('');
-  const c=agentServerConfig||agentConfig(),provider=LLM_PRESETS[c.provider]?c.provider:'custom';
-  sel.value=provider;$('#agentEndpoint').value=c.baseUrl||c.endpoint||LLM_PRESETS[provider].base;$('#agentApiKey').value='';
-  agentModels=c.models?.length?[...c.models]:agentPresetModels(provider);
-  agentRenderModelOptions(c.model||'');
-  $('#agentContextChars').value=String(c.contextChars??32000);
-  agentConfigStatus('');agentSyncProviderUI();
-  agentModelsSource=agentConfigConnection();
-  $('#agentClearKey')&&( $('#agentClearKey').checked=false);
-  $('#agentProvider')?.focus?.();
-}
-function agentRenderModelOptions(selected=''){
-  const select=$('#agentModelSelect'),input=$('#agentCustomModel');if(!select||!input)return;
-  const manual=!agentModels.length||Boolean(selected&&!agentModels.includes(selected));
-  select.innerHTML=agentModels.map(m=>`<option value="${escapeHTML(m)}">${escapeHTML(m)}</option>`).join('')
-    +'<option value="__custom">其他（手动填写）</option>';
-  select.value=manual?'__custom':(selected||agentPreferredModel(agentModels));
-  select.classList.toggle('hidden',!agentModels.length);input.classList.toggle('hidden',!manual);
-  if(manual)input.value=selected||input.value;
-}
-const agentPickedModel=()=>{const select=$('#agentModelSelect');return select&&!select.classList.contains('hidden')&&select.value!=='__custom'?select.value:$('#agentCustomModel').value.trim()};
-function agentSyncProviderUI(changed=false){
-  const provider=$('#agentProvider')?.value||'custom',preset=LLM_PRESETS[provider]||LLM_PRESETS.custom,endpoint=$('#agentEndpoint');
-  endpoint.placeholder=preset.base||'https://api.example.com/v1';
-  if(changed){agentInvalidateConfigTest();endpoint.value=preset.base;agentModels=agentPresetModels(provider);
-    $('#agentCustomModel').value='';agentRenderModelOptions('');agentModelsSource=agentConfigConnection()}
-  const cfg=agentServerConfig;
-  $('#agentApiKey').placeholder=cfg?.apiKeySet&&!changed?`留空表示保持原密钥（${cfg.apiKeyMasked}）`:preset.key?`例如 ${preset.key}`:'API Key（本地服务可不填）';
-}
-/* 测试连接: the server tries the address with this key (or the saved one),
-   lists the models it offers and has the chosen one answer; the picker takes
-   the list, and a failure says why. Nothing is saved until 保存. */
-async function agentTestConfig(){
-  agentInvalidateConfigTest();
-  const btn=$('#agentConfigTest'),model=agentPickedModel();
-  const data={provider:$('#agentProvider').value,baseUrl:$('#agentEndpoint').value.trim(),apiKey:$('#agentApiKey').value.trim(),model,clearApiKey:Boolean($('#agentClearKey')?.checked)};
-  if(!data.baseUrl&&data.provider!=='opencode-go'){agentConfigStatus('请先填写 API 地址','fail');return}
-  const version=agentConfigVersion,user=S.user?.id,identity=agentConfigConnection(),controller=new AbortController();
-  agentConfigTestController=controller;
-  const current=()=>version===agentConfigVersion&&user===S.user?.id&&identity===agentConfigConnection()&&model===agentPickedModel();
-  btn.disabled=true;btn.setAttribute('aria-busy','true');agentConfigStatus('正在验证模型…','busy');
-  try{
-    const r=await api('/api/action',{action:'agent.config.test',data},{signal:controller.signal});
-    if(!current()){if(version===agentConfigVersion)agentConfigStatus('');return}
-    agentModels=r.models||[];agentModelsSource=identity;
-    agentRenderModelOptions(r.testedModel||model||agentPreferredModel(agentModels));
-    agentConfigStatus(r.ok?`${r.message}${r.ms?` · ${r.ms} ms`:''}`:r.reason,r.ok?'ok':'fail');
-  }catch(e){if(version===agentConfigVersion){if(current()&&e.name!=='AbortError')agentConfigStatus(e.message||'测试失败','fail');else agentConfigStatus('')}}
-  finally{if(version===agentConfigVersion){agentConfigTestController=null;btn.disabled=false;btn.removeAttribute('aria-busy')}}
-}
-async function agentSaveConfig(){
-  const provider=$('#agentProvider').value,endpoint=$('#agentEndpoint').value.trim()||LLM_PRESETS[provider]?.base||'',model=agentPickedModel(),apiKey=$('#agentApiKey').value.trim();
-  if(!endpoint||!model){toast('请填写 API 地址和模型');return}
-  const models=agentModelsSource===agentConfigConnection()?[...agentModels]:[];
-  agentInvalidateConfigTest();
-  try{
-    const data=await api('/api/action',{action:'agent.config.set',data:{provider,baseUrl:endpoint,model,apiKey,models,
-      contextChars:Number($('#agentContextChars').value),clearApiKey:Boolean($('#agentClearKey')?.checked)}});
-    agentServerConfig=data;saveAgentConfig({provider,endpoint,model});renderAgentModelChip();agentSetConfigVisible(false);
-    toast('Agent API 配置已保存（密钥仅保存在服务端）');
-  }catch(e){toast(e.message||'保存失败')}
-}
+
 /* The header chip doubles as a model switch for admins, over the models the
    last test found. */
 function agentToggleModelMenu(open){
@@ -3788,25 +3884,10 @@ function agentToggleModelMenu(open){
       toast(`已切换到 ${b.dataset.model}`)}catch(e){toast(e.message)}
   });
 }
-/* The speech-to-text fields mirror the chat fields: superadmin-only, with the
-   key never echoed back. Empty endpoint means "not configured". */
-function renderAgentAsrConfig(){
-  const separator=$('#agentAsrEndpoint')?.closest('.agent-asr-config');
-  if(!separator)return;
-  separator.classList.toggle('hidden',!S.user?.admin);
-  if(!S.user?.admin)return;
-  const cfg=agentServerAsr||{};
-  if($('#agentAsrEndpoint'))$('#agentAsrEndpoint').value=cfg.baseUrl||'';
-  if($('#agentAsrModel'))$('#agentAsrModel').value=cfg.model||'';
-  if($('#agentAsrLanguage'))$('#agentAsrLanguage').value=cfg.language||'zh';
-  if($('#agentAsrApiKey'))$('#agentAsrApiKey').value='';
-  const state=$('#agentAsrModel');
-  if(state)state.title=cfg.configured?`当前已启用：${cfg.model||''}`:'当前未启用，语音输入回退到浏览器识别';
-}
 async function agentLoadServerConfig(){
   try{agentServerConfig=await api('/api/action',{action:'agent.config.get',data:{}})}catch(_){agentServerConfig=null}
   try{agentServerAsr=await api('/api/action',{action:'agent.asr.get',data:{}})}catch(_){agentServerAsr=null}
-  renderAgentModelChip();renderAgentAsrConfig();agentInitVoice();
+  renderAgentModelChip();agentInitVoice();
   if(!agentState.messages.length&&!agentState.historyError)agentRenderEmptyState($('#agentMessages'));
 }
 function agentExtractText(data){
@@ -5119,7 +5200,7 @@ function initAgentUI(){
   initAgentPanelResize();
   $('#agentBtn')?.addEventListener('click',async()=>{$('#agentPanel').classList.remove('hidden');applyAgentPanelSize();renderAgentCapability();await agentLoadOwnHistory();await agentLoadServerConfig();agentSyncPlanButton();agentInitVoice();$('#agentInput').focus()});
   $('#agentHistoryBtn')?.addEventListener('click',()=>agentToggleSessions());
-  $('#agentCloseBtn')?.addEventListener('click',()=>{if(!voice.target)agentCancelVoice();agentSetConfigVisible(false);agentToggleModelMenu(false);$('#agentPanel').classList.add('hidden')});
+  $('#agentCloseBtn')?.addEventListener('click',()=>{if(!voice.target)agentCancelVoice();agentToggleModelMenu(false);$('#agentPanel').classList.add('hidden')});
   $('#agentStopBtn')?.addEventListener('click',()=>agentHalt('已停止，草稿和已执行记录保留。'));
   $('#agentPauseBtn')?.addEventListener('click',()=>agentTogglePause());
   $('#agentDraftToggle')?.addEventListener('click',()=>{const b=agentState.planBoard;if(b){b.closed=!b.closed;planRender(b)}});
@@ -5127,14 +5208,8 @@ function initAgentUI(){
   $('#agentPlanBtn')?.addEventListener('click',()=>agentTogglePlan());
   $$('#agentPanel .agent-mode-opt').forEach(b=>b.addEventListener('click',()=>agentSetPref(b.dataset.mode)));
   agentRenderModeOptions();
-  $('#agentConfigBtn')?.addEventListener('click',()=>agentSetConfigVisible(true));
-  $('#agentConfigClose')?.addEventListener('click',()=>agentSetConfigVisible(false));
-  $('#agentProvider')?.addEventListener('change',()=>agentSyncProviderUI(true));
-  for(const id of ['#agentEndpoint','#agentApiKey'])$(id)?.addEventListener('input',()=>{agentInvalidateConfigTest(true);agentConnectionHint()} );
-  $('#agentCustomModel')?.addEventListener('input',()=>agentInvalidateConfigTest());
-  $('#agentConfigTest')?.addEventListener('click',agentTestConfig);
-  $('#agentModelSelect')?.addEventListener('change',()=>{agentInvalidateConfigTest();const manual=$('#agentModelSelect').value==='__custom';
-    $('#agentCustomModel').classList.toggle('hidden',!manual);if(manual)$('#agentCustomModel').focus()});
+  /* The AI connection is configured in 系统设置; the gear goes there. */
+  $('#agentConfigBtn')?.addEventListener('click',()=>openSettingsPage('ai'));
   $('#agentModelChip')?.addEventListener('click',e=>{e.stopPropagation();agentToggleModelMenu()});
   $('#agentModelChip')?.addEventListener('keydown',e=>{if(['Enter',' ','ArrowDown'].includes(e.key)){e.preventDefault();agentToggleModelMenu(true);$('#agentModelMenu [data-model]')?.focus()}});
   $('#agentModelMenu')?.addEventListener('keydown',e=>{
@@ -5144,25 +5219,11 @@ function initAgentUI(){
     if(next!==undefined){e.preventDefault();options[next]?.focus()}
   });
   document.addEventListener('click',e=>{if(!e.target.closest?.('.agent-model-slot'))agentToggleModelMenu(false)});
-  $('#agentConfigSave')?.addEventListener('click',agentSaveConfig);
-  $('#agentConfigReset')?.addEventListener('click',async()=>{const c=agentServerConfig;if(!c?.baseUrl){toast('尚未保存服务端连接');return}try{agentServerConfig=await api('/api/action',{action:'agent.config.set',data:{baseUrl:c.baseUrl,provider:c.provider,model:c.model,clearApiKey:true}});agentSetConfigVisible(true);renderAgentModelChip();toast('已移除服务端模型密钥')}catch(e){toast(e.message)}});
-  $('#agentAsrSave')?.addEventListener('click',async()=>{
-    const baseUrl=$('#agentAsrEndpoint').value.trim();
-    if(!baseUrl){toast('请填写语音转写服务地址；如需关闭请用「停用语音转写」');return}
-    const payload={baseUrl,model:$('#agentAsrModel').value.trim(),language:$('#agentAsrLanguage').value.trim()||'zh'};
-    const apiKey=$('#agentAsrApiKey').value.trim();
-    if(apiKey)payload.apiKey=apiKey;
-    try{agentServerAsr=await api('/api/action',{action:'agent.asr.set',data:payload});sharedSpeechStatus={configured:agentServerAsr.configured};renderAgentAsrConfig();agentInitVoice();scanVoiceFields();toast('语音转写配置已保存')}catch(e){toast(e.message||'保存失败')}
-  });
-  $('#agentAsrClear')?.addEventListener('click',async()=>{
-    try{agentServerAsr=await api('/api/action',{action:'agent.asr.set',data:{disabled:true}});sharedSpeechStatus={configured:agentServerAsr.configured};renderAgentAsrConfig();agentInitVoice();scanVoiceFields();toast('已停用语音转写')}catch(e){toast(e.message||'停用失败')}
-  });
   $('#agentPaneCards')?.addEventListener('click',()=>agentSetPane('cards'));
   $('#agentPaneChat')?.addEventListener('click',()=>agentSetPane('chat'));
   $('#agentPaneTabs')?.addEventListener('keydown',agentPaneKeydown);
   document.addEventListener('keydown',e=>{if(e.key!=='Escape'||e.defaultPrevented||$('#agentPanel')?.classList.contains('hidden')||agentPanelDrag)return;
-    e.preventDefault();if(!$('#agentConfig')?.classList.contains('hidden'))agentSetConfigVisible(false);
-    else if(!$('#agentModelMenu')?.classList.contains('hidden')){agentToggleModelMenu(false);$('#agentModelChip')?.focus()}
+    e.preventDefault();if(!$('#agentModelMenu')?.classList.contains('hidden')){agentToggleModelMenu(false);$('#agentModelChip')?.focus()}
     else{$('#agentCloseBtn')?.click();$('#agentBtn')?.focus()}});
     $('#agentForm')?.addEventListener('submit',e=>{e.preventDefault();agentSubmit()});
   document.addEventListener('compositionend',()=>{imeUntil=Date.now()+80},true);
