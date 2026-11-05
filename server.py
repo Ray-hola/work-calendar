@@ -67,6 +67,7 @@ AI_SCENES = {
     'transcribe': ('语音转写', '把录音转成文字，供各处语音输入使用'),
 }
 CONTEXT_CHOICES = (16_000, 32_000, 64_000)
+REASONING_EFFORTS = ('auto', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max')
 CONTEXT_DEFAULT = 32_000
 LEGACY_CONTEXT_CHOICES = {80_000: 16_000, 200_000: 32_000, 500_000: 64_000, 0: 64_000}
 
@@ -556,7 +557,8 @@ class Store:
             # Always provide source data, even when the global prompt has no placeholders.
             source = json.dumps({'title': meeting.get('title'), 'agenda': meeting.get('agenda'), 'transcript': transcript}, ensure_ascii=False)
             if len(content) + len(source) > MAX_MESSAGE_CHARS: raise Problem(400, '会议内容过长，请先分段整理')
-            payload = self.llm_payload(model, [{'role':'system','content':content}, {'role':'user','content':source}], probe=False)
+            payload = self.llm_payload(model, [{'role':'system','content':content}, {'role':'user','content':source}],
+                                       reasoning_effort=connection['reasoningEffort'])
             req = urllib.request.Request(base + '/chat/completions', data=json.dumps(payload, ensure_ascii=False).encode(), method='POST', headers=self.llm_headers(base, key))
         try:
             with urllib.request.urlopen(req, timeout=120) as response: reply=json.loads(response.read(2_000_000).decode('utf-8'))
@@ -720,7 +722,8 @@ class Store:
         if not source or not model:
             raise Problem(409, f'请先在「系统设置 → AI 接入与模型」为「{AI_SCENES[scene][0]}」选择来源和模型')
         return {'base': self.llm_root(source['baseUrl']), 'key': str(source.get('apiKey') or ''), 'model': model,
-                'source': source, 'language': str(choice.get('language') or 'zh')}
+                'source': source, 'language': str(choice.get('language') or 'zh'),
+                'reasoningEffort': choice.get('reasoningEffort', 'auto')}
 
     def ai_settings(self, user):
         """What the AI page shows: sources without keys, and each scene's choice."""
@@ -792,7 +795,13 @@ class Store:
         scene = required(data, 'scene')
         if scene not in AI_SCENES: raise Problem(400, '没有这个使用场景')
         scenes = self.ai_scenes()
-        source = str(data.get('source') or '').strip()
+        previous = self.scene_choice(scene)
+        effort = data.get('reasoningEffort', previous.get('reasoningEffort', 'auto'))
+        if not isinstance(effort, str) or effort not in REASONING_EFFORTS:
+            raise Problem(400, '思考强度无效')
+        if scene == 'transcribe' and 'reasoningEffort' in data:
+            raise Problem(400, '语音转写不支持思考强度')
+        source = str(data.get('source', previous.get('source')) or '').strip()
         if not source:
             if scene == 'transcribe':
                 scenes[scene] = {'disabled': True}  # Do not fall back to the legacy ASR source.
@@ -803,9 +812,10 @@ class Store:
             picked = self.ai_source(source)
             if (picked.get('kind') == 'speech') != (scene == 'transcribe'):
                 raise Problem(400, '语音转写只能用语音来源，其他场景只能用对话来源')
-            model = str(data.get('model') or '').strip()
+            model = str(data.get('model', previous.get('model')) or '').strip()
             if not model or len(model) > 200: raise Problem(400, '请选择或填写模型')
             choice = {'source': source, 'model': model}
+            if scene != 'transcribe' and effort != 'auto': choice['reasoningEffort'] = effort
             if scene == 'transcribe': choice['language'] = (str(data.get('language') or 'zh').strip() or 'zh')[:32]
             scenes[scene] = choice
         self.put('settings', {'id': 'ai_scenes', 'value': scenes, 'updatedAt': timestamp()})
@@ -1010,7 +1020,7 @@ class Store:
         return f'HTTP {code} · {hint}' + (f'：{message}' if message else '')
 
     @staticmethod
-    def llm_payload(model, messages, temperature=None, probe=False):
+    def llm_payload(model, messages, temperature=None, probe=False, reasoning_effort='auto'):
         """Share model parameter compatibility between verification and chat.
 
         OpenAI reasoning families reject max_tokens and non-default sampling
@@ -1018,9 +1028,11 @@ class Store:
         """
         reasoning = bool(re.match(r'^(?:o[1-9](?:[-.]|$)|gpt-[5-9](?:[.-]|$))', model.rsplit('/', 1)[-1], re.I))
         payload = {'model': model, 'messages': messages, 'stream': False}
+        if reasoning_effort not in REASONING_EFFORTS: raise Problem(400, '思考强度无效')
+        if reasoning_effort != 'auto': payload['reasoning_effort'] = reasoning_effort
         if probe:
             payload['max_completion_tokens' if reasoning else 'max_tokens'] = 4096 if reasoning else 256
-        if temperature is not None and not reasoning:
+        if temperature is not None and not reasoning and reasoning_effort == 'auto':
             payload['temperature'] = temperature
         return payload
 
@@ -1254,7 +1266,8 @@ class Store:
             meta['generation'] = generation
             self.put('agent_conversations', meta)
         endpoint = self.llm_root(base) + '/chat/completions'
-        payload = self.llm_payload(model, messages, temperature=float(cfg.get('temperature', 0.2)))
+        payload = self.llm_payload(model, messages, temperature=float(cfg.get('temperature', 0.2)),
+                                   reasoning_effort=connection['reasoningEffort'])
         payload['tools'] = tool_definitions
         native_tools = True
         headers = {**self.llm_headers(base, key), 'x-opencode-session': session_id}

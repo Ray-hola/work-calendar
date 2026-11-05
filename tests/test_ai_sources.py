@@ -133,6 +133,64 @@ class AiSourceTests(unittest.TestCase):
         with self.assertRaises(Problem):
             self.act('ai.context.set', {'contextChars': 5})
 
+    def test_reasoning_effort_inherits_and_survives_model_changes(self):
+        self.act('ai.scene.set', {'scene': 'chat', 'reasoningEffort': 'high'})
+        for scene in ('chat', 'plan', 'minutes'):
+            self.assertEqual(self.store.scene_connection(scene)['reasoningEffort'], 'high')
+        self.act('ai.scene.set', {'scene': 'plan', 'source': 'main', 'model': 'planner', 'reasoningEffort': 'low'})
+        self.act('ai.scene.set', {'scene': 'plan', 'source': 'main', 'model': 'new-planner'})
+        self.assertEqual(self.store.scene_connection('plan')['reasoningEffort'], 'low')
+        self.act('agent.config.model', {'model': 'new-chat'})
+        self.assertEqual(self.store.scene_connection('chat')['reasoningEffort'], 'high')
+        self.act('ai.scene.set', {'scene': 'plan', 'source': ''})
+        self.assertEqual(self.store.scene_connection('plan')['reasoningEffort'], 'high')
+        self.act('ai.scene.set', {'scene': 'chat', 'reasoningEffort': 'auto'})
+        self.assertEqual(self.store.scene_connection('minutes')['reasoningEffort'], 'auto')
+
+    def test_reasoning_effort_validation_and_permissions(self):
+        for value in ('invalid', None, [], 1):
+            with self.subTest(value=value), self.assertRaises(Problem):
+                self.act('ai.scene.set', {'scene': 'chat', 'reasoningEffort': value})
+        with self.assertRaises(Problem):
+            self.act('ai.scene.set', {'scene': 'transcribe', 'reasoningEffort': 'high'})
+        with self.assertRaises(Problem):
+            self.act('ai.scene.set', {'scene': 'chat', 'reasoningEffort': 'high'}, self.member)
+
+    def test_effort_is_sent_to_chat_planning_and_minutes_from_server_settings(self):
+        self.act('ai.scene.set', {'scene': 'chat', 'reasoningEffort': 'high'})
+        self.act('ai.scene.set', {'scene': 'plan', 'source': 'main', 'model': 'planner', 'reasoningEffort': 'low'})
+        project = self.act('project.create', {'name': '会议项目', 'owner': 'superadmin', 'cycle': 'infinite'})
+        meeting = self.act('meeting.create', {'projectId': project['id'], 'title': '周会', 'rawTranscript': '周五发布'})
+        sent = []
+        def reply(request):
+            sent.append(json.loads(request.data.decode()))
+            return _chat('确认周五发布')
+        with mock.patch('server.urllib.request.urlopen', _provider({'/chat/completions': reply}, [])):
+            self.store.llm_chat(self.admin, {'messages': [{'role': 'user', 'content': '你好'}], 'reasoningEffort': 'none'})
+            self.store.llm_chat(self.admin, {'messages': [{'role': 'user', 'content': '安排发布'}], 'planning': True})
+            self.store.meeting_generate_minutes(self.admin, {'id': meeting['id']})
+        self.assertEqual([p['reasoning_effort'] for p in sent], ['high', 'low', 'high'])
+        self.assertTrue(all('temperature' not in p for p in sent))
+
+    def test_default_omits_effort_and_explicit_levels_are_not_silently_downgraded(self):
+        for effort in ('auto', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'):
+            payload = self.store.llm_payload('gateway-model', [], temperature=0.2, reasoning_effort=effort)
+            if effort == 'auto':
+                self.assertNotIn('reasoning_effort', payload)
+                self.assertIn('temperature', payload)
+            else:
+                self.assertEqual(payload['reasoning_effort'], effort)
+                self.assertNotIn('temperature', payload)
+
+    def test_unsupported_effort_surfaces_provider_error_without_downgrading(self):
+        self.act('ai.scene.set', {'scene': 'chat', 'reasoningEffort': 'high'})
+        seen = []
+        with mock.patch('server.urllib.request.urlopen', _provider({'/chat/completions': 400}, seen)):
+            with self.assertRaises(Problem):
+                self.store.llm_chat(self.admin, {'messages': [{'role': 'user', 'content': '你好'}]})
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(json.loads(seen[0].data)['reasoning_effort'], 'high')
+
     def test_chat_metadata_never_falls_back_to_another_sources_catalogue_or_key(self):
         self.store.save_source_models('main', ['old-model'])
         view = self.act('ai.source.save', {'name': 'Local', 'baseUrl': 'http://local.example/v1'})
