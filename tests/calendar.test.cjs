@@ -2500,6 +2500,13 @@ test('meeting server transcription writes and saves complete clips while recordi
   assert.equal(h.a.run('meetingLive.session'),null);
   assert.equal(h.calls.at(-1).data.recording,false);
 });
+test('an empty audio segment does not silently stop continuous capture',async()=>{
+  const h=meetingServerApp();await h.nodes['#meetingLiveBtn'].onclick();
+  h.recorders[0].stop=function(){this.state='inactive';this.onstop()};h.tick();await settle();
+  assert.equal(h.recorders.length,2);assert.equal(h.audio.length,0);assert.equal(h.a.run('meetingLive.active'),true);
+  const stop=h.a.run('meetingStopLive()');await settle();h.audio[0].reply('有效尾段');await stop;
+  assert.equal(h.nodes['#meetingTranscript'].value,'有效尾段');
+});
 test('failed clips remain retryable and a failed save never appends text twice',async()=>{
   const h=meetingServerApp();await h.nodes['#meetingLiveBtn'].onclick();h.tick();await settle();
   h.audio[0].fail();await settle();

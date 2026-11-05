@@ -1387,16 +1387,16 @@ function meetingRecordClip(s){
     r.ondataavailable=e=>{if(e.data?.size)parts.push(e.data)};
     r.onstop=()=>{
       clearTimeout(s.timer);
-      if(!s.cancelled&&parts.length){
-        s.queue.push({blob:new Blob(parts,{type:r.mimeType||parts[0].type||'audio/webm'})});
+      if(!s.cancelled){
+        if(parts.length)s.queue.push({blob:new Blob(parts,{type:r.mimeType||parts[0].type||'audio/webm'})});
         if(s.queue.length>=3){meetingRelease(s);meetingLive.active=false;meetingLiveStatus('转写较慢，已暂停录音，正在处理剩余片段')}
         if(s.active){try{meetingRecordClip(s)}catch(e){s.error=e;meetingRelease(s);meetingLive.active=false}}
         // A failure keeps the audio in memory. Explicit retry resumes this queue.
-        if(!s.error)meetingDrain(s);
+        if(!s.error&&s.queue.length)meetingDrain(s);
       }
       resolve();
     };
-    r.onerror=()=>{s.error=new Error('录音中断');meetingRelease(s);meetingLive.active=false;meetingLiveStatus('录音中断，请停止并重试')};
+    r.onerror=()=>{s.error=new Error('录音中断');meetingRelease(s);meetingLive.active=false;meetingLiveStatus('录音中断，请停止并重试');$('#meetingLiveBtn')?.replaceChildren(document.createTextNode('重试转写'))};
   });
   r.start();s.timer=setTimeout(()=>{if(r.state==='recording')r.stop()},4000);
 }
