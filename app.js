@@ -343,7 +343,7 @@ const status=t=>{
 };
 const projectName=t=>(S.projects.find(p=>p.id===t.projectId)||{}).name||'个人';
 function toast(msg){const e=$('#toast');e.textContent=msg;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200)}
-function showAuth(){meetingStopLive();if(typeof agentCancelVoice==='function')agentCancelVoice();document.body.classList.add('auth-locked');let e=$('#authScreen');if(!e){e=document.createElement('section');e.id='authScreen';document.body.prepend(e)}const local=location.protocol==='file:';e.innerHTML=`<div class="auth-card"><div class="brand"><span class="brand-mark">战</span><span>战略小组<br><strong>台账</strong></span></div><h1>登录工作台</h1><form id="loginForm"><label>账户<input id="loginUser" autocomplete="username" value="superadmin" required></label><label>密码<input id="loginPass" type="password" autocomplete="current-password" required></label><button class="primary-btn" type="submit" ${local?'disabled':''}>${local?'请先启动本地服务':'进入工作台'}</button><div id="loginError" class="login-error">${local?'请在工作区运行 ./run.sh，然后访问 http://127.0.0.1:4173/':''}</div></form></div>`;$('#loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/login',{username:$('#loginUser').value,password:$('#loginPass').value});document.body.classList.remove('auth-locked');e.target.closest('#authScreen').remove();await refresh();switchView('calendar')}catch(err){$('#loginError').textContent=err.message}}}
+function showAuth(){meetingCancelCapture();meetingStopLive().catch(()=>{});if(typeof agentCancelVoice==='function')agentCancelVoice();document.body.classList.add('auth-locked');let e=$('#authScreen');if(!e){e=document.createElement('section');e.id='authScreen';document.body.prepend(e)}const local=location.protocol==='file:';e.innerHTML=`<div class="auth-card"><div class="brand"><span class="brand-mark">战</span><span>战略小组<br><strong>台账</strong></span></div><h1>登录工作台</h1><form id="loginForm"><label>账户<input id="loginUser" autocomplete="username" value="superadmin" required></label><label>密码<input id="loginPass" type="password" autocomplete="current-password" required></label><button class="primary-btn" type="submit" ${local?'disabled':''}>${local?'请先启动本地服务':'进入工作台'}</button><div id="loginError" class="login-error">${local?'请在工作区运行 ./run.sh，然后访问 http://127.0.0.1:4173/':''}</div></form></div>`;$('#loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/login',{username:$('#loginUser').value,password:$('#loginPass').value});document.body.classList.remove('auth-locked');e.target.closest('#authScreen').remove();await refresh();switchView('calendar')}catch(err){$('#loginError').textContent=err.message}}}
 /* Accounts that have signed in on this browser, newest first. The switcher
    offers only these, so it never lists the whole team to everyone. */
 const KNOWN_ACCOUNTS_KEY='wc-accounts';
@@ -353,6 +353,7 @@ async function refresh(){
   let next;
   try{next=await getState()}catch(e){if(e.status===401){showAuth();return}throw e}
   if(S.user?.id!==next.user.id){
+    meetingCancelCapture();
     if(S.user&&typeof agentResetUser==='function')agentResetUser();
     Object.assign(UI,{space:'',folder:'',view:'calendar',member:'all',filter:'all',selectedWeek:0,detailDate:null,timelineScroll:null,dayOffset:0});
   }
@@ -376,6 +377,8 @@ async function refreshInboxState(){
   return inboxRefreshPromise;
 }
 function switchView(view){
+  if(UI.view==='projects'&&view!=='projects'&&(meetingLive.session||meetingLive.active))return meetingStopLive().then(()=>switchView(view)).catch(e=>toast(e.message));
+  if(UI.view==='projects'&&view!=='projects'&&$('#meetingEditor')?.dataset?.dirty==='true'&&!confirm('会议修改尚未保存，确定离开？'))return;
   if(view==='summary')view='archive';
   if((view==='achievements'||view==='accounts'||view==='settings')&&!S.user?.admin){view='calendar'}
   const changed=UI.view!==view;
@@ -1010,11 +1013,13 @@ function renderProjectNav(){
   const tree=projectTree(),closed=closedFolders(),fresh=freshRefs(),admin=Boolean(S.user?.admin);
   const drag=(kind,item)=>canDragNav(kind,item)?' data-drag="1"':'';
   const project=(n,level,parent='')=>{
-    const p=n.item,on=UI.space===p.id;
-    return `<button class="project-nav-item nav-row${on?' is-on':''}" data-kind="project" data-id="${escapeHTML(p.id)}" `
+    const p=n.item,on=UI.space===p.id,open=UI.collapsedProjectNode!==p.id&&((UI.openProjectNodes||[]).includes(p.id)||on);
+    return `<div class="project-nav-project" data-node-level="${level}"><button type="button" class="project-node-caret" data-project-expand="${escapeHTML(p.id)}" aria-expanded="${open}" aria-label="${open?'收起':'展开'}「${escapeHTML(p.name)}」的内容">${icon('chevron-right')}</button>`
+      +`<button class="project-nav-item nav-row${on?' is-on':''}" data-kind="project" data-id="${escapeHTML(p.id)}" `
       +`data-level="${level}" data-parent="${escapeHTML(parent)}" data-space="${escapeHTML(p.id)}"${drag('project',p)}`
       +` title="${escapeHTML(p.name)}" aria-label="${escapeHTML(p.name)}"${on?' aria-current="page"':''}>${icon('gantt')}`
-      +`<span class="nav-text">${escapeHTML(p.name)}</span>${fresh.has(p.id)?'<em class="new-chip">新</em>':''}</button>`;
+      +`<span class="nav-text">${escapeHTML(p.name)}</span>${fresh.has(p.id)?'<em class="new-chip">新</em>':''}</button></div>`
+      +(open?projectNavContents(p):'');
   };
   const folder=n=>{
     const f=n.item,open=!closed.has(f.id),on=UI.folder===f.id&&!UI.space;
@@ -1036,6 +1041,17 @@ function renderProjectNav(){
     +((S.fileArchives||[]).length?`<div class="project-nav-label">归档文件</div>${S.fileArchives.map(p=>project({item:p},0)
       .replace(' nav-row','').replace(' data-drag="1"','')).join('')}`:'')+navigationHandle('project');
   $$('#projectNav [data-space]').forEach(b=>b.onclick=()=>{if(!navClickBlocked())openProjectSpace(b.dataset.space)});
+  $$('#projectNav [data-project-expand]').forEach(b=>b.onclick=()=>{
+    const ids=new Set(UI.openProjectNodes||[]),id=b.dataset.projectExpand;
+    if(ids.has(id))ids.delete(id);else ids.add(id);
+    if(UI.space===id&&b.getAttribute('aria-expanded')==='true'){UI.collapsedProjectNode=id}else UI.collapsedProjectNode=null;
+    UI.openProjectNodes=[...ids];renderProjectNav();
+  });
+  $$('#projectNav [data-project-area]').forEach(b=>b.onclick=async()=>{
+    const p=[...S.projects,...(S.fileArchives||[])].find(p=>p.id===b.dataset.project);if(!p)return;
+    if(UI.space!==p.id)await openProjectSpace(p.id);if(UI.space!==p.id)return;await projectArea(p,b.dataset.projectArea);
+    if(b.dataset.meeting&&UI.spaceArea==='meetings')openMeetingEditor(p,b.dataset.meeting);
+  });
   $$('#projectNav [data-folder]').forEach(b=>b.onclick=()=>{if(!navClickBlocked())toggleFolder(b.dataset.folder)});
   $$('#projectNav [data-open-folder]').forEach(b=>b.onclick=()=>{if(!navClickBlocked())openFolderView(b.dataset.openFolder)});
   $$('#projectNav [data-edit-folder]').forEach(b=>b.onclick=()=>editFolder(b.dataset.editFolder));
@@ -1044,6 +1060,13 @@ function renderProjectNav(){
     if(e.button===0&&e.pointerType!=='touch'&&!e.target.closest('.project-nav-edit'))startNavDrag(row,e);
   }));
   applyNavigationLayout();
+}
+function projectNavContents(p){
+  const files=(S.files||[]).filter(f=>f.projectId===p.id),meetings=(S.meetings||[]).filter(m=>m.projectId===p.id);
+  const entry=(area,label,extra='')=>`<button type="button" class="project-nav-resource" data-project="${escapeHTML(p.id)}" data-project-area="${area}" ${extra}>${icon(area==='meetings'?'chat':'file')}<span>${escapeHTML(label)}</span></button>`;
+  return `<div class="project-nav-resources">${entry('meetings',`会议 · ${meetings.length}`)}`
+    +meetings.map(m=>entry('meetings',m.title,`data-meeting="${escapeHTML(m.id)}"`)).join('')
+    +entry('files',`文件 · ${files.length}`)+files.map(f=>`<a class="project-nav-resource" href="/api/files/${encodeURIComponent(f.id)}" download="${escapeHTML(f.name)}">${icon('file')}<span>${escapeHTML(f.name)}</span></a>`).join('')+'</div>';
 }
 /* Where a drop at (x, y) would go. Over the middle of a folder a project goes
    into it; between rows it takes that gap, and where a gap could be either
@@ -1200,14 +1223,44 @@ async function commitNavMove(plan,ghost,into){
   finally{UI.navSaving=false}
 }
 function openFolderView(id){
+  if(meetingLive.session||meetingLive.active)return meetingStopLive().then(()=>openFolderView(id)).catch(e=>toast(e.message));
+  if($('#meetingEditor')?.dataset?.dirty==='true'&&!confirm('会议修改尚未保存，确定离开？'))return;
   UI.folder=id;UI.space='';setFolderClosed(id,false);
   if(UI.view!=='projects')switchView('projects');else renderProjects();
   $('.main-content')?.scrollTo?.({top:0,behavior:'smooth'});
 }
 function openProjectSpace(id){
+  if(meetingLive.session||meetingLive.active)return meetingStopLive().then(()=>openProjectSpace(id)).catch(e=>toast(e.message));
+  if(UI.space!==id&&$('#meetingEditor')?.dataset?.dirty==='true'&&!confirm('会议修改尚未保存，确定离开？'))return;
+  if(UI.space!==id){UI.spaceArea='overview';UI.collapsedProjectNode=null}
   UI.space=id||'';if(!id)UI.folder='';if(id)clearFresh([id]);
   if(UI.view!=='projects')switchView('projects');else renderProjects();
   $('.main-content')?.scrollTo?.({top:0,behavior:'smooth'});
+}
+function projectArea(p,area){
+  if(UI.space===p.id&&(UI.spaceArea||'overview')===area)return;
+  if(meetingLive.session||meetingLive.active)return meetingStopLive().then(()=>projectArea(p,area)).catch(e=>toast(e.message));
+  if($('#meetingEditor')?.dataset?.dirty==='true'&&!confirm('会议修改尚未保存，确定离开？'))return;
+  if(!['overview','meetings','files'].includes(area))return;
+  UI.spaceArea=area;openProjectSpace(p.id);renderProjectNav();
+}
+function projectSpaceTabs(p){
+  const area=UI.spaceArea||'overview';
+  return `<nav class="space-tabs" aria-label="项目内容">${[['overview','概览'],['meetings','会议'],['files','文件']].map(([id,label])=>
+    `<button type="button" class="space-tab${area===id?' is-on':''}" data-space-area="${id}"${area===id?' aria-current="page"':''}>${label}</button>`).join('')}</nav>`;
+}
+function bindSpaceTabs(p){$$('#projectSpace [data-space-area]').forEach(b=>b.onclick=()=>projectArea(p,b.dataset.spaceArea))}
+function projectMeetingList(p){
+  const meetings=(S.meetings||[]).filter(m=>m.projectId===p.id).sort((a,b)=>String(b.scheduledAt||b.createdAt).localeCompare(String(a.scheduledAt||a.createdAt)));
+  return meetings.map(m=>`<button type="button" class="meeting-row" data-meeting="${escapeHTML(m.id)}"><span class="meeting-icon">${icon('chat')}</span><span class="meeting-copy"><strong>${escapeHTML(m.title)}</strong><small>${escapeHTML(m.scheduledAt||'未安排')} · ${m.minutes?'已整理':'待整理'}</small></span>${icon('chevron-right')}</button>`).join('')||'<p class="muted space-empty">还没有会议</p>';
+}
+function projectMeetings(p,readonly=false){
+  return `<section class="space-section space-meetings"><div class="space-head"><h2>项目会议</h2>${!readonly&&canManageProject(p)?'<button type="button" class="secondary-btn" id="newProjectMeeting">新增会议</button>':''}</div>`
+    +`<div class="meeting-workspace"><div id="projectMeetingList" class="meeting-list">${projectMeetingList(p)}</div><div id="meetingEditor" class="meeting-detail"><p class="muted space-empty">选择一场会议</p></div></div></section>`;
+}
+function bindMeetingList(p){
+  $$('#projectMeetingList [data-meeting]').forEach(b=>b.onclick=()=>openMeetingEditor(p,b.dataset.meeting));
+  const add=$('#newProjectMeeting');if(add)add.onclick=()=>openMeetingEditor(p);
 }
 function editFolder(id){
   const f=(S.folders||[]).find(x=>x.id===id),count=f?S.projects.filter(p=>p.folderId===f.id).length:0;
@@ -1226,16 +1279,24 @@ function editFolder(id){
   if(drop)drop.onclick=async()=>{try{await act('folder.delete',{id:f.id});closeModal()}catch(e){}};
 }
 const MEETING_PROMPT_DEFAULT='你是会议纪要整理助手。请只根据原始转录整理，不要补造事实。输出简洁的 Markdown，包含：会议结论、待办事项（负责人/截止时间/事项）、风险与待确认问题。若原稿没有对应信息，写“未提及”。';
+function meetingMount(html){
+  const pane=UI.spaceArea==='meetings'&&UI.space?$('#meetingEditor'):null;
+  if(pane){pane.innerHTML=html;pane.dataset.dirty='false'}else openModal(html);
+}
 function openArchivedMeeting(p,id){
   const m=(S.meetings||[]).find(x=>x.id===id&&x.projectId===p.id);if(!m)return;
-  openModal(`<div class="eyebrow">${escapeHTML(p.name)} · 归档会议</div><h2>${escapeHTML(m.title)}</h2><p class="muted">${escapeHTML(m.scheduledAt||'未安排')} · ${escapeHTML((m.participants||[]).join('、'))}</p><p>${escapeHTML(m.agenda||'')}</p><label class="form-field">原始转录<textarea readonly rows="10">${escapeHTML(m.rawTranscript||'')}</textarea></label><section class="meeting-minutes-preview"><h3>会议纪要</h3><div class="meeting-minutes-body">${escapeHTML(m.minutes||'尚未生成')}</div></section><div class="modal-footer"><button type="button" class="secondary-btn" id="cancelAction">关闭</button></div>`);
-  $('#cancelAction').onclick=closeModal;
+  meetingMount(`<div class="eyebrow">${escapeHTML(p.name)} · 归档会议</div><h2>${escapeHTML(m.title)}</h2><p class="muted">${escapeHTML(m.scheduledAt||'未安排')} · ${escapeHTML((m.participants||[]).join('、'))}</p><p>${escapeHTML(m.agenda||'')}</p><label class="form-field">原始转录<textarea readonly rows="10">${escapeHTML(m.rawTranscript||'')}</textarea></label><section class="meeting-minutes-preview"><h3>会议纪要</h3><div class="meeting-minutes-body">${escapeHTML(m.minutes||'尚未生成')}</div></section><div class="modal-footer"><button type="button" class="secondary-btn" id="cancelAction">关闭</button></div>`);
+  $('#cancelAction').onclick=()=>{const pane=$('#meetingEditor');if(pane)pane.innerHTML='<p class="muted space-empty">选择一场会议</p>';else closeModal()};
 }
 function openMeetingEditor(p,meetingId=null){
+  if(meetingLive.session||meetingLive.active)return meetingStopLive().then(()=>openMeetingEditor(p,meetingId)).catch(e=>toast(e.message));
+  const oldPane=$('#meetingEditor');
+  if(oldPane?.dataset?.dirty==='true'&&!confirm('会议修改尚未保存，确定切换？'))return;
   if((S.fileArchives||[]).some(x=>x.id===p.id)){openArchivedMeeting(p,meetingId);return}
-  const current=meetingId?(S.meetings||[]).find(m=>m.id===meetingId):null,manage=canManageProject(p);if(!current&&!manage){toast('只有项目 Owner 或管理员可以新增会议');return}
+  const owner=S.user?.id,current=meetingId?(S.meetings||[]).find(m=>m.id===meetingId&&m.projectId===p.id):null,manage=canManageProject(p);if(meetingId&&!current){toast('会议已删除或无权访问');return}if(!current&&!manage){toast('只有项目 Owner 或管理员可以新增会议');return}
+  if(current)meetingLive.revisions.set(`${S.user?.id}:${current.id}`,current.revision||0);
   const m=current||{title:'',scheduledAt:'',participants:[],agenda:'',rawTranscript:'',minutes:'',status:'scheduled'};
-  openModal(`<div class="eyebrow">${escapeHTML(p.name)} · 项目会议</div><h2>${current?escapeHTML(m.title):'新增会议'}</h2><div class="meeting-editor-grid"><label class="form-field">会议名称<input id="meetingTitle" maxlength="120" value="${escapeHTML(m.title)}"></label><label class="form-field">安排时间<input id="meetingScheduledAt" type="datetime-local" value="${escapeHTML(m.scheduledAt||'')}"></label></div><label class="form-field">参会人（用逗号分隔）<input id="meetingParticipants" value="${escapeHTML((m.participants||[]).join('、'))}"></label><label class="form-field">会议议程<textarea id="meetingAgenda" rows="3">${escapeHTML(m.agenda||'')}</textarea></label><label class="form-field">原始转录<textarea id="meetingTranscript" rows="10" maxlength="200000" placeholder="可粘贴实时转录原稿，或使用下方实时录入">${escapeHTML(m.rawTranscript||'')}</textarea></label><div class="meeting-live-bar"><button type="button" class="secondary-btn" id="meetingLiveBtn">开始实时录入</button><span id="meetingLiveState" class="muted"></span></div><section class="meeting-minutes-preview"><div class="space-head"><h3>整理后的会议纪要</h3><button type="button" class="secondary-btn" id="generateMeetingMinutes" ${current&&m.rawTranscript?'':'disabled'}>根据模板生成</button></div><div id="meetingMinutes" class="meeting-minutes-body">${m.minutes?escapeHTML(m.minutes):'<span class="muted">尚未生成</span>'}</div></section><div class="modal-footer"><button type="button" class="secondary-btn" id="cancelAction">关闭</button><button type="button" class="primary-btn" id="saveMeeting">${current?'保存会议':'创建会议'}</button></div>`);
+  meetingMount(`<div class="eyebrow">${escapeHTML(p.name)} · 项目会议</div><h2>${current?escapeHTML(m.title):'新增会议'}</h2><div class="meeting-editor-grid"><label class="form-field">会议名称<input id="meetingTitle" maxlength="120" value="${escapeHTML(m.title)}"></label><label class="form-field">安排时间<input id="meetingScheduledAt" type="datetime-local" value="${escapeHTML(m.scheduledAt||'')}"></label></div><label class="form-field">参会人（用逗号分隔）<input id="meetingParticipants" value="${escapeHTML((m.participants||[]).join('、'))}"></label><label class="form-field">会议议程<textarea id="meetingAgenda" rows="3">${escapeHTML(m.agenda||'')}</textarea></label><label class="form-field">原始转录<textarea id="meetingTranscript" rows="10" maxlength="200000" placeholder="可粘贴实时转录原稿，或使用下方实时录入">${escapeHTML(m.rawTranscript||'')}</textarea></label><div class="meeting-live-bar"><button type="button" class="secondary-btn" id="meetingLiveBtn">开始实时录入</button><span id="meetingLiveState" class="muted"></span></div><section class="meeting-minutes-preview"><div class="space-head"><h3>整理后的会议纪要</h3><button type="button" class="secondary-btn" id="generateMeetingMinutes" ${current&&m.rawTranscript?'':'disabled'}>根据模板生成</button></div><div id="meetingMinutes" class="meeting-minutes-body">${m.minutes?escapeHTML(m.minutes):'<span class="muted">尚未生成</span>'}</div></section><div class="modal-footer"><button type="button" class="secondary-btn" id="cancelAction">关闭</button><button type="button" class="primary-btn" id="saveMeeting">${current?'保存会议':'创建会议'}</button></div>`);
   const text=$('#meetingTranscript'),save=$('#saveMeeting'),generate=$('#generateMeetingMinutes'),live=$('#meetingLiveBtn');
   const values=()=>({title:$('#meetingTitle').value.trim(),scheduledAt:$('#meetingScheduledAt').value,participants:$('#meetingParticipants').value.split(/[、,，]/).map(x=>x.trim()).filter(Boolean),agenda:$('#meetingAgenda').value});
   let busy=false;
@@ -1243,70 +1304,190 @@ function openMeetingEditor(p,meetingId=null){
   const persist=async()=>{
     const data=values();if(!data.title)throw new Error('请填写会议名称');
     await meetingStopLive();
-    const result=await api('/api/action',{action:m.id?'meeting.transcript.update':'meeting.create',data:{...(m.id?{id:m.id}:{projectId:p.id}),...data,rawTranscript:text.value}});
-    Object.assign(m,result);S.meetings=[...(S.meetings||[]).filter(x=>x.id!==m.id),m];return m;
+    const result=await api('/api/action',{action:m.id?'meeting.transcript.update':'meeting.create',data:{...(m.id?{id:m.id}:{projectId:p.id}),...data,rawTranscript:text.value,...(m.id?{expectedRevision:meetingLive.revisions.get(`${S.user?.id}:${m.id}`)??m.revision??0}:{})}});
+    if(S.user?.id!==owner)throw new Error('账户已切换');
+    Object.assign(m,result);meetingLive.revisions.set(`${S.user?.id}:${m.id}`,result.revision||0);const pane=$('#meetingEditor');if(pane){pane.dataset.dirty='false';pane.dataset.metadataDirty='false'}S.meetings=[...(S.meetings||[]).filter(x=>x.id!==m.id),m];return m;
   };
   const run=async(work)=>{if(busy)return;busy=true;sync();try{await work()}catch(e){toast(e.message)}finally{busy=false;sync()}};
-  $('#cancelAction').onclick=closeModal;text.addEventListener('input',sync);sync();
-  save.onclick=()=>run(async()=>{await persist();if(!text.isConnected)return;closeModal();renderProjectSpace(p.id);toast('会议已保存')});
+  const closeEditor=()=>{const pane=$('#meetingEditor');if(pane){pane.innerHTML='<p class="muted space-empty">选择一场会议</p>';pane.dataset.dirty='false'}else closeModal()};
+  const markDirty=e=>{const pane=$('#meetingEditor');if(pane){pane.dataset.dirty='true';if(e.target.id!=='meetingTranscript')pane.dataset.metadataDirty='true'}sync()};
+  ['#meetingTitle','#meetingScheduledAt','#meetingParticipants','#meetingAgenda','#meetingTranscript'].forEach(id=>$(id)?.addEventListener('input',markDirty));
+  $('#cancelAction').onclick=()=>run(async()=>{await persist();closeEditor();renderProjectSpace(p.id)});text.addEventListener('input',sync);sync();
+  save.onclick=()=>run(async()=>{await persist();if(!text.isConnected)return;const pane=$('#meetingEditor');if(pane)pane.dataset.dirty='false';else closeModal();renderProjectSpace(p.id);renderProjectNav();toast('会议已保存')});
   generate.onclick=()=>run(async()=>{
     generate.textContent='整理中…';
-    try{await persist();const updated=await api('/api/action',{action:'meeting.minutes.generate',data:{id:m.id}});Object.assign(m,updated);if(text.isConnected)$('#meetingMinutes').textContent=updated.minutes||'未生成';toast('会议纪要已生成')}
+    try{await persist();const updated=await api('/api/action',{action:'meeting.minutes.generate',data:{id:m.id}});if(S.user?.id!==owner)return;Object.assign(m,updated);if(text.isConnected)$('#meetingMinutes').textContent=updated.minutes||'未生成';toast('会议纪要已生成')}
     finally{generate.textContent='根据模板生成'}
   });
   live.onclick=()=>run(async()=>{
     if(meetingLive.active){await meetingStopLive();return}
-    if(!window.SpeechRecognition&&!window.webkitSpeechRecognition){toast('当前浏览器不支持实时语音识别，请粘贴转录原稿');return}
-    await persist();if(text.isConnected)meetingToggleLive(m.id,text);
+    if(meetingLive.session?.error){await meetingToggleLive(m.id,text);return}
+    await persist();if(text.isConnected)await meetingToggleLive(m.id,text);
   });
 }
-const meetingLive={recognition:null,meetingId:null,input:null,active:false,generation:0,saveTimer:null,pending:Promise.resolve()};
+const meetingLive={revisions:new Map(),session:null,recognition:null,meetingId:null,input:null,active:false,generation:0,saveTimer:null,pending:Promise.resolve()};
 function meetingSaveTranscript(id,input,recording){
-  const data={id,rawTranscript:input.value,recording};
-  const request=meetingLive.pending.then(()=>api('/api/action',{action:'meeting.transcript.update',data}));
+  const owner=S.user?.id,data={id,rawTranscript:input.value,recording};
+  const request=meetingLive.pending.then(async()=>{
+    if(owner!==S.user?.id)throw new Error('账户已切换');
+    const current=(S.meetings||[]).find(m=>m.id===id),key=`${owner}:${id}`;
+    if(current)data.expectedRevision=meetingLive.revisions.get(key)??current.revision??0;
+    const result=await api('/api/action',{action:'meeting.transcript.update',data});
+    if(owner===S.user?.id){meetingLive.revisions.set(key,result.revision||0);if(current)Object.assign(current,result);
+      const pane=$('#meetingEditor');if(pane&&pane.dataset.metadataDirty!=='true'&&input.value===data.rawTranscript)pane.dataset.dirty='false';
+    }
+    return result;
+  });
   meetingLive.pending=request.catch(e=>{toast(`原稿保存失败：${e.message}`)});return request;
 }
+/* Each clip is a complete recording, including its container header. The
+   next recorder starts before uploading; only three clips may be queued. */
+function meetingLiveStatus(text){const s=meetingLive.session;if(!s||s.owner===S.user?.id&&s.input.isConnected){const el=$('#meetingLiveState');if(el)el.textContent=text}}
+function meetingRelease(s){clearTimeout(s.timer);s.active=false;s.stream?.getTracks().forEach(t=>t.stop())}
+function meetingCancelCapture(){
+  const s=meetingLive.session;if(s){s.cancelled=true;meetingRelease(s);s.controller?.abort();if(s.recorder?.state==='recording')s.recorder.stop()}
+  const r=meetingLive.recognition;if(r){for(const k of ['onstart','onresult','onerror','onend'])r[k]=null;try{r.stop()}catch(_){}}
+  meetingLive.recognition=null;meetingLive.revisions.clear();if(meetingLive.saveTimer)clearTimeout(meetingLive.saveTimer);
+  Object.assign(meetingLive,{session:null,active:false,meetingId:null,input:null});meetingLive.generation++;
+}
+async function meetingDrain(s){
+  if(s.draining)return s.draining;
+  s.error=null;
+  s.draining=(async()=>{
+    while(s.queue.length&&!s.cancelled&&s.owner===S.user?.id){
+      const clip=s.queue[0];
+      if(clip.text===undefined){
+        s.controller=new AbortController();
+        const r=await apiBlob('/api/transcribe',clip.blob,{signal:s.controller.signal});
+        if(s.cancelled||s.owner!==S.user?.id)return;
+        clip.text=String(r.text||'').trim();
+      }
+      if(!clip.appended&&clip.text){
+        s.input.value+=(s.input.value?'\n':'')+clip.text;s.input.dispatchEvent(new Event('input',{bubbles:true}));clip.appended=true;
+      }
+      await meetingSaveTranscript(s.id,s.input,s.active);
+      if(s.cancelled||s.owner!==S.user?.id)return;
+      s.queue.shift();meetingLiveStatus(s.active?'正在录入 · 原稿已保存':'原稿已保存');
+      if(!s.active&&!s.queue.length)$('#meetingLiveBtn')?.replaceChildren(document.createTextNode('继续实时录入'));
+    }
+  })().catch(e=>{
+    if(s.cancelled)return;
+    s.error=e;meetingRelease(s);if(s.recorder?.state==='recording')s.recorder.stop();
+    meetingLive.active=false;meetingLiveStatus(`录入已暂停，${s.queue.length} 段待重试：${e.message}`);
+    $('#meetingLiveBtn')?.replaceChildren(document.createTextNode('重试转写'));
+  }).finally(()=>{s.draining=null});
+  return s.draining;
+}
+function meetingRecordClip(s){
+  if(!s.active||s.cancelled)return;
+  const mime=['audio/webm;codecs=opus','audio/webm','audio/mp4'].find(t=>MediaRecorder.isTypeSupported?.(t))||'';
+  const r=mime?new MediaRecorder(s.stream,{mimeType:mime}):new MediaRecorder(s.stream),parts=[];s.recorder=r;
+  s.clipDone=new Promise(resolve=>{
+    r.ondataavailable=e=>{if(e.data?.size)parts.push(e.data)};
+    r.onstop=()=>{
+      clearTimeout(s.timer);
+      if(!s.cancelled&&parts.length){
+        s.queue.push({blob:new Blob(parts,{type:r.mimeType||parts[0].type||'audio/webm'})});
+        if(s.queue.length>=3){meetingRelease(s);meetingLive.active=false;meetingLiveStatus('转写较慢，已暂停录音，正在处理剩余片段')}
+        if(s.active){try{meetingRecordClip(s)}catch(e){s.error=e;meetingRelease(s);meetingLive.active=false}}
+        // A failure keeps the audio in memory. Explicit retry resumes this queue.
+        if(!s.error)meetingDrain(s);
+      }
+      resolve();
+    };
+    r.onerror=()=>{s.error=new Error('录音中断');meetingRelease(s);meetingLive.active=false;meetingLiveStatus('录音中断，请停止并重试')};
+  });
+  r.start();s.timer=setTimeout(()=>{if(r.state==='recording')r.stop()},4000);
+}
+async function meetingStopServerLive(){
+  const s=meetingLive.session;if(!s)return;
+  meetingRelease(s);meetingLive.active=false;
+  if(s.recorder?.state==='recording')s.recorder.stop();
+  await s.clipDone;await s.draining;
+  if(s.cancelled)return;
+  if(s.error||s.queue.length)throw s.error||new Error('还有录音片段未处理，请重试转写');
+  await meetingSaveTranscript(s.id,s.input,false);
+  if(meetingLive.session===s)Object.assign(meetingLive,{session:null,meetingId:null,input:null});
+  meetingLiveStatus('原稿已保存');$('#meetingLiveBtn')?.replaceChildren(document.createTextNode('开始实时录入'));
+}
+async function meetingToggleLive(id,input){
+  if(meetingLive.session){
+    const s=meetingLive.session;
+    if(s.error){s.error=null;await meetingDrain(s)}
+    return meetingStopServerLive();
+  }
+  if(meetingLive.active)return meetingStopLive();
+  const owner=S.user?.id;
+  const status=await api('/api/action',{action:'speech.status',data:{}});
+  if(owner!==S.user?.id||!input.isConnected)return;
+  if(!status.configured)return meetingToggleBrowserLive(id,input);
+  if(!navigator.mediaDevices?.getUserMedia||typeof MediaRecorder!=='function')throw new Error('当前浏览器不支持录音，请使用 HTTPS 或本机地址');
+  const generation=++meetingLive.generation;
+  const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+  if(owner!==S.user?.id||!input.isConnected||generation!==meetingLive.generation){stream.getTracks().forEach(t=>t.stop());return}
+  const s={id,input,owner,stream,active:true,queue:[],cancelled:false};meetingLive.session=s;
+  Object.assign(meetingLive,{meetingId:id,input,active:true});
+  try{await meetingSaveTranscript(id,input,true);if(s.cancelled||s.owner!==S.user?.id)return;meetingRecordClip(s);meetingLiveStatus('正在实时录入…');$('#meetingLiveBtn')?.replaceChildren(document.createTextNode('停止实时录入'))}
+  catch(e){meetingCancelCapture();meetingLive.active=false;throw e}
+}
+
 function meetingScheduleSave(){
   clearTimeout(meetingLive.saveTimer);const {meetingId,input}=meetingLive;if(!meetingId||!input)return;
   meetingLive.saveTimer=setTimeout(()=>meetingSaveTranscript(meetingId,input,meetingLive.active).catch(()=>{}),1200);
 }
 function meetingStopLive(){
+  if(meetingLive.session)return meetingStopServerLive();
   if(!meetingLive.meetingId&&!meetingLive.recognition)return meetingLive.pending;
   meetingLive.generation++;clearTimeout(meetingLive.saveTimer);
-  const {recognition:r,meetingId,input}=meetingLive;
+  const {recognition:r,meetingId,input,interim}=meetingLive;
+  if(interim&&input){input.value+=(input.value?'\n':'')+interim;input.dispatchEvent(new Event('input',{bubbles:true}))}
+  meetingLive.interim='';
   Object.assign(meetingLive,{recognition:null,active:false,meetingId:null,input:null});
   if(r){for(const k of ['onstart','onresult','onerror','onend'])r[k]=null;try{r.stop()}catch(_){}}
   if(!meetingId||!input)return meetingLive.pending;
   $('#meetingLiveBtn')?.replaceChildren(document.createTextNode('开始实时录入'));
   const state=$('#meetingLiveState');if(state)state.textContent='正在保存…';
-  return meetingSaveTranscript(meetingId,input,false).then(()=>{if(input.isConnected&&state)state.textContent='已保存'}).catch(()=>{if(input.isConnected&&state)state.textContent='保存失败，请点击保存会议重试'});
+  return meetingSaveTranscript(meetingId,input,false).then(()=>{if(input.isConnected&&state)state.textContent='已保存'}).catch(()=>{if(input.isConnected&&state)state.textContent='保存失败，请点击保存会议重试';throw new Error('会议原稿未保存，请重试')});
 }
-function meetingToggleLive(id,input){
+function meetingToggleBrowserLive(id,input){
   if(meetingLive.active){meetingStopLive();return}
   const Engine=window.SpeechRecognition||window.webkitSpeechRecognition;
   if(!Engine){toast('当前浏览器不支持实时语音识别，请粘贴转录原稿');return}
-  const generation=++meetingLive.generation,r=new Engine();Object.assign(meetingLive,{recognition:r,meetingId:id,input,active:true,generation});
+  const generation=++meetingLive.generation,r=new Engine();Object.assign(meetingLive,{recognition:r,meetingId:id,input,active:true,generation,interim:''});
   r.lang=agentVoiceLang?.()||'zh-CN';r.continuous=true;r.interimResults=true;
   r.onstart=()=>{if(generation!==meetingLive.generation)return;$('#meetingLiveBtn')?.replaceChildren(document.createTextNode('停止实时录入'));if($('#meetingLiveState'))$('#meetingLiveState').textContent='正在实时录入…'};
   r.onresult=e=>{
     if(generation!==meetingLive.generation)return;let final='',interim='';
     for(let i=e.resultIndex;i<e.results.length;i++){const t=e.results[i][0]?.transcript||'';e.results[i].isFinal?final+=t:interim+=t}
+    meetingLive.interim=interim;
     if(final){input.value+=(input.value?'\n':'')+final;input.dispatchEvent(new Event('input',{bubbles:true}));meetingScheduleSave()}
     if($('#meetingLiveState'))$('#meetingLiveState').textContent=interim?`正在识别：${interim}`:'正在实时录入…';
   };
-  r.onerror=e=>{if(generation!==meetingLive.generation)return;meetingStopLive();toast(e.error==='not-allowed'?'没有麦克风权限':'实时识别中断')};
-  r.onend=()=>{if(generation===meetingLive.generation&&meetingLive.active){try{r.start()}catch(_){meetingStopLive()}}};
-  try{r.start()}catch(_){meetingStopLive();toast('实时识别未能启动')}
+  r.onerror=e=>{if(generation!==meetingLive.generation)return;meetingStopLive().catch(()=>{});toast(e.error==='not-allowed'?'没有麦克风权限':'实时识别中断')};
+  r.onend=()=>{if(generation===meetingLive.generation&&meetingLive.active){try{r.start()}catch(_){meetingStopLive().catch(()=>{})}}};
+  try{r.start()}catch(_){meetingStopLive().catch(()=>{});toast('实时识别未能启动')}
 }
 
 function renderProjectSpace(id){
   const archive=(S.fileArchives||[]).find(x=>x.id===id),p=S.projects.find(x=>x.id===id)||archive,box=$('#projectSpace');if(!p||!box)return;
+  const area=UI.spaceArea||'overview';
+  if(area!=='overview'){
+    $('#projectsView h1').textContent=p.name;
+    $('#projectsView .eyebrow').textContent=archive?'项目空间 · 归档':'项目空间';
+    if(area==='meetings'&&box.dataset.meetingProject===id&&box.dataset.meetingOwner===S.user?.id&&box.dataset.readonly===String(Boolean(archive))&&$('#meetingEditor')){
+      $('#projectMeetingList').innerHTML=projectMeetingList(p);bindMeetingList(p);return;
+    }
+    box.innerHTML=projectSpaceTabs(p)+(area==='meetings'?projectMeetings(p,Boolean(archive)):projectFiles(p,Boolean(archive)));
+    box.dataset.meetingProject=area==='meetings'?id:'';box.dataset.meetingOwner=S.user?.id;box.dataset.readonly=String(Boolean(archive));
+    bindSpaceTabs(p);if(area==='meetings')bindMeetingList(p);else bindProjectSpace(p);return;
+  }
+  box.dataset.meetingProject='';
   if(archive){
     $('#projectsView .eyebrow').textContent='项目空间 · 归档文件';$('#projectsView h1').textContent=p.name;
-    box.innerHTML=`<section class="space-section"><div class="space-head"><h2>项目文件归档</h2></div>`
+    box.innerHTML=projectSpaceTabs(p)+`<section class="space-section"><div class="space-head"><h2>项目文件归档</h2></div>`
       +`<p class="muted">${escapeHTML(projectStatus(p))} · Owner ${escapeHTML(nameOf(p.owner))}。文件与会议保留供项目成员读取。</p></section>`
       +projectFiles(p,true);
-    $$('#projectSpace .meeting-row').forEach(b=>b.onclick=()=>openArchivedMeeting(p,b.dataset.meeting));return;
+    bindSpaceTabs(p);return;
   }
   const manage=canManageProject(p),folder=(S.folders||[]).find(f=>f.id===p.folderId);
   /* 申请项目 / 新建项目 is for the overview; inside one project it only repeats the top bar. */
@@ -1314,10 +1495,10 @@ function renderProjectSpace(id){
   $('#projectsView .eyebrow').textContent=`项目空间 · ${folder?folder.name:'未归类'}`;
 
   $('#projectsView h1').textContent=p.name;
-  box.innerHTML=(p.desc?`<p class="space-description">${escapeHTML(p.desc)}</p>`:'')+projectLifecycle(p,manage)+projectBackground(p,manage)+projectStaffing(p,manage)
+  box.innerHTML=projectSpaceTabs(p)+(p.desc?`<p class="space-description">${escapeHTML(p.desc)}</p>`:'')+projectLifecycle(p,manage)+projectBackground(p,manage)+projectStaffing(p,manage)
     +`<section class="space-section space-tasks"><div class="space-head"><h2>项目任务</h2></div>${projectCardHTML(p,true)}</section>`
     +projectFiles(p);
-  bindProjectCards();bindProjectSpace(p);
+  bindSpaceTabs(p);bindProjectCards();bindProjectSpace(p);
 }
 /* 项目周期: 立项 → 执行 → 结项, with how far the dates and the work have come. */
 function projectLifecycle(p,manage){
@@ -1381,12 +1562,9 @@ function projectFiles(p,readonly=false){
     +`${escapeHTML(nameOf(f.uploader))} · <span title="${escapeHTML(f.createdAt)}">${escapeHTML(relTime(f.createdAt))}</span></small>`
     +`${canDrop(f)?`<button class="ghost-btn file-delete" data-file="${escapeHTML(f.id)}" aria-label="删除 ${escapeHTML(f.name)}">`
     +`${icon('x')}</button>`:''}</div>`;
-  const meetings=(S.meetings||[]).filter(m=>m.projectId===p.id).sort((a,b)=>String(b.scheduledAt||b.createdAt).localeCompare(String(a.scheduledAt||a.createdAt)));
-  const meetingRow=m=>`<button type="button" class="meeting-row" data-meeting="${escapeHTML(m.id)}"><span class="meeting-icon">${icon('chat')}</span><span class="meeting-copy"><strong>${escapeHTML(m.title)}</strong><small>${escapeHTML(m.scheduledAt||'未安排')} · ${m.minutes?'已整理':'待整理'} · 原稿 ${m.rawTranscript?`${m.rawTranscript.length} 字`:'空'}</small></span><span class="meeting-arrow">${icon('chevron-right')}</span></button>`;
-  return `<section class="space-section space-files" id="spaceFiles"><div class="space-head"><h2>项目文件 <span>${files.length+meetings.length}</span></h2>`
+  return `<section class="space-section space-files" id="spaceFiles"><div class="space-head"><h2>项目文件 <span>${files.length}</span></h2>`
     +`${readonly?'':`<details class="space-file-create" id="fileCreateMenu"><summary class="secondary-btn">${icon('plus')}新增文件</summary><div class="space-file-options"><button type="button" id="uploadFileFromMenu">${icon('upload')}上传文件</button>${canManageProject(p)?`<button type="button" id="createMeetingFromFiles">${icon('chat')}新增会议</button>`:''}</div></details><input type="file" id="spaceFileInput" multiple hidden>`}</div>`
     +`${files.length?`<div class="file-list">${files.map(row).join('')}</div>`:''}`
-    +`${meetings.length?`<div class="meeting-list project-file-meetings">${meetings.map(meetingRow).join('')}</div>`:''}`
     +`<p class="space-drop-hint">${readonly?'附件可下载，会议可只读查看。':`拖入文件，或从「新增文件」上传。单个文件不超过 ${MAX_FILE_MB}MB。`}</p></section>`;
 }
 async function uploadProjectFiles(p,list){
@@ -1432,7 +1610,7 @@ function bindProjectSpace(p){
   const input=$('#spaceFileInput');if(input)input.onchange=()=>{uploadProjectFiles(p,input.files);input.value=''};
   const menu=$('#fileCreateMenu');const upload=$('#uploadFileFromMenu');if(upload)upload.onclick=()=>{menu.open=false;input.click()};
   if(menu)menu.onkeydown=e=>{if(e.key==='Escape'){menu.open=false;menu.querySelector('summary').focus()}};
-  const addMeeting=$('#createMeetingFromFiles');if(addMeeting)addMeeting.onclick=()=>{menu.open=false;openMeetingEditor(p)};
+  const addMeeting=$('#createMeetingFromFiles');if(addMeeting)addMeeting.onclick=async()=>{menu.open=false;await projectArea(p,'meetings');if(UI.spaceArea==='meetings')openMeetingEditor(p)};
   $$('#projectSpace .meeting-row').forEach(b=>b.onclick=()=>openMeetingEditor(p,b.dataset.meeting));
   $$('#projectSpace .file-delete').forEach(b=>b.onclick=async()=>{
     const f=S.files.find(x=>x.id===b.dataset.file);
@@ -2514,7 +2692,7 @@ async function act(action,data,{quiet=false}={}){try{await api('/api/action',{ac
 function restorePanelFocus(target){
   if(target?.isConnected&&!target.closest('.hidden'))target.focus?.({preventScroll:true});
 }
-function openModal(html){meetingStopLive();if($('#modalBackdrop').classList.contains('hidden'))UI.modalReturnFocus=document.activeElement;UI.docDirty=false;if(UI.briefSource){UI.briefSource.closest('.archive-file')?.classList.remove('is-out');UI.briefSource=null}UI.briefTyping?.finish();UI.briefTyping=null;document.querySelectorAll('.brief-folder').forEach(x=>x.remove());['#modalBackdrop','#modalBackdrop .modal','#modalContent'].forEach(s=>$(s)?.getAnimations?.().forEach(a=>a.cancel()));$('#modalContent').innerHTML=html;$('#modalBackdrop .modal')?.classList?.remove('is-wide','is-flown');$('#modalBackdrop').classList.remove('hidden')};function closeModal(){if(UI.docDirty&&!confirm('修改还没保存，确定关闭？'))return;meetingStopLive();UI.docDirty=false;if(typeof foldBrief==='function'&&foldBrief())return;$('#modalBackdrop').classList.add('hidden');restorePanelFocus(UI.modalReturnFocus)};function closeDrawer(){$('#taskDrawer').classList.add('hidden');restorePanelFocus(UI.drawerReturnFocus)}
+function openModal(html){meetingStopLive().catch(e=>toast(e.message));if($('#modalBackdrop').classList.contains('hidden'))UI.modalReturnFocus=document.activeElement;UI.docDirty=false;if(UI.briefSource){UI.briefSource.closest('.archive-file')?.classList.remove('is-out');UI.briefSource=null}UI.briefTyping?.finish();UI.briefTyping=null;document.querySelectorAll('.brief-folder').forEach(x=>x.remove());['#modalBackdrop','#modalBackdrop .modal','#modalContent'].forEach(s=>$(s)?.getAnimations?.().forEach(a=>a.cancel()));$('#modalContent').innerHTML=html;$('#modalBackdrop .modal')?.classList?.remove('is-wide','is-flown');$('#modalBackdrop').classList.remove('hidden')};function closeModal(){if(UI.docDirty&&!confirm('修改还没保存，确定关闭？'))return;meetingStopLive().catch(e=>toast(e.message));UI.docDirty=false;if(typeof foldBrief==='function'&&foldBrief())return;$('#modalBackdrop').classList.add('hidden');restorePanelFocus(UI.modalReturnFocus)};function closeDrawer(){$('#taskDrawer').classList.add('hidden');restorePanelFocus(UI.drawerReturnFocus)}
 function newTask(projectId,initialDate){
   const admin=Boolean(S.user.admin),paths=taskProjects(),projects=paths.map(x=>x.p),temp=tempTaskMode(),locked=typeof projectId==='string';
   if(!projects.length&&temp==='none'){toast('你所在的规则组不能新建任务');return}
@@ -3342,6 +3520,7 @@ function renderInboxToolbar(){
 }
 function openSearch(){openModal(`<div class="eyebrow">工作台搜索</div><h2>搜索任务与项目</h2><label class="form-field">关键词<input id="searchQuery" placeholder="搜索"></label><div id="searchResults" class="search-results"><span class="muted">输入关键词开始搜索</span></div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">关闭</button></div>`);$('#cancelAction').onclick=closeModal;const input=$('#searchQuery'),results=$('#searchResults');input.oninput=()=>{const q=input.value.trim().toLowerCase();if(!q){results.innerHTML='<span class="muted">输入关键词开始搜索</span>';return}const ts=(S.user?.admin?S.tasks.filter(t=>!isSuperseded(t)):scheduleTasks()).filter(t=>[t.name,t.assignee,projectName(t)].some(v=>String(v||'').toLowerCase().includes(q)));const ps=S.projects.filter(p=>[p.name,p.owner,p.desc].some(v=>String(v||'').toLowerCase().includes(q)));results.innerHTML=ts.map(t=>`<button class="search-result" data-task="${escapeHTML(t.id)}"><strong>${escapeHTML(t.name)}</strong><small>${escapeHTML(t.assignee)} · ${escapeHTML(projectName(t))}</small></button>`).join('')+ps.map(p=>`<button class="search-result" data-project="${escapeHTML(p.id)}"><strong>${escapeHTML(p.name)}</strong><small>Owner · ${escapeHTML(p.owner)} · ${projectStatus(p)}</small></button>`).join('')||'<span class="muted">没有找到匹配项</span>';$$('.search-result').forEach(b=>b.onclick=()=>{if(b.dataset.task)openDrawer(b.dataset.task);else{closeModal();switchView('projects')}})};input.focus()}
 $$('.nav-item').forEach(b=>b.onclick=()=>switchView(b.dataset.view));
+window.addEventListener('beforeunload',e=>{if(meetingLive.session||meetingLive.active||$('#meetingEditor')?.dataset?.dirty==='true'){e.preventDefault();e.returnValue=''}});
 $('#workspaceSwitcher')?.addEventListener('click',()=>toggleAccountMenu());
 $('#workspaceSwitcher')?.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggleAccountMenu()}});
 document.addEventListener('click',e=>{

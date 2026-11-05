@@ -56,6 +56,24 @@ class MeetingTests(unittest.TestCase):
         self.assertEqual(updated['status'], 'recording')
         self.assertEqual(self.store.get('meetings', meeting['id'])['rawTranscript'], '确认周五发布')
 
+    def test_live_save_rejects_stale_revision_without_losing_another_edit(self):
+        m = self.store.action(self.admin, 'meeting.create', {'projectId': self.project['id'], 'title': '周会'})
+        first = self.store.action(self.admin, 'meeting.transcript.update', {'id': m['id'], 'expectedRevision': 0, 'rawTranscript': '第一段', 'recording': True})
+        self.assertEqual(first['revision'], 1)
+        with self.assertRaises(Problem) as error:
+            self.store.action(self.member, 'meeting.transcript.update', {'id': m['id'], 'expectedRevision': 0, 'rawTranscript': '旧页面'})
+        self.assertEqual(error.exception.status, 409)
+        self.assertEqual(self.store.get('meetings', m['id'])['rawTranscript'], '第一段')
+        final = self.store.action(self.admin, 'meeting.transcript.update', {'id': m['id'], 'expectedRevision': 1, 'rawTranscript': '第一段\n尾段', 'recording': False})
+        self.assertEqual((final['revision'], final['status']), (2, 'ended'))
+
+    def test_transcript_revision_still_requires_project_access(self):
+        self.store.create_user('outsider', 'password-long', False)
+        m = self.store.action(self.admin, 'meeting.create', {'projectId': self.project['id'], 'title': '周会'})
+        with self.assertRaises(Problem):
+            self.store.action(self.store.user('outsider'), 'meeting.transcript.update', {'id': m['id'], 'expectedRevision': 0, 'rawTranscript': '越权'})
+        self.assertEqual(self.store.get('meetings', m['id'])['rawTranscript'], '')
+
     def test_minutes_generation_uses_template_and_keeps_raw_transcript(self):
         self.store.action(self.admin, 'meeting.prompt.update', {'prompt': '标题={{title}}\n议程={{agenda}}\n原稿={{transcript}}'})
         meeting = self.store.action(self.admin, 'meeting.create', {'projectId': self.project['id'], 'title': '周会', 'agenda': '发布计划'})
