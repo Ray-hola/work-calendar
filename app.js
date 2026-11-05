@@ -1304,16 +1304,17 @@ function openMeetingEditor(p,meetingId=null){
   const persist=async()=>{
     const data=values();if(!data.title)throw new Error('请填写会议名称');
     await meetingStopLive();
-    const result=await api('/api/action',{action:m.id?'meeting.transcript.update':'meeting.create',data:{...(m.id?{id:m.id}:{projectId:p.id}),...data,rawTranscript:text.value,...(m.id?{expectedRevision:meetingLive.revisions.get(`${S.user?.id}:${m.id}`)??m.revision??0}:{})}});
+    const transcript=text.value;
+    const result=await api('/api/action',{action:m.id?'meeting.transcript.update':'meeting.create',data:{...(m.id?{id:m.id}:{projectId:p.id}),...data,rawTranscript:transcript,...(m.id?{expectedRevision:meetingLive.revisions.get(`${S.user?.id}:${m.id}`)??m.revision??0}:{})}});
     if(S.user?.id!==owner)throw new Error('账户已切换');
-    Object.assign(m,result);meetingLive.revisions.set(`${S.user?.id}:${m.id}`,result.revision||0);const pane=$('#meetingEditor');if(pane){pane.dataset.dirty='false';pane.dataset.metadataDirty='false'}S.meetings=[...(S.meetings||[]).filter(x=>x.id!==m.id),m];return m;
+    Object.assign(m,result);meetingLive.revisions.set(`${S.user?.id}:${m.id}`,result.revision||0);const pane=$('#meetingEditor');if(pane){const metadataChanged=JSON.stringify(values())!==JSON.stringify(data);pane.dataset.dirty=String(metadataChanged||text.value!==transcript);pane.dataset.metadataDirty=String(metadataChanged)}S.meetings=[...(S.meetings||[]).filter(x=>x.id!==m.id),m];return m;
   };
   const run=async(work)=>{if(busy)return;busy=true;sync();try{await work()}catch(e){toast(e.message)}finally{busy=false;sync()}};
   const closeEditor=()=>{const pane=$('#meetingEditor');if(pane){pane.innerHTML='<p class="muted space-empty">选择一场会议</p>';pane.dataset.dirty='false'}else closeModal()};
   const markDirty=e=>{const pane=$('#meetingEditor');if(pane){pane.dataset.dirty='true';if(e.target.id!=='meetingTranscript')pane.dataset.metadataDirty='true'}sync()};
   ['#meetingTitle','#meetingScheduledAt','#meetingParticipants','#meetingAgenda','#meetingTranscript'].forEach(id=>$(id)?.addEventListener('input',markDirty));
-  $('#cancelAction').onclick=()=>run(async()=>{await persist();closeEditor();renderProjectSpace(p.id)});text.addEventListener('input',sync);sync();
-  save.onclick=()=>run(async()=>{await persist();if(!text.isConnected)return;const pane=$('#meetingEditor');if(pane)pane.dataset.dirty='false';else closeModal();renderProjectSpace(p.id);renderProjectNav();toast('会议已保存')});
+  $('#cancelAction').onclick=()=>run(async()=>{await persist();if($('#meetingEditor')?.dataset?.dirty==='true'){toast('已保存提交版本，仍有未保存修改');return}closeEditor();renderProjectSpace(p.id)});text.addEventListener('input',sync);sync();
+  save.onclick=()=>run(async()=>{await persist();if(!text.isConnected)return;const pane=$('#meetingEditor');if(!pane)closeModal();renderProjectSpace(p.id);renderProjectNav();toast('会议已保存')});
   generate.onclick=()=>run(async()=>{
     generate.textContent='整理中…';
     try{await persist();const updated=await api('/api/action',{action:'meeting.minutes.generate',data:{id:m.id}});if(S.user?.id!==owner)return;Object.assign(m,updated);if(text.isConnected)$('#meetingMinutes').textContent=updated.minutes||'未生成';toast('会议纪要已生成')}
