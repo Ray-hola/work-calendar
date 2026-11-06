@@ -4373,7 +4373,7 @@ class Store:
             elif done and not t.get('carriedCompletion') and not t.get('stackCompletedBy') and start<=day(t.get('completedAt'),t.get('date',''))<=cutoff:
                 result['completed'].append({**base,'completedOn':day(t.get('completedAt'),t.get('date','')),
                     'summary':t.get('completionSummary',''),'feeling':t.get('completionFeeling',''),
-                    'followup':'','actual':t.get('completionActual',t.get('duration',0)),'reopened':False})
+                    'followup':'','actual':t.get('completionActual') or 0,'reopened':False})
             if not done and not skipped:
                 remaining=next((l for l in reversed(logs) if l.get('kind') in ('defer','reopen')), {})
                 result['unfinished'].append({**base,'remaining':remaining.get('remaining') or t.get('desc') or t.get('name',''),

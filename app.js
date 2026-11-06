@@ -3803,7 +3803,7 @@ function weekReportDocument(week){
     +`<h2>${esc(fmt(week.start))} — ${esc(fmt(week.end))}</h2><p class="muted">截至 ${esc(fmt(work.asOf||week.end))}</p>`
     +`<div class="brief-stats"><div><b data-count="${done.length}">${done.length}</b><span>本周完成</span></div>`
     +`<div><b data-count="${pending.length}">${pending.length}</b><span>待继续</span></div>`
-    +`<div><b>${hours(totals)}h</b><span>完成实际工时</span></div></div></header>`
+    +`<div><b>${hours(totals)}h</b><span>已记录实际工时</span></div></div></header>`
     +`<section class="brief-section"><h3>这周做了什么</h3>${completed?`<ul class="week-work-list">${completed}</ul>`:'<p class="muted">本周暂无已记录的完成任务</p>'}`
     +`<h4>大家的反馈</h4>${feedback?`<ul class="week-work-list">${feedback}</ul>`:'<p class="muted">暂无已提交的反馈</p>'}</section>`
     +`<section class="brief-section"><h3>这周没做完，下周继续</h3>${unfinished?`<ul class="week-work-list">${unfinished}</ul>`:'<p class="muted">暂无待继续的任务</p>'}</section>`

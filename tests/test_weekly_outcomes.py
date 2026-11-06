@@ -59,3 +59,7 @@ class WeeklyOutcomesTests(unittest.TestCase):
         self.s.put('reports',{'id':'r','kind':'owner','projectId':'p','author':'member','date':'2026-11-03','content':{'progress':'原进展'}})
         w=self.s.week_work('2026-10-31','2026-11-06',[{'date':'2026-11-03','content':{'projects':[{'id':'p','name':'项目','owner':'member','edited':True,'content':{'progress':'修订进展'}}]}}])
         self.assertEqual(len(w['feedback']),1);self.assertEqual(w['feedback'][0]['content'],{'progress':'修订进展'})
+
+    def test_legacy_completion_never_reports_estimate_as_actual_time(self):
+        self.task('a',status='done',duration=120,completedAt='2026-11-03T12:00:00+08:00')
+        self.assertEqual(self.week()['completed'][0]['actual'],0)
