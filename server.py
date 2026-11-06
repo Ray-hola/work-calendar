@@ -140,6 +140,7 @@ MAX_AUDIO_BYTES = 8_000_000
 # snapshot never carries them; only the list of files travels with the state.
 # Like the audio route, the bound is raised per-route in do_POST.
 FILES_PATH = '/api/files'
+FILE_TEXT_PATH = FILES_PATH + '/text'
 MAX_FILE_BYTES = 20_000_000
 TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'task_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages', 'messages', 'folders', 'files', 'agent_conversations', 'agent_drafts', 'agent_receipts', 'meetings')
 
@@ -585,10 +586,13 @@ class Store:
         title = required(data, 'title')[:120]
         participants = data.get('participants') if isinstance(data.get('participants'), list) else []
         participants = [str(x).strip() for x in participants if str(x).strip()][:50]
+        minutes = str(data.get('minutes') or '')
+        if len(minutes) > 50000:
+            raise Problem(400, '会议纪要不能超过 50000 字')
         record = {'projectId': project_id, 'title': title,
                   'scheduledAt': str(data.get('scheduledAt') or '').strip()[:40],
                   'participants': participants, 'agenda': str(data.get('agenda') or '').strip()[:10000],
-                  'rawTranscript': str(data.get('rawTranscript') or '')[:200000], 'minutes': '',
+                  'rawTranscript': str(data.get('rawTranscript') or '')[:200000], 'minutes': minutes,
                   'status': 'recording' if data.get('rawTranscript') else 'scheduled', 'createdBy': user['id'], 'createdAt': timestamp(), 'updatedAt': timestamp()}
         return self.put('meetings', record)
 
@@ -603,6 +607,11 @@ class Store:
         meeting['rawTranscript'] = text
         for key, limit in (('title', 120), ('agenda', 10000), ('scheduledAt', 40)):
             if key in data: meeting[key] = str(data.get(key) or '').strip()[:limit]
+        if 'minutes' in data:
+            minutes = str(data.get('minutes') or '')
+            if len(minutes) > 50000:
+                raise Problem(400, '会议纪要不能超过 50000 字')
+            meeting['minutes'] = minutes
         if isinstance(data.get('participants'), list): meeting['participants'] = [str(x).strip() for x in data['participants'] if str(x).strip()][:50]
         meeting['status'] = 'recording' if data.get('recording') else ('ended' if meeting.get('status') == 'recording' else meeting.get('status', 'scheduled'))
         meeting['updatedAt'] = timestamp()
@@ -2032,6 +2041,23 @@ class Store:
             if not row:raise Problem(404,'文件内容已丢失')
             return f,bytes(row['data'])
 
+    def update_text_file(self, user, data):
+        """Replace the content of a Markdown or text file; whoever may delete it may edit it."""
+        f = self.get('files', required(data, 'id'))
+        p = self.get('projects', f['projectId'])
+        if not self.can_view_project(user, p):
+            raise Problem(403, '项目已归档或无权访问')
+        if not (user['admin'] or p['owner'] == user['id'] or f.get('uploader') == user['id']):
+            raise Problem(403, '只有上传者、项目 Owner 或管理员可以修改这个文件')
+        if not str(f.get('name', '')).lower().endswith(PREVIEW_TEXT):
+            raise Problem(400, '只有文本文件可以在线修改')
+        raw = str(data.get('text') or '').encode('utf-8')
+        if len(raw) > MAX_FILE_BYTES:
+            raise Problem(413, '文件不能超过 20MB')
+        self.db.execute('UPDATE file_blobs SET data=? WHERE id=?', (sqlite3.Binary(raw), f['id']))
+        f.update(size=len(raw), updatedAt=timestamp(), updatedBy=user['id'])
+        return self.put('files', f)
+
     def drop_file(self, id):
         self.db.execute('DELETE FROM file_blobs WHERE id=?',(id,))
         self.db.execute('DELETE FROM files WHERE id=?',(id,))
@@ -2872,7 +2898,7 @@ class Store:
             # Never persist credentials or chat message bodies in the audit log.
             details = ({k: data.get(k) for k in ('kind', 'operation', 'id', 'sessionId')} if action == 'work.card.apply'
                        else {'projects': len(data.get('projects') or []), 'tasks': len(data.get('tasks') or [])} if action == 'work.cards.preview'
-                       else {k:v for k,v in data.items() if k not in ('password', 'apiKey', 'messages')})
+                       else {k:(f'<{len(v)} 字>' if isinstance(v, str) and len(v) > 500 else v) for k,v in data.items() if k not in ('password', 'apiKey', 'messages')})
             self.audit(user['id'], action, details)
             return result or {'ok':True}
 
@@ -3182,6 +3208,7 @@ class Store:
         if action=='meeting.prompt.update': return self.set_meeting_prompt(user, d)
         if action=='meeting.list': return self.meeting_list(user, d)
         if action=='meeting.get': return self.meeting_get(user, d)
+        if action=='file.text.update': return self.update_text_file(user, d)
         if action=='meeting.create': return self.meeting_create(user, d)
         if action=='meeting.transcript.update': return self.meeting_update_transcript(user, d)
         if action=='chat.list':
@@ -4743,8 +4770,14 @@ def main():
                 # below raises the ceiling just for that one upload, so a long
                 # clip is not silently turned into a 413 with a text-shaped error.
                 route=self.path.split('?')[0]
-                limit=MAX_AUDIO_BYTES if route==TRANSCRIBE_PATH else MAX_FILE_BYTES if route==FILES_PATH else 200_000
-                if size>limit:raise Problem(413,'文件不能超过 20MB' if route==FILES_PATH else '请求内容过大')
+                limit=MAX_AUDIO_BYTES if route==TRANSCRIBE_PATH else MAX_FILE_BYTES if route in (FILES_PATH,FILE_TEXT_PATH) else 200_000
+                if size>limit:raise Problem(413,'文件不能超过 20MB' if route in (FILES_PATH,FILE_TEXT_PATH) else '请求内容过大')
+                if route==FILE_TEXT_PATH:
+                    user=store.authenticate(self.token())
+                    file_id=(urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('id') or [''])[0]
+                    try: text=(self.rfile.read(size) if size>0 else b'').decode('utf-8')
+                    except UnicodeDecodeError:raise Problem(400,'文本文件必须使用 UTF-8 编码')
+                    self.send(200,store.action(user,'file.text.update',{'id':file_id,'text':text}));return
                 if route==FILES_PATH:
                     # Raw bytes, like the audio route; the name rides in a header.
                     user=store.authenticate(self.token())

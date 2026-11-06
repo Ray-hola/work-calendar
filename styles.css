@@ -14088,3 +14088,204 @@ body.is-resizing-agent { user-select: none; }
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+
+/* Markdown ---------------------------------------------------------------------
+   Rendered text keeps the page's type; the editor is a textarea with a small
+   bar for 编辑 / 预览 and the common marks. */
+.md-body {
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.md-body > :first-child { margin-top: 0; }
+.md-body > :last-child { margin-bottom: 0; }
+
+.md-body h2, .md-body h3, .md-body h4, .md-body h5, .md-body h6 {
+  margin: 16px 0 6px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.md-body h2 { font-size: 16px; }
+.md-body h3 { font-size: 14.5px; }
+.md-body h4, .md-body h5, .md-body h6 { font-size: 13.5px; }
+
+.md-body p { margin: 0 0 8px; }
+
+.md-body ul, .md-body ol {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.md-body li { margin: 2px 0; }
+
+.md-body li.md-task {
+  list-style: none;
+  margin-left: -18px;
+}
+
+.md-body li.md-task input {
+  margin: 0 4px 0 0;
+  vertical-align: -1px;
+  accent-color: var(--accent);
+}
+
+.md-body blockquote {
+  margin: 0 0 8px;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--line-strong);
+  color: var(--muted);
+}
+
+.md-body code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface-sunk);
+  font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.md-body pre {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface-sunk);
+  overflow-x: auto;
+}
+
+.md-body pre code { padding: 0; background: none; }
+
+.md-body a {
+  color: var(--accent-dark);
+  text-underline-offset: 2px;
+}
+
+.md-body hr {
+  margin: 14px 0;
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.md-body table {
+  width: 100%;
+  margin: 0 0 10px;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.md-body th, .md-body td {
+  padding: 6px 8px;
+  border: 1px solid var(--line-soft);
+  text-align: left;
+  vertical-align: top;
+}
+
+.md-body th {
+  background: var(--surface-sunk);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.md-empty {
+  margin: 0;
+  color: var(--faint);
+}
+
+.md-editor {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.md-editor:focus-within {
+  border-color: var(--accent-line);
+}
+
+.md-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--surface-sunk);
+}
+
+.md-tabs, .md-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.md-tabs button, .md-tools button {
+  min-width: 28px;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.md-tabs button.is-on {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: 0 0 0 1px var(--line-soft);
+}
+
+.md-tools button:hover, .md-tabs button:hover {
+  color: var(--ink);
+}
+
+.md-tools button:hover {
+  background: var(--surface);
+}
+
+.md-editor[data-mode="preview"] .md-tools,
+.md-editor[data-mode="preview"] .md-input,
+.md-editor[data-mode="edit"] .md-view {
+  display: none;
+}
+
+.md-input {
+  display: block;
+  width: 100%;
+  min-height: 160px;
+  padding: 12px 14px;
+  border: 0;
+  outline: none;
+  resize: vertical;
+  background: transparent;
+  font: 13px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--ink);
+}
+
+.md-view {
+  min-height: 80px;
+  padding: 12px 14px;
+}
+
+.md-editor.is-readonly {
+  border-color: var(--line-soft);
+}
+
+.md-editor.is-readonly .md-bar {
+  display: none;
+}
+
+.meeting-minutes-preview .md-editor {
+  margin-top: 2px;
+}
+
+/* Dictation belongs to the text box, so it hides while the box shows its preview. */
+.md-editor[data-mode="preview"] .field-voice-btn {
+  display: none;
+}

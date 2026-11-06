@@ -1381,7 +1381,7 @@ function openArchivedMeeting(p,id){
   cancelMeetingOpen();
   const m=(S.meetings||[]).find(x=>x.id===id&&x.projectId===p.id);if(!m)return;
   if(!meetingLoaded(m))return loadMeeting(m,()=>openArchivedMeeting(p,id));
-  meetingMount(`<div class="eyebrow">${escapeHTML(p.name)} · 归档会议</div><h2>${escapeHTML(m.title)}</h2><p class="muted">${escapeHTML(m.scheduledAt||'未安排')} · ${escapeHTML((m.participants||[]).join('、'))}</p><p>${escapeHTML(m.agenda||'')}</p><label class="form-field">原始转录<textarea readonly rows="10">${escapeHTML(m.rawTranscript||'')}</textarea></label><section class="meeting-minutes-preview"><h3>会议纪要</h3><div class="meeting-minutes-body">${escapeHTML(m.minutes||'尚未生成')}</div></section><div class="modal-footer"><button type="button" class="secondary-btn" id="cancelAction">关闭</button></div>`);
+  meetingMount(`<div class="eyebrow">${escapeHTML(p.name)} · 归档会议</div><h2>${escapeHTML(m.title)}</h2><p class="muted">${escapeHTML(m.scheduledAt||'未安排')} · ${escapeHTML((m.participants||[]).join('、'))}</p><p>${escapeHTML(m.agenda||'')}</p><label class="form-field">原始转录<textarea readonly rows="10">${escapeHTML(m.rawTranscript||'')}</textarea></label><section class="meeting-minutes-preview"><h3>会议纪要</h3><div class="meeting-minutes-body md-body">${m.minutes?mdRender(m.minutes):'<p class="md-empty">尚未生成</p>'}</div></section><div class="modal-footer"><button type="button" class="secondary-btn" id="cancelAction">关闭</button></div>`);
   $('#cancelAction').onclick=()=>{const pane=$('#meetingEditor');if(pane)pane.innerHTML='<p class="muted space-empty">选择一场会议</p>';else closeModal()};
 }
 function openMeetingEditor(p,meetingId=null){
@@ -1396,7 +1396,7 @@ function openMeetingEditor(p,meetingId=null){
   const owner=S.user?.id,current=meetingId?(S.meetings||[]).find(m=>m.id===meetingId&&m.projectId===p.id):null,manage=canManageProject(p);if(meetingId&&!current){toast('会议已删除或无权访问');return}if(!current&&!manage){toast('只有项目 Owner 或管理员可以新增会议');return}
   if(current)meetingLive.revisions.set(`${S.user?.id}:${current.id}`,current.revision||0);
   const m=current||{title:'',scheduledAt:'',participants:[],agenda:'',rawTranscript:'',minutes:'',status:'scheduled'};
-  meetingMount(`<div class="eyebrow">${escapeHTML(p.name)} · 项目会议</div><h2>${current?escapeHTML(m.title):'新增会议'}</h2><div class="meeting-editor-grid"><label class="form-field">会议名称<input id="meetingTitle" maxlength="120" value="${escapeHTML(m.title)}"></label><label class="form-field">安排时间<input id="meetingScheduledAt" type="datetime-local" value="${escapeHTML(m.scheduledAt||'')}"></label></div><label class="form-field">参会人（用逗号分隔）<input id="meetingParticipants" value="${escapeHTML((m.participants||[]).join('、'))}"></label><label class="form-field">会议议程<textarea id="meetingAgenda" rows="3">${escapeHTML(m.agenda||'')}</textarea></label><label class="form-field">原始转录<textarea id="meetingTranscript" rows="10" maxlength="200000" placeholder="可粘贴实时转录原稿，或使用下方实时录入">${escapeHTML(m.rawTranscript||'')}</textarea></label><div class="meeting-live-bar"><button type="button" class="secondary-btn" id="meetingLiveBtn">开始实时录入</button><span id="meetingLiveState" class="muted"></span></div><section class="meeting-minutes-preview"><div class="space-head"><h3>整理后的会议纪要</h3><button type="button" class="secondary-btn" id="generateMeetingMinutes" ${current&&m.rawTranscript?'':'disabled'}>根据模板生成</button></div><div id="meetingMinutes" class="meeting-minutes-body">${m.minutes?escapeHTML(m.minutes):'<span class="muted">尚未生成</span>'}</div></section><div class="modal-footer"><button type="button" class="secondary-btn" id="cancelAction">关闭</button><button type="button" class="primary-btn" id="saveMeeting">${current?'保存会议':'创建会议'}</button></div>`);
+  meetingMount(`<div class="eyebrow">${escapeHTML(p.name)} · 项目会议</div><h2>${current?escapeHTML(m.title):'新增会议'}</h2><div class="meeting-editor-grid"><label class="form-field">会议名称<input id="meetingTitle" maxlength="120" value="${escapeHTML(m.title)}"></label><label class="form-field">安排时间<input id="meetingScheduledAt" type="datetime-local" value="${escapeHTML(m.scheduledAt||'')}"></label></div><label class="form-field">参会人（用逗号分隔）<input id="meetingParticipants" value="${escapeHTML((m.participants||[]).join('、'))}"></label><label class="form-field">会议议程<textarea id="meetingAgenda" rows="3">${escapeHTML(m.agenda||'')}</textarea></label><label class="form-field">原始转录<textarea id="meetingTranscript" rows="10" maxlength="200000" placeholder="可粘贴实时转录原稿，或使用下方实时录入">${escapeHTML(m.rawTranscript||'')}</textarea></label><div class="meeting-live-bar"><button type="button" class="secondary-btn" id="meetingLiveBtn">开始实时录入</button><span id="meetingLiveState" class="muted"></span></div><section class="meeting-minutes-preview"><div class="space-head"><h3>整理后的会议纪要</h3><button type="button" class="secondary-btn" id="generateMeetingMinutes" ${current&&m.rawTranscript?'':'disabled'}>根据模板生成</button></div>${mdEditorHTML({id:'meetingMinutesEditor',inputId:'meetingMinutesInput',viewId:'meetingMinutes',value:m.minutes||'',rows:12,mode:'preview',empty:'尚未生成，可以点「根据模板生成」，也可以直接编辑',placeholder:'会议结论、待办、风险……（支持 Markdown）'})}</section><div class="modal-footer"><button type="button" class="secondary-btn" id="cancelAction">关闭</button><button type="button" class="primary-btn" id="saveMeeting">${current?'保存会议':'创建会议'}</button></div>`);
   const text=$('#meetingTranscript'),save=$('#saveMeeting'),generate=$('#generateMeetingMinutes'),live=$('#meetingLiveBtn');
   const values=()=>({title:$('#meetingTitle').value.trim(),scheduledAt:$('#meetingScheduledAt').value,participants:$('#meetingParticipants').value.split(/[、,，]/).map(x=>x.trim()).filter(Boolean),agenda:$('#meetingAgenda').value});
   let busy=false;
@@ -1404,20 +1404,21 @@ function openMeetingEditor(p,meetingId=null){
   const persist=async()=>{
     const data=values();if(!data.title)throw new Error('请填写会议名称');
     await meetingStopLive();
-    const transcript=text.value;
-    const result=await api('/api/action',{action:m.id?'meeting.transcript.update':'meeting.create',data:{...(m.id?{id:m.id}:{projectId:p.id}),...data,rawTranscript:transcript,...(m.id?{expectedRevision:meetingLive.revisions.get(`${S.user?.id}:${m.id}`)??m.revision??0}:{})}});
+    const transcript=text.value,minutes=$('#meetingMinutesInput')?.value||'';
+    const result=await api('/api/action',{action:m.id?'meeting.transcript.update':'meeting.create',data:{...(m.id?{id:m.id}:{projectId:p.id}),...data,rawTranscript:transcript,minutes,...(m.id?{expectedRevision:meetingLive.revisions.get(`${S.user?.id}:${m.id}`)??m.revision??0}:{})}});
     if(S.user?.id!==owner)throw new Error('账户已切换');
-    Object.assign(m,result);meetingLive.revisions.set(`${S.user?.id}:${m.id}`,result.revision||0);const pane=$('#meetingEditor');const metadataChanged=JSON.stringify(values())!==JSON.stringify(data);if(pane){pane.dataset.dirty=String(metadataChanged||text.value!==transcript);pane.dataset.metadataDirty=String(metadataChanged)}else UI.docDirty=metadataChanged||text.value!==transcript;S.meetings=[...(S.meetings||[]).filter(x=>x.id!==m.id),m];return m;
+    Object.assign(m,result);meetingLive.revisions.set(`${S.user?.id}:${m.id}`,result.revision||0);const pane=$('#meetingEditor');const metadataChanged=JSON.stringify(values())!==JSON.stringify(data)||($('#meetingMinutesInput')?.value||'')!==minutes;if(pane){pane.dataset.dirty=String(metadataChanged||text.value!==transcript);pane.dataset.metadataDirty=String(metadataChanged)}else UI.docDirty=metadataChanged||text.value!==transcript;S.meetings=[...(S.meetings||[]).filter(x=>x.id!==m.id),m];return m;
   };
   const run=async(work)=>{if(busy)return;busy=true;sync();try{await work()}catch(e){toast(e.message)}finally{busy=false;sync()}};
   const closeEditor=()=>{const pane=$('#meetingEditor');if(pane){pane.innerHTML='<p class="muted space-empty">选择一场会议</p>';pane.dataset.dirty='false'}else closeModal()};
   const markDirty=e=>{const pane=$('#meetingEditor');if(pane){pane.dataset.dirty='true';if(e.target.id!=='meetingTranscript')pane.dataset.metadataDirty='true'}else UI.docDirty=true;sync()};
-  ['#meetingTitle','#meetingScheduledAt','#meetingParticipants','#meetingAgenda','#meetingTranscript'].forEach(id=>$(id)?.addEventListener('input',markDirty));
+  ['#meetingTitle','#meetingScheduledAt','#meetingParticipants','#meetingAgenda','#meetingTranscript','#meetingMinutesInput'].forEach(id=>$(id)?.addEventListener('input',markDirty));
+  bindMdEditor($('#meetingMinutesEditor'));
   $('#cancelAction').onclick=()=>run(async()=>{await persist();if($('#meetingEditor')?.dataset?.dirty==='true'){toast('已保存提交版本，仍有未保存修改');return}closeEditor();renderProjectSpace(p.id)});text.addEventListener('input',sync);sync();
   save.onclick=()=>run(async()=>{await persist();if(!text.isConnected)return;const pane=$('#meetingEditor');if(!pane)closeModal();renderProjectSpace(p.id);renderProjectNav();toast('会议已保存')});
   generate.onclick=()=>run(async()=>{
     generate.textContent='整理中…';
-    try{await persist();const updated=await api('/api/action',{action:'meeting.minutes.generate',data:{id:m.id}});if(S.user?.id!==owner)return;Object.assign(m,updated);if(text.isConnected)$('#meetingMinutes').textContent=updated.minutes||'未生成';toast('会议纪要已生成')}
+    try{await persist();const updated=await api('/api/action',{action:'meeting.minutes.generate',data:{id:m.id}});if(S.user?.id!==owner)return;Object.assign(m,updated);if(text.isConnected){const editor=$('#meetingMinutesEditor');if(editor?.querySelector)mdSet(editor,updated.minutes||'');else{const view=$('#meetingMinutes');if(view)view.innerHTML=mdRender(updated.minutes||'未生成')}}toast('会议纪要已生成')}
     finally{generate.textContent='根据模板生成'}
   });
   live.onclick=()=>run(async()=>{
@@ -1664,8 +1665,8 @@ function projectBackground(p,manage){
   const text=p.background||'';
   return `<section class="space-section"><div class="space-head"><h2>项目背景</h2>${manage?'<button class="primary-btn is-idle" '
     +'id="saveBackground" disabled>已保存</button>':''}</div>`
-    +`${manage?docEdit(text,'id="spaceBackground" data-placeholder="为什么做、要达成什么、边界在哪里"')
-    :`<div class="space-text">${text?escapeHTML(text):'<span class="muted">Owner 还没有写项目背景</span>'}</div>`}</section>`;
+    +`${manage?mdEditorHTML({id:'spaceBackgroundEditor',inputId:'spaceBackground',viewId:'spaceBackgroundView',value:text,rows:8,mode:text?'preview':'edit',placeholder:'为什么做、要达成什么、边界在哪里（支持 Markdown）',empty:'还没有写项目背景'})
+    :`<div class="space-text md-body">${text?mdRender(text):'<span class="muted">Owner 还没有写项目背景</span>'}</div>`}</section>`;
 }
 /* 项目人力: who is on the project and what each one carries. A member's own
    snapshot only holds their own tasks, so others' load is shown to managers. */
@@ -1693,6 +1694,118 @@ const MAX_FILE_MB=20;
 /* Files and meetings form one list, newest first, with dates read as dates. */
 const whenText=iso=>{const day=String(iso||'').slice(0,10),time=String(iso||'').slice(11,16);
   return /^\d{4}-\d\d-\d\d$/.test(day)?`${fmt(day)}${time?` ${time}`:''}`:'未安排'};
+/* Markdown, the small safe subset the workbench writes and reads: headings,
+   paragraphs, bold / italic / strikethrough / inline code, links, lists with
+   to-dos and nesting, quotes, code blocks, tables and rules. Everything is
+   escaped first; links open only http(s) and mailto. */
+function mdInline(text){
+  const tokens=[],keep=html=>`\u0000${tokens.push(html)-1}\u0000`;
+  const marks=s=>s.replace(/\*\*([^*\n]+)\*\*|__([^_\n]+)__/g,(_,a,b)=>`<strong>${a??b}</strong>`)
+    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g,'$1<em>$2</em>')
+    .replace(/~~([^~\n]+)~~/g,'<del>$1</del>');
+  let s=escapeHTML(String(text).replace(/\u0000/g,'')).replace(/`([^`\n]+)`/g,(_,c)=>keep(`<code>${c}</code>`));
+  s=s.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g,(all,label,url)=>{
+    const href=url.replace(/&amp;/g,'&');
+    return /^(https?:\/\/|mailto:)/i.test(href)?keep(`<a href="${escapeHTML(href)}" target="_blank" rel="noopener noreferrer">${marks(label)}</a>`):all});
+  s=s.replace(/(^|[\s(（])(https?:\/\/[^\s<)）]+)/g,(_,pre,url)=>pre+keep(`<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`));
+  const restore=(_,i)=>(tokens[i]||'').replace(/\u0000(\d+)\u0000/g,restore);
+  return marks(s).replace(/\u0000(\d+)\u0000/g,restore);
+}
+function mdRender(src){
+  const lines=String(src||'').replace(/\r\n?/g,'\n').split('\n'),out=[];let i=0;
+  const isList=l=>/^\s*([-*+]|\d+[.)])\s+/.test(l),isBlockStart=l=>/^(#{1,6}\s|>|```|\s*([-*_])\s*(\2\s*){2,}$)/.test(l)||isList(l)||/^\s*\|.*\|\s*$/.test(l);
+  while(i<lines.length){
+    const line=lines[i];
+    if(!line.trim()){i++;continue}
+    const fence=line.match(/^```\s*(\S*)/);
+    if(fence){const code=[];i++;while(i<lines.length&&!/^```/.test(lines[i]))code.push(lines[i++]);i++;
+      out.push(`<pre><code>${escapeHTML(code.join('\n'))}</code></pre>`);continue}
+    const h=line.match(/^(#{1,6})\s+(.*)$/);
+    if(h){const n=Math.min(6,h[1].length+1);out.push(`<h${n}>${mdInline(h[2].replace(/\s+#+\s*$/,''))}</h${n}>`);i++;continue}
+    if(/^\s*([-*_])\s*(\1\s*){2,}$/.test(line)){out.push('<hr>');i++;continue}
+    if(/^>/.test(line)){const quote=[];while(i<lines.length&&/^>/.test(lines[i]))quote.push(lines[i++].replace(/^>\s?/,''));
+      out.push(`<blockquote>${mdRender(quote.join('\n'))}</blockquote>`);continue}
+    if(/^\s*\|.*\|\s*$/.test(line)&&/^\s*\|?\s*:?-{2,}/.test(lines[i+1]||'')){
+      const cells=l=>l.trim().replace(/^\||\|$/g,'').split('|').map(c=>c.trim());
+      const head=cells(line);i+=2;const body=[];
+      while(i<lines.length&&/^\s*\|.*\|\s*$/.test(lines[i]))body.push(cells(lines[i++]));
+      out.push(`<table><thead><tr>${head.map(c=>`<th>${mdInline(c)}</th>`).join('')}</tr></thead>`
+        +`<tbody>${body.map(r=>`<tr>${head.map((_,k)=>`<td>${mdInline(r[k]||'')}</td>`).join('')}</tr>`).join('')}</tbody></table>`);continue}
+    if(isList(line)){
+      /* Nested lists by indentation; each level is a list of its own kind. */
+      const stack=[];let html='';
+      const close=()=>{html+=`</${stack.pop()}>`+(stack.length?'</li>':'')};
+      while(i<lines.length&&(isList(lines[i])||(lines[i].trim()&&/^\s{2,}/.test(lines[i])&&stack.length))){
+        const m=lines[i].match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
+        if(!m){html=html.replace(/<\/li>$/,'')+`<br>${mdInline(lines[i].trim())}</li>`;i++;continue}
+        const depth=Math.floor(m[1].replace(/\t/g,'  ').length/2),tag=/\d/.test(m[2])?'ol':'ul';
+        while(stack.length>depth+1||(stack.length===depth+1&&stack[stack.length-1]!==tag))close();
+        while(stack.length<depth+1){if(stack.length&&html.endsWith('</li>'))html=html.slice(0,-5);stack.push(tag);html+=`<${tag}>`}
+        const task=m[3].match(/^\[([ xX])\]\s+(.*)$/);
+        html+=task?`<li class="md-task"><input type="checkbox" disabled${task[1]===' '?'':' checked'}> ${mdInline(task[2])}</li>`:`<li>${mdInline(m[3])}</li>`;
+        i++;
+      }
+      while(stack.length)close();
+      out.push(html);continue}
+    const para=[];
+    while(i<lines.length&&lines[i].trim()&&!(para.length&&isBlockStart(lines[i])))para.push(lines[i++]);
+    out.push(`<p>${para.map(mdInline).join('<br>')}</p>`);
+  }
+  return out.join('');
+}
+/* An editor: 编辑 shows the text with a small toolbar, 预览 shows it rendered.
+   The textarea keeps its own id so existing save logic can read it. */
+const MD_TOOLS=[['h','标题','## ',''],['b','加粗','**','**'],['i','斜体','*','*'],['ul','列表','- ',''],['todo','待办','- [ ] ',''],
+  ['quote','引用','> ',''],['code','代码','`','`'],['link','链接','[','](https://)']];
+function mdEditorHTML({id,inputId,viewId,value='',placeholder='',rows=10,mode='preview',empty='还没有内容',readonly=false}){
+  return `<div class="md-editor${readonly?' is-readonly':''}" id="${id}" data-mode="${readonly?'preview':mode}" data-empty="${escapeHTML(empty)}">`
+    +`<div class="md-bar"><div class="md-tabs" role="tablist"><button type="button" role="tab" data-md-mode="edit">编辑</button>`
+    +`<button type="button" role="tab" data-md-mode="preview">预览</button></div>`
+    +`<div class="md-tools">${MD_TOOLS.map(([k,label])=>`<button type="button" data-md-tool="${k}" title="${label}" aria-label="${label}">${MD_TOOL_GLYPH[k]}</button>`).join('')}</div></div>`
+    +`<textarea class="md-input" id="${inputId}" rows="${rows}" placeholder="${escapeHTML(placeholder)}" spellcheck="false">${escapeHTML(value)}</textarea>`
+    +`<div class="md-view md-body" id="${viewId}">${mdRender(value)||`<p class="md-empty">${escapeHTML(empty)}</p>`}</div></div>`;
+}
+const MD_TOOL_GLYPH={h:'H',b:'<b>B</b>',i:'<i>I</i>',ul:'•',todo:'☐',quote:'❝',code:'&lt;/&gt;',link:'↗'};
+function mdShow(root,mode,focus=true){
+  root.dataset.mode=mode;
+  root.querySelectorAll('[data-md-mode]').forEach(b=>{const on=b.dataset.mdMode===mode;b.setAttribute('aria-selected',String(on));b.classList.toggle('is-on',on)});
+  const input=root.querySelector('.md-input'),view=root.querySelector('.md-view');
+  if(mode==='preview')view.innerHTML=mdRender(input.value)||`<p class="md-empty">${escapeHTML(root.dataset.empty||'')}</p>`;
+  else if(focus)input.focus({preventScroll:true});
+}
+function mdApply(input,tool){
+  const t=MD_TOOLS.find(x=>x[0]===tool);if(!t)return;
+  const [,,before,after]=t,{selectionStart:a,selectionEnd:b,value}=input,picked=value.slice(a,b);
+  const lineTool=!after&&before.trim()!=='';
+  if(lineTool){
+    const start=value.lastIndexOf('\n',a-1)+1,block=value.slice(start,b);
+    const next=block.split('\n').map(l=>l.startsWith(before)?l.slice(before.length):before+l).join('\n');
+    input.value=value.slice(0,start)+next+value.slice(b);input.setSelectionRange(start,start+next.length);
+  }else{
+    const text=picked||(tool==='link'?'链接文字':'文字');
+    input.value=value.slice(0,a)+before+text+after+value.slice(b);
+    input.setSelectionRange(a+before.length,a+before.length+text.length);
+  }
+  input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();
+}
+function bindMdEditor(root){
+  if(!root?.querySelectorAll)return;
+  const input=root.querySelector('.md-input');
+  root.querySelectorAll('[data-md-mode]').forEach(b=>b.onclick=()=>mdShow(root,b.dataset.mdMode));
+  root.querySelectorAll('[data-md-tool]').forEach(b=>b.onmousedown=e=>e.preventDefault());
+  root.querySelectorAll('[data-md-tool]').forEach(b=>b.onclick=()=>mdApply(input,b.dataset.mdTool));
+  input?.addEventListener('keydown',e=>{
+    if(!(e.metaKey||e.ctrlKey))return;
+    const tool={b:'b',i:'i',k:'link'}[e.key.toLowerCase()];if(tool){e.preventDefault();mdApply(input,tool)}
+  });
+  mdShow(root,root.dataset.mode||'preview',false);
+}
+function mdSet(root,value){
+  if(!root?.querySelector)return;
+  root.querySelector('.md-input').value=value||'';
+  root.querySelector('.md-view').innerHTML=mdRender(value)||`<p class="md-empty">${escapeHTML(root.dataset.empty||'')}</p>`;
+}
+
 /* Images, PDFs and plain text open in a new tab; the server checks the bytes again. */
 const filePreviewable=name=>/\.(png|jpe?g|gif|webp|pdf|txt|md|csv|log|json)$/i.test(String(name||''));
 function projectFiles(p,readonly=false,includeMeetings=true){
@@ -1700,7 +1813,8 @@ function projectFiles(p,readonly=false,includeMeetings=true){
   const file=f=>`<div class="file-row"><span class="file-ext">${escapeHTML(fileExt(f.name))}</span><a class="file-name" href="/api/files/`
     +`${encodeURIComponent(f.id)}" download="${escapeHTML(f.name)}">${escapeHTML(f.name)}</a><small>${escapeHTML(fileSize(f.size))} · `
     +`${escapeHTML(nameOf(f.uploader))} · <span title="${escapeHTML(f.createdAt)}">${escapeHTML(relTime(f.createdAt))}</span>`
-    +`${filePreviewable(f.name)?` · <a class="file-preview" href="/api/files/${encodeURIComponent(f.id)}?preview=1" target="_blank" rel="noopener">预览</a>`:''}</small>`
+    +`${/\.md$/i.test(f.name)?` · <button type="button" class="text-btn file-preview" data-md-file="${escapeHTML(f.id)}">打开</button>`
+      :filePreviewable(f.name)?` · <a class="file-preview" href="/api/files/${encodeURIComponent(f.id)}?preview=1" target="_blank" rel="noopener">预览</a>`:''}</small>`
     +`${canDrop(f)?`<button class="ghost-btn file-delete" data-file="${escapeHTML(f.id)}" aria-label="删除 ${escapeHTML(f.name)}" title="删除">`
     +`${icon('x')}</button>`:'<span></span>'}</div>`;
   const meeting=m=>`<button type="button" class="file-row meeting-row" data-meeting="${escapeHTML(m.id)}"><span class="file-ext is-meeting">会议</span>`
@@ -1714,6 +1828,42 @@ function projectFiles(p,readonly=false,includeMeetings=true){
     +`${rows.length?`<div class="file-list">${rows.map(r=>r.html).join('')}</div>`:'<p class="space-empty">还没有文件</p>'}`
     +`</section>`;
 
+}
+/* A Markdown file opens rendered; its uploader, the project Owner and admins
+   can switch to 编辑 and save it in place. */
+async function openMarkdownFile(p,id){
+  const f=(S.files||[]).find(x=>x.id===id&&x.projectId===p.id);if(!f)return;
+  // Share the meeting reader's navigation lifecycle: opening another viewer,
+  // changing account/view/project or closing the modal invalidates this read.
+  cancelMeetingOpen();
+  const generation=meetingOpenGeneration,scope=meetingOpenScope(),owner=S.user?.id;
+  const current=()=>generation===meetingOpenGeneration&&scope===meetingOpenScope();
+  let text;
+  try{const r=await fetch(`/api/files/${encodeURIComponent(id)}?preview=1`,{credentials:'same-origin'});if(!r.ok)throw new Error('读不到文件');text=await r.text()}
+  catch(e){if(current())toast(e.message);return}
+  if(!current())return;
+  const archived=(S.fileArchives||[]).some(x=>x.id===p.id),editable=!archived&&(S.user?.admin||p.owner===S.user?.id||f.uploader===S.user?.id);
+  openModal(`<div class="eyebrow">${escapeHTML(p.name)} · 文件</div><h2>${escapeHTML(f.name)}</h2>`
+    +mdEditorHTML({id:'mdFileEditor',inputId:'mdFileInput',viewId:'mdFileView',value:text,rows:18,readonly:!editable,empty:'文件是空的'})
+    +`<div class="modal-footer"><a class="secondary-btn" href="/api/files/${encodeURIComponent(id)}" download="${escapeHTML(f.name)}">下载</a>`
+    +`<button type="button" class="secondary-btn" id="cancelAction">关闭</button>${editable?'<button type="button" class="primary-btn" id="saveMdFile" disabled>保存</button>':''}</div>`);
+  $('#modalBackdrop .modal')?.classList?.add('is-wide');
+  const editor=$('#mdFileEditor');bindMdEditor(editor);$('#cancelAction').onclick=closeModal;
+  const input=$('#mdFileInput'),save=$('#saveMdFile');if(!save)return;
+  let saved=text;
+  input.addEventListener('input',()=>{UI.docDirty=input.value!==saved;save.disabled=input.value===saved});
+  save.onclick=async()=>{
+    if(save.disabled)return;
+    const next=input.value;save.disabled=true;save.textContent='保存中…';
+    try{
+      const r=await fetch(`/api/files/text?id=${encodeURIComponent(id)}`,{method:'POST',credentials:'same-origin',
+        headers:{'Content-Type':'text/plain; charset=utf-8','X-Work-Calendar':'1'},body:next});
+      const result=await readJSON(r);if(!r.ok)throw new Error(result.error||'文件保存失败');
+      if(owner!==S.user?.id||!input.isConnected)return;
+      saved=next;UI.docDirty=input.value!==saved;toast('文件已保存');refresh().catch(()=>{});
+    }catch(e){if(owner===S.user?.id&&input.isConnected)toast(e.message)}
+    finally{if(input.isConnected){save.textContent='保存';save.disabled=input.value===saved}}
+  };
 }
 async function uploadProjectFiles(p,list){
   const files=[...list];if(!files.length)return;
@@ -1732,6 +1882,7 @@ async function uploadProjectFiles(p,list){
    field and moving to the next never loses the caret. */
 function bindProjectSpace(p){
   const save=async(data,done)=>{try{await api('/api/action',{action:'project.space',data:{id:p.id,...data}});Object.assign(p,data);done?.();return true}catch(e){toast(e.message);return false}};
+  bindMdEditor($('#spaceBackgroundEditor'));
   const bg=$('#spaceBackground'),btn=$('#saveBackground');
   if(bg&&btn){
     let saved=docText(bg),saving=false;
@@ -1760,6 +1911,7 @@ function bindProjectSpace(p){
   if(menu)menu.onkeydown=e=>{if(e.key==='Escape'){menu.open=false;menu.querySelector('summary').focus()}};
   const addMeeting=$('#createMeetingFromFiles');if(addMeeting)addMeeting.onclick=async()=>{menu.open=false;await projectArea(p,'meetings');if(UI.spaceArea==='meetings')openMeetingEditor(p)};
   $$('#projectSpace .meeting-row').forEach(b=>b.onclick=()=>openMeetingEditor(p,b.dataset.meeting));
+  $$('#projectSpace [data-md-file]').forEach(b=>b.onclick=()=>openMarkdownFile(p,b.dataset.mdFile));
   $$('#projectSpace .file-delete').forEach(b=>b.onclick=async()=>{
     const f=S.files.find(x=>x.id===b.dataset.file);
     if(f&&confirm(`删除「${f.name}」？删除后无法恢复。`)){try{await act('file.delete',{id:f.id})}catch(e){}}
@@ -3944,7 +4096,7 @@ function flyArchive(folder){
 }
 /* Archives are edited in place: every collected block is plain editable text
    on the page itself, and 保存 lights up once something changes. */
-const docText=el=>String(el?.innerText??el?.textContent??el?.value??'').replace(/\u00a0/g,' ').replace(/\n{3,}/g,'\n\n').trim();
+const docText=el=>String((el?.tagName==='TEXTAREA'?el.value:null)??el?.innerText??el?.textContent??el?.value??'').replace(/\u00a0/g,' ').replace(/\n{3,}/g,'\n\n').trim();
 const docEdit=(value,attrs)=>`<div class="doc-edit" contenteditable="plaintext-only" spellcheck="false" ${attrs}>${escapeHTML(value??'')}</div>`;
 /* 随记 under the three fixed blocks is the holder's own blank page: nothing
    fills it in, and it stays out of the team brief. */
