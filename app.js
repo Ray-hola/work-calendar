@@ -396,6 +396,7 @@ function switchView(view){
   const shown=$(`#${view}View`),seen=UI.seenViews||(UI.seenViews=new Set());
   shown?.classList?.toggle('is-revisit',seen.has(view));seen.add(view);
   $$('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.view===view));
+  if(view!=='today'&&typeof syncFilterLinks==='function')syncFilterLinks();
   const labels={today:'今日任务',calendar:'周视图',projects:'项目空间',timeline:'项目时间轴',achievements:'成果库',archive:'档案室',inbox:'收件箱',accounts:'账户管理',settings:'系统设置',dayDetail:'日期详情',chat:'沟通区',guide:'使用教程'};
   $('#crumbCurrent').textContent=`/ ${labels[view]||view}`;
   renderScheduleScope();
@@ -519,7 +520,7 @@ function dailyTaskGroups(tasks){
 }
 function bindTaskCards(root){$$(root+' .task-card').forEach(e=>{e.onclick=()=>openDrawer(e.dataset.id);e.onkeydown=x=>{if(x.key==='Enter')openDrawer(e.dataset.id)}})}
 function renderDayTab(day){const tab=$('#dayTab');if(!tab)return;const d=new Date(`${day}T12:00:00`),n=String(d.getDate());if($('#dayTabDay').textContent!==n){tab.classList.remove('turn');void tab.offsetWidth;tab.classList.add('turn')}$('#dayTabMonth').textContent=`${d.getMonth()+1}月`;$('#dayTabDay').textContent=n;$('#dayTabWeek').textContent=wd(day);tab.classList.toggle('is-today',day===S.today);const h=$('#todayView h1');if(h)h.textContent=day===S.today?'今天做什么？':day===add(S.today,1)?'明天做什么？':day===add(S.today,-1)?'昨天做了什么？':'这一天的安排'}
-function renderToday(){const day=displayDay(),deferredView=UI.filter==='deferred';renderStats(day);renderDayTab(day);
+function renderToday(){if(typeof syncFilterLinks==='function')syncFilterLinks();const day=displayDay(),deferredView=UI.filter==='deferred';renderStats(day);renderDayTab(day);
   $('#todayLabel').textContent=deferredView?'递延任务':`${wd(day)} · `
   +`${fmt(day)}`;$('#dateChip').textContent=deferredView?'全部日期':fmt(day);
   $$('.quick-tab').forEach(b=>b.classList.toggle('active',b.dataset.filter===UI.filter));
@@ -1692,11 +1693,14 @@ const MAX_FILE_MB=20;
 /* Files and meetings form one list, newest first, with dates read as dates. */
 const whenText=iso=>{const day=String(iso||'').slice(0,10),time=String(iso||'').slice(11,16);
   return /^\d{4}-\d\d-\d\d$/.test(day)?`${fmt(day)}${time?` ${time}`:''}`:'未安排'};
+/* Images and plain text open in a new tab; the server checks the bytes again. */
+const filePreviewable=name=>/\.(png|jpe?g|gif|webp|txt|md|csv|log|json)$/i.test(String(name||''));
 function projectFiles(p,readonly=false,includeMeetings=true){
   const canDrop=f=>!readonly&&(S.user?.admin||p.owner===S.user?.id||f.uploader===S.user?.id);
   const file=f=>`<div class="file-row"><span class="file-ext">${escapeHTML(fileExt(f.name))}</span><a class="file-name" href="/api/files/`
     +`${encodeURIComponent(f.id)}" download="${escapeHTML(f.name)}">${escapeHTML(f.name)}</a><small>${escapeHTML(fileSize(f.size))} · `
-    +`${escapeHTML(nameOf(f.uploader))} · <span title="${escapeHTML(f.createdAt)}">${escapeHTML(relTime(f.createdAt))}</span></small>`
+    +`${escapeHTML(nameOf(f.uploader))} · <span title="${escapeHTML(f.createdAt)}">${escapeHTML(relTime(f.createdAt))}</span>`
+    +`${filePreviewable(f.name)?` · <a class="file-preview" href="/api/files/${encodeURIComponent(f.id)}?preview=1" target="_blank" rel="noopener">预览</a>`:''}</small>`
     +`${canDrop(f)?`<button class="ghost-btn file-delete" data-file="${escapeHTML(f.id)}" aria-label="删除 ${escapeHTML(f.name)}" title="删除">`
     +`${icon('x')}</button>`:'<span></span>'}</div>`;
   const meeting=m=>`<button type="button" class="file-row meeting-row" data-meeting="${escapeHTML(m.id)}"><span class="file-ext is-meeting">会议</span>`
@@ -3907,7 +3911,10 @@ document.addEventListener('keydown',e=>{
   if(e.target.closest('input,textarea,select,[contenteditable],.archive-ruler'))return;
   if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();stepArchive(e.key==='ArrowLeft'?1:-1)}});
 addEventListener('resize',()=>{if(UI.view==='archive')fitArchiveDrawer($('#archiveCabinet .drawer-stage'))});
-$$('.filter-link').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;switchView('today')});
+/* A quick filter narrows 今日任务; picking the one already on goes back to 全部. */
+$$('.filter-link').forEach(b=>b.onclick=()=>{UI.filter=UI.view==='today'&&UI.filter===b.dataset.filter?'all':b.dataset.filter;switchView('today')});
+function syncFilterLinks(){$$('.filter-link').forEach(b=>{const on=UI.view==='today'&&UI.filter===b.dataset.filter;
+  b.classList.toggle('is-on',on);b.setAttribute('aria-pressed',String(on))})}
 $$('.quick-tab').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;renderToday()});
 $('#prevDay').onclick=()=>{UI.dayOffset=(UI.dayOffset||0)-1;renderToday()};
 $('#nextDay').onclick=()=>{if(displayDay()>=DATE_HORIZON){toast(`日期范围目前只支持到 `
@@ -5412,7 +5419,7 @@ const CHAT_PRESENCE_MS=15000;
 /* A broadcast is a sentinel rather than an account id, so it can never
    collide with a real member and needs no row of its own. */
 const CHAT_EVERYONE='*';
-let chatPollTimer=0,chatPresenceTimer=0,chatLastAt='',chatLastDay='';
+let chatPollTimer=0,chatPresenceTimer=0,chatLastAt='',chatLastDay='',chatFirstAt='';
 let chatChannel='general',chatPresence={},chatMentionQuery=null,chatMentionIndex=0;
 /* One line of the newest message per room, sent along with chat.list so the
    sidebar can read like a list of conversations. */
@@ -5569,17 +5576,17 @@ function chatBubble(m,withDay){
 }
 async function loadChat(reset){
   const log=$('#chatLog');if(!log)return;
-  let rows=[];
+  let rows=[],more=false;
   try{
     const scope={channel:chatChannel};
     const data=await api('/api/action',{action:'chat.list',data:reset?scope:{...scope,since:chatLastAt}});
-    rows=data.messages||[];
+    rows=data.messages||[];more=Boolean(data.more);
     if(data.previews)chatPreviews=data.previews;
   }catch(e){
     if(reset)log.innerHTML=`<p class="chat-empty">读不到消息：${escapeHTML(e?.message||'加载失败')}</p>`;
     return;
   }
-  if(reset){log.innerHTML='';chatLastAt='';chatLastDay=''}
+  if(reset){log.innerHTML='';chatLastAt='';chatLastDay='';chatFirstAt=''}
   if(!rows.length){
     if(reset)log.innerHTML=chatChannel==='general'
       ?'<p class="chat-empty">暂无消息</p>'
@@ -5596,10 +5603,34 @@ async function loadChat(reset){
     if(day)chatLastDay=day;
     if(m.createdAt)chatLastAt=m.createdAt;
   });
+  if(reset){chatFirstAt=rows[0]?.createdAt||'';if(more)log.insertAdjacentHTML('afterbegin',chatMoreButton())}
+  bindChatMore();
   if(reset||nearBottom)log.scrollTop=log.scrollHeight;
   /* The list carries the newest line of every room, so a poll keeps it fresh. */
   renderChatChannels();
   reportChatRead(chatLastAt);
+}
+/* Older history comes a page at a time from the top of the log; the reader
+   stays on the line they were reading. */
+const chatMoreButton=()=>'<button type="button" class="chat-more" id="chatMore">加载更早的消息</button>';
+function bindChatMore(){const b=$('#chatMore');if(b)b.onclick=loadEarlierChat}
+async function loadEarlierChat(){
+  const log=$('#chatLog'),button=$('#chatMore');if(!log||!button||!chatFirstAt)return;
+  const channel=chatChannel;button.disabled=true;button.textContent='加载中…';
+  let data;
+  try{data=await api('/api/action',{action:'chat.list',data:{channel,before:chatFirstAt,limit:120}})}
+  catch(e){button.disabled=false;button.textContent='加载更早的消息';toast(e.message);return}
+  if(channel!==chatChannel||!button.isConnected)return;
+  const rows=data.messages||[];let day='',html='';
+  rows.forEach(m=>{const d=(m.createdAt||'').slice(0,10);html+=chatBubble(m,Boolean(d)&&d!==day);if(d)day=d});
+  /* The day already shown at the top no longer starts there. */
+  const firstDay=log.querySelector('.chat-day');
+  if(firstDay&&rows.length&&(rows[rows.length-1].createdAt||'').slice(0,10)===(chatFirstAt||'').slice(0,10))firstDay.remove();
+  const before=log.scrollHeight;
+  button.insertAdjacentHTML('afterend',html);
+  if(rows[0]?.createdAt)chatFirstAt=rows[0].createdAt;
+  if(data.more){button.disabled=false;button.textContent='加载更早的消息'}else button.remove();
+  log.scrollTop+=log.scrollHeight-before;
 }
 async function reportChatRead(at){
   const channel=chatChannel;
