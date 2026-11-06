@@ -4454,16 +4454,21 @@ class Store:
                 if at.tzinfo is None:at=at.replace(tzinfo=now().tzinfo)
                 return at.timestamp(),str(log.get('id',''))
             except (ValueError,TypeError):return float('-inf'),str(log.get('id',''))
-        tasks=self.all('tasks');by_id={t['id']:t for t in tasks};projects=self.all('projects');project_by_id={p['id']:p for p in projects};chains={};events={};future_changes=set()
+        tasks=self.all('tasks');by_id={t['id']:t for t in tasks};projects=self.all('projects');project_by_id={p['id']:p for p in projects};chains={};events={};future_changes=set();covered_roots=set()
         for t in tasks:chains.setdefault(self._lineage_root(t,by_id),[]).append(t)
         for log in self.all('logs'):
             t=by_id.get(log.get('taskId'))
             if not t:continue
             root=self._lineage_root(t,by_id)
-            if day(log.get('createdAt'),log.get('date',''))<=cutoff:events.setdefault(root,[]).append(log)
+            if day(log.get('createdAt'),log.get('date',''))<=cutoff:
+                events.setdefault(root,[]).append(log)
+                if log.get('kind')=='complete':
+                    covered_roots.update(self._lineage_root(by_id[p],by_id) for p in (log.get('stackPeriods') or []) if p in by_id and self._lineage_root(by_id[p],by_id)!=root)
             elif log.get('kind') in ('skip','restore','reopen'):future_changes.add(root)
         remaining={}
         for root,chain in chains.items():
+            # A merged completion also settles deferred chains of covered periods.
+            if root in covered_roots:continue
             known=[t for t in chain if day(t.get('createdAt'),day(t.get('completedAt'),t.get('date','')))<=cutoff]
             if not known:continue
             logs=sorted(events.get(root,[]),key=event_order)

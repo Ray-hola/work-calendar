@@ -130,3 +130,15 @@ class WeeklyOutcomesTests(unittest.TestCase):
         self.s.put('logs',{'taskId':'t','kind':'complete','actor':'member','createdAt':'2026-11-06T18:00:00+08:00','summary':'先完成'})
         self.s.put('logs',{'taskId':'t','kind':'reopen','actor':'member','createdAt':'2026-11-06T11:00:00Z','reason':'后打回'})
         self.assertEqual(self.week()['completedTasks'],[]);self.assertEqual(len(self.week()['unfinishedOther']),1)
+
+    def test_merged_completion_settles_deferred_covered_periods_only_after_completion(self):
+        for root in ('a','b'):
+            self.task(root,projectId=None,repeatId='r',fixed=True,status='done',carriedCompletion=True,completedAt='2026-11-04T12:00:00+08:00')
+            self.task(root+'-next',projectId=None,originId=root,date='2026-11-04',repeatId='r',fixed=True,status='done',completedAt='2026-11-04T12:00:00+08:00',
+                      **({'stackCompletedBy':'b-next','carriedCompletion':True} if root=='a' else {'stackPeriods':['a','b']}))
+            self.log(root,'defer','2026-11-02',remaining='继续复盘')
+        self.log('b-next','complete','2026-11-04',summary='两期完成',actual=40,stackCount=2,stackPeriods=['a','b'])
+        before=self.s.week_work('2026-10-31','2026-11-03');self.assertEqual(len(before['unfinishedOther']),2);self.assertEqual(before['completedTasks'],[])
+        after=self.week();self.assertEqual([t['taskId'] for t in after['completedTasks']],['b-next']);self.assertEqual(after['unfinishedOther'],[])
+        self.log('b-next','reopen','2026-11-05',reason='重新核实',stackPeriods=['a','b'])
+        reopened=self.week();self.assertEqual(reopened['completedTasks'],[]);self.assertEqual([t['taskId'] for t in reopened['unfinishedOther']],['b-next'])
