@@ -300,6 +300,7 @@ class Store:
         # While a snapshot is being assembled, each table is parsed once and
         # shared by every helper that reads it (see snapshot()).
         self._reads = threading.local()
+        self._login_failures = {}
         self.db = sqlite3.connect(self.path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.execute('PRAGMA journal_mode=WAL')
@@ -1954,15 +1955,55 @@ class Store:
         with self.lock, self.db:
             self.db.execute('UPDATE users SET salt=?,hash=? WHERE id=?', (salt, digest, id))
 
-    def login(self, id, password):
-        with self.lock, self.db:
+    LOGIN_FAILURES = 8
+    LOGIN_WINDOW = timedelta(minutes=15)
+    LOGIN_FAILURE_KEYS = 4096
+
+    def prune_login_failures(self, at):
+        """Called under the store lock; retain only bounded, live failure buckets."""
+        for key, times in list(self._login_failures.items()):
+            recent = [t for t in times if at - t < self.LOGIN_WINDOW]
+            if recent:
+                self._login_failures[key] = recent[-self.LOGIN_FAILURES:]
+            else:
+                self._login_failures.pop(key, None)
+
+    def login(self, id, password, client=''):
+        """Check a password and open a session. The deliberately slow hash runs
+        outside the shared lock, so a wrong guess never stalls other people;
+        after LOGIN_FAILURES wrong guesses for one account from one place, that
+        pair waits out LOGIN_WINDOW."""
+        # Fixed-size keys also bound memory for arbitrary submitted account names.
+        key = (hashlib.sha256(id.encode()).digest(), hashlib.sha256(client.encode()).digest())
+        with self.lock:
+            self.prune_login_failures(now())
+            if len(self._login_failures.get(key, [])) >= self.LOGIN_FAILURES:
+                raise Problem(429, '尝试次数过多，请 15 分钟后再试')
             r = self.db.execute('SELECT * FROM users WHERE id=? AND active=1', (id,)).fetchone()
-            salt = bytes.fromhex(r['salt']) if r else b'no-such-user-salt'
-            digest = hashlib.scrypt(password.encode(), salt=salt, n=16384, r=8, p=1).hex()
-            if not r or not hmac.compare_digest(digest, r['hash']):
+        salt = bytes.fromhex(r['salt']) if r else b'no-such-user-salt'
+        digest = hashlib.scrypt(password.encode(), salt=salt, n=16384, r=8, p=1).hex()
+        with self.lock, self.db:
+            at = now()
+            self.prune_login_failures(at)
+            # In-flight attempts may have finished since the admission check.
+            if len(self._login_failures.get(key, [])) >= self.LOGIN_FAILURES:
+                raise Problem(429, '尝试次数过多，请 15 分钟后再试')
+            current = self.db.execute('SELECT salt,hash,active FROM users WHERE id=?', (id,)).fetchone()
+            if (not r or not current or not current['active'] or current['salt'] != r['salt']
+                    or not hmac.compare_digest(current['hash'], r['hash'])
+                    or not hmac.compare_digest(digest, r['hash'])):
+                # Dict insertion order tracks the least recently failed pair.
+                # Global expiry runs first, then the oldest live pair is evicted
+                # if necessary; input account names cannot grow this indefinitely.
+                recent = self._login_failures.pop(key, [])
+                if len(self._login_failures) >= self.LOGIN_FAILURE_KEYS:
+                    self._login_failures.pop(next(iter(self._login_failures)))
+                self._login_failures[key] = recent + [at]
                 raise Problem(401, '账户或密码错误')
+            self._login_failures.pop(key, None)
+            self.db.execute('DELETE FROM sessions WHERE expires<?', (at.isoformat(),))
             token = secrets.token_urlsafe(32)
-            self.db.execute('INSERT INTO sessions VALUES (?,?,?)', (hashlib.sha256(token.encode()).hexdigest(), id, (now()+timedelta(days=7)).isoformat()))
+            self.db.execute('INSERT INTO sessions VALUES (?,?,?)', (hashlib.sha256(token.encode()).hexdigest(), id, (at+timedelta(days=7)).isoformat()))
             return token
 
     def authenticate(self, token):
@@ -2341,7 +2382,10 @@ class Store:
     def _carry_task(self, task, target_day, reason='当日未完成，系统自动递延'):
         """Create one next-day occurrence while retaining the source record."""
         if task.get('projectId'):
-            project = self.get('projects', task['projectId'])
+            try:
+                project = self.get('projects', task['projectId'])
+            except Problem:
+                return None  # its project is gone; nothing to carry it into
             if project.get('status') != 'active' or (project.get('end') and target_day > project['end']):
                 return None
         existing = next((x for x in self.all('tasks') if x.get('originId') == (task.get('originId') or task['id']) and x.get('date') == target_day), None)
@@ -2744,7 +2788,7 @@ class Store:
         task_requests=[r for r in self.all('task_requests') if user['admin'] or r.get('requester')==user['id'] or r.get('projectId') in owned]
         automation=next((x.get('value',{}) for x in self.all('settings') if x.get('id')=='automation'),{})
         return {'user':user,'users':self.users(),'today':at.date().isoformat(),'dateHorizon':calendar_end(at.date()).isoformat(),'weekStart':self.week_start(),'repeatStacking':self.repeat_stacking(),'projects':projects,
-'folders':folders,'fileArchives':file_archives,'files':[f for f in all_files if f.get('projectId') in file_pids],'meetings':[self.meeting_summary(m) for m in all_meetings if m.get('projectId') in file_pids],'meetingPrompt':self.meeting_prompt() if user['admin'] else None,'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees'] or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':self.notices_for(user['id']), 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'taskRequests':task_requests, 'creationRules':self.creation_rules(user), 'creationPolicy':self.creation_policy() if user.get('role')=='superadmin' else None, 'accountOrder':next((x.get('value') or [] for x in self.all('settings') if x.get('id')=='account_order'),[]) if user['admin'] else [], 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or owner_of.get(s['projectId'])==user['id'])], 'chat':self.chat_summary(user),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.recent_audit(60) if user['admin'] else []}
+'folders':folders,'fileArchives':file_archives,'files':[f for f in all_files if f.get('projectId') in file_pids],'meetings':[self.meeting_summary(m) for m in all_meetings if m.get('projectId') in file_pids],'meetingPrompt':self.meeting_prompt() if user['admin'] else None,'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees'] or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':self.notices_for(user['id']), 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'taskRequests':task_requests, 'creationRules':self.creation_rules(user), 'creationPolicy':self.creation_policy() if user.get('role')=='superadmin' else None, 'accountOrder':next((x.get('value') or [] for x in self.all('settings') if x.get('id')=='account_order'),[]) if user['admin'] else [], 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or owner_of.get(s['projectId'])==user['id'])], 'chat':self.chat_summary(user), 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.recent_audit(60) if user['admin'] else []}
 
     def diary_statistics(self, viewer, start=None, end=None):
         """Return daily completion/load summaries for the diary dashboard.
@@ -4610,8 +4654,9 @@ class Store:
                         root=current.get('originId') or current['id']
                         copy=next((x for x in self.all('tasks') if x.get('originId')==root and x.get('date')==target),None)
                     if not copy:
+                        awaiting=current.get('status')=='pending_approval' or current.get('approval',{}).get('status')=='pending'
                         current['status']='skipped';current['skipReason']='项目已结束，无法继续递延'
-                        if current.get('status')=='pending_approval' or current.get('approval',{}).get('status')=='pending':
+                        if awaiting:
                             current.setdefault('approval',{})['status']='expired'
                             approver=current.get('approval',{}).get('approver')
                             if approver:
@@ -4795,7 +4840,7 @@ def main():
                 d=json.loads(self.rfile.read(size) or b'{}')
                 if not isinstance(d,dict):raise Problem(400,'请求参数必须是对象')
                 if self.path=='/api/login':
-                    token=store.login(str(d.get('username','')),str(d.get('password','')))
+                    token=store.login(str(d.get('username','')),str(d.get('password','')),self.client_address[0])
                     secure='; Secure' if args.secure_cookie else ''
                     self.send(200,{'ok':True},{'Set-Cookie':f'wc_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800{secure}'});return
                 user=store.authenticate(self.token())
