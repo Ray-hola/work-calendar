@@ -437,8 +437,14 @@ function rememberStackSizes(){
 const stackPeriodDates=t=>t.stackDates||(t.stackPeriods||[]).map(id=>S.tasks.find(x=>x.id===id)?.date).filter(Boolean).sort();
 /* Every occurrence of one task shares originId/reworkOf links. Walking them
    lets the drawer show a single history for a task that was deferred or redone. */
+/* One id → task index per state, rebuilt when the task list is replaced or grows. */
+function taskIndex(){
+  const tasks=S.tasks||[],memo=taskIndex.memo;
+  if(memo&&memo.tasks===tasks&&memo.size===tasks.length)return memo.map;
+  taskIndex.memo={tasks,size:tasks.length,map:new Map(tasks.map(x=>[x.id,x]))};return taskIndex.memo.map;
+}
 function taskLineageIds(task,includeStack=true){
-  const byId=new Map((S.tasks||[]).map(x=>[x.id,x])),ids=new Set([task.id]);
+  const byId=taskIndex(),ids=new Set([task.id]);
   let parent=task.originId||task.reworkOf,root=task.id;const seen=new Set();
   while(parent&&byId.has(parent)&&!seen.has(parent)){seen.add(parent);ids.add(parent);root=parent;
     const node=byId.get(parent);parent=node.originId||node.reworkOf}
@@ -1771,8 +1777,12 @@ function tempTaskCard(){
 /* New work handed to someone carries a notice marked fresh. Until it is opened
    the project space shows a hopping red dot on its menu entry and marks the
    project or task; each one clears as it is opened, and the dot with the last. */
+/* Work marked new. The set of live ids is kept per state; the notices are
+   read each time, since opening work marks them read in place. */
 function freshRefs(){
-  const live=new Set([...S.projects.map(p=>p.id),...S.tasks.map(t=>t.id)]);
+  const memo=freshRefs.live,key=[S.projects,S.tasks,S.projects?.length,S.tasks?.length];
+  if(!memo||!memo.key.every((v,i)=>v===key[i]))freshRefs.live={key,ids:new Set([...S.projects.map(p=>p.id),...S.tasks.map(t=>t.id)])};
+  const live=freshRefs.live.ids;
   return new Set((S.notifications||[]).filter(n=>n.fresh&&!n.read&&live.has(n.reference)).map(n=>n.reference));
 }
 const isFreshTask=t=>{const refs=freshRefs();return refs.size>0&&[...taskLineageIds(t)].some(id=>refs.has(id))};
@@ -3066,6 +3076,7 @@ function renderGuide(){
     $$('#guideToc [data-guide]').forEach(x=>x.classList.toggle('is-on',x===a))});
 }
 function renderAll(){
+  if(typeof ensureAccountCreateButton==='function')ensureAccountCreateButton();
   $$('.admin-only-nav').forEach(n=>n.classList.toggle('hidden',!S.user?.admin));
   const pm=projectMode();
   ['#addProjectBtn','#addProjectTopBtn','#timelineAddProjectBtn'].forEach(id=>{$(id).innerHTML=entryLabel(pm,'项目');$(id).classList.toggle('hidden',pm==='none')});
@@ -5984,5 +5995,4 @@ function createAccountDialog(){
     catch(e){toast(e.message||'创建失败')}
   };
 }
-setInterval(ensureAccountCreateButton,1000);
 window.addEventListener('load',()=>setTimeout(ensureAccountCreateButton,200));
