@@ -4747,7 +4747,7 @@ body.nav-dragging * {
 
 @media (max-width: 1400px) {
   #projectsView.active-view {
-    grid-template-columns: 208px minmax(0, 1fr);
+    grid-template-columns: var(--project-navigation-width, 208px) minmax(0, 1fr);
   }
 }
 
@@ -11892,9 +11892,9 @@ body.is-resizing-agent { user-select: none; }
   outline: none;
 }
 
-/* Below the side-by-side width the directory is the 全部项目 page itself;
-   inside a project the crumbs lead back up, so the tree steps aside. */
-@media (max-width: 1180px) {
+/* On a phone the directory is the 全部项目 page itself; inside a project the
+   crumbs lead back up, so the tree steps aside. */
+@media (max-width: 760px) {
   #projectsView.is-in-project .project-nav-rail {
     display: none;
   }
@@ -12643,3 +12643,224 @@ body.is-resizing-agent { user-select: none; }
 }
 
 .project-nav-folder-row { height: auto; min-height: 32px; align-items: flex-start; }
+
+/* 项目目录 at every width ------------------------------------------------------
+   Names take at most two lines and show in full on hover. Narrow: projects
+   only, tighter branches. Collapsed: icons only, the marker still on the row.
+   Between a phone and a wide screen the directory stays a side column. */
+.project-nav-item .nav-text,
+.project-nav-toggle .nav-text,
+.project-nav-resource > span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.project-nav.is-nav-narrow .project-nav-resources,
+.project-nav.is-nav-narrow .project-node-caret,
+.project-nav.is-nav-narrow .project-nav-item b,
+.project-nav.is-nav-narrow .project-nav-toggle b,
+.project-nav.is-nav-narrow .project-nav-edit,
+.project-nav.is-nav-narrow .project-nav-add {
+  display: none;
+}
+
+.project-nav.is-nav-narrow .nav-branch {
+  margin-left: 6px;
+  padding-left: 10px;
+}
+
+.project-nav.is-nav-narrow .project-nav-item {
+  padding-left: 6px;
+}
+
+.project-nav.is-nav-collapsed .nav-text,
+.project-nav.is-nav-collapsed .project-nav-resources,
+.project-nav.is-nav-collapsed .project-node-caret,
+.project-nav.is-nav-collapsed .project-nav-caret,
+.project-nav.is-nav-collapsed .project-nav-empty,
+.project-nav.is-nav-collapsed .project-nav-label,
+.project-nav.is-nav-collapsed b {
+  display: none;
+}
+
+.project-nav.is-nav-collapsed .nav-branch {
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.project-nav.is-nav-collapsed .nav-branch > .nav-node::before,
+.project-nav.is-nav-collapsed .nav-branch > .nav-node::after {
+  display: none;
+}
+
+.project-nav.is-nav-collapsed .project-nav-project,
+.project-nav.is-nav-collapsed .project-nav-folder-row {
+  justify-content: center;
+}
+
+.project-nav.is-nav-collapsed .project-nav-item,
+.project-nav.is-nav-collapsed .project-nav-toggle,
+.project-nav.is-nav-collapsed .project-nav-all {
+  flex: 0 0 auto;
+  width: 36px;
+  min-height: 34px;
+  justify-content: center;
+  padding: 0;
+  align-items: center;
+}
+
+.project-nav.is-nav-collapsed .project-nav-all {
+  align-self: center;
+}
+
+.project-nav.is-nav-collapsed .project-nav-item .icon,
+.project-nav.is-nav-collapsed .project-nav-toggle .icon,
+.project-nav.is-nav-collapsed .project-nav-toggle .nav-folder-icon {
+  margin-top: 0;
+}
+
+.project-nav.is-nav-collapsed .new-chip {
+  position: absolute;
+  right: 4px;
+  top: 5px;
+  width: 6px;
+  min-width: 0;
+  height: 6px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 0;
+}
+
+@media (min-width: 761px) and (max-width: 1180px) {
+  #projectsView.active-view {
+    grid-template-columns: var(--project-navigation-width, 216px) minmax(0, 1fr);
+  }
+
+  .project-nav-rail {
+    border-right: 1px solid var(--line-soft);
+    border-bottom: 0;
+  }
+
+  .project-nav {
+    position: sticky;
+    max-height: calc(100vh - 80px);
+    padding: 18px 10px 28px;
+  }
+
+  .project-nav > .nav-resize-handle {
+    display: block;
+  }
+
+  .project-nav.is-nav-collapsed > .project-nav-all,
+  .project-nav.is-nav-collapsed > .project-nav-tree {
+    display: flex;
+  }
+
+  .project-nav.is-nav-collapsed > .nav-resize-handle {
+    display: block;
+  }
+}
+
+/* The directory changes width at once: an animated column width could stop
+   between sizes and leave the rows laid out for the wrong width. */
+#projectsView.active-view {
+  transition: none;
+}
+
+/* 导览 -------------------------------------------------------------------------
+   The page dims except one lit control; the light and the card glide to the
+   next control, the same hand-off the directory's selection uses. */
+.tour-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+}
+
+.tour-spot {
+  position: fixed;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1.5px var(--accent), 0 0 0 9999px rgba(31, 27, 21, .46);
+  pointer-events: none;
+  transition: left .36s cubic-bezier(.2, .8, .2, 1), top .36s cubic-bezier(.2, .8, .2, 1),
+    width .36s cubic-bezier(.2, .8, .2, 1), height .36s cubic-bezier(.2, .8, .2, 1);
+}
+
+.tour-veil.is-centered .tour-spot {
+  box-shadow: 0 0 0 9999px rgba(31, 27, 21, .46);
+}
+
+.tour-card {
+  position: fixed;
+  width: min(380px, calc(100vw - 32px));
+  padding: 16px 18px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 18px 50px -20px rgba(31, 27, 21, .45);
+  outline: none;
+  transition: left .36s cubic-bezier(.2, .8, .2, 1), top .36s cubic-bezier(.2, .8, .2, 1);
+}
+
+.tour-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.tour-crumbs i {
+  font-style: normal;
+}
+
+.tour-crumbs .is-on {
+  color: var(--accent-dark);
+  font-weight: 600;
+}
+
+.tour-card h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.tour-card p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+
+.tour-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.tour-count {
+  font-size: 12px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.tour-gap {
+  flex: 1;
+}
+
+.tour-foot .secondary-btn,
+.tour-foot .primary-btn {
+  height: 32px;
+  padding: 0 14px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-spot, .tour-card { transition: none; }
+}

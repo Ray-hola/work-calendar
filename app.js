@@ -75,7 +75,7 @@ const navigationLayout=readNavigationLayout();
 let navigationDrag=null,navigationFrame=0,navigationFadeFrame=0;
 function navigationBounds(kind,viewport,available){
   const c=NAVIGATION[kind];
-  const stacked=kind==='project'?viewport<=1180:viewport<=760;
+  const stacked=viewport<=760;
   const room=kind==='main'?viewport-490:!stacked&&Number.isFinite(available)?available-340:c.max;
   const initial=viewport<=1180?{main:216,chat:184}[kind]:undefined;
   return {min:c.min,max:Math.max(c.min,Math.min(c.max,room)),default:initial??c.width};
@@ -155,7 +155,7 @@ function finishNavigationDrag(cancelled=false){
   try{drag.handle.releasePointerCapture(drag.pointerId)}catch(_){}
   applyNavigationLayout();if(!cancelled)saveNavigationLayout();
 }
-function navigationResizeEnabled(kind){return window.innerWidth>(kind==='project'?1180:760)}
+function navigationResizeEnabled(kind){return window.innerWidth>760}
 function initNavigationLayout(){
   const main=$('.sidebar'),chat=$('.chat-side');
   if(main){
@@ -345,7 +345,7 @@ const status=t=>{
 };
 const projectName=t=>(S.projects.find(p=>p.id===t.projectId)||{}).name||'个人';
 function toast(msg){const e=$('#toast');e.textContent=msg;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200)}
-function showAuth(){meetingCancelCapture();meetingStopLive().catch(()=>{});if(typeof agentCancelVoice==='function')agentCancelVoice();document.body.classList.add('auth-locked');let e=$('#authScreen');if(!e){e=document.createElement('section');e.id='authScreen';document.body.prepend(e)}const local=location.protocol==='file:';e.innerHTML=`<div class="auth-card"><div class="brand"><span class="brand-mark">战</span><span>战略小组<br><strong>台账</strong></span></div><h1>登录工作台</h1><form id="loginForm"><label>账户<input id="loginUser" autocomplete="username" value="superadmin" required></label><label>密码<input id="loginPass" type="password" autocomplete="current-password" required></label><button class="primary-btn" type="submit" ${local?'disabled':''}>${local?'请先启动本地服务':'进入工作台'}</button><div id="loginError" class="login-error">${local?'请在工作区运行 ./run.sh，然后访问 http://127.0.0.1:4173/':''}</div></form></div>`;$('#loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/login',{username:$('#loginUser').value,password:$('#loginPass').value});document.body.classList.remove('auth-locked');e.target.closest('#authScreen').remove();await refresh();switchView('calendar')}catch(err){$('#loginError').textContent=err.message}}}
+function showAuth(){cancelTourOffer();endTour(false);meetingCancelCapture();meetingStopLive().catch(()=>{});if(typeof agentCancelVoice==='function')agentCancelVoice();document.body.classList.add('auth-locked');let e=$('#authScreen');if(!e){e=document.createElement('section');e.id='authScreen';document.body.prepend(e)}const local=location.protocol==='file:';e.innerHTML=`<div class="auth-card"><div class="brand"><span class="brand-mark">战</span><span>战略小组<br><strong>台账</strong></span></div><h1>登录工作台</h1><form id="loginForm"><label>账户<input id="loginUser" autocomplete="username" value="superadmin" required></label><label>密码<input id="loginPass" type="password" autocomplete="current-password" required></label><button class="primary-btn" type="submit" ${local?'disabled':''}>${local?'请先启动本地服务':'进入工作台'}</button><div id="loginError" class="login-error">${local?'请在工作区运行 ./run.sh，然后访问 http://127.0.0.1:4173/':''}</div></form></div>`;$('#loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/login',{username:$('#loginUser').value,password:$('#loginPass').value});document.body.classList.remove('auth-locked');e.target.closest('#authScreen').remove();await refresh();switchView('calendar')}catch(err){$('#loginError').textContent=err.message}}}
 /* Accounts that have signed in on this browser, newest first. The switcher
    offers only these, so it never lists the whole team to everyone. */
 const KNOWN_ACCOUNTS_KEY='wc-accounts';
@@ -355,13 +355,13 @@ async function refresh(){
   let next;
   try{next=await getState()}catch(e){if(e.status===401){showAuth();return}throw e}
   if(S.user?.id!==next.user.id){
-    meetingCancelCapture();
+    cancelTourOffer();endTour(false);meetingCancelCapture();
     if(S.user&&typeof agentResetUser==='function')agentResetUser();
     Object.assign(UI,{space:'',folder:'',view:'calendar',member:'all',filter:'all',selectedWeek:0,detailDate:null,timelineScroll:null,dayOffset:0});
   }
   /* updateChatDot is defined further down the file than the unit-test sandbox
      loads, so guard the call rather than assume it is in scope. */
-  S=next;if(S.dateHorizon)DATE_HORIZON=S.dateHorizon;rememberAccount(S.user.id);renderAll();renderPip();if(typeof loadSpeechStatus==='function')loadSpeechStatus();if(typeof updateChatDot==='function')updateChatDot();
+  S=next;if(S.dateHorizon)DATE_HORIZON=S.dateHorizon;rememberAccount(S.user.id);renderAll();if(typeof offerTour==='function')offerTour();renderPip();if(typeof loadSpeechStatus==='function')loadSpeechStatus();if(typeof updateChatDot==='function')updateChatDot();
 }
 let inboxRefreshPromise=null;
 async function refreshInboxState(){
@@ -402,6 +402,7 @@ function switchView(view){
   if(view==='calendar')renderCalendar();
   if(view==='today')renderToday();
   if(view==='dayDetail')renderDayContent();
+  if(view!=='projects')UI.navMark=null;
   if(view==='projects')renderProjects();
   if(view==='timeline')renderTimeline();
   if(view==='achievements')renderAchievements();
@@ -1088,24 +1089,47 @@ function projectNavContents(p){
   const group=(area,label,items)=>`<div class="nav-node"><button type="button" class="project-nav-resource is-group" data-project="${escapeHTML(p.id)}" data-project-area="${area}">`
     +`${icon(area==='meetings'?'chat':'folder')}<span>${label}</span><b>${items.length}</b></button>`
     +`${items.length?`<div class="nav-branch">${items.join('')}</div>`:''}</div>`;
-  const meeting=m=>`<div class="nav-node"><button type="button" class="project-nav-resource" data-project="${escapeHTML(p.id)}" data-project-area="meetings" data-meeting="${escapeHTML(m.id)}">${icon('chat')}<span>${escapeHTML(m.title)}</span></button></div>`;
-  const file=f=>`<div class="nav-node"><a class="project-nav-resource" href="/api/files/${encodeURIComponent(f.id)}" download="${escapeHTML(f.name)}">${icon('file')}<span>${escapeHTML(f.name)}</span></a></div>`;
+  const meeting=m=>`<div class="nav-node"><button type="button" class="project-nav-resource" data-project="${escapeHTML(p.id)}" data-project-area="meetings" data-meeting="${escapeHTML(m.id)}" title="${escapeHTML(m.title)}">${icon('chat')}<span>${escapeHTML(m.title)}</span></button></div>`;
+  const file=f=>`<div class="nav-node"><a class="project-nav-resource" href="/api/files/${encodeURIComponent(f.id)}" download="${escapeHTML(f.name)}" title="${escapeHTML(f.name)}">${icon('file')}<span>${escapeHTML(f.name)}</span></a></div>`;
   return `<div class="nav-branch project-nav-resources">${group('meetings','会议',meetings.map(meeting))}${group('files','文件',files.map(file))}</div>`;
 }
 /* The selection is one marker that travels to the chosen row: its leading edge
-   moves first and the trailing edge follows, so the move reads as a hand-off. */
+   moves first and the trailing edge follows, so the move reads as a hand-off.
+   When the rail is resized or collapsed it simply sits on the same row again. */
 function placeNavIndicator(){
   const nav=$('#projectNav');if(!nav||typeof nav.querySelector!=='function')return;
   const on=nav.querySelector('.project-nav-all.is-on')||nav.querySelector('.project-nav-folder-row.is-on')||nav.querySelector('.project-nav-project.is-on');
   let mark=nav.querySelector('.nav-indicator');
   if(!mark){mark=document.createElement('i');mark.className='nav-indicator';mark.setAttribute('aria-hidden','true');nav.prepend(mark)}
   if(!on||typeof on.getBoundingClientRect!=='function'||!on.offsetHeight){mark.style.opacity='0';UI.navMark=null;return}
+  watchNavWidth(nav);
+  const key=on.dataset?.id??on.querySelector?.('[data-id]')?.dataset?.id??'all';
   const nb=nav.getBoundingClientRect(),b=on.getBoundingClientRect();
-  const next={y1:b.top-nb.top+nav.scrollTop,y2:b.bottom-nb.top+nav.scrollTop,x:b.left-nb.left,w:b.width},prev=UI.navMark;
+  const next={key,y1:b.top-nb.top+nav.scrollTop,y2:b.bottom-nb.top+nav.scrollTop,x:b.left-nb.left,w:b.width},prev=UI.navMark;
   const set=g=>{mark.style.setProperty('--nav-y1',`${g.y1}px`);mark.style.setProperty('--nav-y2',`${g.y2}px`);mark.style.left=`${g.x}px`;mark.style.width=`${g.w}px`};
   UI.navMark=next;mark.style.opacity='1';
-  if(!prev||window.matchMedia?.('(prefers-reduced-motion: reduce)').matches){set(next);return}
-  set(prev);mark.classList.remove('is-down','is-up');mark.classList.add(next.y1>=prev.y1?'is-down':'is-up');void mark.offsetWidth;set(next);
+  /* A new selection, or the same row pushed up or down, glides; a change of
+     width (the rail resized or collapsed) just snaps. */
+  const sameWidth=prev&&Math.abs(prev.x-next.x)<.5&&Math.abs(prev.w-next.w)<.5;
+  const glide=prev&&(prev.key!==key||(sameWidth&&(prev.y1!==next.y1||prev.y2!==next.y2)));
+  if(!glide||window.matchMedia?.('(prefers-reduced-motion: reduce)').matches){mark.classList.remove('is-down','is-up');set(next);return}
+  set(prev);mark.classList.remove('is-down','is-up');void mark.offsetWidth;mark.classList.add(next.y1>=prev.y1?'is-down':'is-up');set(next);
+}
+/* The rail's width animates when it is collapsed or dragged; follow it. Only a
+   width change counts, so a project opening below does not cut a move short. */
+function watchNavWidth(nav){
+  const view=$('#projectsView');
+  if(view?.dataset&&!view.dataset.navSettle&&typeof view.addEventListener==='function'){
+    view.dataset.navSettle='1';
+    view.addEventListener('transitionend',e=>{if(e.target===view&&e.propertyName==='grid-template-columns'&&UI.navMark)placeNavIndicator()});
+  }
+  if(UI.navWidthWatch||typeof ResizeObserver!=='function')return;
+  let last=nav.getBoundingClientRect().width;
+  UI.navWidthWatch=new ResizeObserver(entries=>{
+    const width=entries[0]?.contentRect?.width;if(width==null||Math.abs(width-last)<.5)return;
+    last=width;if(UI.navMark)placeNavIndicator();
+  });
+  UI.navWidthWatch.observe(nav);
 }
 /* Where a drop at (x, y) would go. Over the middle of a folder a project goes
    into it; between rows it takes that gap, and where a gap could be either
@@ -3056,6 +3080,7 @@ const GUIDE=[
 ];
 function renderGuide(){
   const box=$('#guideContent'),toc=$('#guideToc');if(!box||!toc)return;
+  const start=$('#startTourBtn');if(start)start.onclick=startTour;
   toc.innerHTML=GUIDE.map(c=>`<a class="guide-toc-item" href="#guide-${c.id}" data-guide="${c.id}">${icon(c.icon)}<span>${escapeHTML(c.title)}</span></a>`).join('');
   box.innerHTML=GUIDE.map((c,i)=>`<article class="guide-chapter" id="guide-${c.id}" tabindex="-1"><header><span class="guide-index">${String(i+1).padStart(2,'0')}</span>`
     +`<h2>${escapeHTML(c.title)}</h2><p>${escapeHTML(c.lead)}</p></header>`
@@ -3064,6 +3089,131 @@ function renderGuide(){
   $$('#guideToc [data-guide]').forEach(a=>a.onclick=e=>{e.preventDefault();
     const chapter=$(`#guide-${a.dataset.guide}`);chapter?.scrollIntoView?.({behavior:navReducedMotion()?'auto':'smooth',block:'start'});chapter?.focus?.({preventScroll:true});
     $$('#guideToc [data-guide]').forEach(x=>x.classList.toggle('is-on',x===a))});
+}
+/* 导览: a guided walk through the real interface. Each step opens its page,
+   lights up one control and explains it beside it; the light glides from
+   control to control. Esc leaves, ← → turn the page. It runs once per account
+   on first visit and any time from 使用教程. */
+const TOUR=[
+  {ch:'开始',title:'欢迎来到战略小组台账',body:'两分钟走一遍主线：安排任务 → 跟进项目 → 处理收件箱 → 写档案。随时按 Esc 或点「跳过」退出，← → 键也能翻页。'},
+  {ch:'今天',view:'today',target:'#addTaskBtn',title:'新建任务',body:'按 N 或点这里。选项目任务、临时任务或固定任务，再定负责人、日期、时间和时长。所在规则组需要审批时，这里会显示「申请任务」。'},
+  {ch:'今天',view:'today',target:'.daily-progress',title:'今天做到哪了',body:'今日进度按已完成的任务计算。右上角的箭头可以前后翻一天。'},
+  {ch:'今天',view:'today',target:'.quick-tabs',title:'全部 · 待处理 · 已完成',body:'切换下面列表的范围。点任何一张任务卡打开详情：开始、记录完成、申请修改、递延都在那里。没做完的任务第二天会自动递延。'},
+  {ch:'今天',target:'.sidebar-section',title:'快捷筛选',body:'P0 重要任务、进行中、已递延：点一下就跳到今日任务，只列出这一类。'},
+  {ch:'周视图',view:'calendar',target:'#weekCarousel',title:'一周的安排',body:'七天一列，左右箭头翻周，点某一天看当天全部任务。'},
+  {ch:'项目',view:'projects',prep:()=>openProjectSpace(''),target:'#projectNav',title:'项目目录',body:'文件夹 → 项目 → 会议和文件。点项目左边的箭头展开它的会议和文件；有权限的人可以拖动排序、把项目拖进文件夹。拖右边缘调宽窄，点顶部箭头收起。'},
+  {ch:'项目',view:'projects',target:'#projectGrid',title:'全部项目',body:'每个项目一张卡：进度、成员、截止日期和你在其中的待办。点卡片进入项目。'},
+  {ch:'项目',view:'projects',prep:()=>{const p=visibleProjects()[0];if(p&&UI.space!==p.id)openProjectSpace(p.id)},target:'#projectSpace .space-tabs',title:'一个项目里',body:'任务、会议、文件、成员、概况五个标签。在目录里点会议或文件，会直接切到对应的标签。'},
+  {ch:'项目',view:'projects',target:'#projectActions',title:'项目的操作',body:'主按钮是新建任务；项目设置、完成项目、退出项目和删除项目都收在「更多」里。'},
+  {ch:'收件箱',view:'inbox',target:'#inboxList',title:'收件箱',body:'指派、审批、邀请、@ 你的消息都在这里。需要你处理的通知上直接有同意、驳回、接受等按钮。'},
+  {ch:'沟通',target:'#chatEntryBtn',title:'沟通区',body:'团队频道和每个项目各自的频道。输入 @ 提到成员，@所有人 会通知整个频道。'},
+  {ch:'档案',view:'archive',target:'#archiveView .page-intro',title:'档案室',body:'每天的档案：今日完成、未完成与阻塞、明日计划和随记。管理员在这里看团队日报和周报。'},
+  {ch:'助手',target:'#agentBtn',title:'AI 助手',body:'用一句话查询或安排工作。规划模式会起草任务和项目卡片，你逐张确认后才会生效。'},
+  {ch:'助手',target:'#pipBtn',title:'桌面小组件',body:'悬浮在桌面上的今日待办和番茄钟，勾选就记为完成。'},
+  {ch:'助手',target:'.topbar [aria-label="搜索"]',title:'搜索与快捷键',body:'按 / 搜任务和项目，按 ? 查看全部快捷键。'},
+  {ch:'设置',view:'settings',admin:true,target:'#settingsNav',title:'系统设置',body:'规则组、日程、补报、会议纪要提示词和 AI 模型都在这里，修改对全员生效。'},
+  {ch:'完成',target:'.nav-item[data-view="guide"]',title:'就这些',body:'每个功能的详细说明都在「使用教程」里，按 H 打开；也可以在那里重新开始这段导览。'},
+];
+const TOUR_KEY='wc-tour-done';
+let tour=null,tourOfferTimer=0;
+function tourDone(){try{return localStorage.getItem(`${TOUR_KEY}:${S.user?.id}`)==='1'}catch(_){return true}}
+function cancelTourOffer(){if(tourOfferTimer)clearTimeout(tourOfferTimer);tourOfferTimer=0}
+function tourBusy(){return Boolean(UI.docDirty||meetingLive.session||meetingLive.active
+  ||$('#meetingEditor')?.dataset?.dirty==='true'
+  ||['#modalBackdrop','#taskDrawer','#agentPanel'].some(s=>{const el=$(s);return el&&!el.classList.contains('hidden')}))}
+function offerTour(){
+  if(tour||tourOfferTimer||!S.user||tourDone()||window.innerWidth<900)return;
+  const owner=S.user.id;
+  const offer=()=>{
+    tourOfferTimer=0;
+    if(tour||S.user?.id!==owner||tourDone()||window.innerWidth<900||document.body.classList.contains('auth-locked'))return;
+    if(tourBusy()){tourOfferTimer=setTimeout(offer,1000);return}
+    startTour();
+  };
+  tourOfferTimer=setTimeout(offer,700);
+}
+function startTour(){
+  if(tour||!S.user||document.body.classList.contains('auth-locked')||tourBusy())return;
+  cancelTourOffer();
+  const steps=TOUR.filter(s=>!s.admin||S.user?.admin);
+  tour={i:0,steps,owner:S.user.id,returnFocus:document.activeElement,
+    background:[...document.body.children].map(el=>({el,inert:el.inert}))};
+  tour.background.forEach(({el})=>el.inert=true);
+  const veil=document.createElement('div');veil.id='tourVeil';veil.className='tour-veil';
+  veil.setAttribute('role','dialog');veil.setAttribute('aria-modal','true');veil.setAttribute('aria-labelledby','tourTitle');
+  veil.innerHTML='<div class="tour-spot"></div><div class="tour-card" tabindex="-1"></div>';
+  document.body.appendChild(veil);
+  document.addEventListener('keydown',tourKey,true);document.addEventListener('focusin',tourFocus,true);
+  window.addEventListener('resize',tourPlace);window.addEventListener('scroll',tourPlace,true);
+  tourShow(0,1);
+}
+function endTour(markDone=true){
+  if(!tour)return;const ended=tour;tour=null;
+  $('#tourVeil')?.remove();document.removeEventListener('keydown',tourKey,true);document.removeEventListener('focusin',tourFocus,true);
+  window.removeEventListener('resize',tourPlace);window.removeEventListener('scroll',tourPlace,true);
+  ended.background.forEach(({el,inert})=>el.inert=inert);
+  if(markDone)try{localStorage.setItem(`${TOUR_KEY}:${ended.owner}`,'1')}catch(_){}
+  const focus=ended.returnFocus;
+  if(focus?.isConnected&&focus.getClientRects().length&&!focus.closest('[inert]'))focus.focus({preventScroll:true});
+  else $('.nav-item.active')?.focus({preventScroll:true});
+}
+function tourFocus(e){if(tour&&!e.target.closest('#tourVeil'))$('#tourVeil .tour-next')?.focus({preventScroll:true})}
+function tourKey(e){
+  if(!tour)return;
+  e.stopPropagation();
+  if(e.key==='Escape'){e.preventDefault();endTour();return}
+  if(e.key==='Tab'){
+    const buttons=[...$$('#tourVeil button')],i=buttons.indexOf(document.activeElement);
+    if(i<0||e.shiftKey&&i===0||!e.shiftKey&&i===buttons.length-1){e.preventDefault();buttons[e.shiftKey?buttons.length-1:0]?.focus()}
+    return;
+  }
+  if(e.key==='Enter'&&e.target.closest('#tourVeil button'))return;
+  const go={ArrowRight:1,Enter:1,ArrowLeft:-1}[e.key];
+  if(go){e.preventDefault();tourShow(tour.i+go,go)}
+}
+const tourVisible=el=>Boolean(el&&el.getClientRects().length&&getComputedStyle(el).visibility!=='hidden');
+function tourShow(i,dir){
+  if(!tour)return;
+  if(i>=tour.steps.length){endTour();return}
+  if(i<0)i=0;
+  const step=tour.steps[i];
+  if(step.view&&UI.view!==step.view)switchView(step.view);
+  step.prep?.();
+  const target=step.target?$(step.target):null;
+  if(step.target&&!tourVisible(target)){if(i+dir>=0&&i+dir<tour.steps.length)tourShow(i+dir,dir);else if(dir>0)endTour();return}
+  tour.i=i;tour.target=target;
+  target?.scrollIntoView?.({block:'center',inline:'nearest'});
+  const chapters=[...new Set(tour.steps.map(s=>s.ch))],last=i===tour.steps.length-1;
+  const card=$('#tourVeil .tour-card');if(!card)return;
+  card.innerHTML=`<div class="tour-crumbs">${chapters.map(c=>`<span${c===step.ch?' class="is-on"':''}>${escapeHTML(c)}</span>`).join('<i>·</i>')}</div>`
+    +`<h3 id="tourTitle">${escapeHTML(step.title)}</h3><p>${escapeHTML(step.body)}</p>`
+    +`<div class="tour-foot"><span class="tour-count">${i+1} / ${tour.steps.length}</span>`
+    +`${last?'':'<button type="button" class="text-btn tour-skip">跳过</button>'}<span class="tour-gap"></span>`
+    +`${i?'<button type="button" class="secondary-btn tour-prev">上一步</button>':''}`
+    +`<button type="button" class="primary-btn tour-next">${i===0?'开始':last?'完成':'下一步'}</button></div>`;
+  card.querySelector('.tour-next').onclick=()=>tourShow(tour.i+1,1);
+  const prev=card.querySelector('.tour-prev');if(prev)prev.onclick=()=>tourShow(tour.i-1,-1);
+  const skip=card.querySelector('.tour-skip');if(skip)skip.onclick=endTour;
+  requestAnimationFrame(()=>{tourPlace();card.querySelector('.tour-next')?.focus({preventScroll:true})});
+}
+/* The light sits 6px around the control; the card goes below it, above it or
+   beside it, whichever fits, and never leaves the window. */
+function tourPlace(){
+  const veil=$('#tourVeil');if(!tour||!veil)return;
+  const spot=veil.querySelector('.tour-spot'),card=veil.querySelector('.tour-card');
+  const vw=window.innerWidth,vh=window.innerHeight,gap=14,margin=16;
+  const r=tour.target?.getBoundingClientRect?.();
+  const box=r?{x:r.left-6,y:r.top-6,w:r.width+12,h:r.height+12}:{x:vw/2,y:vh/2,w:0,h:0};
+  Object.assign(spot.style,{left:`${box.x}px`,top:`${box.y}px`,width:`${box.w}px`,height:`${box.h}px`});
+  veil.classList.toggle('is-centered',!r);
+  const cw=card.offsetWidth,ch=card.offsetHeight;let x,y;
+  if(!r){x=(vw-cw)/2;y=(vh-ch)/2}
+  else if(box.y+box.h+gap+ch<=vh-margin){y=box.y+box.h+gap;x=box.x}
+  else if(box.y-gap-ch>=margin){y=box.y-gap-ch;x=box.x}
+  else if(box.x+box.w+gap+cw<=vw-margin){x=box.x+box.w+gap;y=box.y}
+  else{x=box.x-gap-cw;y=box.y}
+  card.style.left=`${Math.max(margin,Math.min(x,vw-cw-margin))}px`;
+  card.style.top=`${Math.max(margin,Math.min(y,vh-ch-margin))}px`;
 }
 function renderAll(){
   $$('.admin-only-nav').forEach(n=>n.classList.toggle('hidden',!S.user?.admin));
