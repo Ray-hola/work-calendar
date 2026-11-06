@@ -236,6 +236,29 @@ def required(data, key):
         raise Problem(400, f'请填写 {key}')
     return value
 
+PREVIEW_TEXT = ('.txt', '.md', '.csv', '.log', '.json')
+
+def preview_type(name, raw):
+    """The type to show a file as in the browser, or None to download it.
+    Judged by the bytes, not the name, so a page renamed to .png still downloads."""
+    if raw.startswith(b'\x89PNG\r\n\x1a\n'):
+        return 'image/png'
+    if raw.startswith(b'\xff\xd8\xff'):
+        return 'image/jpeg'
+    if raw[:6] in (b'GIF87a', b'GIF89a'):
+        return 'image/gif'
+    if raw[:4] == b'RIFF' and raw[8:12] == b'WEBP':
+        return 'image/webp'
+    if raw.startswith(b'%PDF-'):
+        return 'application/pdf'
+    if str(name).lower().endswith(PREVIEW_TEXT):
+        try:
+            raw.decode('utf-8')
+        except UnicodeDecodeError:
+            return None
+        return 'text/plain; charset=utf-8'
+    return None
+
 def valid_date(value):
     try:
         parsed = date.fromisoformat(str(value))
@@ -2941,14 +2964,29 @@ class Store:
             limit = max(1, min(300, int(data.get('limit') or 120)))
         except (TypeError, ValueError):
             limit = 120
+        # `before` pages back through older history; `more` says whether any is left.
+        before = str(data.get('before') or '')
         where, args = f'{CHAT_CHANNEL_SQL}=?', [channel]
-        if since:
-            where += f" AND {CHAT_TIME_SQL}>?"
-            args.append(since)
-        rows = [json.loads(r['data']) for r in self.db.execute(
-            f'SELECT data FROM messages WHERE {where} ORDER BY {CHAT_TIME_SQL} DESC, rowid DESC LIMIT ?', (*args, limit))]
-        rows.reverse()
-        return {'messages': rows, 'now': timestamp(), 'channel': channel,
+        # Keep the complete ordering key: timestamps are not unique. Legacy
+        # timestamp-only callers still work, while new clients use both keys.
+        for key, legacy, op in (('sinceCursor', since, '>'), ('beforeCursor', before, '<')):
+            cursor = data.get(key)
+            if cursor is not None:
+                if (not isinstance(cursor, dict) or not isinstance(cursor.get('at'), str)
+                        or type(cursor.get('rowid')) is not int or cursor['rowid'] < 1):
+                    raise Problem(400, '消息分页位置无效，请重新打开频道')
+                where += f' AND ({CHAT_TIME_SQL}, rowid){op}(?, ?)'
+                args.extend((cursor['at'], cursor['rowid']))
+            elif legacy:
+                where += f' AND {CHAT_TIME_SQL}{op}?'
+                args.append(legacy)
+        records = list(self.db.execute(
+            f'SELECT rowid AS cursor_id, data FROM messages WHERE {where} ORDER BY {CHAT_TIME_SQL} DESC, rowid DESC LIMIT ?', (*args, limit + 1)))
+        more = len(records) > limit
+        records = records[:limit][::-1]
+        rows = [json.loads(r['data']) for r in records]
+        cursor = lambda i: {'at': rows[i].get('createdAt') or '', 'rowid': records[i]['cursor_id']} if records else None
+        return {'messages': rows, 'more': more, 'beforeCursor': cursor(0), 'sinceCursor': cursor(-1), 'now': timestamp(), 'channel': channel,
                 'previews': self.chat_previews(user)}
 
     def chat_previews(self, user):
@@ -4679,11 +4717,16 @@ def main():
                 if self.path=='/api/state':self.send(200,store.snapshot(store.authenticate(self.token())));return
                 if self.path=='/api/health':self.send(200,{'ok':True,'timezone':'Asia/Shanghai'});return
                 if self.path.startswith(FILES_PATH+'/'):
-                    # Always a download, never rendered: an uploaded page must
-                    # not run as this site.
+                    # A download by default. ?preview=1 shows a file in the browser
+                    # only when its bytes prove it is a raster image, a PDF or plain
+                    # text: an uploaded page never runs as this site. Images and text
+                    # sit under a sandbox that runs nothing; a PDF is left to the
+                    # browser's own viewer, which that sandbox would block.
                     f,raw=store.read_file(store.authenticate(self.token()),urllib.parse.unquote(self.path[len(FILES_PATH)+1:].split('?')[0]))
-                    self.send_response(200);self.send_header('Content-Type','application/octet-stream')
-                    self.send_header('Content-Disposition',"attachment; filename*=UTF-8''"+urllib.parse.quote(f['name']))
+                    shown=preview_type(f['name'],raw) if 'preview=1' in self.path.partition('?')[2].split('&') else None
+                    self.send_response(200);self.send_header('Content-Type',shown or 'application/octet-stream')
+                    self.send_header('Content-Disposition',("inline" if shown else "attachment")+"; filename*=UTF-8''"+urllib.parse.quote(f['name']))
+                    if shown and shown!='application/pdf':self.send_header('Content-Security-Policy',"sandbox; default-src 'none'; img-src 'self'; style-src 'unsafe-inline'")
                     self.send_header('Cache-Control','private, no-store');self.send_header('X-Content-Type-Options','nosniff')
                     self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
                 filename={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/styles.css':'styles.css'}.get(self.path.split('?')[0])

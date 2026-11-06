@@ -2956,6 +2956,33 @@ test('project rail resize is available on tablet and reserves content space down
 
 test('project weekly report escapes summaries and has honest empty states',()=>{const a=app();a.run("S.today='2026-11-06'");const empty=a.run("weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{}})");assert.match(empty,/暂无待完成项目/);assert.match(empty,/本周暂无已结项项目/);const html=a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{completedProjects:[{name:'<img>',completedOn:'2026-11-02',summary:'<script>bad</script>'}]}})`);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<img>|<script>/)});
 
+function chatPagingApp(){
+  const a=app(),calls=[],pages=[],log={innerHTML:'',isConnected:true,scrollHeight:100,scrollTop:0,clientHeight:100,querySelector:()=>null,insertAdjacentHTML(){}},button={isConnected:true,insertAdjacentHTML(){},remove(){this.isConnected=false}};
+  a.context.document={querySelector:s=>s==='#chatLog'?log:s==='#chatMore'?button:null};
+  a.context.fetch=async(url,options)=>{calls.push(JSON.parse(options.body).data);return {ok:true,text:async()=>JSON.stringify(pages.shift())}};
+  a.run("let chatChannel='general',chatLastAt='',chatLastDay='',chatFirstAt='',chatFirstCursor=null,chatLastCursor=null,chatLoadGeneration=0,chatPreviews={};S.user={id:'member'};renderChatChannels=()=>{};reportChatRead=()=>{};chatBubble=()=>'<div>message</div>'");
+  a.run(source.slice(source.indexOf('async function loadChat(reset)'),source.indexOf('async function reportChatRead(at)')));
+  return {a,calls,pages,log,button};
+}
+test('chat history and live polling retain independent complete cursors',async()=>{
+  const {a,calls,pages}=chatPagingApp(),at='2026-11-06T08:00:00+08:00';
+  pages.push({messages:[{createdAt:at}],more:true,beforeCursor:{at,rowid:2},sinceCursor:{at,rowid:121}});
+  await a.run('loadChat(true)');
+  pages.push({messages:[{createdAt:at}],sinceCursor:{at,rowid:122}});await a.run('loadChat(false)');
+  assert.deepEqual(calls[1].sinceCursor,{at,rowid:121});
+  pages.push({messages:[{createdAt:at}],more:false,beforeCursor:{at,rowid:1}});await a.run('loadEarlierChat()');
+  assert.deepEqual(calls[2].beforeCursor,{at,rowid:2});
+  assert.equal(a.run('chatLastCursor.rowid'),122);assert.equal(a.run('chatFirstCursor.rowid'),1);
+});
+test('a late chat page cannot replace cursors after changing account or channel',async()=>{
+  for(const change of ["S.user.id='other'","chatChannel='lounge'"]){
+    const {a,log}=chatPagingApp();let resolve;a.context.fetch=()=>new Promise(r=>resolve=r);
+    log.innerHTML='current account content';const pending=a.run('loadChat(true)');a.run(change);
+    resolve({ok:true,text:async()=>JSON.stringify({messages:[{createdAt:'old'}],beforeCursor:{at:'old',rowid:1},sinceCursor:{at:'old',rowid:1}})});await pending;
+    assert.equal(log.innerHTML,'current account content');assert.equal(a.run('chatLastCursor'),null);
+  }
+});
+
 function guideDemoHarness(reduced=false){
   const a=app(),timers=[],cleared=[],classes=new Set(),dots=Array.from({length:4},()=>({classList:{toggle(){}},setAttribute(){}}));
   const play={},caption={},fig={dataset:{demo:'task-life'},classList:{toggle(c,on){on?classes.add(c):classes.delete(c)},add(c){classes.add(c)},contains:c=>classes.has(c)},
