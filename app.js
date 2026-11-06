@@ -3042,7 +3042,7 @@ const GUIDE=[
   ]},
   {id:'archive',title:'档案室',icon:'archive',lead:'每天的日志、个人档案和团队日报周报。',parts:[
     ['我的档案',['普通成员点档案室右上角的今日按钮，打开今天的档案。','档案分四栏：今日完成、未完成与阻塞、明日计划和随记；系统会先把当天的工作日志整理进去，你补充后点「保存」。','档案只有你自己和管理员能看到。','按月份翻看以前的档案，已记录的日子有标记。']],
-    ['团队日报与周报',['系统每天自动汇总团队日报：完成任务数、完成工时、各项目进展（Owner 汇报或系统汇总）和成员总结。','管理员可以打开任意一天的日报修改，修改过的会标「已改」。','周报列出本周完成任务与反馈，以及未完成、下周待续的事项；可切换周次并打开每日记录。']],
+    ['团队日报与周报',['系统每天自动汇总团队日报：完成任务数、完成工时、各项目进展（Owner 汇报或系统汇总）和成员总结。','管理员可以打开任意一天的日报修改，修改过的会标「已改」。','周报结合本周完成项目的描述和结项说明呈现成果，并按未完成项目列出剩余工作；可切换周次并打开每日记录。']],
     ['自动补报',['开启「系统设置 → 日报与补报 → 自动补报」后，到点时前一天没交项目日报的项目会自动汇总成一份补报，交给 Owner 确认。']],
   ]},
   {id:'achievements',title:'成果库',icon:'award',lead:'已结项项目的完整档案，仅管理员可见。',parts:[
@@ -3784,29 +3784,28 @@ function openTodayArchive(){
 }
 /* Weekly outcomes are computed from task events by the server. */
 function weekReportDocument(week){
-  const work=week.work||{completed:[],unfinished:[],feedback:[]},done=work.completed||[],pending=work.unfinished||[];
-  const esc=escapeHTML;
-  const taskMeta=t=>`${esc(t.projectName||'临时任务')} · ${esc(t.assigneeName||t.assignee||'未指派')}`;
+  const work=week.work||{},done=work.completedProjects||[],pending=work.unfinishedProjects||[],other=work.unfinishedOther||[],esc=escapeHTML;
   const text=(label,value)=>value?`<p><span class="muted">${label}</span>${esc(String(value))}</p>`:'';
-  const completed=done.map(t=>`<li><div class="week-work-head"><strong>${esc(t.name)}</strong><time>${esc(fmt(t.completedOn))}</time></div>`
-    +`<small>${taskMeta(t)}</small>${text('完成总结：',t.summary)}${text('工作感受：',t.feeling)}${text('后续反馈：',t.followup)}`
-    +`${t.reopened?'<p class="muted">已打回，仍需继续处理</p>':''}</li>`).join('');
-  const unfinished=pending.map(t=>`<li><div class="week-work-head"><strong>${esc(t.name)}</strong><span>${t.status==='doing'?'进行中':'待继续'}</span></div>`
-    +`<small>${taskMeta(t)}</small>${text('剩余事项：',t.remaining)}${text('原因：',t.reason)}`
-    +`${text('后续安排：',t.scheduledOn>week.end?fmt(t.scheduledOn):'尚未安排到下周')}${text('截止日期：',t.deadline?fmt(t.deadline):'')}</li>`).join('');
-  const feedback=(work.feedback||[]).map(f=>`<li><div class="week-work-head"><strong>${esc(f.author)}</strong><time>${esc(fmt(f.date))}</time></div><small>${esc(f.source)}${f.projectName?' · '+esc(f.projectName):''}</small>`
-    +(typeof f.content==='string'?text('',f.content):Object.entries(f.content||{}).map(([k,v])=>text(({done:'完成反馈：',progress:'进展：',risks:'问题与阻塞：',next:'后续计划：'})[k]||'',v)).join(''))+'</li>').join('');
-  const totals=done.reduce((n,t)=>n+Number(t.actual||0),0);
+  const people=p=>`Owner · ${esc(p.ownerName||'未指派')}${p.members?.length?' · 参与人：'+esc(p.members.join('、')):''}`;
+  const task=t=>`<li><div class="week-work-head"><strong>${esc(t.name)}</strong><span>${esc(t.assigneeName||'未指派')}</span></div>`
+    +`${text('剩余事项：',t.remaining)}${text('原因：',t.reason)}${text('后续安排：',t.scheduledOn>week.end?fmt(t.scheduledOn):'尚未安排到下周')}${text('截止日期：',t.deadline?fmt(t.deadline):'')}</li>`;
+  const completed=done.map(p=>`<li><div class="week-work-head"><strong>${esc(p.name)}</strong><time>${esc(fmt(p.completedOn))}</time></div>`
+    +`<small>${people(p)}</small><p class="week-project-summary">${esc(p.summary||[p.description,p.completionReport].filter(Boolean).join('\n'))}</p></li>`).join('');
+  const unfinished=pending.map(p=>`<li><div class="week-work-head"><strong>${esc(p.name)}</strong><span>${p.status==='pending_completion'?'待结项审批':'进行中'}</span></div>`
+    +`<small>${people(p)}</small>${text('项目内容：',p.description)}`
+    +`${p.status==='pending_completion'?'<p>已提交结项，等待审批</p>':''}`
+    +`${p.remaining?.length?`<ul class="week-remaining-list">${p.remaining.map(task).join('')}</ul>`:p.status==='pending_completion'?'':'<p class="muted">项目尚未结项，暂无已记录的未完成任务</p>'}</li>`).join('');
+  const remainingCount=pending.reduce((n,p)=>n+(p.remaining||[]).length,other.length);
   return `<article class="brief-doc week-report"><header class="brief-head"><div class="week-report-top"><div class="eyebrow">档案室 · 周报</div><div class="week-report-nav">`
     +`<button type="button" class="icon-btn" data-week="-1" aria-label="上一周">${icon('chevron-left')}</button>`
     +`<button type="button" class="icon-btn" data-week="1" ${week.end>=S.today?'disabled':''} aria-label="下一周">${icon('chevron-right')}</button></div></div>`
     +`<h2>${esc(fmt(week.start))} — ${esc(fmt(week.end))}</h2><p class="muted">截至 ${esc(fmt(work.asOf||week.end))}</p>`
-    +`<div class="brief-stats"><div><b data-count="${done.length}">${done.length}</b><span>本周完成</span></div>`
-    +`<div><b data-count="${pending.length}">${pending.length}</b><span>待继续</span></div>`
-    +`<div><b>${hours(totals)}h</b><span>已记录实际工时</span></div></div></header>`
-    +`<section class="brief-section"><h3>这周做了什么</h3>${completed?`<ul class="week-work-list">${completed}</ul>`:'<p class="muted">本周暂无已记录的完成任务</p>'}`
-    +`<h4>大家的反馈</h4>${feedback?`<ul class="week-work-list">${feedback}</ul>`:'<p class="muted">暂无已提交的反馈</p>'}</section>`
-    +`<section class="brief-section"><h3>这周没做完，下周继续</h3>${unfinished?`<ul class="week-work-list">${unfinished}</ul>`:'<p class="muted">暂无待继续的任务</p>'}</section>`
+    +`<div class="brief-stats"><div><b data-count="${done.length}">${done.length}</b><span>本周完成项目</span></div>`
+    +`<div><b data-count="${pending.length}">${pending.length}</b><span>待完成项目</span></div>`
+    +`<div><b data-count="${remainingCount}">${remainingCount}</b><span>剩余任务</span></div></div></header>`
+    +`<section class="brief-section"><h3>这周做了什么</h3>${completed?`<ul class="week-work-list">${completed}</ul>`:'<p class="muted">本周暂无已结项项目</p>'}</section>`
+    +`<section class="brief-section"><h3>还有什么没做</h3>${unfinished?`<ul class="week-work-list">${unfinished}</ul>`:'<p class="muted">暂无待完成项目</p>'}`
+    +`${other.length?`<h4>其他待续事项</h4><ul class="week-work-list">${other.map(task).join('')}</ul>`:''}</section>`
     +`<footer class="week-daily-links">${(week.briefs||[]).filter(b=>b.filed!==false).map(b=>`<button type="button" class="text-btn week-cell" data-date="${esc(b.date)}">${esc(fmt(b.date))} 日报</button>`).join('')}</footer></article>`;
 }
 /* Numbers run up from zero as the report settles; a tap shows them at once. */

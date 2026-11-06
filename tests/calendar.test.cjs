@@ -455,11 +455,11 @@ test('日记 and 档案室 are one 档案室: members file their own days, admin
   assert.ok(/data-scope="members" data-id="test002" data-field="done">联调/.test(editable) && /data-scope="projects" data-id="p" data-field="progress">/.test(editable), '每一块都能改，空的也能补');
   assert.ok(/已改/.test(editable));
   assert.ok(!/contenteditable/.test(a.run(`briefDocument(${JSON.stringify(brief)})`)), '导出和只读时是原样');
-  const week = a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',briefs:[${JSON.stringify(brief)}],work:{asOf:'2026-11-06',completed:[{name:'完成联调',assigneeName:'王二',projectName:'官网',completedOn:'2026-11-02',summary:'接口已对齐',feeling:'顺利',followup:'补文档',actual:60}],unfinished:[{name:'验收',assigneeName:'王二',remaining:'最终验证',reason:'环境未好',scheduledOn:'2026-11-09'}],feedback:[{author:'王二',date:'2026-11-02',source:'日记',content:{risks:'等待反馈'}}]}})`);
-  assert.match(week,/这周做了什么/);assert.match(week,/这周没做完，下周继续/);
-  for(const value of ['完成联调','接口已对齐','顺利','补文档','最终验证','环境未好','等待反馈'])assert.ok(week.includes(value));
+  const week = a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',briefs:[${JSON.stringify(brief)}],work:{asOf:'2026-11-06',completedProjects:[{name:'官网改版',ownerName:'王二',members:['王二','王三'],completedOn:'2026-11-02',summary:'本周完成官网改版。项目内容：更新首页。完成情况：验收上线'}],unfinishedProjects:[{name:'验收项目',ownerName:'王三',description:'接口验收',status:'active',remaining:[{name:'最终验证',remaining:'补齐验证',reason:'环境未好',scheduledOn:'2026-11-09'}]}]}})`);
+  assert.match(week,/这周做了什么/);assert.match(week,/还有什么没做/);
+  for(const value of ['官网改版','更新首页','验收上线','验收项目','最终验证','环境未好','王三'])assert.ok(week.includes(value));
   assert.match(week,/data-week="1" disabled/);assert.match(week,/data-date="2026-11-01"/);
-  assert.doesNotMatch(week,/成员本周|项目本周|week-meter/);
+  assert.doesNotMatch(week,/大家的反馈|完成实际工时|成员本周|项目本周/);
 
 });
 
@@ -2954,4 +2954,4 @@ test('project rail resize is available on tablet and reserves content space down
   assert.match(a.run("TOUR.find(s=>s.ch==='档案').body"),/看团队日报和周报/);
 });
 
-test('weekly outcome empty states and user feedback are escaped',()=>{const a=app();a.run("S.today='2026-11-06'");const empty=a.run("weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{}})");assert.match(empty,/暂无待继续/);assert.match(empty,/暂无已提交的反馈/);const html=a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{feedback:[{author:'<img>',date:'2026-11-02',content:{risks:'<script>bad</script>'}}]}})`);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<img>|<script>/)});
+test('project weekly report escapes summaries and has honest empty states',()=>{const a=app();a.run("S.today='2026-11-06'");const empty=a.run("weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{}})");assert.match(empty,/暂无待完成项目/);assert.match(empty,/本周暂无已结项项目/);const html=a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{completedProjects:[{name:'<img>',completedOn:'2026-11-02',summary:'<script>bad</script>'}]}})`);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<img>|<script>/)});
