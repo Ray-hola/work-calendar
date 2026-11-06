@@ -2015,12 +2015,12 @@ test('delete cards cannot submit before human confirmation and never use automat
   assert.ok(!a.run('planCardsHTML({...planDraft({tasks:[raw]})})').includes('<pre'));
 });
 test('project deletion shows impact and requires the full original name, independent of editable titles',()=>{
-  const a=planningApp();a.run(`var board=planDraft({projects:[{operation:'delete',id:'p',revision:'r',before:{name:'重要项目',owner:'test001'},impact:{tasks:12,files:3,repeats:2}}]});`);
+  const a=planningApp();a.run(`var board=planDraft({projects:[{operation:'delete',id:'p',revision:'r',before:{name:'重要项目',owner:'test001'},impact:{tasks:12,files:3,repeats:2,meetings:4,messages:15}}]});`);
   assert.ok(a.run('planProblems(board,board.projects[0]).confirm'));
   a.run("board.projects[0].confirm='重要';board.projects[0].name='重要'");
   assert.ok(a.run('planProblems(board,board.projects[0]).confirm'));
   a.run("board.projects[0].confirm='重要项目'");assert.deepEqual(a.json('planProblems(board,board.projects[0])'),{});
-  const html=a.run('planCardsHTML(board)');assert.ok(html.includes('12 项任务')&&html.includes('3 个附件')&&html.includes('2 条固定安排'));
+  const html=a.run('planCardsHTML(board)');assert.ok(html.includes('12 项任务')&&html.includes('3 个附件')&&html.includes('2 条固定安排')&&html.includes('4 场会议')&&html.includes('15 条沟通记录'));
 });
 test('a member change card follows approval rights and requires a reason instead of rewriting task ownership',()=>{
   const a=planningApp();a.context.raw=mutationTask({name:'申请修改',before:{...mutationTask().before,creator:'test002'}});
@@ -2347,6 +2347,48 @@ test('settings speak plainly: neutral "not allowed", one-choice-at-a-time week s
   const collect = source.match(/function renderCollectionSchedule\(\)\{[\s\S]*?\n\}/)[0];
   assert.ok(collect.includes('data-mode') && collect.includes('data-weekday'), '补报时间就地设置');
   assert.ok(/已完成 · /.test(source) && /action:'scheduler\.run'/.test(source));
+});
+
+/* Source-level CSS contract: read the real classes emitted for each action
+   row and apply the matching simple selectors in specificity/order. This
+   checks the height regression without claiming browser layout acceptance. */
+function settingsButtonHeight(classes,container){
+  const css=fs.readFileSync(path.join(__dirname,'../styles.css'),'utf8').replace(/\/\*[\s\S]*?\*\//g,'');
+  const scopes=new Set(['','#settingsView',`.${container}`,`#settingsView .${container}`]);
+  let winner=null;
+  for(const rule of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)){
+    const height=rule[2].match(/(?:^|;)\s*height\s*:\s*(\d+)px\s*(?:;|$)/);if(!height)continue;
+    for(const selector of rule[1].split(',').map(s=>s.trim())){
+      const normalized=selector.replace(/\s+/g,' '),split=normalized.lastIndexOf(' ');
+      const scope=split<0?'':normalized.slice(0,split),target=normalized.slice(split+1);
+      if(!scopes.has(scope)||! /^(?:\.[\w-]+)+$/.test(target)||!target.slice(1).split('.').every(c=>classes.includes(c)))continue;
+      const specificity=(selector.match(/#/g)||[]).length*100+(selector.match(/\./g)||[]).length*10;
+      if(!winner||specificity>=winner.specificity)winner={specificity,height:Number(height[1])};
+    }
+  }
+  assert.ok(winner,`no height found for ${classes.join(' ')}`);return winner.height;
+}
+function buttonHeights(html,container){
+  return [...html.matchAll(/<button\b[^>]*class="([^"]+)"[^>]*>/g)].map(m=>settingsButtonHeight(m[1].split(/\s+/),container));
+}
+test('settings source editor cancel and submit use the same compact height',()=>{
+  const a=planningApp();a.run("aiEditing={kind:'chat'}");
+  const html=a.run('aiSourceEditor(null)');
+  assert.deepEqual(buttonHeights(html,'ai-editor-actions'),[32,32]);
+});
+test('settings test edit and destructive confirmation actions have equal heights',()=>{
+  const a=aiEditorApp();a.run('renderAiSettingsPage()');
+  const actions=[...a.box.innerHTML.matchAll(/<div class="ai-source-actions">([\s\S]*?)<\/div>/g)];
+  assert.equal(actions.length,2);
+  for(const [,html] of actions){
+    assert.deepEqual(buttonHeights(html,'ai-source-actions'),[32,32,32]);
+    assert.deepEqual(buttonHeights(html.replace('text-btn is-danger','text-btn is-danger is-armed'),'ai-source-actions'),[32,32,32]);
+  }
+});
+test('settings empty state primary and alternative actions have equal heights',()=>{
+  const a=aiEditorApp();a.run('aiSettings.sources=[];renderAiSettingsPage()');
+  const html=a.box.innerHTML.match(/<div class="ai-empty-actions">([\s\S]*?)<\/div>/)[1];
+  assert.deepEqual(buttonHeights(html,'ai-empty-actions'),[32,32]);
 });
 
 test('week history retains deferral events after completion without treating merged or reopened rows as deferrals', () => {
@@ -2737,4 +2779,121 @@ test('prompt reset replaces dirty editor and its saved baseline without racing a
 test('archived meeting opens escaped read-only transcript and minutes without mutation controls',()=>{
   const a=app();a.context.document={querySelector:()=>({})};a.run("openModal=html=>{globalThis.archivedHTML=html};S.fileArchives=[{id:'p1'}];S.meetings=[{id:'m1',projectId:'p1',title:'周会',rawTranscript:'<script>bad</script>',minutes:'结论'}];openMeetingEditor({id:'p1',name:'项目'},'m1')");
   const html=a.context.archivedHTML;assert.match(html,/<textarea readonly/);assert.match(html,/&lt;script&gt;/);assert.match(html,/结论/);assert.doesNotMatch(html,/id="(?:saveMeeting|meetingLiveBtn|generateMeetingMinutes)"/);
+});
+
+function lazyMeetingApp(){
+  const h=meetingApp(),pending=[],mounts=[],notices=[];
+  h.a.context.pending=pending;h.a.context.mounts=mounts;h.a.context.notices=notices;
+  h.a.context.fetch=(url,options)=>new Promise(resolve=>pending.push({
+    id:JSON.parse(options.body).data.id,
+    reply:full=>resolve({ok:true,text:async()=>JSON.stringify(full)}),
+    fail:()=>resolve({ok:false,text:async()=>JSON.stringify({error:'加载失败'})})
+  }));
+  h.a.run(`toast=msg=>notices.push(msg);openModal=html=>{cancelMeetingOpen();mounts.push(html)};
+    renderProjects=()=>{};S.user={id:'owner'};UI.view='projects';UI.space='p1';UI.spaceArea='overview';UI.docDirty=false;
+    S.projects=[{id:'p1',name:'项目',owner:'owner'},{id:'p2',name:'另一个项目',owner:'owner'}];
+    S.meetings=[{id:'a',projectId:'p1',title:'A',revision:0},{id:'b',projectId:'p1',title:'B',revision:0}];`);
+  return {...h,pending,mounts,notices,open:id=>h.a.run(`openMeetingEditor(S.projects[0],${JSON.stringify(id)})`),
+    full:(id,revision=0)=>({id,projectId:'p1',title:id.toUpperCase(),rawTranscript:'原稿 '+id,minutes:'纪要 '+id,revision})};
+}
+
+test('lazy meeting loading keeps the last selection and ignores an earlier reply',async()=>{
+  const h=lazyMeetingApp(),first=h.open('a'),last=h.open('b');
+  assert.deepEqual(h.pending.map(p=>p.id),['a','b']);assert.equal(h.notices[0],'正在加载会议…');
+  h.pending[1].reply(h.full('b'));await last;
+  h.pending[0].reply(h.full('a'));await first;
+  assert.equal(h.mounts.length,1);assert.match(h.mounts[0],/<h2>B<\/h2>/);
+});
+
+test('pending meeting replies cannot reopen after navigation, account changes or cancellation',async()=>{
+  for(const transition of ["UI.view='calendar'","S.user={id:'another'}",
+    "openProjectSpace('p2');openProjectSpace('p1')","openFolderView('f');openProjectSpace('p1')",
+    "projectArea(S.projects[0],'files');projectArea(S.projects[0],'overview')",'cancelMeetingOpen()','meetingCancelCapture()']){
+    const h=lazyMeetingApp(),opening=h.open('a');h.a.run(transition);
+    h.pending[0].reply(h.full('a'));await opening;
+    assert.equal(h.mounts.length,0,transition);
+  }
+});
+
+test('meeting loads attach to a refreshed list without re-fetching or overwriting a newer revision',async()=>{
+  const h=lazyMeetingApp(),opening=h.open('a');
+  h.a.run("S.meetings=S.meetings.map(m=>({...m}))");h.pending[0].reply(h.full('a'));await opening;
+  assert.equal(h.pending.length,1);assert.equal(h.mounts.length,1);
+  assert.equal(h.a.run('S.meetings[0].rawTranscript'),'原稿 a');
+  const newer=lazyMeetingApp(),pending=newer.open('a');newer.a.run('S.meetings[0].revision=2');
+  newer.pending[0].reply(newer.full('a',1));await pending;
+  assert.equal(newer.mounts.length,0);assert.equal(newer.a.run('S.meetings[0].revision'),2);
+  assert.equal(newer.notices.at(-1),'会议已更新，请重新打开');
+});
+
+test('archived meeting lazy loading also ignores out-of-order and stale errors',async()=>{
+  const h=lazyMeetingApp();h.a.run("S.fileArchives=[{id:'p1'}]");
+  const first=h.open('a'),last=h.open('b');h.pending[1].reply(h.full('b'));await last;
+  h.pending[0].fail();await first;
+  assert.equal(h.mounts.length,1);assert.match(h.mounts[0],/归档会议/);assert.match(h.mounts[0],/<h2>B<\/h2>/);
+  assert.doesNotMatch(h.mounts[0],/id="saveMeeting"/);assert.ok(!h.notices.includes('加载失败'));
+});
+
+test('a failed meeting load is retryable and a dirty modal is not overwritten without consent',async()=>{
+  const h=lazyMeetingApp(),failed=h.open('a');h.pending[0].fail();await failed;
+  assert.equal(h.mounts.length,0);assert.equal(h.notices.at(-1),'加载失败');
+  const retry=h.open('a');h.a.context.confirm=()=>false;h.a.run('UI.docDirty=true');
+  h.pending[1].reply(h.full('a'));await retry;assert.equal(h.mounts.length,0);
+  h.a.run('UI.docDirty=false');await h.open('a');assert.equal(h.mounts.length,1);
+});
+
+test('meeting refresh retains the draft while rebuilding working project header actions',()=>{
+  const a=app(),elements={},calls=[];let button;
+  const actions={classList:{toggle(){}}};Object.defineProperty(actions,'innerHTML',{set(html){this.html=html;button={dataset:{project:'p'}}},get(){return this.html}});
+  a.context.document={querySelector:s=>s==='#projectActions'?actions:elements[s]||(elements[s]={dataset:{},innerHTML:'',classList:{toggle(){}}}),
+    querySelectorAll:s=>s==='.add-project-task'?[button]:[]};
+  a.context.calls=calls;a.run(`newTask=id=>calls.push(id);S.today='2026-11-05';S.user={id:'owner',admin:false};S.users=[];S.tasks=[];
+    S.projects=[{id:'p',name:'项目',owner:'owner',status:'active',members:{owner:'accepted'}}];S.meetings=[];UI.space='p';setSpaceTab('meetings');renderProjectSpace('p')`);
+  const pane=elements['#projectSpace'],before=pane.innerHTML;
+  elements['#meetingEditor']={dataset:{dirty:'true'},innerHTML:'未保存的原稿'};
+  a.run("S.meetings=[{id:'m',projectId:'p',title:'新会议'}];renderProjectSpace('p')");
+  assert.equal(pane.innerHTML,before);assert.equal(elements['#meetingEditor'].innerHTML,'未保存的原稿');
+  assert.equal(typeof button.onclick,'function');button.onclick();assert.deepEqual(calls,['p']);
+  assert.match(elements['#projectMeetingList'].innerHTML,/新会议/);
+});
+
+test('unified project tabs preserve a refused dirty draft and invalidate pending meeting loads on accepted leave',()=>{
+  const a=app(),panel={hidden:false},editor={dataset:{dirty:'true'}},tabs=['tasks','meetings','files'].map(key=>({dataset:{spaceTab:key},setAttribute(){},focus(){}}));
+  a.context.document={querySelector:s=>s==='#meetingEditor'?editor:panel,querySelectorAll:()=>tabs};
+  a.context.confirm=()=>false;a.run("S.user={id:'owner'};UI.space='p';setSpaceTab('meetings');bindProjectContentTabs()");
+  tabs[0].onclick();assert.equal(a.run('spaceTabNow()'),'meetings');
+  const old=a.run('meetingOpenGeneration');a.context.confirm=()=>true;tabs[2].onclick();
+  assert.equal(a.run('spaceTabNow()'),'files');assert.ok(a.run('meetingOpenGeneration')>old);
+});
+
+test('the directory selection reverses direction and realigns after row resizing',()=>{
+  const a=app(),classes=new Set(),values={};let top=50,height=32;
+  const row={offsetHeight:32,getBoundingClientRect:()=>({top,bottom:top+height,left:10,width:180})};
+  const mark={style:{setProperty:(k,v)=>values[k]=v},classList:{add:c=>classes.add(c),remove:(...cs)=>cs.forEach(c=>classes.delete(c))}};
+  const nav={scrollTop:0,querySelector:s=>s==='.nav-indicator'?mark:s==='.project-nav-all.is-on'?row:null,getBoundingClientRect:()=>({top:0,left:0})};
+  a.context.document={querySelector:()=>nav};a.context.window={matchMedia:()=>({matches:false})};
+  a.run('placeNavIndicator()');top=20;a.run('placeNavIndicator()');assert.ok(classes.has('is-up'));
+  top=80;height=64;a.run('placeNavIndicator()');assert.ok(classes.has('is-down'));assert.ok(!classes.has('is-up'));
+  assert.equal(values['--nav-y2'],'144px');
+});
+
+test('guide follows the current completion and collaborator rules and keyboard navigation',()=>{
+  const a=app(),els={},chapter={scrollIntoView(o){this.scroll=o},focus(o){this.focused=o}};
+  const link={dataset:{guide:'tasks'},classList:{toggle(){}}};
+  a.context.document={querySelector:s=>s==='#guide-tasks'?chapter:els[s]||(els[s]={}),querySelectorAll:()=>[link]};
+  a.context.matchMedia=()=>({matches:true});a.run('renderGuide()');link.onclick({preventDefault(){}});
+  assert.equal(chapter.scroll.behavior,'auto');assert.equal(chapter.focused.preventScroll,true);
+  assert.match(els['#guideContent'].innerHTML,/不需要审批/);assert.match(els['#guideContent'].innerHTML,/无需接受邀请/);
+  assert.doesNotMatch(els['#guideContent'].innerHTML,/需要审批的完成|被加为协作者的人会收到邀请/);
+});
+
+
+test('directory meeting navigation reveals the retained editor and synchronizes the unified tabs',()=>{
+  const a=app(),els={},tabs=['tasks','meetings','files'].map(key=>({dataset:{spaceTab:key},setAttribute(k,v){this[k]=v}}));
+  a.context.document={querySelector:s=>els[s]||(els[s]={dataset:{},classList:{toggle(){}},innerHTML:''}),querySelectorAll:s=>s==='#projectSpace [data-space-tab]'?tabs:[]};
+  a.run("S.today='2026-11-05';S.user={id:'owner'};S.users=[];S.tasks=[];S.meetings=[];S.projects=[{id:'p',name:'项目',owner:'owner',status:'active',members:{owner:'accepted'}}];UI.space='p';setSpaceTab('tasks');renderProjectSpace('p')");
+  const box=els['#projectSpace'],before=box.innerHTML;els['#meetingEditor']={dataset:{dirty:'false'},innerHTML:'保留的编辑器'};
+  a.run("UI.view='projects';renderProjects=()=>renderProjectSpace(UI.space);renderProjectNav=()=>{};projectArea(S.projects[0],'meetings')");
+  assert.equal(box.innerHTML,before);assert.equal(els['#spacePanel-meetings'].hidden,false);assert.equal(els['#spacePanel-tasks'].hidden,true);
+  assert.equal(tabs[1]['aria-selected'],'true');assert.equal(tabs[1].tabIndex,0);assert.equal(tabs[0]['aria-selected'],'false');
 });

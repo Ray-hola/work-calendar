@@ -10834,7 +10834,7 @@ body.is-resizing-agent { user-select: none; }
 .project-nav-resource:hover { background: var(--surface-sunk); color: var(--ink); }
 .project-nav-resource > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-nav-resource .icon { width: 13px; height: 13px; flex-shrink: 0; }
-.nav-dragging .project-nav-resources, .nav-dragging .project-nav-project:has(.is-lifted) { display: none; }
+.nav-node.is-drag-source { display: none; }
 @media (max-width: 800px) { .meeting-workspace { grid-template-columns: 1fr; gap: 16px; } .meeting-detail { border-left: 0; padding-left: 0; padding-top: 16px; border-top: 1px solid var(--line-soft); } }
 .meeting-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 12px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--surface); color: var(--ink); text-align: left; cursor: pointer; }
 .meeting-row:hover { border-color: var(--accent-line); background: var(--surface-sunk); }
@@ -11938,6 +11938,213 @@ body.is-resizing-agent { user-select: none; }
   }
 }
 
+
+.setting-row.is-link,
+.setting-row.is-link .setting-control {
+  grid-template-columns: minmax(0, 1fr) auto;
+  justify-content: flex-end;
+}
+
+/* 系统设置 · button roles. One filled primary per editing context (save, or the
+   first step of an empty page); a quiet outline for commands that run now; text
+   buttons for add and edit, with add in the accent ink; delete stays muted until
+   armed, then turns red. Going elsewhere is a row with a chevron, not a button. */
+/* Roles differ in colour and emphasis, never in the height of peer actions. */
+#settingsView .primary-btn,
+#settingsView .secondary-btn,
+#settingsView .text-btn {
+  height: 32px;
+}
+
+#settingsView .primary-btn {
+  box-shadow: none;
+}
+
+#settingsView .primary-btn::after {
+  display: none;
+}
+
+#settingsView .primary-btn:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+#settingsView .secondary-btn {
+  padding: 0 12px;
+  border-color: var(--line-strong);
+  border-radius: 8px;
+  font-size: 12.5px;
+  box-shadow: none;
+}
+
+#settingsView .secondary-btn:hover {
+  transform: none;
+  background: var(--surface-sunk);
+}
+
+.text-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+
+.text-btn:hover,
+.text-btn:focus-visible {
+  background: var(--surface-sunk);
+  color: var(--ink);
+  outline: none;
+}
+
+.text-btn:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent-line);
+}
+
+.text-btn .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.text-btn.is-add {
+  margin-left: -9px;
+  color: var(--accent-dark);
+}
+
+.text-btn.is-add:hover {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+.text-btn.is-danger {
+  color: var(--muted);
+}
+
+.text-btn.is-danger:hover {
+  background: var(--c-coral-soft);
+  color: var(--danger);
+}
+
+.text-btn.is-danger.is-armed {
+  background: var(--danger);
+  color: var(--surface);
+}
+
+/* The way back is a control, not an eyebrow. */
+#settingsView .page-intro .eyebrow:has(.settings-back) {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+#settingsView .page-intro .eyebrow:has(.settings-back)::before {
+  display: none;
+}
+
+.settings-back {
+  height: 30px;
+  margin-left: -10px;
+  padding: 0 10px 0 6px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.settings-back:hover {
+  background: var(--surface-sunk);
+  color: var(--ink);
+}
+
+.settings-back .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.ai-source-usage {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.ai-source-actions {
+  gap: 2px;
+}
+
+.ai-empty-state {
+  padding: 22px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 14px;
+  background: var(--surface-sunk);
+}
+
+.ai-empty-state strong {
+  font-size: 14px;
+}
+
+.ai-empty-state p {
+  margin: 6px 0 14px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.ai-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-scene-empty {
+  align-self: center;
+  font-size: 12.5px;
+  color: var(--faint);
+}
+
+.ai-scene-controls .ai-field.is-short {
+  flex: 0 0 72px;
+}
+
+.ai-scene-controls .ai-field:not(.is-short) {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+/* Model ids are long (Qwen/Qwen3-ASR-0.6B): give the controls the wider share
+   on desktop, and one select per line on a phone, so a chosen id reads whole. */
+@media (min-width: 901px) {
+  .ai-scene {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .ai-scene-controls .ai-field:not(.is-short) {
+    flex-basis: 100%;
+  }
+}
+
+/* Selected choices sit raised on a sunk track instead of a dark fill, so the
+   only colour left among the controls is a switch that is on. */
+#settingsView .rule-seg {
+  background: var(--surface-sunk);
+  border-color: transparent;
+}
+
+#settingsView .rule-opt.is-on {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(64,54,42,.10), 0 0 0 1px var(--line-strong);
+}
+
 /* 项目空间 v2 · 目录 → 项目 → 文件 ------------------------------------------
    The directory sits on the page's own surface and runs the full height. A
    folder's projects and a project's meetings and files hang off fork lines,
@@ -12069,8 +12276,8 @@ body.is-resizing-agent { user-select: none; }
   margin-top: 1.5px;
 }
 
-.project-nav-item span,
-.project-nav-toggle span:not(.nav-folder-icon) {
+.project-nav-item span.nav-text,
+.project-nav-toggle span.nav-text {
   white-space: normal;
   overflow: visible;
   text-overflow: clip;
@@ -12424,3 +12631,15 @@ body.is-resizing-agent { user-select: none; }
   .guide-layout { grid-template-columns: 1fr; gap: 20px; }
   .guide-toc { position: static; max-height: none; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
 }
+
+/* Keep the meeting editor readable when the workspace stacks on a phone. */
+@media (max-width: 800px) {
+  .space-meetings .meeting-workspace { grid-template-columns: minmax(0, 1fr); }
+}
+@media (min-width: 1181px) {
+  .project-nav.is-nav-collapsed .nav-branch { margin-left: 0; padding-left: 0; }
+  .project-nav.is-nav-collapsed .nav-branch > .nav-node::before,
+  .project-nav.is-nav-collapsed .nav-branch > .nav-node::after { display: none; }
+}
+
+.project-nav-folder-row { height: auto; min-height: 32px; align-items: flex-start; }
