@@ -2349,6 +2349,48 @@ test('settings speak plainly: neutral "not allowed", one-choice-at-a-time week s
   assert.ok(/已完成 · /.test(source) && /action:'scheduler\.run'/.test(source));
 });
 
+/* Source-level CSS contract: read the real classes emitted for each action
+   row and apply the matching simple selectors in specificity/order. This
+   checks the height regression without claiming browser layout acceptance. */
+function settingsButtonHeight(classes,container){
+  const css=fs.readFileSync(path.join(__dirname,'../styles.css'),'utf8').replace(/\/\*[\s\S]*?\*\//g,'');
+  const scopes=new Set(['','#settingsView',`.${container}`,`#settingsView .${container}`]);
+  let winner=null;
+  for(const rule of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)){
+    const height=rule[2].match(/(?:^|;)\s*height\s*:\s*(\d+)px\s*(?:;|$)/);if(!height)continue;
+    for(const selector of rule[1].split(',').map(s=>s.trim())){
+      const normalized=selector.replace(/\s+/g,' '),split=normalized.lastIndexOf(' ');
+      const scope=split<0?'':normalized.slice(0,split),target=normalized.slice(split+1);
+      if(!scopes.has(scope)||! /^(?:\.[\w-]+)+$/.test(target)||!target.slice(1).split('.').every(c=>classes.includes(c)))continue;
+      const specificity=(selector.match(/#/g)||[]).length*100+(selector.match(/\./g)||[]).length*10;
+      if(!winner||specificity>=winner.specificity)winner={specificity,height:Number(height[1])};
+    }
+  }
+  assert.ok(winner,`no height found for ${classes.join(' ')}`);return winner.height;
+}
+function buttonHeights(html,container){
+  return [...html.matchAll(/<button\b[^>]*class="([^"]+)"[^>]*>/g)].map(m=>settingsButtonHeight(m[1].split(/\s+/),container));
+}
+test('settings source editor cancel and submit use the same compact height',()=>{
+  const a=planningApp();a.run("aiEditing={kind:'chat'}");
+  const html=a.run('aiSourceEditor(null)');
+  assert.deepEqual(buttonHeights(html,'ai-editor-actions'),[32,32]);
+});
+test('settings test edit and destructive confirmation actions have equal heights',()=>{
+  const a=aiEditorApp();a.run('renderAiSettingsPage()');
+  const actions=[...a.box.innerHTML.matchAll(/<div class="ai-source-actions">([\s\S]*?)<\/div>/g)];
+  assert.equal(actions.length,2);
+  for(const [,html] of actions){
+    assert.deepEqual(buttonHeights(html,'ai-source-actions'),[32,32,32]);
+    assert.deepEqual(buttonHeights(html.replace('text-btn is-danger','text-btn is-danger is-armed'),'ai-source-actions'),[32,32,32]);
+  }
+});
+test('settings empty state primary and alternative actions have equal heights',()=>{
+  const a=aiEditorApp();a.run('aiSettings.sources=[];renderAiSettingsPage()');
+  const html=a.box.innerHTML.match(/<div class="ai-empty-actions">([\s\S]*?)<\/div>/)[1];
+  assert.deepEqual(buttonHeights(html,'ai-empty-actions'),[32,32]);
+});
+
 test('week history retains deferral events after completion without treating merged or reopened rows as deferrals', () => {
   const a=app();
   a.run(`S.today='2026-11-04';S.user={id:'member'};S.projects=[];UI.member='all';
@@ -2797,4 +2839,17 @@ test('a failed meeting load is retryable and a dirty modal is not overwritten wi
   const retry=h.open('a');h.a.context.confirm=()=>false;h.a.run('UI.docDirty=true');
   h.pending[1].reply(h.full('a'));await retry;assert.equal(h.mounts.length,0);
   h.a.run('UI.docDirty=false');await h.open('a');assert.equal(h.mounts.length,1);
+});
+
+
+test('the account settings row opens once by mouse, Enter or Space and has no nested button',()=>{
+  const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8');
+  const markup=html.match(/<div[^>]*data-settings-go="accounts"[\s\S]*?<\/section>/)[0];
+  assert.match(markup,/<div(?=[^>]*role="button")(?=[^>]*tabindex="0")[^>]*>/);assert.doesNotMatch(markup,/<button\b/);
+  const a=app(),row={dataset:{settingsGo:'accounts'}},views=[];
+  a.context.views=views;a.context.document={querySelectorAll:()=>[row]};a.run('switchView=view=>views.push(view)');
+  const start=source.indexOf("$$('#settingsView [data-settings-go]')");
+  a.run(source.slice(start,source.indexOf("$$('#settingsView [data-settings-page]')",start)));
+  row.onclick();let prevented=0;for(const key of ['Enter',' ','ArrowDown'])row.onkeydown({key,preventDefault(){prevented++}});
+  assert.deepEqual(views,['accounts','accounts','accounts']);assert.equal(prevented,2);
 });
