@@ -249,6 +249,8 @@ def preview_type(name, raw):
         return 'image/gif'
     if raw[:4] == b'RIFF' and raw[8:12] == b'WEBP':
         return 'image/webp'
+    if raw.startswith(b'%PDF-'):
+        return 'application/pdf'
     if str(name).lower().endswith(PREVIEW_TEXT):
         try:
             raw.decode('utf-8')
@@ -4708,14 +4710,15 @@ def main():
                 if self.path=='/api/health':self.send(200,{'ok':True,'timezone':'Asia/Shanghai'});return
                 if self.path.startswith(FILES_PATH+'/'):
                     # A download by default. ?preview=1 shows a file in the browser
-                    # only when its bytes prove it is a raster image or plain text,
-                    # under a sandbox that runs nothing: an uploaded page never
-                    # runs as this site.
+                    # only when its bytes prove it is a raster image, a PDF or plain
+                    # text: an uploaded page never runs as this site. Images and text
+                    # sit under a sandbox that runs nothing; a PDF is left to the
+                    # browser's own viewer, which that sandbox would block.
                     f,raw=store.read_file(store.authenticate(self.token()),urllib.parse.unquote(self.path[len(FILES_PATH)+1:].split('?')[0]))
                     shown=preview_type(f['name'],raw) if 'preview=1' in self.path.partition('?')[2].split('&') else None
                     self.send_response(200);self.send_header('Content-Type',shown or 'application/octet-stream')
                     self.send_header('Content-Disposition',("inline" if shown else "attachment")+"; filename*=UTF-8''"+urllib.parse.quote(f['name']))
-                    if shown:self.send_header('Content-Security-Policy',"sandbox; default-src 'none'; img-src 'self'; style-src 'unsafe-inline'")
+                    if shown and shown!='application/pdf':self.send_header('Content-Security-Policy',"sandbox; default-src 'none'; img-src 'self'; style-src 'unsafe-inline'")
                     self.send_header('Cache-Control','private, no-store');self.send_header('X-Content-Type-Options','nosniff')
                     self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
                 filename={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/styles.css':'styles.css'}.get(self.path.split('?')[0])

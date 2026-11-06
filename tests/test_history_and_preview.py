@@ -56,8 +56,12 @@ class PreviewTypeTests(unittest.TestCase):
     def test_pages_and_unknown_files_stay_downloads(self):
         self.assertIsNone(preview_type('logo.png', b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'))
         self.assertIsNone(preview_type('page.html', b'<html><script>alert(1)</script></html>'))
-        self.assertIsNone(preview_type('report.pdf', b'%PDF-1.7'))
+        self.assertIsNone(preview_type('report.pdf', b'<html><script>alert(1)</script></html>'), '只看名字是 PDF 不算')
         self.assertIsNone(preview_type('notes.txt', b'\xff\xfe\x00broken'), '不是 UTF-8 的文本不预览')
+
+    def test_a_real_pdf_previews(self):
+        self.assertEqual(preview_type('report.pdf', b'%PDF-1.7\n%...'), 'application/pdf')
+        self.assertEqual(preview_type('report', b'%PDF-1.4\n%...'), 'application/pdf')
 
     def test_text_is_shown_as_plain_text_never_as_a_page(self):
         self.assertEqual(preview_type('notes.md', '# 纪要\n<script>x</script>'.encode()), 'text/plain; charset=utf-8')

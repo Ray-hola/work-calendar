@@ -1693,8 +1693,8 @@ const MAX_FILE_MB=20;
 /* Files and meetings form one list, newest first, with dates read as dates. */
 const whenText=iso=>{const day=String(iso||'').slice(0,10),time=String(iso||'').slice(11,16);
   return /^\d{4}-\d\d-\d\d$/.test(day)?`${fmt(day)}${time?` ${time}`:''}`:'未安排'};
-/* Images and plain text open in a new tab; the server checks the bytes again. */
-const filePreviewable=name=>/\.(png|jpe?g|gif|webp|txt|md|csv|log|json)$/i.test(String(name||''));
+/* Images, PDFs and plain text open in a new tab; the server checks the bytes again. */
+const filePreviewable=name=>/\.(png|jpe?g|gif|webp|pdf|txt|md|csv|log|json)$/i.test(String(name||''));
 function projectFiles(p,readonly=false,includeMeetings=true){
   const canDrop=f=>!readonly&&(S.user?.admin||p.owner===S.user?.id||f.uploader===S.user?.id);
   const file=f=>`<div class="file-row"><span class="file-ext">${escapeHTML(fileExt(f.name))}</span><a class="file-name" href="/api/files/`
