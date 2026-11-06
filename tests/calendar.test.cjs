@@ -288,18 +288,58 @@ test('project operations are available to admin and project owner; assignees mus
   assert.deepEqual(a.json('projectAssignees(S.projects[0]).map(u=>u.id)'),['test001','test002']);
 });
 
-test('project tree places task actions under the parent and distinguishes admin from owner and collaborator', () => {
+test('a project page places task actions under the project and distinguishes admin from owner and collaborator', () => {
   const a=app(); const elements={};
-  a.context.document={querySelector:s=>elements[s]||(elements[s]={}),querySelectorAll:()=>[]};
-  a.run(`S.projects=[{id:'p',name:'Example project',owner:'test001',status:'active',members:{test001:'accepted',test002:'accepted'}}];S.users=[{id:'test001',active:1},{id:'test002',active:1},{id:'test003',active:1}];S.tasks=[{id:'t',projectId:'p',name:'Child task',assignee:'test002',priority:'P1',status:'todo',date:'2026-09-12'}];`);
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={innerText:'',classList:{toggle(){}}}),querySelectorAll:()=>[]};
+  a.run(`S.today='2026-11-04';S.notifications=[];S.projects=[{id:'p',name:'Example project',owner:'test001',status:'active',members:{test001:'accepted',test002:'accepted'}}];S.users=[{id:'test001',active:1},{id:'test002',active:1},{id:'test003',active:1}];S.tasks=[{id:'t',projectId:'p',name:'Child task',assignee:'test002',priority:'P1',status:'todo',date:'2026-09-12'}];`);
   for(const id of ['superadmin','test001','test002']) {
-    a.run(`S.user={id:'${id}',admin:${id==='superadmin'?1:0}};renderProjects()`);
-    const html=elements['#projectGrid'].innerHTML;
-    assert.ok(html.indexOf('Example project')<html.indexOf('Child task'));
+    a.run(`S.user={id:'${id}',admin:${id==='superadmin'?1:0}};UI.space='';renderProjects()`);
+    const card=elements['#projectGrid'].innerHTML;
+    assert.ok(card.includes('Example project')&&!card.includes('Child task')&&!card.includes('add-project-task'),
+      '全部项目只列项目概要，任务和操作在项目页里');
+    a.run("UI.space='p';renderProjects()");
+    const html=elements['#projectSpace'].innerHTML;
+    assert.ok(html.includes('Child task'));
     assert.equal(html.includes('assign-project-task'),id!=='test002');
-    assert.equal(html.includes('add-project-task'),id!=='test002');
+    assert.equal(html.includes('primary-btn add-project-task'),id!=='test002');
     assert.equal(html.includes('添加协作者'),id!=='test002', 'Owner 和管理员都是直接加人，不再发邀请');
   }
+});
+
+test('project summaries label collaborator progress as personal instead of project completion',()=>{
+  const a=app(),elements={};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={innerHTML:'',classList:{toggle(){}}}),querySelectorAll:()=>[]};
+  a.run(`S.today='2026-11-04';S.projects=[{id:'p',name:'项目',owner:'owner',status:'active',members:{owner:'accepted',member:'accepted'}}];
+    S.users=[{id:'owner',active:1},{id:'member',active:1}];S.tasks=[
+      {id:'done',projectId:'p',assignee:'member',status:'done',date:'2026-11-04'},
+      {id:'todo',projectId:'p',assignee:'other',status:'todo',date:'2026-11-04'}];`);
+  a.run("S.user={id:'owner',admin:false};renderProjects()");
+  assert.match(elements['#projectGrid'].innerHTML,/项目 1\/2 完成/);
+  a.run("S.user={id:'member',admin:false};renderProjects()");
+  assert.match(elements['#projectGrid'].innerHTML,/我的任务 1\/1 完成/);
+  assert.doesNotMatch(elements['#projectGrid'].innerHTML,/项目 1\/1 完成/);
+});
+
+test('project content tabs keep the dedicated meetings workspace and keyboard navigation',()=>{
+  const a=app();
+  const sourceText=source;
+  assert.match(sourceText,/const SPACE_TABS=\{[^}]*meetings:'会议'/);
+  assert.match(sourceText,/panel\('meetings',projectMeetings\(p/);
+  assert.match(sourceText,/function bindProjectAreaTabs\(p\)/);
+  assert.match(sourceText,/function bindProjectContentTabs\(\)/);
+  assert.doesNotMatch(sourceText,/function bindSpaceTabs\(/,'同名 tab binder 不能覆盖会议空间入口');
+  const binder=sourceText.match(/function bindProjectContentTabs\(\)\{[\s\S]*?\n\}/)[0];
+  assert.match(binder,/ArrowRight/);assert.match(binder,/ArrowLeft/);assert.match(binder,/Home/);assert.match(binder,/End/);
+  assert.match(sourceText,/bindProjectAreaTabs\(p\);bindProjectSpace\(p\);return;/,'归档会议也要能打开只读详情');
+});
+
+test('project lifecycle labels collaborator task progress as personal',()=>{
+  const a=app();
+  a.run(`S.today='2026-11-04';S.user={id:'member',admin:false};S.tasks=[
+    {id:'done',projectId:'p',assignee:'member',status:'done',date:'2026-11-04'},
+    {id:'todo',projectId:'p',assignee:'other',status:'todo',date:'2026-11-04'}];`);
+  const html=a.run("projectLifecycle({id:'p',owner:'owner',start:'2026-11-01',end:'2026-11-30',status:'active'},false)");
+  assert.match(html,/我的任务/);assert.doesNotMatch(html,/>任务<\/span>/);
 });
 
 test('daily work renders one parent card per project with nested clickable task cards', () => {
@@ -439,18 +479,18 @@ test('inbox renders edit approval action for the request approver, including sup
 
 test('a running project offers 完成项目 to its Owner and the admins, finished or not', () => {
   const a=app(); const elements={};
-  const el=s=>elements[s]||(elements[s]={innerHTML:'',textContent:'',classList:{toggle(){}}});
+  const el=s=>elements[s]||(elements[s]={innerHTML:'',textContent:'',innerText:'',classList:{toggle(){}}});
   a.context.document={querySelector:el,querySelectorAll:()=>[]};
-  a.run(`S.user={id:'test001',admin:0};S.users=[];S.projects=[{id:'p',name:'项目',owner:'test001',status:'active',
+  a.run(`S.today='2026-11-04';S.notifications=[];S.user={id:'test001',admin:0};S.users=[];S.projects=[{id:'p',name:'项目',owner:'test001',status:'active',
     members:{test001:'accepted',test002:'accepted'}}];
-    S.tasks=[{id:'t1',projectId:'p',name:'已完成',assignee:'test001',status:'done'}];renderProjects()`);
-  assert.ok(elements['#projectGrid'].innerHTML.includes('request-project-completion'));
+    S.tasks=[{id:'t1',projectId:'p',name:'已完成',assignee:'test001',status:'done'}];UI.space='p';renderProjects()`);
+  assert.ok(elements['#projectSpace'].innerHTML.includes('request-project-completion'));
   a.run("S.tasks[0].status='doing';renderProjects()");
-  assert.ok(/request-project-completion[^>]*>.*完成项目/.test(elements['#projectGrid'].innerHTML), '没做完也能提前完成');
+  assert.ok(/request-project-completion[^>]*>.*完成项目/.test(elements['#projectSpace'].innerHTML), '没做完也能提前完成');
   a.run("S.user={id:'test002',admin:0};renderProjects()");
-  assert.ok(!elements['#projectGrid'].innerHTML.includes('request-project-completion'), '协作者没有这个按钮');
+  assert.ok(!elements['#projectSpace'].innerHTML.includes('request-project-completion'), '协作者没有这个按钮');
   a.run("S.user={id:'superadmin',admin:1};renderProjects()");
-  assert.ok(elements['#projectGrid'].innerHTML.includes('request-project-completion'));
+  assert.ok(elements['#projectSpace'].innerHTML.includes('request-project-completion'));
 });
 
 test('project completion request opens a required report form before submitting', () => {
@@ -933,9 +973,9 @@ test('the online ones come first, however many there are', () => {
 });
 
 test('leaving a project is offered to a collaborator, and is leaving the workspace', () => {
-  assert.ok(/\(p\.members\|\|\{\}\)\[S\.user\.id\]==='accepted'/.test(source),
+  assert.ok(/\(p\.members\|\|\{\}\)\[S\.user\?\.id\]==='accepted'/.test(source),
     '退出项目只给已经加入的协作者');
-  assert.ok(/class="ghost-btn leave-project"/.test(source), '协作者要有退出入口');
+  assert.ok(/class="leave-project"/.test(source), '协作者要有退出入口');
   const fn = source.match(/function leaveProject\(projectId\)\{[\s\S]*?\n\}/)[0];
   assert.ok(/project\.member\.remove/.test(fn), '退出走 project.member.remove');
   assert.ok(/chatChannel===projectId/.test(fn), '退出后要离开它在沟通区里的工作区');
@@ -1975,12 +2015,12 @@ test('delete cards cannot submit before human confirmation and never use automat
   assert.ok(!a.run('planCardsHTML({...planDraft({tasks:[raw]})})').includes('<pre'));
 });
 test('project deletion shows impact and requires the full original name, independent of editable titles',()=>{
-  const a=planningApp();a.run(`var board=planDraft({projects:[{operation:'delete',id:'p',revision:'r',before:{name:'重要项目',owner:'test001'},impact:{tasks:12,files:3,repeats:2}}]});`);
+  const a=planningApp();a.run(`var board=planDraft({projects:[{operation:'delete',id:'p',revision:'r',before:{name:'重要项目',owner:'test001'},impact:{tasks:12,files:3,repeats:2,meetings:4,messages:15}}]});`);
   assert.ok(a.run('planProblems(board,board.projects[0]).confirm'));
   a.run("board.projects[0].confirm='重要';board.projects[0].name='重要'");
   assert.ok(a.run('planProblems(board,board.projects[0]).confirm'));
   a.run("board.projects[0].confirm='重要项目'");assert.deepEqual(a.json('planProblems(board,board.projects[0])'),{});
-  const html=a.run('planCardsHTML(board)');assert.ok(html.includes('12 项任务')&&html.includes('3 个附件')&&html.includes('2 条固定安排'));
+  const html=a.run('planCardsHTML(board)');assert.ok(html.includes('12 项任务')&&html.includes('3 个附件')&&html.includes('2 条固定安排')&&html.includes('4 场会议')&&html.includes('15 条沟通记录'));
 });
 test('a member change card follows approval rights and requires a reason instead of rewriting task ownership',()=>{
   const a=planningApp();a.context.raw=mutationTask({name:'申请修改',before:{...mutationTask().before,creator:'test002'}});
@@ -2486,7 +2526,9 @@ test('project files share one create menu and respect meeting creation permissio
   const a=app();a.run("S.user={id:'owner',admin:false};S.files=[];S.meetings=[{id:'m1',projectId:'p1',title:'周会'}]");
   const owner=a.run("projectFiles({id:'p1',owner:'owner'})");
   assert.match(owner, /<summary[^>]*>.*新增文件/);assert.match(owner,/id="uploadFileFromMenu"/);assert.match(owner,/id="createMeetingFromFiles"/);
-  assert.match(owner,/项目文件 <span>0<\/span>/);assert.doesNotMatch(owner,/file-subheading|项目会议/);
+  assert.match(owner,/项目文件 <span>1<\/span>/);assert.match(owner,/data-meeting="m1"/);
+  const filesOnly=a.run("projectFiles({id:'p1',owner:'owner'},false,false)");
+  assert.match(filesOnly,/项目文件 <span>0<\/span>/);assert.doesNotMatch(filesOnly,/data-meeting="m1"/);
   a.run("S.user={id:'member',admin:false}");assert.doesNotMatch(a.run("projectFiles({id:'p1',owner:'owner'})"),/id="createMeetingFromFiles"/);
   assert.doesNotMatch(a.run("projectFiles({id:'p1',owner:'owner'},true)"),/fileCreateMenu/);
 });
@@ -2736,4 +2778,65 @@ test('prompt reset replaces dirty editor and its saved baseline without racing a
 test('archived meeting opens escaped read-only transcript and minutes without mutation controls',()=>{
   const a=app();a.context.document={querySelector:()=>({})};a.run("openModal=html=>{globalThis.archivedHTML=html};S.fileArchives=[{id:'p1'}];S.meetings=[{id:'m1',projectId:'p1',title:'周会',rawTranscript:'<script>bad</script>',minutes:'结论'}];openMeetingEditor({id:'p1',name:'项目'},'m1')");
   const html=a.context.archivedHTML;assert.match(html,/<textarea readonly/);assert.match(html,/&lt;script&gt;/);assert.match(html,/结论/);assert.doesNotMatch(html,/id="(?:saveMeeting|meetingLiveBtn|generateMeetingMinutes)"/);
+});
+
+function lazyMeetingApp(){
+  const h=meetingApp(),pending=[],mounts=[],notices=[];
+  h.a.context.pending=pending;h.a.context.mounts=mounts;h.a.context.notices=notices;
+  h.a.context.fetch=(url,options)=>new Promise(resolve=>pending.push({
+    id:JSON.parse(options.body).data.id,
+    reply:full=>resolve({ok:true,text:async()=>JSON.stringify(full)}),
+    fail:()=>resolve({ok:false,text:async()=>JSON.stringify({error:'加载失败'})})
+  }));
+  h.a.run(`toast=msg=>notices.push(msg);openModal=html=>{cancelMeetingOpen();mounts.push(html)};
+    renderProjects=()=>{};S.user={id:'owner'};UI.view='projects';UI.space='p1';UI.spaceArea='overview';UI.docDirty=false;
+    S.projects=[{id:'p1',name:'项目',owner:'owner'},{id:'p2',name:'另一个项目',owner:'owner'}];
+    S.meetings=[{id:'a',projectId:'p1',title:'A',revision:0},{id:'b',projectId:'p1',title:'B',revision:0}];`);
+  return {...h,pending,mounts,notices,open:id=>h.a.run(`openMeetingEditor(S.projects[0],${JSON.stringify(id)})`),
+    full:(id,revision=0)=>({id,projectId:'p1',title:id.toUpperCase(),rawTranscript:'原稿 '+id,minutes:'纪要 '+id,revision})};
+}
+
+test('lazy meeting loading keeps the last selection and ignores an earlier reply',async()=>{
+  const h=lazyMeetingApp(),first=h.open('a'),last=h.open('b');
+  assert.deepEqual(h.pending.map(p=>p.id),['a','b']);assert.equal(h.notices[0],'正在加载会议…');
+  h.pending[1].reply(h.full('b'));await last;
+  h.pending[0].reply(h.full('a'));await first;
+  assert.equal(h.mounts.length,1);assert.match(h.mounts[0],/<h2>B<\/h2>/);
+});
+
+test('pending meeting replies cannot reopen after navigation, account changes or cancellation',async()=>{
+  for(const transition of ["UI.view='calendar'","S.user={id:'another'}",
+    "openProjectSpace('p2');openProjectSpace('p1')","openFolderView('f');openProjectSpace('p1')",
+    "projectArea(S.projects[0],'files');projectArea(S.projects[0],'overview')",'cancelMeetingOpen()','meetingCancelCapture()']){
+    const h=lazyMeetingApp(),opening=h.open('a');h.a.run(transition);
+    h.pending[0].reply(h.full('a'));await opening;
+    assert.equal(h.mounts.length,0,transition);
+  }
+});
+
+test('meeting loads attach to a refreshed list without re-fetching or overwriting a newer revision',async()=>{
+  const h=lazyMeetingApp(),opening=h.open('a');
+  h.a.run("S.meetings=S.meetings.map(m=>({...m}))");h.pending[0].reply(h.full('a'));await opening;
+  assert.equal(h.pending.length,1);assert.equal(h.mounts.length,1);
+  assert.equal(h.a.run('S.meetings[0].rawTranscript'),'原稿 a');
+  const newer=lazyMeetingApp(),pending=newer.open('a');newer.a.run('S.meetings[0].revision=2');
+  newer.pending[0].reply(newer.full('a',1));await pending;
+  assert.equal(newer.mounts.length,0);assert.equal(newer.a.run('S.meetings[0].revision'),2);
+  assert.equal(newer.notices.at(-1),'会议已更新，请重新打开');
+});
+
+test('archived meeting lazy loading also ignores out-of-order and stale errors',async()=>{
+  const h=lazyMeetingApp();h.a.run("S.fileArchives=[{id:'p1'}]");
+  const first=h.open('a'),last=h.open('b');h.pending[1].reply(h.full('b'));await last;
+  h.pending[0].fail();await first;
+  assert.equal(h.mounts.length,1);assert.match(h.mounts[0],/归档会议/);assert.match(h.mounts[0],/<h2>B<\/h2>/);
+  assert.doesNotMatch(h.mounts[0],/id="saveMeeting"/);assert.ok(!h.notices.includes('加载失败'));
+});
+
+test('a failed meeting load is retryable and a dirty modal is not overwritten without consent',async()=>{
+  const h=lazyMeetingApp(),failed=h.open('a');h.pending[0].fail();await failed;
+  assert.equal(h.mounts.length,0);assert.equal(h.notices.at(-1),'加载失败');
+  const retry=h.open('a');h.a.context.confirm=()=>false;h.a.run('UI.docDirty=true');
+  h.pending[1].reply(h.full('a'));await retry;assert.equal(h.mounts.length,0);
+  h.a.run('UI.docDirty=false');await h.open('a');assert.equal(h.mounts.length,1);
 });

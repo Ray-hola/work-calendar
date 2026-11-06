@@ -327,7 +327,8 @@ const add=(iso,n)=>{const d=new Date(`${iso}T12:00:00`);d.setDate(d.getDate()+n)
    Saturday until an admin picks another. */
 const weekStartDay=()=>Number.isInteger(S.weekStart)&&S.weekStart>=0&&S.weekStart<=6?S.weekStart:6;
 const weekStart=iso=>{const d=new Date(`${iso}T12:00:00`);d.setDate(d.getDate()-(d.getDay()-weekStartDay()+7)%7);return d.toISOString().slice(0,10)};
-const DATE_HORIZON='2027-04-30';
+/* The last schedulable day rolls with today; the server sends it with every state. */
+let DATE_HORIZON='2027-04-30';
 const displayDay=()=>{const day=add(S.today,UI.dayOffset||0);return day>DATE_HORIZON?DATE_HORIZON:day};
 const week=off=>{const start=add(weekStart(S.today),off*7);return Array.from({length:7},(_,i)=>add(start,i))};
 const weekOffsetFor=iso=>Math.round((new Date(`${weekStart(iso)}T12:00:00`)-new Date(`${weekStart(S.today)}T12:00:00`))/604800000);
@@ -359,7 +360,7 @@ async function refresh(){
   }
   /* updateChatDot is defined further down the file than the unit-test sandbox
      loads, so guard the call rather than assume it is in scope. */
-  S=next;rememberAccount(S.user.id);renderAll();renderPip();if(typeof loadSpeechStatus==='function')loadSpeechStatus();if(typeof updateChatDot==='function')updateChatDot();
+  S=next;if(S.dateHorizon)DATE_HORIZON=S.dateHorizon;rememberAccount(S.user.id);renderAll();renderPip();if(typeof loadSpeechStatus==='function')loadSpeechStatus();if(typeof updateChatDot==='function')updateChatDot();
 }
 let inboxRefreshPromise=null;
 async function refreshInboxState(){
@@ -368,6 +369,7 @@ async function refreshInboxState(){
   inboxRefreshPromise=(async()=>{
     try{
       const next=await getState();
+      if(next.dateHorizon)DATE_HORIZON=next.dateHorizon;
       if(next.user?.id!==S.user?.id){S=next;renderAll();return}
       S=next;
       if(UI.view==='inbox')renderInbox();
@@ -382,6 +384,7 @@ function switchView(view){
   if(view==='summary')view='archive';
   if((view==='achievements'||view==='accounts'||view==='settings')&&!S.user?.admin){view='calendar'}
   const changed=UI.view!==view;
+  if(changed)cancelMeetingOpen();
   UI.view=view;
   /* Returning to the week rail should show the current week, not whichever
      panel the rail happened to be parked on last. */
@@ -858,20 +861,23 @@ function renderProjects(){
   renderProjectNav();
   $('#projectOverview')?.classList?.toggle('hidden',Boolean(UI.space));
   $('#projectSpace')?.classList?.toggle('hidden',!UI.space);
+  $('#projectsView')?.classList?.toggle('is-in-project',Boolean(UI.space));
+  /* 申请项目 / 新项目 already sits in the top bar; a second copy here only repeats it. */
+  $('#addProjectBtn')?.classList?.toggle('hidden',true);
   if(UI.space){$('#projectGrid').innerHTML='';renderProjectSpace(UI.space);return}
   const admin=Boolean(S.user?.admin),folder=UI.folder&&(S.folders||[]).find(f=>f.id===UI.folder);
   if(!folder)UI.folder='';
-  $('#addProjectBtn')?.classList?.toggle('hidden',projectMode()==='none');
 
   const pool=visibleProjects().filter(p=>!folder||p.folderId===folder.id),mode=folderSortMode();
   const projects=mode==='nav'?navSequence().filter(p=>pool.includes(p)):sortFolderProjects(pool,mode);
-  $('#projectsView .eyebrow').textContent=folder?`项目目录 · ${projects.length} 个项目`
-    :`${admin?'团队项目管理':'我的项目'} · ${projects.length} 个项目`;
-  $('#projectsView h1').textContent=folder?folder.name:admin?'项目与任务管理':'我的项目与任务';
+  $('#projectsView .eyebrow').innerHTML=folder?`${crumb('全部项目','')} · ${projects.length} 个项目`
+    :`${admin?'团队项目':'我参与的项目'} · ${projects.length} 个项目`;
+  bindCrumbs();
+  $('#projectsView h1').textContent=folder?folder.name:'全部项目';
   $('#projectToolbar').innerHTML=projects.length>1?`<label class="project-sort">排序<select id="projectSort">`
     +`${Object.entries(FOLDER_SORTS).map(([k,v])=>`<option value="${k}"${k===mode?' selected':''}>${v}</option>`).join('')}</select></label>`:'';
   const sort=$('#projectSort');if(sort)sort.onchange=()=>{setFolderSortMode(sort.value);renderProjects()};
-  $('#projectGrid').innerHTML=projects.map(p=>projectCardHTML(p)).join('')+(folder?'':tempTaskCard())
+  $('#projectGrid').innerHTML=projects.map(projectSummaryHTML).join('')+(folder?'':tempTaskCard())
     ||`<div class="empty-state">${folder?'这个文件夹还没有项目，把左侧的项目拖进来':'暂无项目'}</div>`;
   bindProjectCards();
 }
@@ -889,57 +895,70 @@ function sortFolderProjects(list,mode){
     progress:(a,b)=>progress(b)-progress(a),created:(a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||''))}[mode];
   return [...list].sort(by);
 }
-/* One project's card: its people, its tasks and what its Owner can do. The
-   overview lists them all; a project's own space carries just its own. */
-function projectCardHTML(p,inSpace=false){
-    const admin=Boolean(S.user?.admin);
-    const mode=projectSortMode(p),tasks=sortProjectTasks(p,S.tasks.filter(t=>t.projectId===p.id&&!t.repeatId&&!isSuperseded(t)),mode),done=tasks.filter(t=>t.status==='done').length;
+/* 全部项目 and a folder list each project as a summary: where it stands and who
+   is on it. Its tasks, files and actions live on the project's own page. */
+function projectSummaryHTML(p){
+  const personal=!S.user?.admin&&p.owner!==S.user?.id;
+  const tasks=S.tasks.filter(t=>t.projectId===p.id&&!t.repeatId&&!isSuperseded(t)&&t.status!=='skipped'
+    &&(!personal||t.assignee===S.user?.id));
+  const done=tasks.filter(t=>t.status==='done').length,pct=tasks.length?Math.round(done/tasks.length*100):0;
+  const mine=tasks.filter(t=>t.assignee===S.user?.id&&['todo','doing'].includes(t.status)).length;
+  const people=Object.entries(p.members||{}).filter(([,v])=>v==='accepted').map(([id])=>id)
+    .sort((a,b)=>(b===p.owner)-(a===p.owner));
+  const fresh=freshRefs().has(p.id);
+  return `<article class="project-card project-summary${fresh?' is-new':''}" data-project="${escapeHTML(p.id)}"`
+    +` data-fresh="${fresh?escapeHTML(p.id):''}"><div class="summary-head"><h3><button type="button" class="project-title-link"`
+    +` data-open-project="${escapeHTML(p.id)}">${escapeHTML(p.name)}</button></h3>${fresh?'<span class="new-chip">新</span>':''}`
+    +`<span class="project-status">${projectStatus(p)}</span></div>`
+    +`<p class="summary-desc">${escapeHTML(p.desc||'暂无描述')}</p>`
+    +`<div class="summary-progress"><div class="progress"><i style="width:${pct}%"></i></div>`
+    +`<span>${tasks.length?`${personal?'我的任务':'项目'} ${done}/${tasks.length} 完成`:'暂无任务'}</span></div>`
+    +`<div class="summary-foot"><span class="summary-people" title="${escapeHTML(people.map(nameOf).join('、'))}">`
+    +`${people.slice(0,4).map(id=>avatarHTML(id)).join('')}${people.length>4?`<b>+${people.length-4}</b>`:''}</span>`
+    +`${mine?`<span class="summary-mine">我的待办 ${mine}</span>`:''}`
+    +`<span class="summary-end">${p.end?`截止 ${escapeHTML(fmt(p.end))}`:'长期'}</span></div></article>`;
+}
+/* What can be done to a project as a whole. One primary step in view; the
+   rest, and deleting, wait in 更多 so they never sit beside everyday work. */
+function projectActionsHTML(p){
+  const admin=Boolean(S.user?.admin),manage=canManageProject(p)&&p.status==='active';
+  const joined=p.status==='active'&&!manage&&(p.members||{})[S.user?.id]==='accepted';
+  const id=escapeHTML(p.id),menu=[];
+  if(manage)menu.push(`<button type="button" class="project-settings" data-id="${id}">${icon('settings')}项目设置</button>`,
+    `<button type="button" class="request-project-completion" data-id="${id}">${icon('check')}完成项目</button>`);
+  if(joined)menu.push(`<button type="button" class="leave-project" data-id="${id}">${icon('arrow-up-right')}退出项目</button>`);
+  if(canManageProject(p))menu.push(`<button type="button" class="delete-project is-danger" data-id="${id}">${icon('x')}删除项目</button>`);
+  return `${manage?`<button class="primary-btn add-project-task" data-project="${id}">${icon('plus')}新建任务</button>`:''}`
+    +`${joined&&creationRules().projectTask!=='none'?`<button class="secondary-btn add-project-task" data-project="${id}">`
+    +`${entryLabel(creationRules().projectTask,'任务')}</button>`:''}`
+    +`${p.status==='pending'&&admin?`<button class="primary-btn approve-project" data-id="${id}">审批项目</button>`:''}`
+    +`${p.status==='pending_completion'&&admin?`<button class="primary-btn approve-project-completion" data-id="${id}">审批项目完成</button>`:''}`
+    +`${menu.length?`<details class="space-more"><summary class="secondary-btn" aria-label="更多项目操作">更多${icon('chevron-down')}</summary>`
+    +`<div class="space-file-options">${menu.join('')}</div></details>`:''}`;
+}
+/* A project's task list: the root of each line of work, in the chosen order. */
+function projectCardHTML(p){
+    const mode=projectSortMode(p),tasks=sortProjectTasks(p,S.tasks.filter(t=>t.projectId===p.id&&!t.repeatId&&!isSuperseded(t)),mode);
     const fixed=(S.repeats||[]).filter(r=>r.projectId===p.id&&r.active!==false);
-    const accepted=Object.entries(p.members||{}).filter(([,v])=>v==='accepted').map(([id])=>id),pending=Object.entries(p.members||{}).filter(([,v])=>v==='pending').map(([id])=>id);
-    const manage=canManageProject(p)&&p.status==='active',
-    hasSlot=S.users.some(u=>u.active&&!u.admin&&u.id!==p.owner&&!accepted.includes(u.id));
+    const manage=canManageProject(p)&&p.status==='active';
     const drag=manage&&mode==='manual'&&tasks.length>1,byId=new Map(S.tasks.map(t=>[t.id,t]));
     const sorter=tasks.length>1?`<select class="project-task-sort" data-project="${escapeHTML(p.id)}" aria-label="任务排序">${Object.entries(PROJECT_SORTS).map(([k,v])=>`<option value="${k}" ${k===mode?'selected':''}>${v}</option>`).join('')}</select>`:'';
-    const fresh=freshRefs().has(p.id),joined=p.status==='active'&&!manage&&(p.members||{})[S.user.id]==='accepted';
-    return `<article class="project-card project-node${fresh?' is-new':''}" data-fresh="${fresh?escapeHTML(p.id):''}"`
-      +`${inSpace?'':` data-project="${escapeHTML(p.id)}"`}>`
-      /* Inside the project's own space the page already carries its name,
-         status, people and dates, so the card keeps only actions and tasks. */
-      +`<div class="project-node-heading">${inSpace?'':`<div><div class="project-title"><h3><button type="button" `
-      +`class="project-title-link" data-open-project="${escapeHTML(p.id)}">${escapeHTML(p.name)}`
-      +`${fresh?'<span class="new-chip">新</span>':''}</button></h3><span class="project-status">${projectStatus(p)}</span></div>`
-      +`<p>${escapeHTML(p.desc||'暂无描述')}</p></div>`}<div class="project-node-actions">`
-      +`${manage?`<button class="primary-btn add-project-task" data-project="${escapeHTML(p.id)}">`
-      +`${icon('plus')}新建并指派任务</button><button class="secondary-btn project-settings" data-id="`
-      +`${escapeHTML(p.id)}">项目设置</button>`:''}`
-      +`${manage&&hasSlot&&!inSpace?`<button class="secondary-btn invite-members" data-id="${escapeHTML(p.id)}">添加协作者`
-      +`</button>`:''}`
-      +`${joined&&creationRules().projectTask!=='none'?`<button class="secondary-btn add-project-task" data-project="`
-      +`${escapeHTML(p.id)}">${entryLabel(creationRules().projectTask,'任务')}</button>`:''}`
-      +`${joined?`<button class="ghost-btn leave-project" data-id="`
-      +`${escapeHTML(p.id)}">退出项目</button>`:''}`
-      +`${p.status==='pending'&&admin?`<button class="secondary-btn approve-project" data-id="${escapeHTML(p.id)}">审批项目`
-      +`</button>`:''}${manage?`<button class="secondary-btn request-project-completion" data-id="${escapeHTML(p.id)}">`
-      +`${icon('check')}完成项目</button>`:''}`
-      +`${p.status==='pending_completion'&&admin?`<button class="secondary-btn approve-project-completion" data-id="`
-      +`${escapeHTML(p.id)}">审批项目完成</button>`:''}`
-      +`${canManageProject(p)?`<button class="ghost-btn delete-project" data-id="${escapeHTML(p.id)}">删除项目`
-      +`</button>`:''}</div></div>${inSpace?'':`<div class="project-members"><span>Owner · ${escapeHTML(nameOf(p.owner))}　协作者：`
-      +`${accepted.filter(id=>id!==p.owner).map(id=>escapeHTML(nameOf(id))).join('、')||'暂无'}${pending.length?`　待确认：`
-      +`${pending.map(id=>escapeHTML(nameOf(id))).join('、')}`:''}</span><span>${canManageProject(p)?'项目':'我的任务'} `
-      +`${done}/${tasks.length} 已完成 · 截止 ${escapeHTML(p.end||'未设置')}</span></div>`}`
-      +`<div class="project-task-tree" data-project="${escapeHTML(p.id)}"><div class="project-tree-label">`
-      +`${canManageProject(p)?'项目任务':'分配给我的任务'} <span>${tasks.length}</span>${sorter}</div>`
+    return `<div class="project-task-tree" data-project="${escapeHTML(p.id)}"><div class="project-tree-label">`
+      +`${canManageProject(p)?'全部任务':'分配给我的任务'} <span>${tasks.length}</span>${sorter}</div>`
       +`${tasks.map(t=>projectChildRow(t,escapeHTML(nameOf(t.assignee)),{title:t.assignee,
-      drag:drag?` draggable="true" data-root="`
-      +`${escapeHTML(taskRootId(t,byId))}"`:'',tail:manage&&['todo',
+      drag:drag?` draggable="true" data-root="${escapeHTML(taskRootId(t,byId))}"`:'',tail:manage&&['todo',
       'doing'].includes(t.status)?`<button class="ghost-btn assign-project-task" data-id="${escapeHTML(t.id)}">调整指派`
       +`</button>`:''})).join('')||`<p class="project-task-empty">${p.status==='pending'?'待审批':'暂无任务'}</p>`}`
       +`${fixed.length?`<div class="project-tree-label">固定任务 <span>${fixed.length}</span></div>`
       +`${fixed.map(r=>`<div class="project-fixed-row"><strong>${escapeHTML(r.name)}</strong><small>`
       +`${escapeHTML(repeatPattern(r))} · ${escapeHTML(r.time||'09:00')} · `
       +`${escapeHTML((r.assignees||[]).map(nameOf).join('、'))}${r.end?` · 至 ${escapeHTML(r.end)}`:''}</small>`
-      +`</div>`).join('')}`:''}</div></article>`;
+      +`</div>`).join('')}`:''}</div>`;
+}
+/* The eyebrow above a folder or project names the levels above it; each opens. */
+const crumb=(label,folder)=>`<button type="button" class="space-crumb" data-crumb="${escapeHTML(folder)}">${escapeHTML(label)}</button>`;
+function bindCrumbs(){
+  $$('#projectsView .space-crumb').forEach(b=>b.onclick=()=>b.dataset.crumb?openFolderView(b.dataset.crumb):openProjectSpace(''));
 }
 function bindProjectCards(){
   $$('.project-title-link').forEach(button=>button.onclick=()=>openProjectSpace(button.dataset.openProject));
@@ -1225,6 +1244,7 @@ async function commitNavMove(plan,ghost,into){
 function openFolderView(id){
   if(meetingLive.session||meetingLive.active)return meetingStopLive().then(()=>openFolderView(id)).catch(e=>toast(e.message));
   if($('#meetingEditor')?.dataset?.dirty==='true'&&!confirm('会议修改尚未保存，确定离开？'))return;
+  cancelMeetingOpen();
   UI.folder=id;UI.space='';setFolderClosed(id,false);
   if(UI.view!=='projects')switchView('projects');else renderProjects();
   $('.main-content')?.scrollTo?.({top:0,behavior:'smooth'});
@@ -1232,7 +1252,7 @@ function openFolderView(id){
 function openProjectSpace(id){
   if(meetingLive.session||meetingLive.active)return meetingStopLive().then(()=>openProjectSpace(id)).catch(e=>toast(e.message));
   if(UI.space!==id&&$('#meetingEditor')?.dataset?.dirty==='true'&&!confirm('会议修改尚未保存，确定离开？'))return;
-  if(UI.space!==id){UI.spaceArea='overview';UI.collapsedProjectNode=null}
+  if(UI.space!==id){cancelMeetingOpen();UI.spaceArea='overview';UI.collapsedProjectNode=null}
   UI.space=id||'';if(!id)UI.folder='';if(id)clearFresh([id]);
   if(UI.view!=='projects')switchView('projects');else renderProjects();
   $('.main-content')?.scrollTo?.({top:0,behavior:'smooth'});
@@ -1242,6 +1262,7 @@ function projectArea(p,area){
   if(meetingLive.session||meetingLive.active)return meetingStopLive().then(()=>projectArea(p,area)).catch(e=>toast(e.message));
   if($('#meetingEditor')?.dataset?.dirty==='true'&&!confirm('会议修改尚未保存，确定离开？'))return;
   if(!['overview','meetings','files'].includes(area))return;
+  cancelMeetingOpen();
   UI.spaceArea=area;openProjectSpace(p.id);renderProjectNav();
 }
 function projectSpaceTabs(p){
@@ -1249,10 +1270,10 @@ function projectSpaceTabs(p){
   return `<nav class="space-tabs" aria-label="项目内容">${[['overview','概览'],['meetings','会议'],['files','文件']].map(([id,label])=>
     `<button type="button" class="space-tab${area===id?' is-on':''}" data-space-area="${id}"${area===id?' aria-current="page"':''}>${label}</button>`).join('')}</nav>`;
 }
-function bindSpaceTabs(p){$$('#projectSpace [data-space-area]').forEach(b=>b.onclick=()=>projectArea(p,b.dataset.spaceArea))}
+function bindProjectAreaTabs(p){$$('#projectSpace [data-space-area]').forEach(b=>b.onclick=()=>projectArea(p,b.dataset.spaceArea))}
 function projectMeetingList(p){
   const meetings=(S.meetings||[]).filter(m=>m.projectId===p.id).sort((a,b)=>String(b.scheduledAt||b.createdAt).localeCompare(String(a.scheduledAt||a.createdAt)));
-  return meetings.map(m=>`<button type="button" class="meeting-row" data-meeting="${escapeHTML(m.id)}"><span class="meeting-icon">${icon('chat')}</span><span class="meeting-copy"><strong>${escapeHTML(m.title)}</strong><small>${escapeHTML(m.scheduledAt||'未安排')} · ${m.minutes?'已整理':'待整理'}</small></span>${icon('chevron-right')}</button>`).join('')||'<p class="muted space-empty">还没有会议</p>';
+  return meetings.map(m=>`<button type="button" class="meeting-row" data-meeting="${escapeHTML(m.id)}"><span class="meeting-icon">${icon('chat')}</span><span class="meeting-copy"><strong>${escapeHTML(m.title)}</strong><small>${escapeHTML(m.scheduledAt||'未安排')} · ${m.minutes||m.hasMinutes?'已整理':'待整理'}</small></span>${icon('chevron-right')}</button>`).join('')||'<p class="muted space-empty">还没有会议</p>';
 }
 function projectMeetings(p,readonly=false){
   return `<section class="space-section space-meetings"><div class="space-head"><h2>项目会议</h2>${!readonly&&canManageProject(p)?'<button type="button" class="secondary-btn" id="newProjectMeeting">新增会议</button>':''}</div>`
@@ -1283,15 +1304,41 @@ function meetingMount(html){
   const pane=UI.spaceArea==='meetings'&&UI.space?$('#meetingEditor'):null;
   if(pane){pane.innerHTML=html;pane.dataset.dirty='false'}else openModal(html);
 }
+/* The state carries meetings without their transcript and minutes; opening one
+   fetches the full record once and keeps it on the list entry. */
+const meetingChars=m=>m.rawTranscript!=null?m.rawTranscript.length:(m.transcriptChars||0);
+function meetingLoaded(m){return !m||'rawTranscript' in m}
+let meetingOpenGeneration=0;
+function cancelMeetingOpen(){meetingOpenGeneration++}
+const meetingOpenScope=()=>JSON.stringify([S.user?.id,UI.view,UI.space,UI.folder,UI.spaceArea,UI.spaceTab]);
+function loadMeeting(m,reopen){
+  const generation=meetingOpenGeneration,scope=meetingOpenScope();
+  const current=()=>generation===meetingOpenGeneration&&scope===meetingOpenScope();
+  toast('正在加载会议…');
+  return api('/api/action',{action:'meeting.get',data:{id:m.id}}).then(full=>{
+    if(!current())return;
+    // A refresh may have replaced the list object while this request ran.
+    const listed=(S.meetings||[]).find(x=>x.id===m.id&&x.projectId===m.projectId);
+    if(!listed)return;
+    if((listed.revision||0)>(full.revision||0)){toast('会议已更新，请重新打开');return}
+    Object.assign(listed,full);return reopen();
+  }).catch(e=>{if(current())toast(e.message)});
+}
 function openArchivedMeeting(p,id){
+  cancelMeetingOpen();
   const m=(S.meetings||[]).find(x=>x.id===id&&x.projectId===p.id);if(!m)return;
+  if(!meetingLoaded(m))return loadMeeting(m,()=>openArchivedMeeting(p,id));
   meetingMount(`<div class="eyebrow">${escapeHTML(p.name)} · 归档会议</div><h2>${escapeHTML(m.title)}</h2><p class="muted">${escapeHTML(m.scheduledAt||'未安排')} · ${escapeHTML((m.participants||[]).join('、'))}</p><p>${escapeHTML(m.agenda||'')}</p><label class="form-field">原始转录<textarea readonly rows="10">${escapeHTML(m.rawTranscript||'')}</textarea></label><section class="meeting-minutes-preview"><h3>会议纪要</h3><div class="meeting-minutes-body">${escapeHTML(m.minutes||'尚未生成')}</div></section><div class="modal-footer"><button type="button" class="secondary-btn" id="cancelAction">关闭</button></div>`);
   $('#cancelAction').onclick=()=>{const pane=$('#meetingEditor');if(pane)pane.innerHTML='<p class="muted space-empty">选择一场会议</p>';else closeModal()};
 }
 function openMeetingEditor(p,meetingId=null){
-  if(meetingLive.session||meetingLive.active)return meetingStopLive().then(()=>openMeetingEditor(p,meetingId)).catch(e=>toast(e.message));
+  cancelMeetingOpen();
+  const generation=meetingOpenGeneration;
+  if(meetingLive.session||meetingLive.active)return meetingStopLive().then(()=>{if(generation===meetingOpenGeneration)return openMeetingEditor(p,meetingId)}).catch(e=>toast(e.message));
+  const listed=meetingId?(S.meetings||[]).find(m=>m.id===meetingId&&m.projectId===p.id):null;
+  if(!meetingLoaded(listed))return loadMeeting(listed,()=>openMeetingEditor(p,meetingId));
   const oldPane=$('#meetingEditor');
-  if(oldPane?.dataset?.dirty==='true'&&!confirm('会议修改尚未保存，确定切换？'))return;
+  if((oldPane?.dataset?.dirty==='true'||UI.docDirty)&&!confirm('会议修改尚未保存，确定切换？'))return;
   if((S.fileArchives||[]).some(x=>x.id===p.id)){openArchivedMeeting(p,meetingId);return}
   const owner=S.user?.id,current=meetingId?(S.meetings||[]).find(m=>m.id===meetingId&&m.projectId===p.id):null,manage=canManageProject(p);if(meetingId&&!current){toast('会议已删除或无权访问');return}if(!current&&!manage){toast('只有项目 Owner 或管理员可以新增会议');return}
   if(current)meetingLive.revisions.set(`${S.user?.id}:${current.id}`,current.revision||0);
@@ -1307,11 +1354,11 @@ function openMeetingEditor(p,meetingId=null){
     const transcript=text.value;
     const result=await api('/api/action',{action:m.id?'meeting.transcript.update':'meeting.create',data:{...(m.id?{id:m.id}:{projectId:p.id}),...data,rawTranscript:transcript,...(m.id?{expectedRevision:meetingLive.revisions.get(`${S.user?.id}:${m.id}`)??m.revision??0}:{})}});
     if(S.user?.id!==owner)throw new Error('账户已切换');
-    Object.assign(m,result);meetingLive.revisions.set(`${S.user?.id}:${m.id}`,result.revision||0);const pane=$('#meetingEditor');if(pane){const metadataChanged=JSON.stringify(values())!==JSON.stringify(data);pane.dataset.dirty=String(metadataChanged||text.value!==transcript);pane.dataset.metadataDirty=String(metadataChanged)}S.meetings=[...(S.meetings||[]).filter(x=>x.id!==m.id),m];return m;
+    Object.assign(m,result);meetingLive.revisions.set(`${S.user?.id}:${m.id}`,result.revision||0);const pane=$('#meetingEditor');const metadataChanged=JSON.stringify(values())!==JSON.stringify(data);if(pane){pane.dataset.dirty=String(metadataChanged||text.value!==transcript);pane.dataset.metadataDirty=String(metadataChanged)}else UI.docDirty=metadataChanged||text.value!==transcript;S.meetings=[...(S.meetings||[]).filter(x=>x.id!==m.id),m];return m;
   };
   const run=async(work)=>{if(busy)return;busy=true;sync();try{await work()}catch(e){toast(e.message)}finally{busy=false;sync()}};
   const closeEditor=()=>{const pane=$('#meetingEditor');if(pane){pane.innerHTML='<p class="muted space-empty">选择一场会议</p>';pane.dataset.dirty='false'}else closeModal()};
-  const markDirty=e=>{const pane=$('#meetingEditor');if(pane){pane.dataset.dirty='true';if(e.target.id!=='meetingTranscript')pane.dataset.metadataDirty='true'}sync()};
+  const markDirty=e=>{const pane=$('#meetingEditor');if(pane){pane.dataset.dirty='true';if(e.target.id!=='meetingTranscript')pane.dataset.metadataDirty='true'}else UI.docDirty=true;sync()};
   ['#meetingTitle','#meetingScheduledAt','#meetingParticipants','#meetingAgenda','#meetingTranscript'].forEach(id=>$(id)?.addEventListener('input',markDirty));
   $('#cancelAction').onclick=()=>run(async()=>{await persist();if($('#meetingEditor')?.dataset?.dirty==='true'){toast('已保存提交版本，仍有未保存修改');return}closeEditor();renderProjectSpace(p.id)});text.addEventListener('input',sync);sync();
   save.onclick=()=>run(async()=>{await persist();if(!text.isConnected)return;const pane=$('#meetingEditor');if(!pane)closeModal();renderProjectSpace(p.id);renderProjectNav();toast('会议已保存')});
@@ -1346,6 +1393,7 @@ function meetingSaveTranscript(id,input,recording){
 function meetingLiveStatus(text){const s=meetingLive.session;if(!s||s.owner===S.user?.id&&s.input.isConnected){const el=$('#meetingLiveState');if(el)el.textContent=text}}
 function meetingRelease(s){clearTimeout(s.timer);s.active=false;s.stream?.getTracks().forEach(t=>t.stop())}
 function meetingCancelCapture(){
+  cancelMeetingOpen();
   const s=meetingLive.session;if(s){s.cancelled=true;meetingRelease(s);s.controller?.abort();if(s.recorder?.state==='recording')s.recorder.stop()}
   const r=meetingLive.recognition;if(r){for(const k of ['onstart','onresult','onerror','onend'])r[k]=null;try{r.stop()}catch(_){}}
   meetingLive.recognition=null;meetingLive.revisions.clear();if(meetingLive.saveTimer)clearTimeout(meetingLive.saveTimer);
@@ -1469,8 +1517,14 @@ function meetingToggleBrowserLive(id,input){
   try{r.start()}catch(_){meetingStopLive().catch(()=>{});toast('实时识别未能启动')}
 }
 
+/* A project's page: the folder above it, its name, where it stands and what can
+   be done to it, then one tab at a time for 任务 · 文件 · 成员 · 概况. The tab
+   stays put when another project is opened, so going project → files and on to
+   the next project's files is one click each. */
+const SPACE_TABS={tasks:'任务',files:'文件',meetings:'会议',people:'成员',about:'概况'};
 function renderProjectSpace(id){
   const archive=(S.fileArchives||[]).find(x=>x.id===id),p=S.projects.find(x=>x.id===id)||archive,box=$('#projectSpace');if(!p||!box)return;
+  box.dataset=box.dataset||{};
   const area=UI.spaceArea||'overview';
   if(area!=='overview'){
     $('#projectsView h1').textContent=p.name;
@@ -1480,26 +1534,59 @@ function renderProjectSpace(id){
     }
     box.innerHTML=projectSpaceTabs(p)+(area==='meetings'?projectMeetings(p,Boolean(archive)):projectFiles(p,Boolean(archive)));
     box.dataset.meetingProject=area==='meetings'?id:'';box.dataset.meetingOwner=S.user?.id;box.dataset.readonly=String(Boolean(archive));
-    bindSpaceTabs(p);if(area==='meetings')bindMeetingList(p);else bindProjectSpace(p);return;
+    bindProjectAreaTabs(p);if(area==='meetings')bindMeetingList(p);else bindProjectSpace(p);return;
   }
   box.dataset.meetingProject='';
   if(archive){
-    $('#projectsView .eyebrow').textContent='项目空间 · 归档文件';$('#projectsView h1').textContent=p.name;
-    box.innerHTML=projectSpaceTabs(p)+`<section class="space-section"><div class="space-head"><h2>项目文件归档</h2></div>`
-      +`<p class="muted">${escapeHTML(projectStatus(p))} · Owner ${escapeHTML(nameOf(p.owner))}。文件与会议保留供项目成员读取。</p></section>`
+    $('#projectsView .eyebrow').innerHTML=`${crumb('全部项目','')} · 归档文件`;bindCrumbs();$('#projectsView h1').textContent=p.name;
+    box.innerHTML=projectSpaceTabs(p)+`<p class="space-description">项目文件归档 · ${escapeHTML(projectStatus(p))} · Owner ${escapeHTML(nameOf(p.owner))}。文件与会议保留供项目成员读取。</p>`
+
       +projectFiles(p,true);
-    bindSpaceTabs(p);return;
+    bindProjectAreaTabs(p);bindProjectSpace(p);return;
   }
   const manage=canManageProject(p),folder=(S.folders||[]).find(f=>f.id===p.folderId);
-  /* 申请项目 / 新建项目 is for the overview; inside one project it only repeats the top bar. */
-  $('#addProjectBtn')?.classList?.toggle('hidden',true);
-  $('#projectsView .eyebrow').textContent=`项目空间 · ${folder?folder.name:'未归类'}`;
-
+  $('#projectsView .eyebrow').innerHTML=`${crumb('全部项目','')}${folder?` / ${crumb(folder.name,folder.id)}`:''}`;bindCrumbs();
   $('#projectsView h1').textContent=p.name;
-  box.innerHTML=projectSpaceTabs(p)+(p.desc?`<p class="space-description">${escapeHTML(p.desc)}</p>`:'')+projectLifecycle(p,manage)+projectBackground(p,manage)+projectStaffing(p,manage)
-    +`<section class="space-section space-tasks"><div class="space-head"><h2>项目任务</h2></div>${projectCardHTML(p,true)}</section>`
-    +projectFiles(p);
-  bindSpaceTabs(p);bindProjectCards();bindProjectSpace(p);
+  const tab=SPACE_TABS[UI.spaceTab]?UI.spaceTab:'tasks';
+  const tasks=S.tasks.filter(t=>t.projectId===p.id&&!t.repeatId&&!isSuperseded(t));
+  const counts={tasks:tasks.length,files:(S.files||[]).filter(f=>f.projectId===p.id).length,
+    meetings:(S.meetings||[]).filter(m=>m.projectId===p.id).length,
+    people:Object.values(p.members||{}).filter(v=>v==='accepted').length,about:''};
+  const work=tasks.filter(t=>t.status!=='skipped'),done=work.filter(t=>t.status==='done').length;
+  const panel=(key,html)=>`<div class="space-panel" role="tabpanel" id="spacePanel-${key}" aria-labelledby="spaceTab-${key}"`
+    +`${key===tab?'':' hidden'}>${html}</div>`;
+  box.innerHTML=(p.desc?`<p class="space-description">${escapeHTML(p.desc)}</p>`:'')
+    +`<div class="space-bar"><div class="space-facts"><span class="project-status">${projectStatus(p)}</span>`
+    +`<span>Owner · ${escapeHTML(nameOf(p.owner))}</span><span>${p.start?escapeHTML(fmt(p.start)):'未定'} – ${p.end?escapeHTML(fmt(p.end)):'长期'}</span>`
+    +`<span>${!S.user?.admin&&p.owner!==S.user?.id?'我的任务':'项目'} ${done}/${work.length} 完成</span></div><div class="space-actions">${projectActionsHTML(p)}</div></div>`
+    +`<div class="space-tabs" role="tablist" aria-label="项目内容">${Object.entries(SPACE_TABS).map(([key,label])=>
+      `<button type="button" role="tab" class="space-tab" id="spaceTab-${key}" data-space-tab="${key}" aria-controls="spacePanel-${key}"`
+      +` aria-selected="${key===tab}" tabindex="${key===tab?0:-1}">${label}${counts[key]===''?'':` <span>${counts[key]}</span>`}</button>`).join('')}</div>`
+    +panel('tasks',`<section class="space-section space-tasks">${projectCardHTML(p)}</section>`)
+    +panel('files',projectFiles(p,false,false))
+    +panel('meetings',projectMeetings(p,Boolean(archive)))
+    +panel('people',projectStaffing(p,manage))
+    +panel('about',projectLifecycle(p,manage)+projectBackground(p,manage));
+  bindProjectCards();bindProjectSpace(p);bindProjectContentTabs();
+}
+/* Tabs follow the usual pattern: click or arrow keys move, Home/End jump. */
+function bindProjectContentTabs(){
+  const tabs=$$('#projectSpace .space-tab');
+  const show=(button,focus)=>{
+    if(UI.spaceTab!==button.dataset.spaceTab)cancelMeetingOpen();
+    UI.spaceTab=button.dataset.spaceTab;
+    tabs.forEach(t=>{const on=t===button;t.setAttribute('aria-selected',String(on));t.tabIndex=on?0:-1;
+      const panel=$(`#spacePanel-${t.dataset.spaceTab}`);if(panel)panel.hidden=!on});
+    if(focus)button.focus();
+  };
+  tabs.forEach((button,i)=>{
+    button.onclick=()=>show(button);
+    button.onkeydown=e=>{
+      const next={ArrowRight:i+1,ArrowLeft:i-1,Home:0,End:tabs.length-1}[e.key];
+      if(next===undefined)return;e.preventDefault();show(tabs[(next+tabs.length)%tabs.length],true);
+    };
+  });
+
 }
 /* 项目周期: 立项 → 执行 → 结项, with how far the dates and the work have come. */
 function projectLifecycle(p,manage){
@@ -1507,6 +1594,7 @@ function projectLifecycle(p,manage){
      立项 is never later than 执行. */
   const made=String(p.createdAt||'').slice(0,10),created=made&&p.start?(made<p.start?made:p.start):made||p.start,start=p.start||created,end=p.end;
 
+  const personal=!S.user?.admin&&p.owner!==S.user?.id;
   const tasks=S.tasks.filter(t=>t.projectId===p.id&&!t.repeatId&&!isSuperseded(t)&&t.status!=='skipped');
   const done=tasks.filter(t=>t.status==='done').length;
   const span=end?Math.max(1,daysCount(start,end)):0,passed=span?Math.min(span,Math.max(0,daysCount(start,S.today))):0;
@@ -1518,11 +1606,10 @@ function projectLifecycle(p,manage){
   return `<section class="space-section space-cycle"><div class="space-steps">${steps.map(([label,day],i)=>`<div class="space-step`
     +`${i<stage?' is-past':i===stage?' is-now':''}"><i></i><strong>${label}</strong><small>${escapeHTML(/^\d{4}-/.test(day||'')?fmt(day):day||'')}</small></div>`).join('')}</div>`
     +`<div class="space-meters">${span?meter('时间',passed,span,`第 ${passed} / ${span} 天`):''}`
-    +`${meter('任务',done,tasks.length,`${done} / ${tasks.length} 已完成`)}</div>`
-    +`<div class="space-meta"><span>Owner · ${escapeHTML(nameOf(p.owner))}</span><span class="project-status">${projectStatus(p)}</span>`
-    +`${manage&&folders.length?`<label class="space-folder">放在<select id="spaceFolder"><option value="">未归类</option>`
+    +`${meter(personal?'我的任务':'任务',done,tasks.length,`${done} / ${tasks.length} 已完成`)}</div>`
+    +`${manage&&folders.length?`<div class="space-meta"><label class="space-folder">放在文件夹<select id="spaceFolder"><option value="">未归类</option>`
     +`${folders.map(f=>`<option value="${escapeHTML(f.id)}"${f.id===p.folderId?' selected':''}>${escapeHTML(f.name)}</option>`).join('')}`
-    +`</select></label>`:''}</div></section>`;
+    +`</select></label></div>`:''}</section>`;
 }
 function projectBackground(p,manage){
   const text=p.background||'';
@@ -1544,29 +1631,37 @@ function projectStaffing(p,manage){
     return `<div class="staff-row">${avatarHTML(id)}<div class="staff-name"><strong>${escapeHTML(nameOf(id))}</strong>`
       +`<small>${id===p.owner?'Owner':'协作者'}</small></div>`
       +`${manage?`<input class="staff-role" data-member="${escapeHTML(id)}" maxlength="200" value="${escapeHTML(role)}" `
-      +`placeholder="负责什么" aria-label="${escapeHTML(nameOf(id))} 的分工">`:`<span class="staff-role-text">${escapeHTML(role||'—')}</span>`}`
+      +`placeholder="填写分工" aria-label="${escapeHTML(nameOf(id))} 的分工">`:`<span class="staff-role-text">${escapeHTML(role||'—')}</span>`}`
       +`<span class="staff-load">${manage||id===S.user?.id?`进行中 ${open} · 已完成 ${done}${mins?` · ${hours(mins)} 小时`:''}`:''}</span></div>`;
   };
-  return `<section class="space-section"><div class="space-head"><h2>项目人力 <span>${people.length}</span>`
-    +`<small class="space-window">${escapeHTML(loadWindowLabel(p))}</small></h2>`
-    +`${manage&&p.status==='active'?'<button class="secondary-btn" id="spaceInvite">添加协作者</button>':''}</div>`
+  return `<section class="space-section"><div class="space-head"><h2>分工与负荷 <small class="space-window">${escapeHTML(loadWindowLabel(p))}</small></h2>`
+    +`${manage&&p.status==='active'?'<button class="secondary-btn" id="spaceInvite">'+icon('plus')+'添加协作者</button>':''}</div>`
     +`<div class="staff-list">${people.map(row).join('')}</div></section>`;
 }
 const fileExt=name=>(String(name).match(/\.([a-z0-9]{1,5})$/i)?.[1]||'FILE').toUpperCase();
 const fileSize=n=>n>=1048576?`${(n/1048576).toFixed(1)} MB`:n>=1024?`${Math.round(n/1024)} KB`:`${n} B`;
 const MAX_FILE_MB=20;
-function projectFiles(p,readonly=false){
-  const files=(S.files||[]).filter(f=>f.projectId===p.id).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+/* Files and meetings form one list, newest first, with dates read as dates. */
+const whenText=iso=>{const day=String(iso||'').slice(0,10),time=String(iso||'').slice(11,16);
+  return /^\d{4}-\d\d-\d\d$/.test(day)?`${fmt(day)}${time?` ${time}`:''}`:'未安排'};
+function projectFiles(p,readonly=false,includeMeetings=true){
   const canDrop=f=>!readonly&&(S.user?.admin||p.owner===S.user?.id||f.uploader===S.user?.id);
-  const row=f=>`<div class="file-row"><span class="file-ext">${escapeHTML(fileExt(f.name))}</span><a class="file-name" href="/api/files/`
+  const file=f=>`<div class="file-row"><span class="file-ext">${escapeHTML(fileExt(f.name))}</span><a class="file-name" href="/api/files/`
     +`${encodeURIComponent(f.id)}" download="${escapeHTML(f.name)}">${escapeHTML(f.name)}</a><small>${escapeHTML(fileSize(f.size))} · `
     +`${escapeHTML(nameOf(f.uploader))} · <span title="${escapeHTML(f.createdAt)}">${escapeHTML(relTime(f.createdAt))}</span></small>`
-    +`${canDrop(f)?`<button class="ghost-btn file-delete" data-file="${escapeHTML(f.id)}" aria-label="删除 ${escapeHTML(f.name)}">`
-    +`${icon('x')}</button>`:''}</div>`;
-  return `<section class="space-section space-files" id="spaceFiles"><div class="space-head"><h2>项目文件 <span>${files.length}</span></h2>`
-    +`${readonly?'':`<details class="space-file-create" id="fileCreateMenu"><summary class="secondary-btn">${icon('plus')}新增文件</summary><div class="space-file-options"><button type="button" id="uploadFileFromMenu">${icon('upload')}上传文件</button>${canManageProject(p)?`<button type="button" id="createMeetingFromFiles">${icon('chat')}新增会议</button>`:''}</div></details><input type="file" id="spaceFileInput" multiple hidden>`}</div>`
-    +`${files.length?`<div class="file-list">${files.map(row).join('')}</div>`:''}`
-    +`<p class="space-drop-hint">${readonly?'附件可下载，会议可只读查看。':`拖入文件，或从「新增文件」上传。单个文件不超过 ${MAX_FILE_MB}MB。`}</p></section>`;
+    +`${canDrop(f)?`<button class="ghost-btn file-delete" data-file="${escapeHTML(f.id)}" aria-label="删除 ${escapeHTML(f.name)}" title="删除">`
+    +`${icon('x')}</button>`:'<span></span>'}</div>`;
+  const meeting=m=>`<button type="button" class="file-row meeting-row" data-meeting="${escapeHTML(m.id)}"><span class="file-ext is-meeting">会议</span>`
+    +`<span class="file-name">${escapeHTML(m.title)}</span><small>${escapeHTML(whenText(m.scheduledAt))} · ${m.minutes||m.hasMinutes?'纪要已整理':'待整理'}`
+    +`${meetingChars(m)?` · 原稿 ${meetingChars(m)} 字`:''}</small><span class="meeting-arrow">${icon('chevron-right')}</span></button>`;
+  const rows=[...(S.files||[]).filter(f=>f.projectId===p.id).map(f=>({at:f.createdAt,html:file(f)})),
+    ...(includeMeetings?(S.meetings||[]).filter(m=>m.projectId===p.id).map(m=>({at:m.scheduledAt||m.createdAt,html:meeting(m)})):[])]
+    .sort((a,b)=>String(b.at||'').localeCompare(String(a.at||'')));
+  return `<section class="space-section space-files" id="spaceFiles"><div class="space-head"><h2>项目文件 <span>${rows.length}</span></h2>`
+    +`${readonly?'':`<details class="space-file-create" id="fileCreateMenu"><summary class="secondary-btn">${icon('plus')}新增文件</summary><div class="space-file-options"><button type="button" id="uploadFileFromMenu">${icon('file')}上传文件</button>${canManageProject(p)?`<button type="button" id="createMeetingFromFiles">${icon('chat')}新增会议</button>`:''}</div></details><input type="file" id="spaceFileInput" multiple hidden>`}</div>`
+    +`${rows.length?`<div class="file-list">${rows.map(r=>r.html).join('')}</div>`:'<p class="space-empty">还没有文件</p>'}`
+    +`<p class="space-drop-hint">${readonly?'附件可下载，会议可只读查看。':`拖入文件即可上传，单个文件不超过 ${MAX_FILE_MB}MB`}</p></section>`;
+
 }
 async function uploadProjectFiles(p,list){
   const files=[...list];if(!files.length)return;
@@ -1703,7 +1798,7 @@ function deleteProject(projectId){
   if(!canManageProject(p)){toast('只有项目 Owner 或 superadmin 可删除项目');return}
   const tasks=S.tasks.filter(t=>t.projectId===p.id),done=tasks.filter(t=>t.status==='done').length;
   const members=Object.entries(p.members||{}).filter(([,v])=>v==='accepted').map(([id])=>id);
-  openModal(`<div class="eyebrow danger-eyebrow">危险操作 · 不可撤销</div><h2>删除项目「${escapeHTML(p.name)}」</h2><div class="danger-panel"><p>删除后无法恢复。</p><ul class="danger-impact"><li>子任务 <strong>${tasks.length}</strong> 项（已完成 ${done} 项）</li><li>参与成员 <strong>${members.length}</strong> 人</li><li>相关报告、申请与通知将一并清除</li></ul></div><label class="danger-check"><input type="checkbox" id="deleteAck"> 我已了解该项目及全部子任务将被永久删除，且无法恢复</label><label class="danger-confirm">请输入项目名称 <code>${escapeHTML(p.name)}</code> 以继续<input id="deleteConfirmText" autocomplete="off" spellcheck="false" placeholder="${escapeHTML(p.name)}"></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="danger-btn" id="confirmDeleteProject" disabled>永久删除项目</button></div>`);
+  openModal(`<div class="eyebrow danger-eyebrow">危险操作 · 不可撤销</div><h2>删除项目「${escapeHTML(p.name)}」</h2><div class="danger-panel"><p>删除后无法恢复。</p><ul class="danger-impact"><li>子任务 <strong>${tasks.length}</strong> 项（已完成 ${done} 项）</li><li>参与成员 <strong>${members.length}</strong> 人</li><li>附件、会议原稿与纪要、项目沟通记录、报告、申请与通知将一并清除</li></ul></div><label class="danger-check"><input type="checkbox" id="deleteAck"> 我已了解该项目及全部子任务将被永久删除，且无法恢复</label><label class="danger-confirm">请输入项目名称 <code>${escapeHTML(p.name)}</code> 以继续<input id="deleteConfirmText" autocomplete="off" spellcheck="false" placeholder="${escapeHTML(p.name)}"></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="danger-btn" id="confirmDeleteProject" disabled>永久删除项目</button></div>`);
   const ack=$('#deleteAck'),text=$('#deleteConfirmText'),btn=$('#confirmDeleteProject');
   const sync=()=>{btn.disabled=!(ack.checked&&text.value.trim()===p.name)};
   ack.onchange=sync;text.oninput=sync;
@@ -2704,7 +2799,7 @@ async function act(action,data,{quiet=false}={}){try{await api('/api/action',{ac
 function restorePanelFocus(target){
   if(target?.isConnected&&!target.closest('.hidden'))target.focus?.({preventScroll:true});
 }
-function openModal(html){meetingStopLive().catch(e=>toast(e.message));if($('#modalBackdrop').classList.contains('hidden'))UI.modalReturnFocus=document.activeElement;UI.docDirty=false;if(UI.briefSource){UI.briefSource.closest('.archive-file')?.classList.remove('is-out');UI.briefSource=null}UI.briefTyping?.finish();UI.briefTyping=null;document.querySelectorAll('.brief-folder').forEach(x=>x.remove());['#modalBackdrop','#modalBackdrop .modal','#modalContent'].forEach(s=>$(s)?.getAnimations?.().forEach(a=>a.cancel()));$('#modalContent').innerHTML=html;$('#modalBackdrop .modal')?.classList?.remove('is-wide','is-flown');$('#modalBackdrop').classList.remove('hidden')};function closeModal(){if(UI.docDirty&&!confirm('修改还没保存，确定关闭？'))return;meetingStopLive().catch(e=>toast(e.message));UI.docDirty=false;if(typeof foldBrief==='function'&&foldBrief())return;$('#modalBackdrop').classList.add('hidden');restorePanelFocus(UI.modalReturnFocus)};function closeDrawer(){$('#taskDrawer').classList.add('hidden');restorePanelFocus(UI.drawerReturnFocus)}
+function openModal(html){cancelMeetingOpen();meetingStopLive().catch(e=>toast(e.message));if($('#modalBackdrop').classList.contains('hidden'))UI.modalReturnFocus=document.activeElement;UI.docDirty=false;if(UI.briefSource){UI.briefSource.closest('.archive-file')?.classList.remove('is-out');UI.briefSource=null}UI.briefTyping?.finish();UI.briefTyping=null;document.querySelectorAll('.brief-folder').forEach(x=>x.remove());['#modalBackdrop','#modalBackdrop .modal','#modalContent'].forEach(s=>$(s)?.getAnimations?.().forEach(a=>a.cancel()));$('#modalContent').innerHTML=html;$('#modalBackdrop .modal')?.classList?.remove('is-wide','is-flown');$('#modalBackdrop').classList.remove('hidden')};function closeModal(){if(UI.docDirty&&!confirm('修改还没保存，确定关闭？'))return;cancelMeetingOpen();meetingStopLive().catch(e=>toast(e.message));UI.docDirty=false;if(typeof foldBrief==='function'&&foldBrief())return;$('#modalBackdrop').classList.add('hidden');restorePanelFocus(UI.modalReturnFocus)};function closeDrawer(){$('#taskDrawer').classList.add('hidden');restorePanelFocus(UI.drawerReturnFocus)}
 function newTask(projectId,initialDate){
   const admin=Boolean(S.user.admin),paths=taskProjects(),projects=paths.map(x=>x.p),temp=tempTaskMode(),locked=typeof projectId==='string';
   if(!projects.length&&temp==='none'){toast('你所在的规则组不能新建任务');return}
@@ -3354,7 +3449,7 @@ function flyArchive(folder){
 }
 /* Archives are edited in place: every collected block is plain editable text
    on the page itself, and 保存 lights up once something changes. */
-const docText=el=>el.innerText.replace(/\u00a0/g,' ').replace(/\n{3,}/g,'\n\n').trim();
+const docText=el=>String(el?.innerText??el?.textContent??el?.value??'').replace(/\u00a0/g,' ').replace(/\n{3,}/g,'\n\n').trim();
 const docEdit=(value,attrs)=>`<div class="doc-edit" contenteditable="plaintext-only" spellcheck="false" ${attrs}>${escapeHTML(value??'')}</div>`;
 /* 随记 under the three fixed blocks is the holder's own blank page: nothing
    fills it in, and it stays out of the team brief. */
@@ -4849,7 +4944,7 @@ function planMutationHTML(board,x,kind){
   const diff=()=>`<div class="plan-diff" aria-label="修改前后">${changes.map(([k,v])=>`<div><span>${fieldLabels[k]||k}</span><del>${escapeHTML(display(k,x.before?.[k]))}</del><strong>${escapeHTML(display(k,v))}</strong></div>`).join('')||'<p>尚未修改字段</p>'}</div>`;
   let body='';
   if(op==='delete'){
-    const impact=project?`同时删除 ${Number(x.impact?.tasks)||0} 项任务、${Number(x.impact?.files)||0} 个附件、${Number(x.impact?.repeats)||0} 条固定安排及相关记录，删除后不可恢复。`:'任务将从日历移除；此操作不可撤销。';
+    const impact=project?`同时删除 ${Number(x.impact?.tasks)||0} 项任务、${Number(x.impact?.files)||0} 个附件、${Number(x.impact?.repeats)||0} 条固定安排、${Number(x.impact?.meetings)||0} 场会议、${Number(x.impact?.messages)||0} 条沟通记录及相关记录，删除后不可恢复。`:'任务将从日历移除；此操作不可撤销。';
     body=`<strong class="plan-target">${escapeHTML(x.before?.name||x.name)}</strong><p class="plan-delete-impact">${impact}</p>`+(project?`<label class="plan-delete-confirm">输入完整项目名以确认<input data-f="confirm" autocomplete="off" value="${escapeHTML(x.confirm||'')}" placeholder="${escapeHTML(x.before?.name||'项目名称')}"></label>`:`<label class="plan-delete-confirm"><input type="checkbox" data-f="deleteConfirmed"${x.deleteConfirmed?' checked':''}>我确认删除这项任务</label>`);
   }else{
     body=`<p class="plan-target">正在修改：${escapeHTML(x.before?.name||'')}</p><input class="plan-title" data-f="name" value="${escapeHTML(x.name)}" maxlength="120" aria-label="${project?'项目':'任务'}名称"><textarea class="plan-desc" data-f="desc" rows="2" aria-label="说明">${escapeHTML(x.desc)}</textarea><div class="plan-grid">`;

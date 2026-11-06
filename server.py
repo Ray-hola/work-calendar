@@ -79,15 +79,31 @@ from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent
 TZ = ZoneInfo('Asia/Shanghai')
-# MVP 的日期范围先开放到 2027-04-30（含当天）。统一由后端校验，避免
-# 浏览器绕过日期输入限制后创建超出当前产品范围的安排。
-CALENDAR_END = date(2027, 4, 30)
+# 可排期的范围随今天滚动：最远到两年后（含当天），由后端统一校验，避免
+# 浏览器绕过日期输入限制。固定任务只提前生成半年，免得任务表被远期的
+# 重复安排撑大；之后每天由调度器顺延补上。
+HORIZON_DAYS = 730
+REPEAT_AHEAD_DAYS = 183
+
+def calendar_end(today=None):
+    return (today or now().date()) + timedelta(days=HORIZON_DAYS)
+
+def repeat_end(today=None):
+    return (today or now().date()) + timedelta(days=REPEAT_AHEAD_DAYS)
 # The two rooms that always exist, in the order they are shown. Every other
 # channel is a project, and a project's channel is archived with it.
 CHAT_CHANNELS = (('general', '沟通'), ('lounge', '闲聊'))
 CHAT_DEFAULT = 'general'
 CHAT_LEGACY = 'all'          # the pre-channel hall; folded into 沟通
 CHAT_EVERYONE = '*'          # a broadcast, not an account id
+# chat_normalize as SQL: no channel (or the legacy hall) means 沟通. An index on
+# this expression lets each room be read without scanning every message.
+_CHAT_RAW = "COALESCE(NULLIF(json_extract(data,'$.channel'),''),'" + CHAT_DEFAULT + "')"
+CHAT_CHANNEL_SQL = f"CASE WHEN {_CHAT_RAW}='{CHAT_LEGACY}' THEN '{CHAT_DEFAULT}' ELSE {_CHAT_RAW} END"
+CHAT_TIME_SQL = "COALESCE(json_extract(data,'$.createdAt'),'')"
+# Notices the page acts on by reference; they stay in the state however old.
+ACTIONABLE_NOTICES = ('approval', 'project_completion', 'task_edit_approval', 'task_request')
+READ_NOTICES_KEPT = 200
 
 # The assistant proxy is the one place a browser can make the server send a body
 # it did not write, so its size is bounded twice, for two different reasons.
@@ -225,8 +241,9 @@ def valid_date(value):
         parsed = date.fromisoformat(str(value))
     except (ValueError, TypeError):
         raise Problem(400, '日期格式应为 YYYY-MM-DD')
-    if parsed > CALENDAR_END:
-        raise Problem(400, f'日期范围目前只支持到 {CALENDAR_END.isoformat()}')
+    last = calendar_end()
+    if parsed > last:
+        raise Problem(400, f'日期范围目前只支持到 {last.isoformat()}')
     return parsed.isoformat()
 
 def valid_clock(value):
@@ -256,6 +273,9 @@ class Store:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
+        # While a snapshot is being assembled, each table is parsed once and
+        # shared by every helper that reads it (see snapshot()).
+        self._reads = threading.local()
         self.db = sqlite3.connect(self.path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.execute('PRAGMA journal_mode=WAL')
@@ -282,6 +302,9 @@ class Store:
         for table in TABLES:
             self.db.execute(f'CREATE TABLE IF NOT EXISTS {table} (id TEXT PRIMARY KEY, data TEXT NOT NULL)')
         self.db.execute('CREATE TABLE IF NOT EXISTS file_blobs (id TEXT PRIMARY KEY, data BLOB NOT NULL)')
+        self.db.execute(f'CREATE INDEX IF NOT EXISTS messages_by_channel_time ON messages({CHAT_CHANNEL_SQL}, {CHAT_TIME_SQL})')
+        self.db.execute('DROP INDEX IF EXISTS messages_by_channel')
+        self.db.execute("CREATE INDEX IF NOT EXISTS notifications_by_recipient ON notifications(json_extract(data,'$.to'))")
         self.db.commit()
         # One JSON record stores the global automatic collection policy.  The
         # default keeps the existing behaviour: collect the previous day's
@@ -344,7 +367,14 @@ class Store:
 
     def all(self, table):
         assert table in TABLES
-        return [json.loads(r['data']) for r in self.db.execute(f'SELECT data FROM {table} ORDER BY rowid')]
+        cache = getattr(self._reads, 'cache', None)
+        if cache is not None and table in cache:
+            return list(cache[table])
+        rows = [json.loads(r['data']) for r in self.db.execute(f'SELECT data FROM {table} ORDER BY rowid')]
+        if cache is not None:
+            cache[table] = rows
+            return list(rows)
+        return rows
 
     def get(self, table, id):
         assert table in TABLES
@@ -357,6 +387,11 @@ class Store:
         assert table in TABLES
         obj.setdefault('id', uid())
         self.db.execute(f'INSERT INTO {table}(id,data) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data', (obj['id'], json.dumps(obj, ensure_ascii=False)))
+        cache = getattr(self._reads, 'cache', None)
+        if cache is not None:
+            cache.pop(table, None)
+            if table == 'tasks':
+                cache.pop('_report_tasks', None)
         return obj
 
     def users(self):
@@ -502,6 +537,18 @@ class Store:
         return ('你是会议纪要整理助手。请只根据原始转录整理，不要补造事实。'
                 '输出简洁的 Markdown，包含：会议结论、待办事项（负责人/截止时间/事项）、'
                 '风险与待确认问题。若原稿没有对应信息，写“未提及”。')
+
+    @staticmethod
+    def meeting_summary(m):
+        """What lists need: everything but the transcript and minutes text."""
+        raw, minutes = m.get('rawTranscript') or '', m.get('minutes') or ''
+        return {**{k: v for k, v in m.items() if k not in ('rawTranscript', 'minutes')},
+                'transcriptChars': len(raw), 'hasMinutes': bool(minutes)}
+
+    def meeting_get(self, user, data):
+        m = self.get('meetings', str(data.get('id') or ''))
+        self._meeting_project(user, m.get('projectId'), readonly=True)
+        return m
 
     def meeting_list(self, user, data):
         project_id = str(data.get('projectId') or '').strip()
@@ -918,7 +965,7 @@ class Store:
             caps = self.agent_capabilities(user)
         return compact({'today': now().date().isoformat(), 'timezone': 'Asia/Shanghai',
                         'account': user['id'], 'role': caps['role'], 'mode': caps['mode'],
-                        'dateHorizon': CALENDAR_END.isoformat(), 'rules': self.creation_rules(user),
+                        'dateHorizon': calendar_end().isoformat(), 'rules': self.creation_rules(user),
                         'workspace': '按需查询授权数据的只读 SQLite 工作区；先用 workspace_schema 查看表和字段。'})
 
     def workspace_rows(self, user, table):
@@ -1528,14 +1575,17 @@ class Store:
         if kind == 'project' and operation == 'delete':
             tasks = [t for t in self.all('tasks') if t.get('projectId') == row['id']]
             impact = {'tasks': len(tasks), 'files': sum(f.get('projectId') == row['id'] for f in self.all('files')),
-                      'repeats': sum(r.get('projectId') == row['id'] for r in self.all('repeats'))}
+                      'repeats': sum(r.get('projectId') == row['id'] for r in self.all('repeats')),
+                      'meetings': sum(m.get('projectId') == row['id'] for m in self.all('meetings')),
+                      'messages': sum(self.chat_normalize(m) == row['id'] for m in self.all('messages'))}
         # Full record and dependent records bind destructive confirmation to the
         # version the human reviewed, including same-count dependency changes.
         dependencies = {}
         if kind == 'project' and operation == 'delete':
             ids = {t['id'] for t in tasks}
-            for table in ('tasks', 'files', 'repeats', 'reports', 'logs', 'requests', 'task_requests', 'edit_requests', 'suggestions', 'notifications'):
+            for table in ('tasks', 'files', 'repeats', 'reports', 'logs', 'requests', 'task_requests', 'edit_requests', 'suggestions', 'notifications', 'meetings'):
                 dependencies[table] = sorted([r for r in self.all(table) if r.get('projectId') == row['id'] or r.get('taskId') in ids or r.get('reference') in ids | {row['id']}], key=lambda r: r['id'])
+            dependencies['messages'] = sorted([m for m in self.all('messages') if self.chat_normalize(m) == row['id']], key=lambda m: m['id'])
         value = json.dumps([row, dependencies], sort_keys=True, ensure_ascii=False, separators=(',', ':'))
         return hashlib.sha256(value.encode()).hexdigest(), impact
 
@@ -1905,6 +1955,18 @@ class Store:
         if fresh:record['fresh']=True
         return self.put('notifications', record)
 
+    def notices_for(self, account):
+        rows = [json.loads(r['data']) for r in self.db.execute(
+            "SELECT data FROM notifications WHERE json_extract(data,'$.to')=? ORDER BY rowid", (account,))]
+        rows = [n for n in rows if '12:00 初稿' not in str(n.get('title', ''))]
+        settled = [i for i, n in enumerate(rows) if n.get('read') and n.get('kind') not in ACTIONABLE_NOTICES]
+        dropped = set(settled[:-READ_NOTICES_KEPT]) if len(settled) > READ_NOTICES_KEPT else set()
+        return [n for i, n in enumerate(rows) if i not in dropped]
+
+    def recent_audit(self, limit):
+        rows = self.db.execute('SELECT data FROM audit ORDER BY rowid DESC LIMIT ?', (limit,)).fetchall()
+        return [json.loads(r['data']) for r in reversed(rows)]
+
     def audit(self, actor, action, details):
         self.put('audit', {'actor':actor, 'action':action, 'details':scrub(details), 'createdAt':timestamp()})
 
@@ -2136,7 +2198,12 @@ class Store:
     def can_view_task(self, user, t):
         if not t.get('projectId'):
             return bool(user['admin'] or t['assignee']==user['id'] or t.get('creator')==user['id'])
-        p = self.get('projects', t['projectId'])
+        # A task left behind by a project that no longer exists is hidden like
+        # one of a finished project, rather than failing everyone's state.
+        try:
+            p = self.get('projects', t['projectId'])
+        except Problem:
+            return False
         if p.get('status') in ('done','archived') or (p.get('end') and p['end'] < now().date().isoformat()):
             return False
         return bool(user['admin'] or (p['status'] not in ('pending','rejected') and (p['owner']==user['id'] or (t['assignee']==user['id'] and p['members'].get(user['id'])=='accepted'))))
@@ -2548,6 +2615,7 @@ class Store:
         """Promote scheduled work to in-progress when its start time arrives."""
         at = (at or now()).astimezone(TZ)
         changed = 0
+        projects = {p['id']: p for p in self.all('projects')}
         for task in self.all('tasks'):
             if task.get('assignee') == 'superadmin' or task.get('status') != 'todo' or not task.get('date'):
                 continue
@@ -2559,15 +2627,15 @@ class Store:
             if datetime.combine(day, clock, TZ) > at:
                 continue
             if task.get('projectId'):
-                project = self.get('projects', task['projectId'])
-                if project.get('status') != 'active' or (project.get('end') and project['end'] < at.date().isoformat()):
+                project = projects.get(task['projectId'])
+                if not project or project.get('status') != 'active' or (project.get('end') and project['end'] < at.date().isoformat()):
                     continue
             task['status'] = 'doing'
             self.put('tasks', task)
             self.put('logs', {'taskId': task['id'], 'actor': 'system', 'kind': 'auto_start',
                               'createdAt': timestamp(), 'date': at.date().isoformat()})
             if task.get('projectId'):
-                project = self.get('projects', task['projectId'])
+                project = projects[task['projectId']]
                 if project.get('owner') and project['owner'] != task.get('assignee'):
                     self.notify(project['owner'], '项目任务自动开始',
                                 f'{task.get("assignee")} 的「{task.get("name", "") }」已到开始时间，状态自动更新为进行中。',
@@ -2581,44 +2649,53 @@ class Store:
             self.advance_due_tasks(at)
             self.settle_legacy_task_approvals()
             self.accept_pending_invitations()
-            all_projects=self.all('projects')
-            projects=[p for p in all_projects if self.can_view_project(user,p)]
-            all_files=self.all('files')
-            all_meetings=self.all('meetings')
-            file_project_ids={f.get('projectId') for f in all_files} | {m.get('projectId') for m in all_meetings}
-            file_archives=[{k:p.get(k) for k in ('id','name','owner','status','end','completedAt','folderId')}
-                           for p in all_projects if p['id'] in file_project_ids
-                           and not self.can_view_project(user,p) and self.can_read_project_files(user,p)]
-            file_pids={p['id'] for p in projects+file_archives}
-            folder_ids={p.get('folderId') for p in projects+file_archives}
-            folders=[f for f in self.all('folders') if user['admin'] or f['id'] in folder_ids]
-            all_tasks=self.all('tasks')
-            # One projection supplies both hidden cards and their period counts.
-            # A request crossing a trigger time must not mix two group scopes.
-            stack_groups=self._repeat_stack_groups(all_tasks,at)
-            superseded=self._superseded_map(all_tasks,stack_groups)
-            stack_meta=self._stack_metadata(all_tasks,stack_groups)
-            tasks=[]
-            for task in all_tasks:
-                if not self.can_view_task(user,task):
-                    continue
-                # Superseded occurrences stay in the payload so history, logs and
-                # approval lookups keep working; the client hides them from the
-                # active views and shows them in the deferral history instead.
-                tasks.append({**task,**stack_meta.get(task['id'],{}),**({'superseded':True,'supersededBy':superseded[task['id']]} if task['id'] in superseded else {})})
-            ids={t['id'] for t in tasks}; pids={p['id'] for p in projects}
-            reports=[r for r in self.all('reports') if r['author']==user['id'] or user['admin'] or (r.get('projectId') and self.get('projects',r['projectId'])['owner']==user['id'])]
-            # Briefs travel as index cards; the archive room fetches a full one when it is opened.
-            reports=[self.brief_card(r) if r.get('kind')=='brief' else r for r in reports]
-            # Personal diaries are private to their author; superadmin can browse
-            # every member notebook from the diary dashboard.
-            diaries=[d for d in self.all('diaries') if user['admin'] or d.get('author')==user['id']]
-            edit_requests=[r for r in self.all('edit_requests') if user['admin'] or r.get('requester')==user['id'] or r.get('approver')==user['id']]
-            owned={p['id'] for p in projects if p['owner']==user['id']}
-            task_requests=[r for r in self.all('task_requests') if user['admin'] or r.get('requester')==user['id'] or r.get('projectId') in owned]
-            automation=next((x.get('value',{}) for x in self.all('settings') if x.get('id')=='automation'),{})
-            return {'user':user,'users':self.users(),'today':at.date().isoformat(),'weekStart':self.week_start(),'repeatStacking':self.repeat_stacking(),'projects':projects,
-'folders':folders,'fileArchives':file_archives,'files':[f for f in all_files if f.get('projectId') in file_pids],'meetings':[m for m in all_meetings if m.get('projectId') in file_pids],'meetingPrompt':self.meeting_prompt() if user['admin'] else None,'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees'] or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':[n for n in self.all('notifications') if n['to']==user['id'] and '12:00 初稿' not in str(n.get('title',''))], 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'taskRequests':task_requests, 'creationRules':self.creation_rules(user), 'creationPolicy':self.creation_policy() if user.get('role')=='superadmin' else None, 'accountOrder':next((x.get('value') or [] for x in self.all('settings') if x.get('id')=='account_order'),[]) if user['admin'] else [], 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or self.get('projects',s['projectId'])['owner']==user['id'])], 'chat':self.chat_summary(user),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.all('audit')[-60:] if user['admin'] else []}
+            # Everything below only reads, so each table is parsed once.
+            self._reads.cache={}
+            try:
+                return self._snapshot(user,at)
+            finally:
+                self._reads.cache=None
+
+    def _snapshot(self, user, at):
+        all_projects=self.all('projects')
+        projects=[p for p in all_projects if self.can_view_project(user,p)]
+        all_files=self.all('files')
+        all_meetings=self.all('meetings')
+        file_project_ids={f.get('projectId') for f in all_files} | {m.get('projectId') for m in all_meetings}
+        file_archives=[{k:p.get(k) for k in ('id','name','owner','status','end','completedAt','folderId')}
+                       for p in all_projects if p['id'] in file_project_ids
+                       and not self.can_view_project(user,p) and self.can_read_project_files(user,p)]
+        file_pids={p['id'] for p in projects+file_archives}
+        folder_ids={p.get('folderId') for p in projects+file_archives}
+        folders=[f for f in self.all('folders') if user['admin'] or f['id'] in folder_ids]
+        all_tasks=self.all('tasks')
+        # One projection supplies both hidden cards and their period counts.
+        # A request crossing a trigger time must not mix two group scopes.
+        stack_groups=self._repeat_stack_groups(all_tasks,at)
+        superseded=self._superseded_map(all_tasks,stack_groups)
+        stack_meta=self._stack_metadata(all_tasks,stack_groups)
+        tasks=[]
+        for task in all_tasks:
+            if not self.can_view_task(user,task):
+                continue
+            # Superseded occurrences stay in the payload so history, logs and
+            # approval lookups keep working; the client hides them from the
+            # active views and shows them in the deferral history instead.
+            tasks.append({**task,**stack_meta.get(task['id'],{}),**({'superseded':True,'supersededBy':superseded[task['id']]} if task['id'] in superseded else {})})
+        ids={t['id'] for t in tasks}; pids={p['id'] for p in projects}
+        owner_of={p['id']:p.get('owner') for p in all_projects}
+        reports=[r for r in self.all('reports') if r['author']==user['id'] or user['admin'] or (r.get('projectId') and owner_of.get(r['projectId'])==user['id'])]
+        # Briefs travel as index cards; the archive room fetches a full one when it is opened.
+        reports=[self.brief_card(r) if r.get('kind')=='brief' else r for r in reports]
+        # Personal diaries are private to their author; superadmin can browse
+        # every member notebook from the diary dashboard.
+        diaries=[d for d in self.all('diaries') if user['admin'] or d.get('author')==user['id']]
+        edit_requests=[r for r in self.all('edit_requests') if user['admin'] or r.get('requester')==user['id'] or r.get('approver')==user['id']]
+        owned={p['id'] for p in projects if p['owner']==user['id']}
+        task_requests=[r for r in self.all('task_requests') if user['admin'] or r.get('requester')==user['id'] or r.get('projectId') in owned]
+        automation=next((x.get('value',{}) for x in self.all('settings') if x.get('id')=='automation'),{})
+        return {'user':user,'users':self.users(),'today':at.date().isoformat(),'dateHorizon':calendar_end(at.date()).isoformat(),'weekStart':self.week_start(),'repeatStacking':self.repeat_stacking(),'projects':projects,
+'folders':folders,'fileArchives':file_archives,'files':[f for f in all_files if f.get('projectId') in file_pids],'meetings':[self.meeting_summary(m) for m in all_meetings if m.get('projectId') in file_pids],'meetingPrompt':self.meeting_prompt() if user['admin'] else None,'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees'] or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':self.notices_for(user['id']), 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'taskRequests':task_requests, 'creationRules':self.creation_rules(user), 'creationPolicy':self.creation_policy() if user.get('role')=='superadmin' else None, 'accountOrder':next((x.get('value') or [] for x in self.all('settings') if x.get('id')=='account_order'),[]) if user['admin'] else [], 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or owner_of.get(s['projectId'])==user['id'])], 'chat':self.chat_summary(user),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.recent_audit(60) if user['admin'] else []}
 
     def diary_statistics(self, viewer, start=None, end=None):
         """Return daily completion/load summaries for the diary dashboard.
@@ -2636,18 +2713,23 @@ class Store:
         # One deferred task is one unit of work: count only the lineage leaf so a
         # chain carried across several days is not charged to every day at once.
         tasks=self._lineage_leaves(self.all('tasks'))
+        by_day={}
+        for t in tasks:
+            if not t.get('projectId') or t.get('projectId') in projects:
+                by_day.setdefault((t.get('assignee'),t.get('date')),[]).append(t)
         rows=[]
         day=start
         while day<=end:
             ds=day.isoformat()
             for account in accounts:
-                assigned=[t for t in tasks if t.get('assignee')==account and t.get('date')==ds and (not t.get('projectId') or t.get('projectId') in projects)]
+                assigned=by_day.get((account,ds),[])
                 scheduled=[t for t in assigned if t.get('status')!='skipped']
                 done=[t for t in scheduled if t.get('status')=='done']
-                by_project=[]
-                for pid,p in projects.items():
-                    pt=[t for t in assigned if t.get('projectId')==pid and t.get('status')!='skipped']
-                    if pt: by_project.append({'projectId':pid,'project':p.get('name',''),'completed':sum(t.get('status')=='done' for t in pt),'total':len(pt)})
+                per={}
+                for t in scheduled:
+                    if t.get('projectId'):per.setdefault(t['projectId'],[]).append(t)
+                by_project=[{'projectId':pid,'project':p.get('name',''),'completed':sum(t.get('status')=='done' for t in per[pid]),'total':len(per[pid])}
+                            for pid,p in projects.items() if pid in per]
                 rows.append({'date':ds,'userId':account,'completed':len(done),'total':len(scheduled),'load':sum(int(t.get('duration',0) or 0) for t in done),'loadTotal':sum(int(t.get('duration',0) or 0) for t in scheduled),'loadRatio':(len(done)/len(scheduled) if scheduled else 0),'projects':by_project})
             day+=timedelta(days=1)
         return rows
@@ -2662,10 +2744,13 @@ class Store:
         for task in all_tasks:
             if not viewer['admin'] and task.get('assignee')!=viewer['id']: continue
             groups.setdefault(self._lineage_root(task,by_id),[]).append(task)
+        by_task={}
+        for l in logs:
+            if l.get('kind') in ('approval','complete','complete_pending'):by_task.setdefault(l.get('taskId'),[]).append(l)
         for root,chain in groups.items():
-            ids={t.get('id') for t in chain}
-            approvals=[l for l in logs if l.get('taskId') in ids and l.get('kind')=='approval' and l.get('decision')=='approved']
-            completes=[l for l in logs if l.get('taskId') in ids and l.get('kind') in ('complete','complete_pending')]
+            chain_logs=[l for t in chain for l in by_task.get(t.get('id'),())]
+            approvals=[l for l in chain_logs if l.get('kind')=='approval' and l.get('decision')=='approved']
+            completes=[l for l in chain_logs if l.get('kind') in ('complete','complete_pending')]
             event=max(approvals or completes,key=lambda l:str(l.get('createdAt','')),default=None)
             task=max(chain,key=lambda t:(str(t.get('date','')),str(t.get('createdAt',''))))
             # A task sent back by its Owner is open again, whatever its log says.
@@ -2693,12 +2778,14 @@ class Store:
         """
         if not viewer.get('admin'):
             return []
-        all_tasks = self.all('tasks')
+        by_project = {}
+        for t in self.all('tasks'):
+            by_project.setdefault(t.get('projectId'), []).append(t)
         result = []
         for project in self.all('projects'):
             if project.get('status') not in ('done', 'archived') and not project.get('completedAt'):
                 continue
-            tasks = [t for t in all_tasks if t.get('projectId') == project.get('id')]
+            tasks = by_project.get(project.get('id'), [])
             # Collapse deferred/rejected/rework occurrences into one logical
             # task chain, matching project_tasks_complete's closeout rules.
             leaves = self._lineage_leaves(tasks)
@@ -2854,11 +2941,14 @@ class Store:
             limit = max(1, min(300, int(data.get('limit') or 120)))
         except (TypeError, ValueError):
             limit = 120
-        rows = [m for m in self.all('messages')
-                if self.chat_normalize(m) == channel
-                and (not since or str(m.get('createdAt', '')) > since)]
-        rows.sort(key=lambda m: m.get('createdAt', ''))
-        return {'messages': rows[-limit:], 'now': timestamp(), 'channel': channel,
+        where, args = f'{CHAT_CHANNEL_SQL}=?', [channel]
+        if since:
+            where += f" AND {CHAT_TIME_SQL}>?"
+            args.append(since)
+        rows = [json.loads(r['data']) for r in self.db.execute(
+            f'SELECT data FROM messages WHERE {where} ORDER BY {CHAT_TIME_SQL} DESC, rowid DESC LIMIT ?', (*args, limit))]
+        rows.reverse()
+        return {'messages': rows, 'now': timestamp(), 'channel': channel,
                 'previews': self.chat_previews(user)}
 
     def chat_previews(self, user):
@@ -2868,19 +2958,16 @@ class Store:
         never surfaces outside 成果库 — and trimmed hard, because this travels
         with every poll.
         """
-        visible = set(self.chat_visible_channels(user))
         previews = {}
-        for m in self.all('messages'):
-            channel = self.chat_normalize(m)
-            if channel not in visible:
-                continue
-            at = str(m.get('createdAt', ''))
-            # Rows come in insertion order, so on a timestamp tie (the Windows
-            # clock ticks every ~16 ms) the later message is the newer one.
-            if channel in previews and previews[channel]['createdAt'] > at:
-                continue
-            previews[channel] = {'body': str(m.get('body', ''))[:60],
-                                 'author': m.get('author', ''), 'createdAt': at}
+        for channel in self.chat_visible_channels(user):
+            # The newest timestamp in the room; on a tie (the Windows clock
+            # ticks every ~16 ms) the later insert is the newer message.
+            row = self.db.execute(f'SELECT data FROM messages WHERE {CHAT_CHANNEL_SQL}=? ORDER BY {CHAT_TIME_SQL} DESC, rowid DESC LIMIT 1',
+                                  (channel,)).fetchone()
+            if row:
+                m = json.loads(row['data'])
+                previews[channel] = {'body': str(m.get('body', ''))[:60],
+                                     'author': m.get('author', ''), 'createdAt': str(m.get('createdAt', ''))}
         return previews
 
     def chat_send(self, user, data):
@@ -2936,7 +3023,7 @@ class Store:
             # First write since the room gained channels: seed every room that
             # exists now with the old all-covering watermark.
             seeded = set(self.chat_visible_channels(user))
-            seeded.update(self.chat_normalize(m) for m in self.all('messages'))
+            seeded.update(r[0] for r in self.db.execute(f'SELECT DISTINCT {CHAT_CHANNEL_SQL} FROM messages'))
             book = {cid: str(raw or '') for cid in seeded}
         book[channel] = at
         state[user['id']] = book
@@ -2971,19 +3058,20 @@ class Store:
         Counted per room as well as in total: a badge on the room tells you
         something happened, not where, and the room has several doors.
         """
-        rows = self.all('messages')
-        visible = set(self.chat_visible_channels(user))
+        book = self.chat_settings('chat-read').get(user['id'], '')
+        read_at = lambda channel: str(book.get(channel) or '') if isinstance(book, dict) else str(book or '')
         by_channel = {}
-        for m in rows:
-            if m.get('author') == user['id']:
-                continue
-            channel = self.chat_normalize(m)
-            if channel not in visible:
-                continue
-            if str(m.get('createdAt', '')) > self.chat_read_at(user['id'], channel):
-                by_channel[channel] = by_channel.get(channel, 0) + 1
-        last = rows[-1] if rows else {}
-        return {'count': len(rows), 'unread': sum(by_channel.values()),
+        for channel in self.chat_visible_channels(user):
+            unread = self.db.execute(
+                f"SELECT count(*) FROM messages WHERE {CHAT_CHANNEL_SQL}=? "
+                "AND COALESCE(json_extract(data,'$.createdAt'),'')>? AND COALESCE(json_extract(data,'$.author'),'')<>?",
+                (channel, read_at(channel), user['id'])).fetchone()[0]
+            if unread:
+                by_channel[channel] = unread
+        total = self.db.execute('SELECT count(*) FROM messages').fetchone()[0]
+        newest = self.db.execute('SELECT data FROM messages ORDER BY rowid DESC LIMIT 1').fetchone()
+        last = json.loads(newest['data']) if newest else {}
+        return {'count': total, 'unread': sum(by_channel.values()),
                 'byChannel': by_channel,
                 'lastAt': last.get('createdAt', ''),
                 'lastBy': last.get('author', '')}
@@ -3055,6 +3143,7 @@ class Store:
     def _action(self, user, action, d):
         if action=='meeting.prompt.update': return self.set_meeting_prompt(user, d)
         if action=='meeting.list': return self.meeting_list(user, d)
+        if action=='meeting.get': return self.meeting_get(user, d)
         if action=='meeting.create': return self.meeting_create(user, d)
         if action=='meeting.transcript.update': return self.meeting_update_transcript(user, d)
         if action=='chat.list':
@@ -3381,6 +3470,9 @@ class Store:
                         self.db.execute('DELETE FROM repeats WHERE id=?',(r['id'],))
                 for f in self.all('files'):
                     if f.get('projectId')==p['id']:self.drop_file(f['id'])
+                for m in self.all('meetings'):
+                    if m.get('projectId')==p['id']:self.db.execute('DELETE FROM meetings WHERE id=?',(m['id'],))
+                self.db.execute(f'DELETE FROM messages WHERE {CHAT_CHANNEL_SQL}=?',(p['id'],))
                 self.db.execute('DELETE FROM projects WHERE id=?',(p['id'],))
             self.audit(user['id'],'project.delete',{'project':p['name'],'projectId':p['id'],**counts})
             for member,status in (p.get('members') or {}).items():
@@ -3601,7 +3693,7 @@ class Store:
             if old.get('status') in ('done','archived') and p['status']=='active':self.reopen_project_tasks(p)
             if p['status'] in ('done','archived') or (p['start'],p['end'])!=(old.get('start'),old.get('end')):
                 self.trim_project_repeats(p,'项目已结束' if p['status'] in ('done','archived') else '项目周期已调整')
-                if p['status']=='active':self.materialize(now().date(), CALENDAR_END)
+                if p['status']=='active':self.materialize(now().date(), repeat_end())
             if p['owner']!=old['owner']:
                 self.notify(p['owner'],'项目 Owner 指派',f'{self.display_name(user["id"])} 将「{p["name"]}」交给你负责，可在项目下创建和分配任务。',
                             'project',p['id'],fresh=True)
@@ -3853,7 +3945,7 @@ class Store:
             skip_dates=sorted(set(valid_date(x) for x in skip_dates))
             if frequency in ('dates','specific') and not specific: raise Problem(400,'指定日期周期至少需要一个日期')
             r=self.put('repeats',{'name':required(d,'name'),'desc':d.get('desc',''),'assignees':assignees,'priority':d.get('priority','P1'),'duration':duration(d.get('duration',30)),'start':start,'end':end,'time':valid_clock(d.get('time','09:00')),'frequency':frequency,'every':every,'weekdays':weekdays,'monthDay':month_day,'span':span,'specificDates':specific,'skipDates':skip_dates,'projectId':pid,'active':True,'createdAt':timestamp()})
-            self.materialize(now().date(), CALENDAR_END)
+            self.materialize(now().date(), repeat_end())
             for a in assignees:self.notify(a,'固定安排已发布',f'superadmin 发布「{r["name"]}」，周期 {frequency}，自 {start} 起。','repeat',r['id'])
             return r
         if action=='repeat.toggle':
@@ -3911,7 +4003,7 @@ class Store:
                     moved=(old_pid,target)
                 self.put('repeats',r)
                 if moved and moved[1]:self.trim_project_repeats(moved[1],'项目周期已调整')
-                self.materialize(now().date(), CALENDAR_END)
+                self.materialize(now().date(), repeat_end())
                 if moved:
                     where=f'挂到项目「{moved[1]["name"]}」' if moved[1] else '移出项目，不再归属任何项目'
                     for a in r['assignees']:self.notify(a,'固定安排调整',f'「{r["name"]}」已{where}，从今天起生效。','repeat',r['id'])
@@ -4154,7 +4246,7 @@ class Store:
     def materialize(self, start, end):
         # Never materialize occurrences outside the product date horizon, even
         # when an internal caller supplies a wider preview window.
-        end=min(end, CALENDAR_END)
+        end=min(end, calendar_end())
         if start > end:
             return
         existing={t['id'] for t in self.all('tasks')}
@@ -4194,9 +4286,15 @@ class Store:
 
     def _report_tasks(self):
         """Hide grouped periods without changing unrelated legacy diary counts."""
+        cache=getattr(self._reads,'cache',None)
+        if cache is not None and '_report_tasks' in cache:
+            return list(cache['_report_tasks'])
         tasks=self.all('tasks');by_id={t['id']:t for t in tasks};superseded=self._superseded_map(tasks)
-        return [t for t in tasks if t['id'] not in superseded or
+        result=[t for t in tasks if t['id'] not in superseded or
                 self._lineage_root(t,by_id)==self._lineage_root(by_id[superseded[t['id']]],by_id)]
+        if cache is not None:
+            cache['_report_tasks']=result
+        return list(result)
 
     def aggregate(self, p, day, cutoff):
         reports=[r for r in self.all('reports') if r['projectId']==p['id'] and r['date']==day and r['kind']=='collaborator' and datetime.fromisoformat(r['createdAt'])<=cutoff]
@@ -4355,7 +4453,7 @@ class Store:
         with self.lock, self.db:
             self.settle_legacy_task_approvals()
             self.accept_pending_invitations()
-            self.materialize(at.date(), CALENDAR_END)
+            self.materialize(at.date(), repeat_end(at.date()))
             # Roll unfinished work forward at the first scheduler run of a new day.
             # Pending approvals are copied with their pending status; approval of any
             # copy resolves the whole chain. Ordinary unfinished work is copied as todo.
@@ -4398,83 +4496,93 @@ class Store:
                         current['status']='deferred';self.put('tasks',current)
                     current=copy
             self.advance_due_tasks(at)
-            # Every member gets one daily diary rollup at 23:30. A hand-written
-            # diary is preserved; otherwise the rollup becomes the day's
-            # structured diary entry. The stable job key makes this idempotent.
-            # Catch up every due day, including the current day after 23:30;
-            # this also fills gaps after the service has been stopped for days.
-            candidate_days={t.get('date') for t in self.all('tasks') if t.get('date')}
-            candidate_days.update(d.get('date') for d in self.all('diaries') if d.get('date'))
-            candidate_days.add(at.date().isoformat())
-            for digest_day in sorted(x for x in candidate_days if x and x <= at.date().isoformat()):
-                digest_due=datetime.combine(date.fromisoformat(digest_day),time(23,30),TZ)
-                if at<digest_due: continue
-                for member in (u['id'] for u in self.users() if u['active'] and not u['admin']):
-                    key=f'diary:{member}:{digest_day}:2330'
-                    if self.db.execute('SELECT 1 FROM jobs WHERE id=?',(key,)).fetchone(): continue
-                    digest=self.diary_digest(member,digest_day)
-                    manual=next((d for d in self.all('diaries') if d.get('author')==member and d.get('date')==digest_day),None)
-                    if not manual:
-                        self.put('diaries',{'id':f'diary:{member}:{digest_day}','author':member,'date':digest_day,
-                                           'content':digest['content'],'auto':True,'updatedAt':at.isoformat()})
-                    count+=1
-                    self.db.execute('INSERT INTO jobs VALUES (?,?)',(key,at.isoformat()))
-            for p in self.all('projects'):
-                if p['status']!='active':continue
-                try:
-                    day=date.fromisoformat(p.get('start') or p['createdAt'][:10])
-                    project_end=date.fromisoformat(p['end']) if p.get('end') else None
-                except (TypeError,ValueError):
-                    continue
-                if day>at.date():continue
-                last_day=min(at.date(),project_end) if project_end else at.date()
-                # Days missed while the service was down are caught up in one
-                # pass; their 23:30 gaps go to the Owner as one notice, not one each.
-                gaps=[]
-                while day<=last_day:
-                    daystr=day.isoformat()
-                    collection_day = day + timedelta(days=1)
-                    for stage,due in [('missing',datetime.combine(day,time(23,30),TZ)),('final',datetime.combine(collection_day,self.collection_time(),TZ))]:
-                        key=f'{p["id"]}:{daystr}:{stage}'
-                        if due>at or self.db.execute('SELECT 1 FROM jobs WHERE id=?',(key,)).fetchone():continue
-                        if stage=='final' and not self.collection_enabled(daystr):
-                            self.db.execute('INSERT INTO jobs VALUES (?,?)',(key,at.isoformat()))
-                            continue
-                        owner_report=next((r for r in self.all('reports') if r['projectId']==p['id'] and r['date']==daystr and r['kind']=='owner' and datetime.fromisoformat(r['createdAt'])<=due),None)
-                        content,missing=self.aggregate(p,daystr,due)
-                        if stage=='missing':
-                            if missing:gaps.append((daystr,missing))
-                        elif stage=='final':
-                            # Only missing reports generate a midnight fallback. Submitted
-                            # owner/collaborator reports are delivered when saved and are
-                            # not duplicated as a noon draft or a second inbox card.
-                            if not owner_report:
-                                content['ownerMissing']=True
-                                self.put('reports',{'id':key,'kind':'automatic','stage':'final','projectId':p['id'],'author':'system','date':daystr,'content':content,'confirmed':False,'createdAt':at.isoformat(),'cutoff':due.isoformat()});count+=1
-                        self.db.execute('INSERT INTO jobs VALUES (?,?)',(key,at.isoformat()))
-                    day+=timedelta(days=1)
-                if len(gaps)==1:
-                    daystr,missing=gaps[0]
-                    self.notify(p['owner'],f'23:30 协作进度缺失 · {daystr}',f'「{p["name"]}」未提交：'+'、'.join(map(self.display_name,missing)),'missing',p['id']);count+=1
-                elif gaps:
-                    lines=[f'{d[5:]}：'+'、'.join(map(self.display_name,m)) for d,m in gaps[-14:]]
-                    more=f'\n另有更早 {len(gaps)-14} 天未列出。' if len(gaps)>14 else ''
-                    self.notify(p['owner'],f'协作进度缺失 · {gaps[0][0]} 至 {gaps[-1][0]}',
-                                f'「{p["name"]}」有 {len(gaps)} 天没有收齐协作进度：\n'+'\n'.join(lines)+more,'missing',p['id']);count+=1
-            # One team brief per finished day goes to the superadmin and into
-
-            # the archive room. Days missed while the service was down are
-            # filed quietly; only the latest one is announced.
-            for brief_day in sorted(x for x in candidate_days if x and x < at.date().isoformat()):
-                key=f'brief:{brief_day}'
-                due=datetime.combine(date.fromisoformat(brief_day)+timedelta(days=1),self.collection_time(),TZ)
-                if at<due or self.db.execute('SELECT 1 FROM jobs WHERE id=?',(key,)).fetchone():continue
-                brief=self.build_brief(brief_day,at)
-                if brief and brief_day>=(at.date()-timedelta(days=1)).isoformat():
-                    self.notify('superadmin',f'团队日报 · {brief_day}',self.brief_summary(brief),'brief',brief['id']);count+=1
-                self.db.execute('INSERT INTO jobs VALUES (?,?)',(key,at.isoformat()))
-            if count:self.audit('scheduler','scheduled_reports',{'at':at.isoformat(),'sent':count})
+            # Summaries only read tasks, so each table is parsed once for the pass.
+            self._reads.cache={}
+            try:
+                count=self._file_summaries(at,count)
+            finally:
+                self._reads.cache=None
         return {'created':count}
+
+    def _file_summaries(self, at, count):
+        """Nightly diaries, project summaries and team briefs, caught up for missed days."""
+        # Every member gets one daily diary rollup at 23:30. A hand-written
+        # diary is preserved; otherwise the rollup becomes the day's
+        # structured diary entry. The stable job key makes this idempotent.
+        # Catch up every due day, including the current day after 23:30;
+        # this also fills gaps after the service has been stopped for days.
+        candidate_days={t.get('date') for t in self.all('tasks') if t.get('date')}
+        candidate_days.update(d.get('date') for d in self.all('diaries') if d.get('date'))
+        candidate_days.add(at.date().isoformat())
+        for digest_day in sorted(x for x in candidate_days if x and x <= at.date().isoformat()):
+            digest_due=datetime.combine(date.fromisoformat(digest_day),time(23,30),TZ)
+            if at<digest_due: continue
+            for member in (u['id'] for u in self.users() if u['active'] and not u['admin']):
+                key=f'diary:{member}:{digest_day}:2330'
+                if self.db.execute('SELECT 1 FROM jobs WHERE id=?',(key,)).fetchone(): continue
+                digest=self.diary_digest(member,digest_day)
+                manual=next((d for d in self.all('diaries') if d.get('author')==member and d.get('date')==digest_day),None)
+                if not manual:
+                    self.put('diaries',{'id':f'diary:{member}:{digest_day}','author':member,'date':digest_day,
+                                       'content':digest['content'],'auto':True,'updatedAt':at.isoformat()})
+                count+=1
+                self.db.execute('INSERT INTO jobs VALUES (?,?)',(key,at.isoformat()))
+        for p in self.all('projects'):
+            if p['status']!='active':continue
+            try:
+                day=date.fromisoformat(p.get('start') or p['createdAt'][:10])
+                project_end=date.fromisoformat(p['end']) if p.get('end') else None
+            except (TypeError,ValueError):
+                continue
+            if day>at.date():continue
+            last_day=min(at.date(),project_end) if project_end else at.date()
+            # Days missed while the service was down are caught up in one
+            # pass; their 23:30 gaps go to the Owner as one notice, not one each.
+            gaps=[]
+            while day<=last_day:
+                daystr=day.isoformat()
+                collection_day = day + timedelta(days=1)
+                for stage,due in [('missing',datetime.combine(day,time(23,30),TZ)),('final',datetime.combine(collection_day,self.collection_time(),TZ))]:
+                    key=f'{p["id"]}:{daystr}:{stage}'
+                    if due>at or self.db.execute('SELECT 1 FROM jobs WHERE id=?',(key,)).fetchone():continue
+                    if stage=='final' and not self.collection_enabled(daystr):
+                        self.db.execute('INSERT INTO jobs VALUES (?,?)',(key,at.isoformat()))
+                        continue
+                    owner_report=next((r for r in self.all('reports') if r['projectId']==p['id'] and r['date']==daystr and r['kind']=='owner' and datetime.fromisoformat(r['createdAt'])<=due),None)
+                    content,missing=self.aggregate(p,daystr,due)
+                    if stage=='missing':
+                        if missing:gaps.append((daystr,missing))
+                    elif stage=='final':
+                        # Only missing reports generate a midnight fallback. Submitted
+                        # owner/collaborator reports are delivered when saved and are
+                        # not duplicated as a noon draft or a second inbox card.
+                        if not owner_report:
+                            content['ownerMissing']=True
+                            self.put('reports',{'id':key,'kind':'automatic','stage':'final','projectId':p['id'],'author':'system','date':daystr,'content':content,'confirmed':False,'createdAt':at.isoformat(),'cutoff':due.isoformat()});count+=1
+                    self.db.execute('INSERT INTO jobs VALUES (?,?)',(key,at.isoformat()))
+                day+=timedelta(days=1)
+            if len(gaps)==1:
+                daystr,missing=gaps[0]
+                self.notify(p['owner'],f'23:30 协作进度缺失 · {daystr}',f'「{p["name"]}」未提交：'+'、'.join(map(self.display_name,missing)),'missing',p['id']);count+=1
+            elif gaps:
+                lines=[f'{d[5:]}：'+'、'.join(map(self.display_name,m)) for d,m in gaps[-14:]]
+                more=f'\n另有更早 {len(gaps)-14} 天未列出。' if len(gaps)>14 else ''
+                self.notify(p['owner'],f'协作进度缺失 · {gaps[0][0]} 至 {gaps[-1][0]}',
+                            f'「{p["name"]}」有 {len(gaps)} 天没有收齐协作进度：\n'+'\n'.join(lines)+more,'missing',p['id']);count+=1
+        # One team brief per finished day goes to the superadmin and into
+
+        # the archive room. Days missed while the service was down are
+        # filed quietly; only the latest one is announced.
+        for brief_day in sorted(x for x in candidate_days if x and x < at.date().isoformat()):
+            key=f'brief:{brief_day}'
+            due=datetime.combine(date.fromisoformat(brief_day)+timedelta(days=1),self.collection_time(),TZ)
+            if at<due or self.db.execute('SELECT 1 FROM jobs WHERE id=?',(key,)).fetchone():continue
+            brief=self.build_brief(brief_day,at)
+            if brief and brief_day>=(at.date()-timedelta(days=1)).isoformat():
+                self.notify('superadmin',f'团队日报 · {brief_day}',self.brief_summary(brief),'brief',brief['id']);count+=1
+            self.db.execute('INSERT INTO jobs VALUES (?,?)',(key,at.isoformat()))
+        if count:self.audit('scheduler','scheduled_reports',{'at':at.isoformat(),'sent':count})
+        return count
 
 def main():
     parser=argparse.ArgumentParser()
