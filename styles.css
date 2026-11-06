@@ -13042,6 +13042,7 @@ body.is-resizing-agent { user-select: none; }
 
 .md-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -13052,6 +13053,7 @@ body.is-resizing-agent { user-select: none; }
 
 .md-tabs, .md-tools {
   display: flex;
+  flex-wrap: wrap;
   gap: 2px;
 }
 

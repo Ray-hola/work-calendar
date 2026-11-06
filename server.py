@@ -140,6 +140,7 @@ MAX_AUDIO_BYTES = 8_000_000
 # snapshot never carries them; only the list of files travels with the state.
 # Like the audio route, the bound is raised per-route in do_POST.
 FILES_PATH = '/api/files'
+FILE_TEXT_PATH = FILES_PATH + '/text'
 MAX_FILE_BYTES = 20_000_000
 TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'task_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages', 'messages', 'folders', 'files', 'agent_conversations', 'agent_drafts', 'agent_receipts', 'meetings')
 
@@ -585,10 +586,13 @@ class Store:
         title = required(data, 'title')[:120]
         participants = data.get('participants') if isinstance(data.get('participants'), list) else []
         participants = [str(x).strip() for x in participants if str(x).strip()][:50]
+        minutes = str(data.get('minutes') or '')
+        if len(minutes) > 50000:
+            raise Problem(400, '会议纪要不能超过 50000 字')
         record = {'projectId': project_id, 'title': title,
                   'scheduledAt': str(data.get('scheduledAt') or '').strip()[:40],
                   'participants': participants, 'agenda': str(data.get('agenda') or '').strip()[:10000],
-                  'rawTranscript': str(data.get('rawTranscript') or '')[:200000], 'minutes': '',
+                  'rawTranscript': str(data.get('rawTranscript') or '')[:200000], 'minutes': minutes,
                   'status': 'recording' if data.get('rawTranscript') else 'scheduled', 'createdBy': user['id'], 'createdAt': timestamp(), 'updatedAt': timestamp()}
         return self.put('meetings', record)
 
@@ -4766,8 +4770,14 @@ def main():
                 # below raises the ceiling just for that one upload, so a long
                 # clip is not silently turned into a 413 with a text-shaped error.
                 route=self.path.split('?')[0]
-                limit=MAX_AUDIO_BYTES if route==TRANSCRIBE_PATH else MAX_FILE_BYTES if route==FILES_PATH else 200_000
-                if size>limit:raise Problem(413,'文件不能超过 20MB' if route==FILES_PATH else '请求内容过大')
+                limit=MAX_AUDIO_BYTES if route==TRANSCRIBE_PATH else MAX_FILE_BYTES if route in (FILES_PATH,FILE_TEXT_PATH) else 200_000
+                if size>limit:raise Problem(413,'文件不能超过 20MB' if route in (FILES_PATH,FILE_TEXT_PATH) else '请求内容过大')
+                if route==FILE_TEXT_PATH:
+                    user=store.authenticate(self.token())
+                    file_id=(urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('id') or [''])[0]
+                    try: text=(self.rfile.read(size) if size>0 else b'').decode('utf-8')
+                    except UnicodeDecodeError:raise Problem(400,'文本文件必须使用 UTF-8 编码')
+                    self.send(200,store.action(user,'file.text.update',{'id':file_id,'text':text}));return
                 if route==FILES_PATH:
                     # Raw bytes, like the audio route; the name rides in a header.
                     user=store.authenticate(self.token())

@@ -1404,10 +1404,10 @@ function openMeetingEditor(p,meetingId=null){
   const persist=async()=>{
     const data=values();if(!data.title)throw new Error('请填写会议名称');
     await meetingStopLive();
-    const transcript=text.value;
-    const result=await api('/api/action',{action:m.id?'meeting.transcript.update':'meeting.create',data:{...(m.id?{id:m.id}:{projectId:p.id}),...data,rawTranscript:transcript,...(m.id&&$('#meetingMinutesInput')?{minutes:$('#meetingMinutesInput').value}:{}),...(m.id?{expectedRevision:meetingLive.revisions.get(`${S.user?.id}:${m.id}`)??m.revision??0}:{})}});
+    const transcript=text.value,minutes=$('#meetingMinutesInput')?.value||'';
+    const result=await api('/api/action',{action:m.id?'meeting.transcript.update':'meeting.create',data:{...(m.id?{id:m.id}:{projectId:p.id}),...data,rawTranscript:transcript,minutes,...(m.id?{expectedRevision:meetingLive.revisions.get(`${S.user?.id}:${m.id}`)??m.revision??0}:{})}});
     if(S.user?.id!==owner)throw new Error('账户已切换');
-    Object.assign(m,result);meetingLive.revisions.set(`${S.user?.id}:${m.id}`,result.revision||0);const pane=$('#meetingEditor');const metadataChanged=JSON.stringify(values())!==JSON.stringify(data);if(pane){pane.dataset.dirty=String(metadataChanged||text.value!==transcript);pane.dataset.metadataDirty=String(metadataChanged)}else UI.docDirty=metadataChanged||text.value!==transcript;S.meetings=[...(S.meetings||[]).filter(x=>x.id!==m.id),m];return m;
+    Object.assign(m,result);meetingLive.revisions.set(`${S.user?.id}:${m.id}`,result.revision||0);const pane=$('#meetingEditor');const metadataChanged=JSON.stringify(values())!==JSON.stringify(data)||($('#meetingMinutesInput')?.value||'')!==minutes;if(pane){pane.dataset.dirty=String(metadataChanged||text.value!==transcript);pane.dataset.metadataDirty=String(metadataChanged)}else UI.docDirty=metadataChanged||text.value!==transcript;S.meetings=[...(S.meetings||[]).filter(x=>x.id!==m.id),m];return m;
   };
   const run=async(work)=>{if(busy)return;busy=true;sync();try{await work()}catch(e){toast(e.message)}finally{busy=false;sync()}};
   const closeEditor=()=>{const pane=$('#meetingEditor');if(pane){pane.innerHTML='<p class="muted space-empty">选择一场会议</p>';pane.dataset.dirty='false'}else closeModal()};
@@ -1699,16 +1699,17 @@ const whenText=iso=>{const day=String(iso||'').slice(0,10),time=String(iso||'').
    to-dos and nesting, quotes, code blocks, tables and rules. Everything is
    escaped first; links open only http(s) and mailto. */
 function mdInline(text){
-  const codes=[];
-  let s=escapeHTML(text).replace(/`([^`\n]+)`/g,(_,c)=>{codes.push(c);return `\u0000${codes.length-1}\u0000`});
-  s=s.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g,(all,label,url)=>{
-    const href=url.replace(/&amp;/g,'&');
-    return /^(https?:\/\/|mailto:)/i.test(href)?`<a href="${escapeHTML(href)}" target="_blank" rel="noopener noreferrer">${label}</a>`:all});
-  s=s.replace(/(^|[\s(（])(https?:\/\/[^\s<)）]+)/g,(_,pre,url)=>`${pre}<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
-  s=s.replace(/\*\*([^*\n]+)\*\*|__([^_\n]+)__/g,(_,a,b)=>`<strong>${a??b}</strong>`)
+  const tokens=[],keep=html=>`\u0000${tokens.push(html)-1}\u0000`;
+  const marks=s=>s.replace(/\*\*([^*\n]+)\*\*|__([^_\n]+)__/g,(_,a,b)=>`<strong>${a??b}</strong>`)
     .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g,'$1<em>$2</em>')
     .replace(/~~([^~\n]+)~~/g,'<del>$1</del>');
-  return s.replace(/\u0000(\d+)\u0000/g,(_,i)=>`<code>${codes[i]}</code>`);
+  let s=escapeHTML(String(text).replace(/\u0000/g,'')).replace(/`([^`\n]+)`/g,(_,c)=>keep(`<code>${c}</code>`));
+  s=s.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g,(all,label,url)=>{
+    const href=url.replace(/&amp;/g,'&');
+    return /^(https?:\/\/|mailto:)/i.test(href)?keep(`<a href="${escapeHTML(href)}" target="_blank" rel="noopener noreferrer">${marks(label)}</a>`):all});
+  s=s.replace(/(^|[\s(（])(https?:\/\/[^\s<)）]+)/g,(_,pre,url)=>pre+keep(`<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`));
+  const restore=(_,i)=>(tokens[i]||'').replace(/\u0000(\d+)\u0000/g,restore);
+  return marks(s).replace(/\u0000(\d+)\u0000/g,restore);
 }
 function mdRender(src){
   const lines=String(src||'').replace(/\r\n?/g,'\n').split('\n'),out=[];let i=0;
@@ -1831,10 +1832,16 @@ function projectFiles(p,readonly=false,includeMeetings=true){
 /* A Markdown file opens rendered; its uploader, the project Owner and admins
    can switch to 编辑 and save it in place. */
 async function openMarkdownFile(p,id){
-  const f=(S.files||[]).find(x=>x.id===id);if(!f)return;
+  const f=(S.files||[]).find(x=>x.id===id&&x.projectId===p.id);if(!f)return;
+  // Share the meeting reader's navigation lifecycle: opening another viewer,
+  // changing account/view/project or closing the modal invalidates this read.
+  cancelMeetingOpen();
+  const generation=meetingOpenGeneration,scope=meetingOpenScope(),owner=S.user?.id;
+  const current=()=>generation===meetingOpenGeneration&&scope===meetingOpenScope();
   let text;
   try{const r=await fetch(`/api/files/${encodeURIComponent(id)}?preview=1`,{credentials:'same-origin'});if(!r.ok)throw new Error('读不到文件');text=await r.text()}
-  catch(e){toast(e.message);return}
+  catch(e){if(current())toast(e.message);return}
+  if(!current())return;
   const archived=(S.fileArchives||[]).some(x=>x.id===p.id),editable=!archived&&(S.user?.admin||p.owner===S.user?.id||f.uploader===S.user?.id);
   openModal(`<div class="eyebrow">${escapeHTML(p.name)} · 文件</div><h2>${escapeHTML(f.name)}</h2>`
     +mdEditorHTML({id:'mdFileEditor',inputId:'mdFileInput',viewId:'mdFileView',value:text,rows:18,readonly:!editable,empty:'文件是空的'})
@@ -1846,10 +1853,16 @@ async function openMarkdownFile(p,id){
   let saved=text;
   input.addEventListener('input',()=>{UI.docDirty=input.value!==saved;save.disabled=input.value===saved});
   save.onclick=async()=>{
+    if(save.disabled)return;
     const next=input.value;save.disabled=true;save.textContent='保存中…';
-    try{await api('/api/action',{action:'file.text.update',data:{id,text:next}});saved=next;UI.docDirty=input.value!==saved;toast('文件已保存');refresh()}
-    catch(e){toast(e.message)}
-    finally{save.textContent='保存';save.disabled=input.value===saved}
+    try{
+      const r=await fetch(`/api/files/text?id=${encodeURIComponent(id)}`,{method:'POST',credentials:'same-origin',
+        headers:{'Content-Type':'text/plain; charset=utf-8','X-Work-Calendar':'1'},body:next});
+      const result=await readJSON(r);if(!r.ok)throw new Error(result.error||'文件保存失败');
+      if(owner!==S.user?.id||!input.isConnected)return;
+      saved=next;UI.docDirty=input.value!==saved;toast('文件已保存');refresh().catch(()=>{});
+    }catch(e){if(owner===S.user?.id&&input.isConnected)toast(e.message)}
+    finally{if(input.isConnected){save.textContent='保存';save.disabled=input.value===saved}}
   };
 }
 async function uploadProjectFiles(p,list){

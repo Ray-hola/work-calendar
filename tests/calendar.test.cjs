@@ -2999,3 +2999,52 @@ test('a late chat page cannot replace cursors after changing account or channel'
     assert.equal(log.innerHTML,'current account content');assert.equal(a.run('chatLastCursor'),null);
   }
 });
+
+test('new meeting submits manually written minutes on its first save',async()=>{
+  const {a,nodes,calls}=meetingApp();nodes['#meetingMinutesInput']={value:'## 手写结论\n- [ ] 跟进评审',addEventListener(){}};
+  await nodes['#cancelAction'].onclick();
+  assert.equal(calls[0].action,'meeting.create');assert.equal(calls[0].data.minutes,nodes['#meetingMinutesInput'].value);
+  assert.equal(a.run('S.meetings[0].minutes'),nodes['#meetingMinutesInput'].value);
+});
+test('editing minutes while save is pending keeps the draft dirty',async()=>{
+  const {a,nodes}=meetingApp();nodes['#meetingMinutesInput']={value:'submitted'};
+  let finish,submitted;
+  a.context.fetch=async(url,options)=>{submitted=JSON.parse(options.body);return new Promise(r=>finish=r)};
+  const pending=nodes['#cancelAction'].onclick();await new Promise(setImmediate);
+  nodes['#meetingMinutesInput'].value='new draft while saving';
+  finish({ok:true,text:async()=>JSON.stringify({id:'m1',...submitted.data})});await pending;
+  assert.equal(a.run('UI.docDirty'),true);assert.equal(a.run('S.meetings[0].minutes'),'submitted');
+});
+test('markdown formatting preserves link targets and still formats link labels',()=>{
+  const a=app();
+  for(const url of ['https://example.com/__init__.py','https://example.com/a**b**c','https://example.com/a~~b~~c']){
+    a.context.markdown=`[**源码**](${url})`;const html=a.run('mdRender(markdown)');
+    assert.ok(html.includes(`href="${url}"`));assert.match(html,/<strong>源码<\/strong>/);
+    a.context.markdown=url;assert.ok(a.run('mdRender(markdown)').includes(`href="${url}"`));
+  }
+  assert.match(a.run('mdRender("[`code`](https://example.com)")'),/<code>code<\/code><\/a>/);
+  assert.doesNotMatch(a.run('mdRender("[x](javascript:alert(1)) <script>bad</script>")'),/href="javascript:|<script>/);
+});
+function markdownFileApp(){
+  const a=app(),opened=[],nodes={};a.context.capture=html=>opened.push(html);
+  const node={value:'',isConnected:true,classList:{add(){}},addEventListener(){}};
+  a.context.document={querySelector:s=>nodes[s]||node};
+  a.run("S.user={id:'owner',admin:true};S.files=[{id:'f',projectId:'p',name:'private.md'}];S.fileArchives=[];S.projects=[];UI.view='projects';UI.space='p';openModal=capture;bindMdEditor=()=>{};closeModal=()=>{};toast=()=>{}");
+  return {a,opened,nodes};
+}
+test('Markdown file reads discard obsolete accounts, navigation and closed viewers',async()=>{
+  for(const change of ["S.user={id:'other'};S.files=[]","UI.view='today'","UI.space='other'","cancelMeetingOpen()"]){
+    const {a,opened}=markdownFileApp();let finish;a.context.fetch=()=>new Promise(r=>finish=r);
+    const pending=a.run("openMarkdownFile({id:'p',name:'private project',owner:'owner'},'f')");a.run(change);
+    finish({ok:true,text:async()=> 'PRIVATE DOCUMENT'});await pending;assert.equal(opened.length,0,change);
+  }
+});
+test('only the newest Markdown file selection opens when responses arrive out of order',async()=>{
+  const {a,opened}=markdownFileApp(),pendingReads=[];a.context.fetch=()=>new Promise(r=>pendingReads.push(r));
+  a.run("S.files.push({id:'f2',projectId:'p',name:'new.md'})");
+  const old=a.run("openMarkdownFile({id:'p',name:'project',owner:'owner'},'f')");
+  const latest=a.run("openMarkdownFile({id:'p',name:'project',owner:'owner'},'f2')");
+  pendingReads[1]({ok:true,text:async()=> 'NEW DOCUMENT'});await latest;
+  pendingReads[0]({ok:true,text:async()=> 'OLD DOCUMENT'});await old;
+  assert.equal(opened.length,1);assert.match(opened[0],/NEW DOCUMENT/);assert.doesNotMatch(opened[0],/OLD DOCUMENT/);
+});
