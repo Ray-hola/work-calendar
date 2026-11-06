@@ -3071,6 +3071,34 @@ test('reduced-motion tutorials wait for manual steps and retain the selected cap
   assert.match(h.caption.textContent,/记录完成/);assert.equal(h.fig.dataset.paused,'1');
 });
 
+test('every tutorial chapter plays a demo whose step markers fit its captions',()=>{
+  const a=app();
+  const bad=a.json(`GUIDE.flatMap(c=>{const out=[];for(const id of [c.demo,c.extraDemo].filter(Boolean)){const d=GUIDE_DEMOS[id];
+    if(!d){out.push(c.id+':'+id+' missing');continue}
+    for(const m of d.html.matchAll(/data-(in|out|move|type|fill|narrow|point)="([\\d ]+)"/g))for(const n of m[2].split(' ').map(Number))
+      if((m[1]!=='point'&&n<1)||n>=d.steps.length)out.push(id+' '+m[0])}
+    if(!c.demo)out.push(c.id+' has no demo');return out})`);
+  assert.deepEqual(bad,[]);
+});
+test('tutorial tables and FAQs render escaped',()=>{
+  const a=app();
+  const table=a.run("guidePart(['状态',[['状态','意思'],['<b>','已完成']],'table'])");
+  assert.match(table,/<th>状态<\/th><th>意思<\/th>/);assert.match(table,/<td>&lt;b&gt;<\/td><td>已完成<\/td>/);
+  const faq=a.run("guidePart(['常见问题',[['能改吗？','<i>能</i>']],'faq'])");
+  assert.match(faq,/<details><summary>能改吗？<\/summary><p>&lt;i&gt;能&lt;\/i&gt;<\/p><\/details>/);
+});
+test('the demo pointer travels to the step target, taps it, and hides when a step has none',()=>{
+  const a=app(),timers=[],cls=new Set();a.context.setTimeout=fn=>{timers.push(fn);return timers.length};a.context.clearTimeout=()=>{};
+  a.context.matchMedia=()=>({matches:false});
+  const ptr={style:{},classList:{add:c=>cls.add(c),remove:c=>cls.delete(c)}};
+  const target={getBoundingClientRect:()=>({left:140,top:70,width:100,height:20})};
+  const stage={getBoundingClientRect:()=>({left:100,top:50}),querySelector:s=>s==='.demo-pointer'?ptr:s==='[data-point~="2"]'?target:null};
+  a.context.fig={querySelector:()=>stage};
+  a.run('demoPoint(fig,2)');assert.equal(ptr.style.transform,'translate(100px,32px)');assert.ok(cls.has('is-on'));
+  assert.ok(!cls.has('is-tap'));timers.at(-1)();assert.ok(cls.has('is-tap'));
+  a.run('demoPoint(fig,3)');assert.ok(!cls.has('is-on'));assert.ok(!cls.has('is-tap'));
+});
+
 test('lineage lookup follows newly added tasks and replacement snapshots',()=>{
   const a=app();a.run("S.tasks=[{id:'root'},{id:'child',originId:'root'}]");
   assert.deepEqual(a.json('[...taskLineageIds(S.tasks[1])].sort()'),['child','root']);
