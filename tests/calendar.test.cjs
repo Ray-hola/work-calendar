@@ -3070,3 +3070,20 @@ test('reduced-motion tutorials wait for manual steps and retain the selected cap
   assert.equal(h.play.textContent,'播放');h.dots[2].onclick();h.timers[0]();assert.equal(h.fig.dataset.step,'2');
   assert.match(h.caption.textContent,/记录完成/);assert.equal(h.fig.dataset.paused,'1');
 });
+
+test('lineage lookup follows newly added tasks and replacement snapshots',()=>{
+  const a=app();a.run("S.tasks=[{id:'root'},{id:'child',originId:'root'}]");
+  assert.deepEqual(a.json('[...taskLineageIds(S.tasks[1])].sort()'),['child','root']);
+  a.run("S.tasks.push({id:'redo',reworkOf:'child'})");
+  assert.deepEqual(a.json('[...taskLineageIds(S.tasks[2])].sort()'),['child','redo','root']);
+  a.run("S.tasks=[{id:'new-root'},{id:'child',originId:'new-root'},{id:'redo',reworkOf:'child'}]");
+  assert.deepEqual(a.json('[...taskLineageIds(S.tasks[2])].sort()'),['child','new-root','redo']);
+});
+test('fresh work follows added and replaced task/project lists while notices change in place',()=>{
+  const a=app();a.run("S.projects=[{id:'p'}];S.tasks=[{id:'t'}];S.notifications=[{fresh:true,read:false,reference:'later'},{fresh:true,read:false,reference:'p2'}]");
+  assert.deepEqual(a.json('[...freshRefs()]'),[]);
+  a.run("S.tasks.push({id:'later'});S.projects.push({id:'p2'})");
+  assert.deepEqual(a.json('[...freshRefs()].sort()'),['later','p2']);
+  a.run('S.notifications[0].read=true');assert.deepEqual(a.json('[...freshRefs()]'),['p2']);
+  a.run("S.projects=[{id:'p'},{id:'replacement'}];S.tasks=[{id:'t'},{id:'other'}]");assert.deepEqual(a.json('[...freshRefs()]'),[]);
+});

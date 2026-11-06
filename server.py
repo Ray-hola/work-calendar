@@ -1957,27 +1957,48 @@ class Store:
 
     LOGIN_FAILURES = 8
     LOGIN_WINDOW = timedelta(minutes=15)
+    LOGIN_FAILURE_KEYS = 4096
+
+    def prune_login_failures(self, at):
+        """Called under the store lock; retain only bounded, live failure buckets."""
+        for key, times in list(self._login_failures.items()):
+            recent = [t for t in times if at - t < self.LOGIN_WINDOW]
+            if recent:
+                self._login_failures[key] = recent[-self.LOGIN_FAILURES:]
+            else:
+                self._login_failures.pop(key, None)
 
     def login(self, id, password, client=''):
         """Check a password and open a session. The deliberately slow hash runs
         outside the shared lock, so a wrong guess never stalls other people;
         after LOGIN_FAILURES wrong guesses for one account from one place, that
         pair waits out LOGIN_WINDOW."""
-        key, at = (id, client), now()
+        # Fixed-size keys also bound memory for arbitrary submitted account names.
+        key = (hashlib.sha256(id.encode()).digest(), hashlib.sha256(client.encode()).digest())
         with self.lock:
-            recent = [t for t in self._login_failures.get(key, []) if at - t < self.LOGIN_WINDOW]
-            if recent:
-                self._login_failures[key] = recent
-            else:
-                self._login_failures.pop(key, None)
-            if len(recent) >= self.LOGIN_FAILURES:
+            self.prune_login_failures(now())
+            if len(self._login_failures.get(key, [])) >= self.LOGIN_FAILURES:
                 raise Problem(429, '尝试次数过多，请 15 分钟后再试')
             r = self.db.execute('SELECT * FROM users WHERE id=? AND active=1', (id,)).fetchone()
         salt = bytes.fromhex(r['salt']) if r else b'no-such-user-salt'
         digest = hashlib.scrypt(password.encode(), salt=salt, n=16384, r=8, p=1).hex()
         with self.lock, self.db:
-            if not r or not hmac.compare_digest(digest, r['hash']):
-                self._login_failures.setdefault(key, []).append(at)
+            at = now()
+            self.prune_login_failures(at)
+            # In-flight attempts may have finished since the admission check.
+            if len(self._login_failures.get(key, [])) >= self.LOGIN_FAILURES:
+                raise Problem(429, '尝试次数过多，请 15 分钟后再试')
+            current = self.db.execute('SELECT salt,hash,active FROM users WHERE id=?', (id,)).fetchone()
+            if (not r or not current or not current['active'] or current['salt'] != r['salt']
+                    or not hmac.compare_digest(current['hash'], r['hash'])
+                    or not hmac.compare_digest(digest, r['hash'])):
+                # Dict insertion order tracks the least recently failed pair.
+                # Global expiry runs first, then the oldest live pair is evicted
+                # if necessary; input account names cannot grow this indefinitely.
+                recent = self._login_failures.pop(key, [])
+                if len(self._login_failures) >= self.LOGIN_FAILURE_KEYS:
+                    self._login_failures.pop(next(iter(self._login_failures)))
+                self._login_failures[key] = recent + [at]
                 raise Problem(401, '账户或密码错误')
             self._login_failures.pop(key, None)
             self.db.execute('DELETE FROM sessions WHERE expires<?', (at.isoformat(),))
