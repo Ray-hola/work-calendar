@@ -55,11 +55,11 @@ test('navigation widths preserve content space and restore desired widths after 
   assert.equal(a.run('navigationLayout.project.width'),300);
 });
 
-test('stacked navigation can expand on tablet and phone without a side-by-side content reserve', () => {
+test('project navigation reserves tablet content space and stacks only on phones', () => {
   const a = app();
   a.run('navigationLayout.project.width=280;navigationLayout.chat.width=278');
   assert.equal(a.run("navigationWidth('project',1181,390)"),56);
-  assert.equal(a.run("navigationWidth('project',1180,390)"),280);
+  assert.equal(a.run("navigationWidth('project',1180,390)"),56);
   assert.equal(a.run("navigationWidth('project',390,340)"),280);
   assert.equal(a.run("navigationWidth('chat',761,390)"),64);
   assert.equal(a.run("navigationWidth('chat',760,340)"),278);
@@ -455,17 +455,12 @@ test('日记 and 档案室 are one 档案室: members file their own days, admin
   assert.ok(/data-scope="members" data-id="test002" data-field="done">联调/.test(editable) && /data-scope="projects" data-id="p" data-field="progress">/.test(editable), '每一块都能改，空的也能补');
   assert.ok(/已改/.test(editable));
   assert.ok(!/contenteditable/.test(a.run(`briefDocument(${JSON.stringify(brief)})`)), '导出和只读时是原样');
-  const week = a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',briefs:[${JSON.stringify(brief)},`
-    +`${JSON.stringify({...brief,date:'2026-11-02'})}]})`);
-  assert.ok(/档案室 · 周报/.test(week) && !/<!doctype/.test(week), '周报在应用里直接看，不再下载');
-  assert.ok(/data-count="2">2<\/span>\/<span data-count="4">4<\/span><\/b><span>完成任务/.test(week)
-    && /data-count="2.0" data-decimals="1">2.0<\/span>h/.test(week), '把一周加起来');
-  assert.equal((week.match(/class="week-cell[ "]/g) || []).length, 7, '每天一格，周六到周五');
-  assert.ok(/data-date="2026-11-01"(?![^>]*disabled)/.test(week) && /data-date="2026-11-03" disabled/.test(week),
-    '有日报的那天能点开，没到的不能');
-  assert.ok(/data-week="1" disabled/.test(week), '本周之后不能再往后翻');
-  assert.ok(/<time>11月1日 · 周日<\/time>要定版/.test(week), '本周需要关注带上日期');
-  assert.ok(/王二<\/strong><span class="week-meter"><i style="--w:50%">/.test(week), '成员本周的完成比例');
+  const week = a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',briefs:[${JSON.stringify(brief)}],work:{asOf:'2026-11-06',completedProjects:[{name:'官网改版',ownerName:'王二',members:['王二','王三'],completedOn:'2026-11-02',summary:'本周完成官网改版。项目内容：更新首页。完成情况：验收上线'}],unfinishedProjects:[{name:'验收项目',ownerName:'王三',description:'接口验收',status:'active',remaining:[{name:'最终验证',remaining:'补齐验证',reason:'环境未好',scheduledOn:'2026-11-09'}]}]}})`);
+  assert.match(week,/这周做了什么/);assert.match(week,/还有什么没做/);
+  for(const value of ['官网改版','更新首页','验收上线','验收项目','最终验证','环境未好','王三'])assert.ok(week.includes(value));
+  assert.match(week,/data-week="1" disabled/);assert.match(week,/data-date="2026-11-01"/);
+  assert.doesNotMatch(week,/大家的反馈|完成实际工时|成员本周|项目本周/);
+
 });
 
 test('inbox renders edit approval action for the request approver, including superadmin', () => {
@@ -1410,15 +1405,9 @@ test('a temp task handed to someone shows for both people in the project space',
   assert.equal(a.run('editApprover(S.tasks[0])'), 'superadmin', '派任务的人停用后由 superadmin 批');
 });
 
-test('the week report counts days put together on the spot, but only filed days open', () => {
-  const a=app();
-  a.run(`S.today='2026-11-02'`);
-  const days=a.json(`weekSummary({start:'2026-10-31',briefs:[
-    {date:'2026-10-31',filed:true,content:{totals:{tasks:4,completed:3}}},
-    {date:'2026-11-01',content:{totals:{tasks:1,completed:1}}},
-    {date:'2026-11-02',filed:false,content:{totals:{tasks:2,completed:1}}}]}).days.slice(0,4)`);
-  assert.deepEqual(days.map(d=>[d.has,d.filed,d.tasks]), [[true,true,4],[true,true,1],[true,false,2],[false,false,0]]);
-  assert.equal(a.json(`weekSummary({start:'2026-10-31',briefs:[]}).totals.tasks`), 0);
+test('weekly report only links filed daily records and does not sum daily snapshots',()=>{
+  const a=app();a.run("S.today='2026-11-02'");const html=a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',briefs:[{date:'2026-10-31',filed:true},{date:'2026-11-01'},{date:'2026-11-02',filed:false}],work:{completed:[],unfinished:[]}})`);
+  assert.match(html,/data-date="2026-10-31"/);assert.match(html,/data-date="2026-11-01"/);assert.doesNotMatch(html,/data-date="2026-11-02"/);
 });
 
 test('a day sits at the same place on the ruler for ticks and the week band', () => {
@@ -2536,7 +2525,7 @@ test('meeting editor stores pasted source and generates minutes on first creatio
   const {nodes,calls}=meetingApp();nodes['#meetingTranscript'].value='确认周五发布';
   await nodes['#generateMeetingMinutes'].onclick();
   assert.deepEqual(calls.map(x=>x.action),['meeting.create','meeting.minutes.generate']);
-  assert.equal(calls[0].data.rawTranscript,'确认周五发布');assert.equal(nodes['#meetingMinutes'].textContent,'已整理');
+  assert.equal(calls[0].data.rawTranscript,'确认周五发布');assert.match(nodes['#meetingMinutes'].innerHTML,/已整理/);
   assert.doesNotMatch(source.slice(source.indexOf('function openMeetingEditor'),source.indexOf('const meetingLive=')),/id="meetingPrompt/);
 });
 test('live recording followed by save updates the same meeting and ignores stale results',async()=>{
@@ -2908,4 +2897,176 @@ test('the account settings row opens once by mouse, Enter or Space and has no ne
   a.run(source.slice(start,source.indexOf("$$('#settingsView [data-settings-page]')",start)));
   row.onclick();let prevented=0;for(const key of ['Enter',' ','ArrowDown'])row.onkeydown({key,preventDefault(){prevented++}});
   assert.deepEqual(views,['accounts','accounts','accounts']);assert.equal(prevented,2);
+});
+
+function tourHarness(){
+  const a=app(),timers=[],writes=[],elements={},background=[{inert:false},{inert:true}],buttons=[];
+  let modal=false,locked=false,focusRestored=false;
+  const focus={isConnected:true,getClientRects:()=>[{}],closest:()=>null,focus(){focusRestored=true}};
+  const veil={setAttribute(){},remove(){delete elements['#tourVeil']}};
+  a.context.window={innerWidth:1280,addEventListener(){},removeEventListener(){}};
+  a.context.localStorage={getItem:()=>null,setItem:(k,v)=>writes.push([k,v])};
+  a.context.setTimeout=fn=>{timers.push(fn);return timers.length};a.context.clearTimeout=()=>{};
+  a.context.document={activeElement:focus,body:{children:background,classList:{contains:()=>locked},appendChild:el=>elements['#tourVeil']=el},
+    createElement:()=>veil,addEventListener(){},removeEventListener(){},querySelector:s=>s==='#modalBackdrop'?{classList:{contains:()=>!modal}}:elements[s]||null,
+    querySelectorAll:()=>buttons};
+  a.run("S.user={id:'owner'};tourShow=()=>{}");
+  return {a,timers,writes,background,buttons,setModal:v=>modal=v,setLocked:v=>locked=v,restored:()=>focusRestored};
+}
+test('automatic tour defers around a task draft and starts only after its dialog closes',()=>{
+  const h=tourHarness();h.setModal(true);h.a.run('offerTour();offerTour()');assert.equal(h.timers.length,1);
+  h.timers[0]();assert.equal(h.a.run('tour'),null);assert.equal(h.timers.length,2);
+  h.setModal(false);h.timers[1]();assert.equal(h.a.run('tour.owner'),'owner');
+});
+test('tour start refuses dirty edits, live recording and open dialogs',()=>{
+  const h=tourHarness();
+  h.a.run("UI.docDirty=true;startTour()");assert.equal(h.a.run('tour'),null);
+  h.a.run("UI.docDirty=false;meetingLive.active=true;startTour()");assert.equal(h.a.run('tour'),null);
+  h.a.run('meetingLive.active=false');h.setModal(true);h.a.run('startTour()');assert.equal(h.a.run('tour'),null);
+});
+test('pending tour offers cannot start under a different account, auth lock or phone viewport',()=>{
+  for(const change of ["S.user={id:'other'}","window.innerWidth=390"]){const h=tourHarness();h.a.run('offerTour()');h.a.run(change);h.timers[0]();assert.equal(h.a.run('tour'),null)}
+  const h=tourHarness();h.a.run('offerTour()');h.setLocked(true);h.timers[0]();assert.equal(h.a.run('tour'),null);
+});
+test('tour isolates the background, restores inert state and focus, and binds completion to its owner',()=>{
+  const h=tourHarness();h.a.run('startTour()');assert.ok(h.background.every(e=>e.inert));
+  h.a.run("S.user={id:'other'};endTour()");assert.deepEqual(h.background.map(e=>e.inert),[false,true]);assert.equal(h.restored(),true);
+  assert.deepEqual(h.writes,[['wc-tour-done:owner','1']]);
+  const cancelled=tourHarness();cancelled.a.run('startTour();endTour(false)');assert.equal(cancelled.writes.length,0);
+});
+test('tour Enter preserves focused button activation while navigation keys and background shortcuts stay isolated',()=>{
+  const h=tourHarness(),moves=[];h.a.context.moves=moves;h.a.run('startTour();tourShow=(i,dir)=>moves.push([i,dir])');
+  let prevented=0,stopped=0;
+  for(const key of ['Enter','n'])h.a.context.event={key,target:{closest:s=>key==='Enter'?{}:null},preventDefault(){prevented++},stopPropagation(){stopped++}},h.a.run('tourKey(event)');
+  assert.equal(prevented,0);assert.equal(stopped,2);assert.equal(moves.length,0);
+  h.a.context.event={key:'ArrowRight',target:{closest:()=>null},preventDefault(){prevented++},stopPropagation(){}};h.a.run('tourKey(event)');assert.deepEqual(JSON.parse(JSON.stringify(moves)),[[1,1]]);assert.equal(prevented,1);
+});
+test('tour Tab and Shift-Tab wrap within its buttons',()=>{
+  const h=tourHarness(),focused=[];h.buttons.push({focus:()=>focused.push(0)},{focus:()=>focused.push(1)});h.a.run('startTour()');
+  for(const [index,shiftKey] of [[1,false],[0,true]]){h.a.context.document.activeElement=h.buttons[index];h.a.context.event={key:'Tab',shiftKey,target:{},preventDefault(){},stopPropagation(){}};h.a.run('tourKey(event)')}
+  assert.deepEqual(focused,[0,1]);
+});
+test('project rail resize is available on tablet and reserves content space down to the phone breakpoint',()=>{
+  const a=app();a.context.window={innerWidth:1000};assert.equal(a.run("navigationResizeEnabled('project')"),true);
+  a.context.window.innerWidth=760;assert.equal(a.run("navigationResizeEnabled('project')"),false);
+  assert.equal(a.run("navigationBounds('project',1000,600).max"),260);
+  const css=fs.readFileSync(path.join(__dirname,'../styles.css'),'utf8');assert.doesNotMatch(css,/grid-template-columns:\s*208px/);
+  assert.match(a.run("TOUR.find(s=>s.ch==='档案').body"),/看团队日报和周报/);
+});
+
+test('project weekly report escapes summaries and has honest empty states',()=>{const a=app();a.run("S.today='2026-11-06'");const empty=a.run("weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{}})");assert.match(empty,/暂无待完成项目/);assert.match(empty,/本周暂无已结项项目/);const html=a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{completedProjects:[{name:'<img>',completedOn:'2026-11-02',summary:'<script>bad</script>'}]}})`);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<img>|<script>/)});
+
+
+test('markdown renders the common marks and never lets markup or scripts through',()=>{
+  const a=app();
+  const html=a.run(`mdRender(['# 纪要','','**结论**：聚焦 *两条* 主线，见 [方案](https://example.com/a?b=1&c=2)。','',
+    '- 资源表','  - 周五前补齐','- [x] 竞品数据','- [ ] 评审','','1. 第一','2. 第二','','> 待确认','','| 人 | 事 |','|---|---|','| 周一 | 资源表 |','',
+    '\`\`\`','<b>不渲染</b>','\`\`\`','','---','<script>alert(1)</script> [x](javascript:alert(1)) \`<i>code</i>\`'].join('\\n'))`);
+  assert.match(html,/<h2>纪要<\/h2>/);assert.match(html,/<strong>结论<\/strong>/);assert.match(html,/<em>两条<\/em>/);
+  assert.match(html,/<a href="https:\/\/example.com\/a\?b=1&amp;c=2" target="_blank" rel="noopener noreferrer">方案<\/a>/);
+  assert.match(html,/<ul><li>资源表<ul><li>周五前补齐<\/li><\/ul><\/li>/,'缩进的列表嵌在上一项里');
+  assert.match(html,/<li class="md-task"><input type="checkbox" disabled checked> 竞品数据<\/li>/);
+  assert.match(html,/<ol><li>第一<\/li><li>第二<\/li><\/ol>/);assert.match(html,/<blockquote><p>待确认<\/p><\/blockquote>/);
+  assert.match(html,/<th>人<\/th><th>事<\/th>/);assert.match(html,/<td>周一<\/td><td>资源表<\/td>/);
+  assert.match(html,/<pre><code>&lt;b&gt;不渲染&lt;\/b&gt;<\/code><\/pre>/);assert.match(html,/<hr>/);
+  assert.doesNotMatch(html,/<script|href="javascript|<i>/,'脚本、危险链接和 HTML 一律转义');
+  assert.match(html,/<code>&lt;i&gt;code&lt;\/i&gt;<\/code>/);
+});
+
+function chatPagingApp(){
+  const a=app(),calls=[],pages=[],log={innerHTML:'',isConnected:true,scrollHeight:100,scrollTop:0,clientHeight:100,querySelector:()=>null,insertAdjacentHTML(){}},button={isConnected:true,insertAdjacentHTML(){},remove(){this.isConnected=false}};
+  a.context.document={querySelector:s=>s==='#chatLog'?log:s==='#chatMore'?button:null};
+  a.context.fetch=async(url,options)=>{calls.push(JSON.parse(options.body).data);return {ok:true,text:async()=>JSON.stringify(pages.shift())}};
+  a.run("let chatChannel='general',chatLastAt='',chatLastDay='',chatFirstAt='',chatFirstCursor=null,chatLastCursor=null,chatLoadGeneration=0,chatPreviews={};S.user={id:'member'};renderChatChannels=()=>{};reportChatRead=()=>{};chatBubble=()=>'<div>message</div>'");
+  a.run(source.slice(source.indexOf('async function loadChat(reset)'),source.indexOf('async function reportChatRead(at)')));
+  return {a,calls,pages,log,button};
+}
+test('chat history and live polling retain independent complete cursors',async()=>{
+  const {a,calls,pages}=chatPagingApp(),at='2026-11-06T08:00:00+08:00';
+  pages.push({messages:[{createdAt:at}],more:true,beforeCursor:{at,rowid:2},sinceCursor:{at,rowid:121}});
+  await a.run('loadChat(true)');
+  pages.push({messages:[{createdAt:at}],sinceCursor:{at,rowid:122}});await a.run('loadChat(false)');
+  assert.deepEqual(calls[1].sinceCursor,{at,rowid:121});
+  pages.push({messages:[{createdAt:at}],more:false,beforeCursor:{at,rowid:1}});await a.run('loadEarlierChat()');
+  assert.deepEqual(calls[2].beforeCursor,{at,rowid:2});
+  assert.equal(a.run('chatLastCursor.rowid'),122);assert.equal(a.run('chatFirstCursor.rowid'),1);
+});
+test('a late chat page cannot replace cursors after changing account or channel',async()=>{
+  for(const change of ["S.user.id='other'","chatChannel='lounge'"]){
+    const {a,log}=chatPagingApp();let resolve;a.context.fetch=()=>new Promise(r=>resolve=r);
+    log.innerHTML='current account content';const pending=a.run('loadChat(true)');a.run(change);
+    resolve({ok:true,text:async()=>JSON.stringify({messages:[{createdAt:'old'}],beforeCursor:{at:'old',rowid:1},sinceCursor:{at:'old',rowid:1}})});await pending;
+    assert.equal(log.innerHTML,'current account content');assert.equal(a.run('chatLastCursor'),null);
+  }
+});
+
+test('new meeting submits manually written minutes on its first save',async()=>{
+  const {a,nodes,calls}=meetingApp();nodes['#meetingMinutesInput']={value:'## 手写结论\n- [ ] 跟进评审',addEventListener(){}};
+  await nodes['#cancelAction'].onclick();
+  assert.equal(calls[0].action,'meeting.create');assert.equal(calls[0].data.minutes,nodes['#meetingMinutesInput'].value);
+  assert.equal(a.run('S.meetings[0].minutes'),nodes['#meetingMinutesInput'].value);
+});
+test('editing minutes while save is pending keeps the draft dirty',async()=>{
+  const {a,nodes}=meetingApp();nodes['#meetingMinutesInput']={value:'submitted'};
+  let finish,submitted;
+  a.context.fetch=async(url,options)=>{submitted=JSON.parse(options.body);return new Promise(r=>finish=r)};
+  const pending=nodes['#cancelAction'].onclick();await new Promise(setImmediate);
+  nodes['#meetingMinutesInput'].value='new draft while saving';
+  finish({ok:true,text:async()=>JSON.stringify({id:'m1',...submitted.data})});await pending;
+  assert.equal(a.run('UI.docDirty'),true);assert.equal(a.run('S.meetings[0].minutes'),'submitted');
+});
+test('markdown formatting preserves link targets and still formats link labels',()=>{
+  const a=app();
+  for(const url of ['https://example.com/__init__.py','https://example.com/a**b**c','https://example.com/a~~b~~c']){
+    a.context.markdown=`[**源码**](${url})`;const html=a.run('mdRender(markdown)');
+    assert.ok(html.includes(`href="${url}"`));assert.match(html,/<strong>源码<\/strong>/);
+    a.context.markdown=url;assert.ok(a.run('mdRender(markdown)').includes(`href="${url}"`));
+  }
+  assert.match(a.run('mdRender("[`code`](https://example.com)")'),/<code>code<\/code><\/a>/);
+  assert.doesNotMatch(a.run('mdRender("[x](javascript:alert(1)) <script>bad</script>")'),/href="javascript:|<script>/);
+});
+function markdownFileApp(){
+  const a=app(),opened=[],nodes={};a.context.capture=html=>opened.push(html);
+  const node={value:'',isConnected:true,classList:{add(){}},addEventListener(){}};
+  a.context.document={querySelector:s=>nodes[s]||node};
+  a.run("S.user={id:'owner',admin:true};S.files=[{id:'f',projectId:'p',name:'private.md'}];S.fileArchives=[];S.projects=[];UI.view='projects';UI.space='p';openModal=capture;bindMdEditor=()=>{};closeModal=()=>{};toast=()=>{}");
+  return {a,opened,nodes};
+}
+test('Markdown file reads discard obsolete accounts, navigation and closed viewers',async()=>{
+  for(const change of ["S.user={id:'other'};S.files=[]","UI.view='today'","UI.space='other'","cancelMeetingOpen()"]){
+    const {a,opened}=markdownFileApp();let finish;a.context.fetch=()=>new Promise(r=>finish=r);
+    const pending=a.run("openMarkdownFile({id:'p',name:'private project',owner:'owner'},'f')");a.run(change);
+    finish({ok:true,text:async()=> 'PRIVATE DOCUMENT'});await pending;assert.equal(opened.length,0,change);
+  }
+});
+test('only the newest Markdown file selection opens when responses arrive out of order',async()=>{
+  const {a,opened}=markdownFileApp(),pendingReads=[];a.context.fetch=()=>new Promise(r=>pendingReads.push(r));
+  a.run("S.files.push({id:'f2',projectId:'p',name:'new.md'})");
+  const old=a.run("openMarkdownFile({id:'p',name:'project',owner:'owner'},'f')");
+  const latest=a.run("openMarkdownFile({id:'p',name:'project',owner:'owner'},'f2')");
+  pendingReads[1]({ok:true,text:async()=> 'NEW DOCUMENT'});await latest;
+  pendingReads[0]({ok:true,text:async()=> 'OLD DOCUMENT'});await old;
+  assert.equal(opened.length,1);assert.match(opened[0],/NEW DOCUMENT/);assert.doesNotMatch(opened[0],/OLD DOCUMENT/);
+});
+
+function guideDemoHarness(reduced=false){
+  const a=app(),timers=[],cleared=[],classes=new Set(),dots=Array.from({length:4},()=>({classList:{toggle(){}},setAttribute(){}}));
+  const play={},caption={},fig={dataset:{demo:'task-life'},classList:{toggle(c,on){on?classes.add(c):classes.delete(c)},add(c){classes.add(c)},contains:c=>classes.has(c)},
+    querySelector:s=>s==='.demo-play'?play:caption,querySelectorAll:()=>dots};
+  a.context.root={querySelectorAll:()=>[fig]};a.context.matchMedia=()=>({matches:reduced});
+  a.context.setInterval=fn=>{timers.push(fn);return timers.length};a.context.clearInterval=id=>cleared.push(id);
+  a.context.IntersectionObserver=class {observe(){} disconnect(){}};
+  a.run("UI.view='guide';bindGuideDemos(root)");return {a,fig,play,caption,dots,timers,cleared,classes};
+}
+test('tutorial demos advance only while visible and respect pause and leaving the guide',()=>{
+  const h=guideDemoHarness();h.timers[0]();assert.equal(h.fig.dataset.step,'0');
+  h.classes.add('is-visible');h.timers[0]();assert.equal(h.fig.dataset.step,'1');
+  h.play.onclick();h.timers[0]();assert.equal(h.fig.dataset.step,'1');assert.equal(h.play.textContent,'播放');
+  h.play.onclick();h.timers[0]();assert.equal(h.fig.dataset.step,'2');
+  h.a.run("UI.view='today'");h.timers[0]();assert.ok(h.cleared.includes(1));
+});
+test('reduced-motion tutorials wait for manual steps and retain the selected caption',()=>{
+  const h=guideDemoHarness(true);h.classes.add('is-visible');h.timers[0]();assert.equal(h.fig.dataset.step,'0');
+  assert.equal(h.play.textContent,'播放');h.dots[2].onclick();h.timers[0]();assert.equal(h.fig.dataset.step,'2');
+  assert.match(h.caption.textContent,/记录完成/);assert.equal(h.fig.dataset.paused,'1');
 });

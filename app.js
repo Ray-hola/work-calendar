@@ -75,7 +75,7 @@ const navigationLayout=readNavigationLayout();
 let navigationDrag=null,navigationFrame=0,navigationFadeFrame=0;
 function navigationBounds(kind,viewport,available){
   const c=NAVIGATION[kind];
-  const stacked=kind==='project'?viewport<=1180:viewport<=760;
+  const stacked=viewport<=760;
   const room=kind==='main'?viewport-490:!stacked&&Number.isFinite(available)?available-340:c.max;
   const initial=viewport<=1180?{main:216,chat:184}[kind]:undefined;
   return {min:c.min,max:Math.max(c.min,Math.min(c.max,room)),default:initial??c.width};
@@ -155,7 +155,7 @@ function finishNavigationDrag(cancelled=false){
   try{drag.handle.releasePointerCapture(drag.pointerId)}catch(_){}
   applyNavigationLayout();if(!cancelled)saveNavigationLayout();
 }
-function navigationResizeEnabled(kind){return window.innerWidth>(kind==='project'?1180:760)}
+function navigationResizeEnabled(kind){return window.innerWidth>760}
 function initNavigationLayout(){
   const main=$('.sidebar'),chat=$('.chat-side');
   if(main){
@@ -345,7 +345,7 @@ const status=t=>{
 };
 const projectName=t=>(S.projects.find(p=>p.id===t.projectId)||{}).name||'个人';
 function toast(msg){const e=$('#toast');e.textContent=msg;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200)}
-function showAuth(){meetingCancelCapture();meetingStopLive().catch(()=>{});if(typeof agentCancelVoice==='function')agentCancelVoice();document.body.classList.add('auth-locked');let e=$('#authScreen');if(!e){e=document.createElement('section');e.id='authScreen';document.body.prepend(e)}const local=location.protocol==='file:';e.innerHTML=`<div class="auth-card"><div class="brand"><span class="brand-mark">战</span><span>战略小组<br><strong>台账</strong></span></div><h1>登录工作台</h1><form id="loginForm"><label>账户<input id="loginUser" autocomplete="username" value="superadmin" required></label><label>密码<input id="loginPass" type="password" autocomplete="current-password" required></label><button class="primary-btn" type="submit" ${local?'disabled':''}>${local?'请先启动本地服务':'进入工作台'}</button><div id="loginError" class="login-error">${local?'请在工作区运行 ./run.sh，然后访问 http://127.0.0.1:4173/':''}</div></form></div>`;$('#loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/login',{username:$('#loginUser').value,password:$('#loginPass').value});document.body.classList.remove('auth-locked');e.target.closest('#authScreen').remove();await refresh();switchView('calendar')}catch(err){$('#loginError').textContent=err.message}}}
+function showAuth(){cancelTourOffer();endTour(false);meetingCancelCapture();meetingStopLive().catch(()=>{});if(typeof agentCancelVoice==='function')agentCancelVoice();document.body.classList.add('auth-locked');let e=$('#authScreen');if(!e){e=document.createElement('section');e.id='authScreen';document.body.prepend(e)}const local=location.protocol==='file:';e.innerHTML=`<div class="auth-card"><div class="brand"><span class="brand-mark">战</span><span>战略小组<br><strong>台账</strong></span></div><h1>登录工作台</h1><form id="loginForm"><label>账户<input id="loginUser" autocomplete="username" value="superadmin" required></label><label>密码<input id="loginPass" type="password" autocomplete="current-password" required></label><button class="primary-btn" type="submit" ${local?'disabled':''}>${local?'请先启动本地服务':'进入工作台'}</button><div id="loginError" class="login-error">${local?'请在工作区运行 ./run.sh，然后访问 http://127.0.0.1:4173/':''}</div></form></div>`;$('#loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/login',{username:$('#loginUser').value,password:$('#loginPass').value});document.body.classList.remove('auth-locked');e.target.closest('#authScreen').remove();await refresh();switchView('calendar')}catch(err){$('#loginError').textContent=err.message}}}
 /* Accounts that have signed in on this browser, newest first. The switcher
    offers only these, so it never lists the whole team to everyone. */
 const KNOWN_ACCOUNTS_KEY='wc-accounts';
@@ -355,13 +355,13 @@ async function refresh(){
   let next;
   try{next=await getState()}catch(e){if(e.status===401){showAuth();return}throw e}
   if(S.user?.id!==next.user.id){
-    meetingCancelCapture();
+    cancelTourOffer();endTour(false);meetingCancelCapture();
     if(S.user&&typeof agentResetUser==='function')agentResetUser();
     Object.assign(UI,{space:'',folder:'',view:'calendar',member:'all',filter:'all',selectedWeek:0,detailDate:null,timelineScroll:null,dayOffset:0});
   }
   /* updateChatDot is defined further down the file than the unit-test sandbox
      loads, so guard the call rather than assume it is in scope. */
-  S=next;if(S.dateHorizon)DATE_HORIZON=S.dateHorizon;rememberAccount(S.user.id);renderAll();renderPip();if(typeof loadSpeechStatus==='function')loadSpeechStatus();if(typeof updateChatDot==='function')updateChatDot();
+  S=next;if(S.dateHorizon)DATE_HORIZON=S.dateHorizon;rememberAccount(S.user.id);renderAll();if(typeof offerTour==='function')offerTour();renderPip();if(typeof loadSpeechStatus==='function')loadSpeechStatus();if(typeof updateChatDot==='function')updateChatDot();
 }
 let inboxRefreshPromise=null;
 async function refreshInboxState(){
@@ -396,12 +396,14 @@ function switchView(view){
   const shown=$(`#${view}View`),seen=UI.seenViews||(UI.seenViews=new Set());
   shown?.classList?.toggle('is-revisit',seen.has(view));seen.add(view);
   $$('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.view===view));
+  if(view!=='today'&&typeof syncFilterLinks==='function')syncFilterLinks();
   const labels={today:'今日任务',calendar:'周视图',projects:'项目空间',timeline:'项目时间轴',achievements:'成果库',archive:'档案室',inbox:'收件箱',accounts:'账户管理',settings:'系统设置',dayDetail:'日期详情',chat:'沟通区',guide:'使用教程'};
   $('#crumbCurrent').textContent=`/ ${labels[view]||view}`;
   renderScheduleScope();
   if(view==='calendar')renderCalendar();
   if(view==='today')renderToday();
   if(view==='dayDetail')renderDayContent();
+  if(view!=='projects')UI.navMark=null;
   if(view==='projects')renderProjects();
   if(view==='timeline')renderTimeline();
   if(view==='achievements')renderAchievements();
@@ -524,7 +526,7 @@ function dailyTaskGroups(tasks){
 }
 function bindTaskCards(root){$$(root+' .task-card').forEach(e=>{e.onclick=()=>openDrawer(e.dataset.id);e.onkeydown=x=>{if(x.key==='Enter')openDrawer(e.dataset.id)}})}
 function renderDayTab(day){const tab=$('#dayTab');if(!tab)return;const d=new Date(`${day}T12:00:00`),n=String(d.getDate());if($('#dayTabDay').textContent!==n){tab.classList.remove('turn');void tab.offsetWidth;tab.classList.add('turn')}$('#dayTabMonth').textContent=`${d.getMonth()+1}月`;$('#dayTabDay').textContent=n;$('#dayTabWeek').textContent=wd(day);tab.classList.toggle('is-today',day===S.today);const h=$('#todayView h1');if(h)h.textContent=day===S.today?'今天做什么？':day===add(S.today,1)?'明天做什么？':day===add(S.today,-1)?'昨天做了什么？':'这一天的安排'}
-function renderToday(){const day=displayDay(),deferredView=UI.filter==='deferred';renderStats(day);renderDayTab(day);
+function renderToday(){if(typeof syncFilterLinks==='function')syncFilterLinks();const day=displayDay(),deferredView=UI.filter==='deferred';renderStats(day);renderDayTab(day);
   $('#todayLabel').textContent=deferredView?'递延任务':`${wd(day)} · `
   +`${fmt(day)}`;$('#dateChip').textContent=deferredView?'全部日期':fmt(day);
   $$('.quick-tab').forEach(b=>b.classList.toggle('active',b.dataset.filter===UI.filter));
@@ -1094,24 +1096,47 @@ function projectNavContents(p){
   const group=(area,label,items)=>`<div class="nav-node"><button type="button" class="project-nav-resource is-group" data-project="${escapeHTML(p.id)}" data-project-area="${area}">`
     +`${icon(area==='meetings'?'chat':'folder')}<span>${label}</span><b>${items.length}</b></button>`
     +`${items.length?`<div class="nav-branch">${items.join('')}</div>`:''}</div>`;
-  const meeting=m=>`<div class="nav-node"><button type="button" class="project-nav-resource" data-project="${escapeHTML(p.id)}" data-project-area="meetings" data-meeting="${escapeHTML(m.id)}">${icon('chat')}<span>${escapeHTML(m.title)}</span></button></div>`;
-  const file=f=>`<div class="nav-node"><a class="project-nav-resource" href="/api/files/${encodeURIComponent(f.id)}" download="${escapeHTML(f.name)}">${icon('file')}<span>${escapeHTML(f.name)}</span></a></div>`;
+  const meeting=m=>`<div class="nav-node"><button type="button" class="project-nav-resource" data-project="${escapeHTML(p.id)}" data-project-area="meetings" data-meeting="${escapeHTML(m.id)}" title="${escapeHTML(m.title)}">${icon('chat')}<span>${escapeHTML(m.title)}</span></button></div>`;
+  const file=f=>`<div class="nav-node"><a class="project-nav-resource" href="/api/files/${encodeURIComponent(f.id)}" download="${escapeHTML(f.name)}" title="${escapeHTML(f.name)}">${icon('file')}<span>${escapeHTML(f.name)}</span></a></div>`;
   return `<div class="nav-branch project-nav-resources">${group('meetings','会议',meetings.map(meeting))}${group('files','文件',files.map(file))}</div>`;
 }
 /* The selection is one marker that travels to the chosen row: its leading edge
-   moves first and the trailing edge follows, so the move reads as a hand-off. */
+   moves first and the trailing edge follows, so the move reads as a hand-off.
+   When the rail is resized or collapsed it simply sits on the same row again. */
 function placeNavIndicator(){
   const nav=$('#projectNav');if(!nav||typeof nav.querySelector!=='function')return;
   const on=nav.querySelector('.project-nav-all.is-on')||nav.querySelector('.project-nav-folder-row.is-on')||nav.querySelector('.project-nav-project.is-on');
   let mark=nav.querySelector('.nav-indicator');
   if(!mark){mark=document.createElement('i');mark.className='nav-indicator';mark.setAttribute('aria-hidden','true');nav.prepend(mark)}
   if(!on||typeof on.getBoundingClientRect!=='function'||!on.offsetHeight){mark.style.opacity='0';UI.navMark=null;return}
+  watchNavWidth(nav);
+  const key=on.dataset?.id??on.querySelector?.('[data-id]')?.dataset?.id??'all';
   const nb=nav.getBoundingClientRect(),b=on.getBoundingClientRect();
-  const next={y1:b.top-nb.top+nav.scrollTop,y2:b.bottom-nb.top+nav.scrollTop,x:b.left-nb.left,w:b.width},prev=UI.navMark;
+  const next={key,y1:b.top-nb.top+nav.scrollTop,y2:b.bottom-nb.top+nav.scrollTop,x:b.left-nb.left,w:b.width},prev=UI.navMark;
   const set=g=>{mark.style.setProperty('--nav-y1',`${g.y1}px`);mark.style.setProperty('--nav-y2',`${g.y2}px`);mark.style.left=`${g.x}px`;mark.style.width=`${g.w}px`};
   UI.navMark=next;mark.style.opacity='1';
-  if(!prev||window.matchMedia?.('(prefers-reduced-motion: reduce)').matches){set(next);return}
-  set(prev);mark.classList.remove('is-down','is-up');mark.classList.add(next.y1>=prev.y1?'is-down':'is-up');void mark.offsetWidth;set(next);
+  /* A new selection, or the same row pushed up or down, glides; a change of
+     width (the rail resized or collapsed) just snaps. */
+  const sameWidth=prev&&Math.abs(prev.x-next.x)<.5&&Math.abs(prev.w-next.w)<.5;
+  const glide=prev&&(prev.key!==key||(sameWidth&&(prev.y1!==next.y1||prev.y2!==next.y2)));
+  if(!glide||window.matchMedia?.('(prefers-reduced-motion: reduce)').matches){mark.classList.remove('is-down','is-up');set(next);return}
+  set(prev);mark.classList.remove('is-down','is-up');void mark.offsetWidth;mark.classList.add(next.y1>=prev.y1?'is-down':'is-up');set(next);
+}
+/* The rail's width animates when it is collapsed or dragged; follow it. Only a
+   width change counts, so a project opening below does not cut a move short. */
+function watchNavWidth(nav){
+  const view=$('#projectsView');
+  if(view?.dataset&&!view.dataset.navSettle&&typeof view.addEventListener==='function'){
+    view.dataset.navSettle='1';
+    view.addEventListener('transitionend',e=>{if(e.target===view&&e.propertyName==='grid-template-columns'&&UI.navMark)placeNavIndicator()});
+  }
+  if(UI.navWidthWatch||typeof ResizeObserver!=='function')return;
+  let last=nav.getBoundingClientRect().width;
+  UI.navWidthWatch=new ResizeObserver(entries=>{
+    const width=entries[0]?.contentRect?.width;if(width==null||Math.abs(width-last)<.5)return;
+    last=width;if(UI.navMark)placeNavIndicator();
+  });
+  UI.navWidthWatch.observe(nav);
 }
 /* Where a drop at (x, y) would go. Over the middle of a folder a project goes
    into it; between rows it takes that gap, and where a gap could be either
@@ -1362,7 +1387,7 @@ function openArchivedMeeting(p,id){
   cancelMeetingOpen();
   const m=(S.meetings||[]).find(x=>x.id===id&&x.projectId===p.id);if(!m)return;
   if(!meetingLoaded(m))return loadMeeting(m,()=>openArchivedMeeting(p,id));
-  meetingMount(`<div class="eyebrow">${escapeHTML(p.name)} · 归档会议</div><h2>${escapeHTML(m.title)}</h2><p class="muted">${escapeHTML(m.scheduledAt||'未安排')} · ${escapeHTML((m.participants||[]).join('、'))}</p><p>${escapeHTML(m.agenda||'')}</p><label class="form-field">原始转录<textarea readonly rows="10">${escapeHTML(m.rawTranscript||'')}</textarea></label><section class="meeting-minutes-preview"><h3>会议纪要</h3><div class="meeting-minutes-body">${escapeHTML(m.minutes||'尚未生成')}</div></section><div class="modal-footer"><button type="button" class="secondary-btn" id="cancelAction">关闭</button></div>`);
+  meetingMount(`<div class="eyebrow">${escapeHTML(p.name)} · 归档会议</div><h2>${escapeHTML(m.title)}</h2><p class="muted">${escapeHTML(m.scheduledAt||'未安排')} · ${escapeHTML((m.participants||[]).join('、'))}</p><p>${escapeHTML(m.agenda||'')}</p><label class="form-field">原始转录<textarea readonly rows="10">${escapeHTML(m.rawTranscript||'')}</textarea></label><section class="meeting-minutes-preview"><h3>会议纪要</h3><div class="meeting-minutes-body md-body">${m.minutes?mdRender(m.minutes):'<p class="md-empty">尚未生成</p>'}</div></section><div class="modal-footer"><button type="button" class="secondary-btn" id="cancelAction">关闭</button></div>`);
   $('#cancelAction').onclick=()=>{const pane=$('#meetingEditor');if(pane)pane.innerHTML='<p class="muted space-empty">选择一场会议</p>';else closeModal()};
 }
 function openMeetingEditor(p,meetingId=null){
@@ -1377,7 +1402,7 @@ function openMeetingEditor(p,meetingId=null){
   const owner=S.user?.id,current=meetingId?(S.meetings||[]).find(m=>m.id===meetingId&&m.projectId===p.id):null,manage=canManageProject(p);if(meetingId&&!current){toast('会议已删除或无权访问');return}if(!current&&!manage){toast('只有项目 Owner 或管理员可以新增会议');return}
   if(current)meetingLive.revisions.set(`${S.user?.id}:${current.id}`,current.revision||0);
   const m=current||{title:'',scheduledAt:'',participants:[],agenda:'',rawTranscript:'',minutes:'',status:'scheduled'};
-  meetingMount(`<div class="eyebrow">${escapeHTML(p.name)} · 项目会议</div><h2>${current?escapeHTML(m.title):'新增会议'}</h2><div class="meeting-editor-grid"><label class="form-field">会议名称<input id="meetingTitle" maxlength="120" value="${escapeHTML(m.title)}"></label><label class="form-field">安排时间<input id="meetingScheduledAt" type="datetime-local" value="${escapeHTML(m.scheduledAt||'')}"></label></div><label class="form-field">参会人（用逗号分隔）<input id="meetingParticipants" value="${escapeHTML((m.participants||[]).join('、'))}"></label><label class="form-field">会议议程<textarea id="meetingAgenda" rows="3">${escapeHTML(m.agenda||'')}</textarea></label><label class="form-field">原始转录<textarea id="meetingTranscript" rows="10" maxlength="200000" placeholder="可粘贴实时转录原稿，或使用下方实时录入">${escapeHTML(m.rawTranscript||'')}</textarea></label><div class="meeting-live-bar"><button type="button" class="secondary-btn" id="meetingLiveBtn">开始实时录入</button><span id="meetingLiveState" class="muted"></span></div><section class="meeting-minutes-preview"><div class="space-head"><h3>整理后的会议纪要</h3><button type="button" class="secondary-btn" id="generateMeetingMinutes" ${current&&m.rawTranscript?'':'disabled'}>根据模板生成</button></div><div id="meetingMinutes" class="meeting-minutes-body">${m.minutes?escapeHTML(m.minutes):'<span class="muted">尚未生成</span>'}</div></section><div class="modal-footer"><button type="button" class="secondary-btn" id="cancelAction">关闭</button><button type="button" class="primary-btn" id="saveMeeting">${current?'保存会议':'创建会议'}</button></div>`);
+  meetingMount(`<div class="eyebrow">${escapeHTML(p.name)} · 项目会议</div><h2>${current?escapeHTML(m.title):'新增会议'}</h2><div class="meeting-editor-grid"><label class="form-field">会议名称<input id="meetingTitle" maxlength="120" value="${escapeHTML(m.title)}"></label><label class="form-field">安排时间<input id="meetingScheduledAt" type="datetime-local" value="${escapeHTML(m.scheduledAt||'')}"></label></div><label class="form-field">参会人（用逗号分隔）<input id="meetingParticipants" value="${escapeHTML((m.participants||[]).join('、'))}"></label><label class="form-field">会议议程<textarea id="meetingAgenda" rows="3">${escapeHTML(m.agenda||'')}</textarea></label><label class="form-field">原始转录<textarea id="meetingTranscript" rows="10" maxlength="200000" placeholder="可粘贴实时转录原稿，或使用下方实时录入">${escapeHTML(m.rawTranscript||'')}</textarea></label><div class="meeting-live-bar"><button type="button" class="secondary-btn" id="meetingLiveBtn">开始实时录入</button><span id="meetingLiveState" class="muted"></span></div><section class="meeting-minutes-preview"><div class="space-head"><h3>整理后的会议纪要</h3><button type="button" class="secondary-btn" id="generateMeetingMinutes" ${current&&m.rawTranscript?'':'disabled'}>根据模板生成</button></div>${mdEditorHTML({id:'meetingMinutesEditor',inputId:'meetingMinutesInput',viewId:'meetingMinutes',value:m.minutes||'',rows:12,mode:'preview',empty:'尚未生成，可以点「根据模板生成」，也可以直接编辑',placeholder:'会议结论、待办、风险……（支持 Markdown）'})}</section><div class="modal-footer"><button type="button" class="secondary-btn" id="cancelAction">关闭</button><button type="button" class="primary-btn" id="saveMeeting">${current?'保存会议':'创建会议'}</button></div>`);
   const text=$('#meetingTranscript'),save=$('#saveMeeting'),generate=$('#generateMeetingMinutes'),live=$('#meetingLiveBtn');
   const values=()=>({title:$('#meetingTitle').value.trim(),scheduledAt:$('#meetingScheduledAt').value,participants:$('#meetingParticipants').value.split(/[、,，]/).map(x=>x.trim()).filter(Boolean),agenda:$('#meetingAgenda').value});
   let busy=false;
@@ -1385,20 +1410,21 @@ function openMeetingEditor(p,meetingId=null){
   const persist=async()=>{
     const data=values();if(!data.title)throw new Error('请填写会议名称');
     await meetingStopLive();
-    const transcript=text.value;
-    const result=await api('/api/action',{action:m.id?'meeting.transcript.update':'meeting.create',data:{...(m.id?{id:m.id}:{projectId:p.id}),...data,rawTranscript:transcript,...(m.id?{expectedRevision:meetingLive.revisions.get(`${S.user?.id}:${m.id}`)??m.revision??0}:{})}});
+    const transcript=text.value,minutes=$('#meetingMinutesInput')?.value||'';
+    const result=await api('/api/action',{action:m.id?'meeting.transcript.update':'meeting.create',data:{...(m.id?{id:m.id}:{projectId:p.id}),...data,rawTranscript:transcript,minutes,...(m.id?{expectedRevision:meetingLive.revisions.get(`${S.user?.id}:${m.id}`)??m.revision??0}:{})}});
     if(S.user?.id!==owner)throw new Error('账户已切换');
-    Object.assign(m,result);meetingLive.revisions.set(`${S.user?.id}:${m.id}`,result.revision||0);const pane=$('#meetingEditor');const metadataChanged=JSON.stringify(values())!==JSON.stringify(data);if(pane){pane.dataset.dirty=String(metadataChanged||text.value!==transcript);pane.dataset.metadataDirty=String(metadataChanged)}else UI.docDirty=metadataChanged||text.value!==transcript;S.meetings=[...(S.meetings||[]).filter(x=>x.id!==m.id),m];return m;
+    Object.assign(m,result);meetingLive.revisions.set(`${S.user?.id}:${m.id}`,result.revision||0);const pane=$('#meetingEditor');const metadataChanged=JSON.stringify(values())!==JSON.stringify(data)||($('#meetingMinutesInput')?.value||'')!==minutes;if(pane){pane.dataset.dirty=String(metadataChanged||text.value!==transcript);pane.dataset.metadataDirty=String(metadataChanged)}else UI.docDirty=metadataChanged||text.value!==transcript;S.meetings=[...(S.meetings||[]).filter(x=>x.id!==m.id),m];return m;
   };
   const run=async(work)=>{if(busy)return;busy=true;sync();try{await work()}catch(e){toast(e.message)}finally{busy=false;sync()}};
   const closeEditor=()=>{const pane=$('#meetingEditor');if(pane){pane.innerHTML='<p class="muted space-empty">选择一场会议</p>';pane.dataset.dirty='false'}else closeModal()};
   const markDirty=e=>{const pane=$('#meetingEditor');if(pane){pane.dataset.dirty='true';if(e.target.id!=='meetingTranscript')pane.dataset.metadataDirty='true'}else UI.docDirty=true;sync()};
-  ['#meetingTitle','#meetingScheduledAt','#meetingParticipants','#meetingAgenda','#meetingTranscript'].forEach(id=>$(id)?.addEventListener('input',markDirty));
+  ['#meetingTitle','#meetingScheduledAt','#meetingParticipants','#meetingAgenda','#meetingTranscript','#meetingMinutesInput'].forEach(id=>$(id)?.addEventListener('input',markDirty));
+  bindMdEditor($('#meetingMinutesEditor'));
   $('#cancelAction').onclick=()=>run(async()=>{await persist();if($('#meetingEditor')?.dataset?.dirty==='true'){toast('已保存提交版本，仍有未保存修改');return}closeEditor();renderProjectSpace(p.id)});text.addEventListener('input',sync);sync();
   save.onclick=()=>run(async()=>{await persist();if(!text.isConnected)return;const pane=$('#meetingEditor');if(!pane)closeModal();renderProjectSpace(p.id);renderProjectNav();toast('会议已保存')});
   generate.onclick=()=>run(async()=>{
     generate.textContent='整理中…';
-    try{await persist();const updated=await api('/api/action',{action:'meeting.minutes.generate',data:{id:m.id}});if(S.user?.id!==owner)return;Object.assign(m,updated);if(text.isConnected)$('#meetingMinutes').textContent=updated.minutes||'未生成';toast('会议纪要已生成')}
+    try{await persist();const updated=await api('/api/action',{action:'meeting.minutes.generate',data:{id:m.id}});if(S.user?.id!==owner)return;Object.assign(m,updated);if(text.isConnected){const editor=$('#meetingMinutesEditor');if(editor?.querySelector)mdSet(editor,updated.minutes||'');else{const view=$('#meetingMinutes');if(view)view.innerHTML=mdRender(updated.minutes||'未生成')}}toast('会议纪要已生成')}
     finally{generate.textContent='根据模板生成'}
   });
   live.onclick=()=>run(async()=>{
@@ -1645,8 +1671,8 @@ function projectBackground(p,manage){
   const text=p.background||'';
   return `<section class="space-section"><div class="space-head"><h2>项目背景</h2>${manage?'<button class="primary-btn is-idle" '
     +'id="saveBackground" disabled>已保存</button>':''}</div>`
-    +`${manage?docEdit(text,'id="spaceBackground" data-placeholder="为什么做、要达成什么、边界在哪里"')
-    :`<div class="space-text">${text?escapeHTML(text):'<span class="muted">Owner 还没有写项目背景</span>'}</div>`}</section>`;
+    +`${manage?mdEditorHTML({id:'spaceBackgroundEditor',inputId:'spaceBackground',viewId:'spaceBackgroundView',value:text,rows:8,mode:text?'preview':'edit',placeholder:'为什么做、要达成什么、边界在哪里（支持 Markdown）',empty:'还没有写项目背景'})
+    :`<div class="space-text md-body">${text?mdRender(text):'<span class="muted">Owner 还没有写项目背景</span>'}</div>`}</section>`;
 }
 /* 项目人力: who is on the project and what each one carries. A member's own
    snapshot only holds their own tasks, so others' load is shown to managers. */
@@ -1674,11 +1700,127 @@ const MAX_FILE_MB=20;
 /* Files and meetings form one list, newest first, with dates read as dates. */
 const whenText=iso=>{const day=String(iso||'').slice(0,10),time=String(iso||'').slice(11,16);
   return /^\d{4}-\d\d-\d\d$/.test(day)?`${fmt(day)}${time?` ${time}`:''}`:'未安排'};
+/* Markdown, the small safe subset the workbench writes and reads: headings,
+   paragraphs, bold / italic / strikethrough / inline code, links, lists with
+   to-dos and nesting, quotes, code blocks, tables and rules. Everything is
+   escaped first; links open only http(s) and mailto. */
+function mdInline(text){
+  const tokens=[],keep=html=>`\u0000${tokens.push(html)-1}\u0000`;
+  const marks=s=>s.replace(/\*\*([^*\n]+)\*\*|__([^_\n]+)__/g,(_,a,b)=>`<strong>${a??b}</strong>`)
+    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g,'$1<em>$2</em>')
+    .replace(/~~([^~\n]+)~~/g,'<del>$1</del>');
+  let s=escapeHTML(String(text).replace(/\u0000/g,'')).replace(/`([^`\n]+)`/g,(_,c)=>keep(`<code>${c}</code>`));
+  s=s.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g,(all,label,url)=>{
+    const href=url.replace(/&amp;/g,'&');
+    return /^(https?:\/\/|mailto:)/i.test(href)?keep(`<a href="${escapeHTML(href)}" target="_blank" rel="noopener noreferrer">${marks(label)}</a>`):all});
+  s=s.replace(/(^|[\s(（])(https?:\/\/[^\s<)）]+)/g,(_,pre,url)=>pre+keep(`<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`));
+  const restore=(_,i)=>(tokens[i]||'').replace(/\u0000(\d+)\u0000/g,restore);
+  return marks(s).replace(/\u0000(\d+)\u0000/g,restore);
+}
+function mdRender(src){
+  const lines=String(src||'').replace(/\r\n?/g,'\n').split('\n'),out=[];let i=0;
+  const isList=l=>/^\s*([-*+]|\d+[.)])\s+/.test(l),isBlockStart=l=>/^(#{1,6}\s|>|```|\s*([-*_])\s*(\2\s*){2,}$)/.test(l)||isList(l)||/^\s*\|.*\|\s*$/.test(l);
+  while(i<lines.length){
+    const line=lines[i];
+    if(!line.trim()){i++;continue}
+    const fence=line.match(/^```\s*(\S*)/);
+    if(fence){const code=[];i++;while(i<lines.length&&!/^```/.test(lines[i]))code.push(lines[i++]);i++;
+      out.push(`<pre><code>${escapeHTML(code.join('\n'))}</code></pre>`);continue}
+    const h=line.match(/^(#{1,6})\s+(.*)$/);
+    if(h){const n=Math.min(6,h[1].length+1);out.push(`<h${n}>${mdInline(h[2].replace(/\s+#+\s*$/,''))}</h${n}>`);i++;continue}
+    if(/^\s*([-*_])\s*(\1\s*){2,}$/.test(line)){out.push('<hr>');i++;continue}
+    if(/^>/.test(line)){const quote=[];while(i<lines.length&&/^>/.test(lines[i]))quote.push(lines[i++].replace(/^>\s?/,''));
+      out.push(`<blockquote>${mdRender(quote.join('\n'))}</blockquote>`);continue}
+    if(/^\s*\|.*\|\s*$/.test(line)&&/^\s*\|?\s*:?-{2,}/.test(lines[i+1]||'')){
+      const cells=l=>l.trim().replace(/^\||\|$/g,'').split('|').map(c=>c.trim());
+      const head=cells(line);i+=2;const body=[];
+      while(i<lines.length&&/^\s*\|.*\|\s*$/.test(lines[i]))body.push(cells(lines[i++]));
+      out.push(`<table><thead><tr>${head.map(c=>`<th>${mdInline(c)}</th>`).join('')}</tr></thead>`
+        +`<tbody>${body.map(r=>`<tr>${head.map((_,k)=>`<td>${mdInline(r[k]||'')}</td>`).join('')}</tr>`).join('')}</tbody></table>`);continue}
+    if(isList(line)){
+      /* Nested lists by indentation; each level is a list of its own kind. */
+      const stack=[];let html='';
+      const close=()=>{html+=`</${stack.pop()}>`+(stack.length?'</li>':'')};
+      while(i<lines.length&&(isList(lines[i])||(lines[i].trim()&&/^\s{2,}/.test(lines[i])&&stack.length))){
+        const m=lines[i].match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
+        if(!m){html=html.replace(/<\/li>$/,'')+`<br>${mdInline(lines[i].trim())}</li>`;i++;continue}
+        const depth=Math.floor(m[1].replace(/\t/g,'  ').length/2),tag=/\d/.test(m[2])?'ol':'ul';
+        while(stack.length>depth+1||(stack.length===depth+1&&stack[stack.length-1]!==tag))close();
+        while(stack.length<depth+1){if(stack.length&&html.endsWith('</li>'))html=html.slice(0,-5);stack.push(tag);html+=`<${tag}>`}
+        const task=m[3].match(/^\[([ xX])\]\s+(.*)$/);
+        html+=task?`<li class="md-task"><input type="checkbox" disabled${task[1]===' '?'':' checked'}> ${mdInline(task[2])}</li>`:`<li>${mdInline(m[3])}</li>`;
+        i++;
+      }
+      while(stack.length)close();
+      out.push(html);continue}
+    const para=[];
+    while(i<lines.length&&lines[i].trim()&&!(para.length&&isBlockStart(lines[i])))para.push(lines[i++]);
+    out.push(`<p>${para.map(mdInline).join('<br>')}</p>`);
+  }
+  return out.join('');
+}
+/* An editor: 编辑 shows the text with a small toolbar, 预览 shows it rendered.
+   The textarea keeps its own id so existing save logic can read it. */
+const MD_TOOLS=[['h','标题','## ',''],['b','加粗','**','**'],['i','斜体','*','*'],['ul','列表','- ',''],['todo','待办','- [ ] ',''],
+  ['quote','引用','> ',''],['code','代码','`','`'],['link','链接','[','](https://)']];
+function mdEditorHTML({id,inputId,viewId,value='',placeholder='',rows=10,mode='preview',empty='还没有内容',readonly=false}){
+  return `<div class="md-editor${readonly?' is-readonly':''}" id="${id}" data-mode="${readonly?'preview':mode}" data-empty="${escapeHTML(empty)}">`
+    +`<div class="md-bar"><div class="md-tabs" role="tablist"><button type="button" role="tab" data-md-mode="edit">编辑</button>`
+    +`<button type="button" role="tab" data-md-mode="preview">预览</button></div>`
+    +`<div class="md-tools">${MD_TOOLS.map(([k,label])=>`<button type="button" data-md-tool="${k}" title="${label}" aria-label="${label}">${MD_TOOL_GLYPH[k]}</button>`).join('')}</div></div>`
+    +`<textarea class="md-input" id="${inputId}" rows="${rows}" placeholder="${escapeHTML(placeholder)}" spellcheck="false">${escapeHTML(value)}</textarea>`
+    +`<div class="md-view md-body" id="${viewId}">${mdRender(value)||`<p class="md-empty">${escapeHTML(empty)}</p>`}</div></div>`;
+}
+const MD_TOOL_GLYPH={h:'H',b:'<b>B</b>',i:'<i>I</i>',ul:'•',todo:'☐',quote:'❝',code:'&lt;/&gt;',link:'↗'};
+function mdShow(root,mode,focus=true){
+  root.dataset.mode=mode;
+  root.querySelectorAll('[data-md-mode]').forEach(b=>{const on=b.dataset.mdMode===mode;b.setAttribute('aria-selected',String(on));b.classList.toggle('is-on',on)});
+  const input=root.querySelector('.md-input'),view=root.querySelector('.md-view');
+  if(mode==='preview')view.innerHTML=mdRender(input.value)||`<p class="md-empty">${escapeHTML(root.dataset.empty||'')}</p>`;
+  else if(focus)input.focus({preventScroll:true});
+}
+function mdApply(input,tool){
+  const t=MD_TOOLS.find(x=>x[0]===tool);if(!t)return;
+  const [,,before,after]=t,{selectionStart:a,selectionEnd:b,value}=input,picked=value.slice(a,b);
+  const lineTool=!after&&before.trim()!=='';
+  if(lineTool){
+    const start=value.lastIndexOf('\n',a-1)+1,block=value.slice(start,b);
+    const next=block.split('\n').map(l=>l.startsWith(before)?l.slice(before.length):before+l).join('\n');
+    input.value=value.slice(0,start)+next+value.slice(b);input.setSelectionRange(start,start+next.length);
+  }else{
+    const text=picked||(tool==='link'?'链接文字':'文字');
+    input.value=value.slice(0,a)+before+text+after+value.slice(b);
+    input.setSelectionRange(a+before.length,a+before.length+text.length);
+  }
+  input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();
+}
+function bindMdEditor(root){
+  if(!root?.querySelectorAll)return;
+  const input=root.querySelector('.md-input');
+  root.querySelectorAll('[data-md-mode]').forEach(b=>b.onclick=()=>mdShow(root,b.dataset.mdMode));
+  root.querySelectorAll('[data-md-tool]').forEach(b=>b.onmousedown=e=>e.preventDefault());
+  root.querySelectorAll('[data-md-tool]').forEach(b=>b.onclick=()=>mdApply(input,b.dataset.mdTool));
+  input?.addEventListener('keydown',e=>{
+    if(!(e.metaKey||e.ctrlKey))return;
+    const tool={b:'b',i:'i',k:'link'}[e.key.toLowerCase()];if(tool){e.preventDefault();mdApply(input,tool)}
+  });
+  mdShow(root,root.dataset.mode||'preview',false);
+}
+function mdSet(root,value){
+  if(!root?.querySelector)return;
+  root.querySelector('.md-input').value=value||'';
+  root.querySelector('.md-view').innerHTML=mdRender(value)||`<p class="md-empty">${escapeHTML(root.dataset.empty||'')}</p>`;
+}
+
+/* Images, PDFs and plain text open in a new tab; the server checks the bytes again. */
+const filePreviewable=name=>/\.(png|jpe?g|gif|webp|pdf|txt|md|csv|log|json)$/i.test(String(name||''));
 function projectFiles(p,readonly=false,includeMeetings=true){
   const canDrop=f=>!readonly&&(S.user?.admin||p.owner===S.user?.id||f.uploader===S.user?.id);
   const file=f=>`<div class="file-row"><span class="file-ext">${escapeHTML(fileExt(f.name))}</span><a class="file-name" href="/api/files/`
     +`${encodeURIComponent(f.id)}" download="${escapeHTML(f.name)}">${escapeHTML(f.name)}</a><small>${escapeHTML(fileSize(f.size))} · `
-    +`${escapeHTML(nameOf(f.uploader))} · <span title="${escapeHTML(f.createdAt)}">${escapeHTML(relTime(f.createdAt))}</span></small>`
+    +`${escapeHTML(nameOf(f.uploader))} · <span title="${escapeHTML(f.createdAt)}">${escapeHTML(relTime(f.createdAt))}</span>`
+    +`${/\.md$/i.test(f.name)?` · <button type="button" class="text-btn file-preview" data-md-file="${escapeHTML(f.id)}">打开</button>`
+      :filePreviewable(f.name)?` · <a class="file-preview" href="/api/files/${encodeURIComponent(f.id)}?preview=1" target="_blank" rel="noopener">预览</a>`:''}</small>`
     +`${canDrop(f)?`<button class="ghost-btn file-delete" data-file="${escapeHTML(f.id)}" aria-label="删除 ${escapeHTML(f.name)}" title="删除">`
     +`${icon('x')}</button>`:'<span></span>'}</div>`;
   const meeting=m=>`<button type="button" class="file-row meeting-row" data-meeting="${escapeHTML(m.id)}"><span class="file-ext is-meeting">会议</span>`
@@ -1692,6 +1834,42 @@ function projectFiles(p,readonly=false,includeMeetings=true){
     +`${rows.length?`<div class="file-list">${rows.map(r=>r.html).join('')}</div>`:'<p class="space-empty">还没有文件</p>'}`
     +`</section>`;
 
+}
+/* A Markdown file opens rendered; its uploader, the project Owner and admins
+   can switch to 编辑 and save it in place. */
+async function openMarkdownFile(p,id){
+  const f=(S.files||[]).find(x=>x.id===id&&x.projectId===p.id);if(!f)return;
+  // Share the meeting reader's navigation lifecycle: opening another viewer,
+  // changing account/view/project or closing the modal invalidates this read.
+  cancelMeetingOpen();
+  const generation=meetingOpenGeneration,scope=meetingOpenScope(),owner=S.user?.id;
+  const current=()=>generation===meetingOpenGeneration&&scope===meetingOpenScope();
+  let text;
+  try{const r=await fetch(`/api/files/${encodeURIComponent(id)}?preview=1`,{credentials:'same-origin'});if(!r.ok)throw new Error('读不到文件');text=await r.text()}
+  catch(e){if(current())toast(e.message);return}
+  if(!current())return;
+  const archived=(S.fileArchives||[]).some(x=>x.id===p.id),editable=!archived&&(S.user?.admin||p.owner===S.user?.id||f.uploader===S.user?.id);
+  openModal(`<div class="eyebrow">${escapeHTML(p.name)} · 文件</div><h2>${escapeHTML(f.name)}</h2>`
+    +mdEditorHTML({id:'mdFileEditor',inputId:'mdFileInput',viewId:'mdFileView',value:text,rows:18,readonly:!editable,empty:'文件是空的'})
+    +`<div class="modal-footer"><a class="secondary-btn" href="/api/files/${encodeURIComponent(id)}" download="${escapeHTML(f.name)}">下载</a>`
+    +`<button type="button" class="secondary-btn" id="cancelAction">关闭</button>${editable?'<button type="button" class="primary-btn" id="saveMdFile" disabled>保存</button>':''}</div>`);
+  $('#modalBackdrop .modal')?.classList?.add('is-wide');
+  const editor=$('#mdFileEditor');bindMdEditor(editor);$('#cancelAction').onclick=closeModal;
+  const input=$('#mdFileInput'),save=$('#saveMdFile');if(!save)return;
+  let saved=text;
+  input.addEventListener('input',()=>{UI.docDirty=input.value!==saved;save.disabled=input.value===saved});
+  save.onclick=async()=>{
+    if(save.disabled)return;
+    const next=input.value;save.disabled=true;save.textContent='保存中…';
+    try{
+      const r=await fetch(`/api/files/text?id=${encodeURIComponent(id)}`,{method:'POST',credentials:'same-origin',
+        headers:{'Content-Type':'text/plain; charset=utf-8','X-Work-Calendar':'1'},body:next});
+      const result=await readJSON(r);if(!r.ok)throw new Error(result.error||'文件保存失败');
+      if(owner!==S.user?.id||!input.isConnected)return;
+      saved=next;UI.docDirty=input.value!==saved;toast('文件已保存');refresh().catch(()=>{});
+    }catch(e){if(owner===S.user?.id&&input.isConnected)toast(e.message)}
+    finally{if(input.isConnected){save.textContent='保存';save.disabled=input.value===saved}}
+  };
 }
 async function uploadProjectFiles(p,list){
   const files=[...list];if(!files.length)return;
@@ -1710,6 +1888,7 @@ async function uploadProjectFiles(p,list){
    field and moving to the next never loses the caret. */
 function bindProjectSpace(p){
   const save=async(data,done)=>{try{await api('/api/action',{action:'project.space',data:{id:p.id,...data}});Object.assign(p,data);done?.();return true}catch(e){toast(e.message);return false}};
+  bindMdEditor($('#spaceBackgroundEditor'));
   const bg=$('#spaceBackground'),btn=$('#saveBackground');
   if(bg&&btn){
     let saved=docText(bg),saving=false;
@@ -1738,6 +1917,7 @@ function bindProjectSpace(p){
   if(menu)menu.onkeydown=e=>{if(e.key==='Escape'){menu.open=false;menu.querySelector('summary').focus()}};
   const addMeeting=$('#createMeetingFromFiles');if(addMeeting)addMeeting.onclick=async()=>{menu.open=false;await projectArea(p,'meetings');if(UI.spaceArea==='meetings')openMeetingEditor(p)};
   $$('#projectSpace .meeting-row').forEach(b=>b.onclick=()=>openMeetingEditor(p,b.dataset.meeting));
+  $$('#projectSpace [data-md-file]').forEach(b=>b.onclick=()=>openMarkdownFile(p,b.dataset.mdFile));
   $$('#projectSpace .file-delete').forEach(b=>b.onclick=async()=>{
     const f=S.files.find(x=>x.id===b.dataset.file);
     if(f&&confirm(`删除「${f.name}」？删除后无法恢复。`)){try{await act('file.delete',{id:f.id})}catch(e){}}
@@ -2960,120 +3140,450 @@ function fixedTask(){
       dates,start,end,time:$('#repeatTime').value,
       duration:Number($('#repeatDuration').value),priority:'P1',skipDates,projectId:$('#repeatProject').value||null});closeModal()}catch(e){}};
 }
-/* 使用教程: every part of the workbench, one chapter each. Steps are lists so a
-   reader can follow them with the page open beside it. */
+/* 使用教程 · 演示. Each demo is a miniature of the real screen that plays its
+   steps in a loop while it is on screen. Elements say when they appear
+   (data-in), leave (data-out), move (data-move with --to), type (data-type) or
+   fill (data-fill with --w); the step classes s1…sN switch them on. */
+const card=(prio,name,meta,state,attrs='',cls='')=>`<div class="dm-card${cls?' '+cls:''}"${attrs}><b class="dm-prio is-${prio.toLowerCase()}">${prio}</b><span class="dm-name">${name}</span><small>${meta}</small><em class="dm-state">${state}</em></div>`;
+const GUIDE_DEMOS={
+  'new-task':{steps:['点「新建任务」打开表单','填好名称、负责人和时间','点「创建任务」','任务立刻出现在负责人的今日任务里','负责人收到指派通知'],html:`
+    <div class="dm-split">
+      <div class="dm-pane dm-dialog" data-out="3"><h6>新任务</h6>
+        <label>任务名称<i data-type="1">整理竞品报价</i></label>
+        <label>指派给<i data-in="1">陈曦</i></label>
+        <label>安排<i data-in="1">今天 14:00 · 60 分钟 · P1</i></label>
+        <span class="dm-btn is-primary">创建任务<i class="dm-tap" data-in="2" data-out="3"></i></span></div>
+      <div class="dm-pane"><h6>陈曦 · 今日任务 <span class="dm-bell">${icon('bell')}<i data-in="4">1</i></span></h6>
+        ${card('P1','晨会同步','09:30 · 15 分钟','进行中')}
+        ${card('P1','整理竞品报价','14:00 · 60 分钟','待开始',' data-in="3"')}</div>
+    </div>`},
+  'task-life':{steps:['任务排在 14:00，还没到时间','到点自动变成「进行中」','做完点「记录完成」，写一句总结和实际耗时','任务完成，今日进度随之前进'],html:`
+    <div class="dm-pane dm-wide"><h6>今日任务 <span class="dm-clock"><i data-out="1">13:58</i><i data-in="1">14:00</i></span></h6>
+      <div class="dm-card"><b class="dm-prio is-p1">P1</b><span class="dm-name">整理竞品报价</span><small>14:00 · 60 分钟</small>
+        <em class="dm-state" data-out="1">待开始</em><em class="dm-state is-doing" data-in="1" data-out="3">进行中</em><em class="dm-state is-done" data-in="3">${icon('check')}已完成</em></div>
+      <div class="dm-sheet" data-in="2" data-out="3"><span>完成总结</span><i data-type="2">已整理 6 家报价，见文件</i><span>实际耗时 <b>75 分钟</b> · 顺利</span></div>
+      <div class="dm-meter"><span>今日进度</span><div class="dm-bar"><i data-fill="3" style="--w:50%"></i></div><b><i data-out="3">0 / 2</i><i data-in="3">1 / 2</i></b></div>
+    </div>`},
+  'defer':{steps:['周四还有一项没做完','过了零点，系统把它递延到周五','周五的卡片写明「由周四递延 · 第 1 次」，周四那张留作记录'],html:`
+    <div class="dm-week is-two">
+      <div class="dm-col"><h6>周四</h6>${card('P0','提交方案初稿','16:00 · 2 小时','进行中',' data-out="1"')}
+        ${card('P0','提交方案初稿','16:00 · 2 小时','已递延',' data-in="1"','is-muted')}</div>
+      <div class="dm-col"><h6>周五</h6><div class="dm-ghost" data-move="1" data-out="2" style="--to:translateX(calc(100% + 12px))"></div>
+        <div class="dm-card is-carried" data-in="2"><b class="dm-prio is-p0">P0</b><span class="dm-name">提交方案初稿</span><small>由周四递延 · 第 1 次</small><em class="dm-state">待开始</em></div></div>
+      <span class="dm-night" data-in="1" data-out="2">00:00</span>
+    </div>`},
+  'repeat':{steps:['制定一条规则：每周一、三、五 09:30 晨会，15 分钟','保存后，系统按规则把之后的晨会排进每个人的日程','不需要的那一次，在规则里「挖空本次」'],html:`
+    <div class="dm-rule"><span>${icon('repeat')}晨会同步</span><b>每周 一 · 三 · 五</b><small>09:30 · 15 分钟 · 林默、周一</small></div>
+    <div class="dm-week">${['一','二','三','四','五'].map((d,i)=>`<div class="dm-col"><h6>周${d}</h6>${i%2===0?`<div class="dm-mini" data-in="1"${i===4?' data-out="2"':''}>晨会</div>${i===4?'<div class="dm-mini is-skipped" data-in="2">已挖空</div>':''}`:''}</div>`).join('')}</div>`},
+  'stack':{steps:['同一条固定任务，三期都没做完','开启「递延合并」后，它们合成一张卡，标着「3 期」','点一次「完成全部 3 期」就全部结清'],html:`
+    <div class="dm-pane dm-wide"><h6>今日任务</h6>
+      <div class="dm-stack">
+        ${['周一','周三','周五'].map((d,i)=>`<div class="dm-card" data-move="1" style="--to:translateY(${-i*44}px)" data-out="1"><b class="dm-prio is-p1">P1</b><span class="dm-name">周报汇总</span><small>${d} · 30 分钟</small><em class="dm-state">已递延</em></div>`).join('')}
+        <div class="dm-card is-stacked" data-in="1"><b class="dm-prio is-p1">P1</b><span class="dm-name">周报汇总 <i class="dm-count">3 期</i></span><small>30 分钟</small>
+          <em class="dm-state" data-out="2">待开始</em><em class="dm-state is-done" data-in="2">${icon('check')}已完成</em></div>
+      </div><span class="dm-btn is-primary" data-in="1" data-out="2">完成全部 3 期</span></div>`},
+  'approval':{steps:['所在规则组需要审批时，按钮显示「申请任务」','申请进入审批人的收件箱，上面直接有同意和驳回','同意后，任务出现在负责人的日程里，申请人收到结果'],html:`
+    <div class="dm-split">
+      <div class="dm-pane"><h6>何雨</h6><span class="dm-btn">申请任务</span><div class="dm-swap is-block">
+        <div class="dm-card" data-in="1" data-out="2"><b class="dm-prio is-p1">P1</b><span class="dm-name">官网首屏改版</span><small>等待审批</small><em class="dm-state">申请中</em></div>
+        ${card('P1','官网首屏改版','周五 10:00 · 3 小时','待开始',' data-in="2"')}</div></div>
+      <div class="dm-pane"><h6>收件箱 · 林默</h6>
+        <div class="dm-notice" data-in="1"><b>任务申请</b><span>何雨 申请「官网首屏改版」</span>
+          <div><span class="dm-btn is-primary">同意创建<i class="dm-tap" data-in="2"></i></span><span class="dm-btn">驳回申请</span></div></div></div>
+    </div>`},
+  'rework':{steps:['任务已完成','Owner 觉得还缺东西，点「打回」并写明原因','任务回到负责人的待办，排到今天，原因写在卡上'],html:`
+    <div class="dm-split">
+      <div class="dm-pane"><h6>周一 · 今日任务</h6>
+        <div class="dm-swap is-block">${card('P1','市场规模数据','昨天 · 2 小时','已完成',' data-out="2"')}
+        <div class="dm-card is-returned" data-in="2"><b class="dm-prio is-p1">P1</b><span class="dm-name">市场规模数据</span><small>打回：补上数据来源</small><em class="dm-state">待开始</em></div></div></div>
+      <div class="dm-pane dm-dialog" data-in="1" data-out="2"><h6>打回「市场规模数据」</h6><label>打回原因<i data-type="1">补上数据来源</i></label><span class="dm-btn is-primary">打回并通知</span></div>
+    </div>`},
+  'tree':{steps:['目录：文件夹装着项目','点项目，选中块滑过去，项目在右边打开','项目下展开会议和文件，点会议直接进会议标签'],html:`
+    <div class="dm-tree"><i class="dm-mark" data-move="1" style="--to:translateY(66px)"></i>
+      <div class="dm-tnode">${icon('layout-grid')}全部项目</div>
+      <div class="dm-tnode">${icon('folder')}年度战略</div>
+      <div class="dm-tbranch"><div class="dm-tnode">${icon('gantt')}2027 战略规划</div>
+        <div class="dm-tbranch" data-in="2"><div class="dm-tnode is-sub">${icon('chat')}会议 2</div><div class="dm-tnode is-sub">${icon('folder')}文件 5</div></div>
+        <div class="dm-tnode">${icon('gantt')}竞品月报</div></div>
+    </div>
+    <div class="dm-pane dm-page" data-in="1"><h6>2027 战略规划</h6><div class="dm-tabs"><b>任务</b><span>会议</span><span>文件</span><span>成员</span><span>概况</span></div>
+      ${card('P0','确定三大战略主题','林默 · 11月4日','进行中')}</div>`},
+  'upload':{steps:['把文件从电脑拖到「文件」标签','松手就开始上传，单个文件不超过 20MB','上传完成，所有成员都能下载'],html:`
+    <div class="dm-pane dm-wide is-drop"><h6>文件 <span class="dm-btn">新增文件</span></h6>
+      <div class="dm-file" data-in="1"><b>PDF</b><span>竞品格局一页纸.pdf</span><small><i data-out="2">上传中…</i><i data-in="2">1.8 MB · 你 · 刚刚</i></small></div>
+      <div class="dm-file"><b>XLSX</b><span>资源分配表.xlsx</span><small>94 KB · 周一 · 昨天</small></div>
+      <div class="dm-drag" data-move="1" data-out="1" style="--to:translate(-120px,26px)"><b>PDF</b>竞品格局一页纸.pdf</div>
+    </div>`},
+  'meeting':{steps:['会议开始，点「开始实时录入」','边说边转成文字，原稿自动保存','点「根据模板生成」','AI 整理出会议结论、待办和风险'],html:`
+    <div class="dm-split">
+      <div class="dm-pane"><h6>原始转录 <span class="dm-rec" data-in="1" data-out="2">● 录入中</span></h6>
+        <p class="dm-line" data-in="1">林默：先看方向，明年聚焦两条主线。</p><p class="dm-line" data-in="1">周一：资源表周五前补齐。</p><p class="dm-line" data-in="1">陈曦：竞品数据还差两家。</p>
+        <span class="dm-btn is-primary">根据模板生成<i class="dm-tap" data-in="2" data-out="3"></i></span></div>
+      <div class="dm-pane"><h6>会议纪要</h6>
+        <div class="dm-min" data-in="3"><b>会议结论</b><span>明年聚焦两条主线</span></div>
+        <div class="dm-min" data-in="3"><b>待办</b><span>周一 · 资源表 · 周五前</span><span>陈曦 · 补两家竞品</span></div>
+        <div class="dm-min" data-in="3"><b>风险与待确认</b><span>竞品数据不完整</span></div></div>
+    </div>`},
+  'project-life':{steps:['申请项目，管理员在收件箱审批','通过后项目开始，任务推进','Owner 点「完成项目」写结项报告','管理员同意，项目进入成果库'],html:`
+    <div class="dm-life">${['申请','执行','结项审批','成果库'].map((s,i)=>`<span class="dm-stage"${i?` data-in="${i}"`:''}>${s}</span>`).join('<i></i>')}</div>
+    <div class="dm-pane dm-wide"><h6>官网改版 <span class="dm-swap"><em class="dm-state" data-out="1">待审批</em><em class="dm-state is-doing" data-in="1" data-out="3">进行中</em><em class="dm-state is-done" data-in="3">已完成</em></span></h6>
+      <div class="dm-meter"><span>任务</span><div class="dm-bar"><i data-fill="1" style="--w:62%"></i><i class="is-full" data-fill="2" style="--w:100%"></i></div></div>
+      <div class="dm-sheet" data-in="2" data-out="3"><span>结项报告</span><i data-type="2">首屏与信息架构已上线，转化提升 18%</i></div>
+      <div class="dm-trophy" data-in="3">${icon('award')}已归入成果库</div></div>`},
+  'inbox':{steps:['收件箱是空的','新的指派和 @ 进来，红点显示几条没看','又来一条修改申请','「全部标为已读」一次清掉'],html:`
+    <div class="dm-pane dm-wide"><h6>收件箱 <span class="dm-bell">${icon('bell')}<i data-in="1" data-out="3"><i data-out="2">2</i><i data-in="2">3</i></i></span></h6>
+      <div class="dm-notice is-unread" data-in="1"><b>任务指派</b><span>林默 把「整理竞品报价」指派给你</span></div>
+      <div class="dm-notice is-unread" data-in="1"><b>沟通区</b><span>周一 在「2027 战略规划」里 @ 了你</span></div>
+      <div class="dm-notice is-unread" data-in="2"><b>修改申请</b><span>何雨 申请把截止改到下周一</span></div>
+      <span class="dm-btn">全部标为已读<i class="dm-tap" data-in="3"></i></span></div>`},
+  'chat':{steps:['在项目频道里输入 @','选中成员','发送后，对方收到通知，频道里也能看到'],html:`
+    <div class="dm-pane dm-wide"><h6># 2027 战略规划</h6>
+      <div class="dm-msg"><b>林默</b><span>今天下午对一下资源表</span></div>
+      <div class="dm-msg is-mine" data-in="2"><b>你</b><span><mark>@陈曦</mark> 竞品还差两家，今天能补吗？</span></div>
+      <div class="dm-mention" data-out="2"><span class="is-on">陈曦</span><span>何雨</span><span>所有人</span></div>
+      <div class="dm-input"><i data-out="1">@陈</i><i data-in="1" data-out="2"><mark>@陈曦</mark> 竞品还差两家，今天能补吗？</i></div>
+      <span class="dm-ping" data-in="2">陈曦 ${icon('bell')}</span></div>`},
+  'archive':{steps:['今天的档案还空着','系统先整理当天的完成和未完成','你补上明日计划和随记，点保存','第二天，团队日报汇总所有人和项目'],html:`
+    <div class="dm-split">
+      <div class="dm-pane"><h6>我的档案 · 11月5日</h6>
+        <div class="dm-min"><b>今日完成</b><span data-in="1">✓ 整理竞品报价</span><span data-in="1">✓ 晨会同步</span></div>
+        <div class="dm-min"><b>未完成与阻塞</b><span data-in="1">提交方案初稿（递延到明天）</span></div>
+        <div class="dm-min"><b>明日计划</b><span><i data-type="2">先交方案初稿，再约评审</i></span></div></div>
+      <div class="dm-pane" data-in="3"><h6>团队日报 · 11月5日</h6>
+        <div class="dm-kpis"><span><b>12</b>完成任务</span><span><b>18.5h</b>完成工时</span><span><b>5</b>位成员</span></div>
+        <div class="dm-min"><b>项目进展</b><span>2027 战略规划 · 1/5 · Owner 汇报</span><span>官网改版 · 0/1 · 系统汇总</span></div></div>
+    </div>`},
+  'assistant':{steps:['打开规划模式','用一句话说要安排的事','助手起草出几张卡片：谁、哪天、多久','你逐张检查、修改，确认后才真正创建'],html:`
+    <div class="dm-pane dm-wide"><h6>${icon('sparkles')}AI 助手 · 规划</h6>
+      <div class="dm-msg is-mine"><span><i data-type="1">下周把季度复盘做完：整理数据、出初稿、找林默评审</i></span></div>
+      <div class="dm-drafts">${[['整理复盘数据','周一 · 周一 · 2 小时'],['写复盘初稿','周三 · 你 · 3 小时'],['复盘评审','周五 · 林默 · 1 小时']].map(([n,m],i)=>
+        `<div class="dm-card is-draft" data-in="2" style="transition-delay:${i*.18}s"><b class="dm-prio is-p1">P1</b><span class="dm-name">${n}</span><small>${m}</small><em class="dm-state" data-out="3">草稿</em><em class="dm-state is-done" data-in="3">${icon('check')}已创建</em></div>`).join('')}</div>
+      <span class="dm-btn is-primary" data-in="2" data-out="3">接受所选</span></div>`},
+  'widget':{steps:['点顶栏的桌面小组件图标','小组件浮在所有窗口之上','开始一轮 25 分钟专注','勾选今天的任务，直接记为完成'],html:`
+    <div class="dm-pip" data-in="1"><h6>今日待办 <small>还剩 <span class="dm-num"><i data-out="3">2</i><i data-in="3">1</i></span> 项</small></h6>
+      <div class="dm-pomo"><b><i data-out="2">25:00</i><i data-in="2">24:13</i></b><span>专注 25 分钟</span><div class="dm-ring"><i data-fill="2" style="--w:4%"></i></div></div>
+      <label class="dm-check"><i class="dm-box"><b data-in="3">${icon('check')}</b></i>整理竞品报价</label>
+      <label class="dm-check"><i class="dm-box"></i>提交方案初稿</label></div>`},
+  'rules':{steps:['默认规则：成员新建项目需要审批','管理员把它改成「直接创建」','成员那边的按钮立刻从「申请项目」变成「新建项目」'],html:`
+    <div class="dm-split">
+      <div class="dm-pane"><h6>规则组 · 默认规则</h6>
+        <div class="dm-seg"><span>新项目</span><b data-out="1">需要审批</b><b class="is-ok" data-in="1">直接创建</b></div>
+        <div class="dm-seg"><span>临时任务</span><b class="is-ok">直接创建</b></div>
+        <div class="dm-seg"><span>AI 助手</span><b>查询与规划</b></div><i class="dm-tap is-left" data-in="1" data-out="2"></i></div>
+      <div class="dm-pane"><h6>成员的顶栏</h6><span class="dm-swap is-block"><span class="dm-btn" data-out="2">${icon('arrow-up-right')}申请项目</span><span class="dm-btn is-primary" data-in="2">${icon('plus')}新建项目</span></span></div>
+    </div>`},
+};
+/* Plays the demos that are on screen; each step holds for its share of the loop.
+   With reduced motion nothing plays: the dots step through by hand. */
+const DEMO_STEP_MS=2100;
+function demoStep(fig,step){
+  const steps=GUIDE_DEMOS[fig.dataset.demo]?.steps||[];fig.dataset.step=String(step);
+  for(let i=1;i<=8;i++)fig.classList.toggle(`s${i}`,i<=step);
+  const caption=fig.querySelector('.demo-caption');if(caption)caption.textContent=steps[step]||'';
+  fig.querySelectorAll('.demo-dot').forEach((d,i)=>{d.classList.toggle('is-on',i===step);d.setAttribute('aria-current',String(i===step))});
+}
+function bindGuideDemos(root){
+  const figs=[...root.querySelectorAll?.('.guide-demo')||[]];if(!figs.length)return;
+  const still=navReducedMotion();
+  figs.forEach(fig=>{
+    demoStep(fig,0);
+    fig.querySelectorAll('.demo-dot').forEach((d,i)=>d.onclick=()=>{fig.dataset.paused='1';fig.querySelector('.demo-play').textContent='播放';demoStep(fig,i)});
+    const play=fig.querySelector('.demo-play');
+    if(play){play.textContent=still?'播放':'暂停';if(still)fig.dataset.paused='1';
+      play.onclick=()=>{const paused=fig.dataset.paused==='1';fig.dataset.paused=paused?'':'1';play.textContent=paused?'暂停':'播放'}}
+  });
+  clearInterval(UI.demoTimer);
+  if(typeof IntersectionObserver==='function'){
+    UI.demoSeen?.disconnect?.();
+    UI.demoSeen=new IntersectionObserver(entries=>entries.forEach(e=>e.target.classList.toggle('is-visible',e.isIntersecting)),{threshold:.35});
+    figs.forEach(f=>UI.demoSeen.observe(f));
+  }else figs.forEach(f=>f.classList.add('is-visible'));
+  UI.demoTimer=setInterval(()=>{
+    if(UI.view!=='guide'){clearInterval(UI.demoTimer);return}
+    figs.forEach(fig=>{
+      if(fig.dataset.paused==='1'||!fig.classList.contains('is-visible'))return;
+      const n=GUIDE_DEMOS[fig.dataset.demo]?.steps.length||1,held=Number(fig.dataset.held||0)+1;
+      if(Number(fig.dataset.step)===n-1&&held<2){fig.dataset.held=String(held);return}
+      fig.dataset.held='0';demoStep(fig,(Number(fig.dataset.step)+1)%n);
+    });
+  },DEMO_STEP_MS);
+}
+function guideDemoHTML(id){
+  const d=GUIDE_DEMOS[id];if(!d)return '';
+  return `<figure class="guide-demo" data-demo="${id}" data-step="0"><div class="demo-stage" aria-hidden="true">${d.html}</div>`
+    +`<figcaption><span class="demo-caption" aria-live="polite"></span><span class="demo-dots">${d.steps.map((s,i)=>`<button type="button" class="demo-dot" aria-label="第 ${i+1} 步：${escapeHTML(s)}"></button>`).join('')}</span>`
+    +`<button type="button" class="text-btn demo-play">暂停</button></figcaption></figure>`;
+}
+/* 使用教程: every part of the workbench, one chapter each. A chapter opens with
+   a short demo of what the feature does, then steps, an example, the people
+   who can use it and the edge cases worth knowing. Kinds: steps (numbered),
+   list, example, note, who. */
 const GUIDE=[
-  {id:'start',title:'开始使用',icon:'book-open',lead:'登录、账户角色和个人资料。',parts:[
+  {id:'start',title:'开始使用',icon:'book-open',lead:'登录、三种角色和你自己的资料。',parts:[
     ['登录',['打开工作台，输入账户名和密码，点「进入工作台」。','登录状态保留 7 天；在别的设备登录不会挤掉当前设备。','同一浏览器登录过的账户会列在左上角账户菜单中，切换时仍需验证该账户密码。']],
-    ['三种角色',['superadmin：系统所有者，能做所有事，包括调整规则组、权限组和删除账户。','管理员：管理全部项目与任务、审批申请、查看成果库、管理账户（不含规则组）。','普通成员：处理分给自己的任务，按所在规则组新建项目或任务，参与被邀请的项目。']],
-    ['账户菜单',['点左上角的头像打开账户菜单。','「个人资料」里可以改昵称、头像（选择图片 / 移除）和个性签名；中文名由管理员设置。','「修改密码」需要输入当前密码，新密码至少 6 位，改完后其他设备会退出登录。','「登录其他账户」切换到另一个账户；「退出登录」结束本设备的登录。']],
+    ['三种角色',['superadmin：系统所有者，能做所有事，包括调整规则组、权限组和删除账户。','管理员：管理全部项目与任务、审批申请、查看成果库、管理账户（不含规则组）。','普通成员：处理分给自己的任务，按所在规则组新建项目或任务，参与被加入的项目。'],'list'],
+    ['你的资料',['点左上角的头像打开账户菜单。','「个人资料」里可以改昵称、头像（选择图片 / 移除）和个性签名；中文名由管理员设置。','「修改密码」需要输入当前密码，新密码至少 6 位，改完后其他设备会退出登录。','「登录其他账户」切换到另一个账户；「退出登录」结束本设备的登录。']],
+    ['第一次进来',['第一次登录会自动开始约 2 分钟的导览，逐个点亮界面上的主要入口。','之后随时可以在「使用教程」页顶部点「开始导览」重看。'],'list'],
   ]},
   {id:'layout',title:'界面与导航',icon:'layout-grid',lead:'左侧导航、顶栏和常用入口在哪里。',parts:[
-    ['左侧主导航',['今日任务、周视图、档案室、项目空间、项目时间轴、收件箱对所有人开放；成果库、账户管理、系统设置只对管理员显示。','导航右侧的数字是待处理数量，红点表示有新分到你的工作。','点导航顶部的箭头可以把导航收成只显示图标；拖动导航右边缘可以调宽窄。']],
+    ['左侧主导航',['今日任务、周视图、档案室、项目空间、项目时间轴、收件箱、使用教程对所有人开放；成果库、账户管理、系统设置只对管理员显示。','导航右侧的数字是待处理数量，红点表示有新分到你的工作。','点导航顶部的箭头收成只显示图标；拖动导航右边缘调宽窄，双击边缘恢复默认宽度。'],'list'],
     ['快捷筛选',['点「P0 重要任务」「进行中」「已递延」会跳到今日任务，只列出对应的任务。','在今日任务里点「全部」回到完整列表。']],
-    ['今日安排',['左下角显示你今天所有任务的预计总时长，进度条随完成情况增长。']],
-    ['顶栏',['搜索：找任务和项目，快捷键 /。','通知铃铛：打开收件箱，红点表示有未读。','桌面小组件：打开悬浮的今日待办和番茄钟（见「桌面小组件」一章）。','AI 助手：打开右侧的助手面板。','新建项目 / 新建任务：按你所在规则组显示为「新建」或「申请」。','沟通区：顶栏左侧的对话图标，有未读消息时出现红点。']],
+    ['今日安排',['左下角显示你今天所有任务的预计总时长，进度条随完成情况增长。'],'list'],
+    ['顶栏',['搜索：找任务和项目，快捷键 /。','通知铃铛：打开收件箱，红点表示有未读。','桌面小组件：悬浮的今日待办和番茄钟。','AI 助手：打开右侧的助手面板。','新建项目 / 新建任务：按你所在规则组显示为「新建」或「申请」，不允许时不显示。','沟通区：顶栏左侧的对话图标，有未读消息时出现红点。'],'list'],
   ]},
-  {id:'today',title:'今日任务',icon:'calendar-check',lead:'一天要做的事，按项目分组。',parts:[
+  {id:'today',title:'今日任务',icon:'calendar-check',demo:'task-life',lead:'一天要做的事，按项目分组；任务从待开始到完成都在这里推进。',parts:[
     ['看今天',['页面顶部是日期卡和「今天做什么？」，右侧箭头可以前后翻一天。','「今日进度」显示已完成 / 全部和百分比。','「全部 / 待处理 / 已完成」切换下面列表的范围。']],
-    ['任务卡',['每张卡显示序号、优先级（P0 最高，P1、P2 依次降低）、名称、负责人、时间与时长、日期和状态。','带「固定」标记的是固定任务按周期生成的；带「由某日递延」的是前一天没做完自动挪过来的，会写明第几次递延。','点卡片打开任务详情（见「任务」一章）。']],
+    ['任务卡上有什么',['序号和优先级：P0 最高，P1、P2 依次降低。','名称、负责人、时间与时长、日期和状态（待开始、进行中、已完成、已递延…）。','「固定」标记：由固定任务规则生成。','「由某日递延 · 第 N 次」：前一天没做完自动挪过来的。','「N 期」：几期没做完的固定任务合成了一张卡。'],'list'],
+    ['例子',['林默的「整理竞品报价」排在今天 14:00。13:59 它还是「待开始」，14:00 自动变成「进行中」；15:15 他点「记录完成」，写下「已整理 6 家报价，见文件」，实际耗时 75 分钟，今日进度从 0/2 走到 1/2。'],'example'],
   ]},
-  {id:'calendar',title:'周视图',icon:'layout-grid',lead:'按周查看所有人的安排。',parts:[
-    ['翻周',['页面显示一周七天，左右箭头切到上一周或下一周，回到周视图时总是显示本周。','每周从哪天开始由管理员在「系统设置 → 日程」里设定。']],
-    ['看某一天',['点某一天进入「日期详情」，列出这天所有任务；点「返回周视图」回来。','管理员可以在顶部切换只看某位成员。','任务卡上的「N 期」表示几期没做完的固定任务合成了一张卡。']],
+  {id:'calendar',title:'周视图',icon:'layout-grid',demo:'defer',lead:'按周查看安排；没做完的任务会自己挪到下一天。',parts:[
+    ['翻周',['页面显示一周七天，左右箭头切到上一周或下一周，「本周」回到当前周。','每周从哪天开始由管理员在「系统设置 → 日程」里设定。']],
+    ['看某一天',['点某一天进入「日期详情」，列出这天所有任务；点「返回周视图」回来。','管理员可以在顶部切换只看某位成员。']],
+    ['自动递延',['当天没做完的任务，过了零点会在第二天生成一张新卡，原来那张标为「已递延」保留作记录。','新卡写明「由某日递延 · 第 N 次」，任务详情底部能看到整条递延链。','跨多天的任务只有过了结束日期才会递延；所属项目已结束的任务不再递延，标为已跳过。'],'list'],
+    ['注意',['服务器停机几天后重新启动，会一次补上这些天的递延，不会漏。'],'note'],
   ]},
-  {id:'tasks',title:'任务',icon:'check',lead:'从新建、执行、完成到修改与审批的完整流程。',parts:[
-    ['新建任务',['点顶栏「新建任务」（快捷键 N），或在项目页点「新建任务」。','先选类型：项目任务（属于某个项目）、临时任务（不属于任何项目）、固定任务（按周期重复，见下一章）。','填写所属项目、任务名称、任务描述、指派给、安排日期、结束日期（跨多天时填写）、时间、预计时长和优先级。','规则组允许直接创建时按钮是「创建任务」，任务立即出现在对方日程里并通知对方；需要审批时按钮是「提交申请」，审批通过后才生效。']],
-    ['执行与完成',['任务到了安排的时间会自动从「待开始」变成「进行中」，也可以在详情里点「开始任务」。','做完后点「记录完成」，填写完成总结、实际耗时（分钟）和工作感受（顺利 / 一般 / 困难 / 阻塞）。','完成后可以点「修改完成记录」更正。','合并了多期的固定任务，一次完成即可结清全部期次。']],
-    ['没做完',['当天没做完的任务会在第二天自动递延，原记录保留，新卡片注明递延次数。','也可以在详情里点「未完成，递延」主动挪到之后。','跨多天的任务只有过了结束日期才算逾期。','项目已经结束的任务不再递延，会标记为已跳过。']],
-    ['修改与指派',['管理员或有管理权限的任务安排人、项目 Owner 可以「直接调整任务」；执行人需要申请修改时，写明理由并等待审批。','有管理权限时，「调整任务指派」可以把任务换给别人，原负责人和新负责人都会收到通知。','项目 Owner 可以在项目任务列表里直接点「调整指派」。','「删除此任务」会把任务从日历移除，需要确认。']],
-    ['审批与打回',['任务完成后直接结束，不需要审批；需要审批的修改和新建申请会出现在审批人的收件箱，驳回时需要写原因。','Owner 对已完成的任务不满意时可以「打回」，写明哪里还需要补充；任务回到负责人的待办并排到今天。','详情底部的「任务记录」列出这张任务的全部历史，包括递延链。']],
+  {id:'tasks',title:'任务',icon:'check',demo:'new-task',lead:'新建、执行、完成，以及修改、指派和打回。',parts:[
+    ['新建任务',['点顶栏「新建任务」（快捷键 N），或在项目页点「新建任务」。','选类型：项目任务（属于某个项目）、临时任务（不属于任何项目）、固定任务（按周期重复，见下一章）。','填写所属项目、任务名称、任务描述、指派给、安排日期、结束日期（跨多天时填写）、时间、预计时长和优先级。','规则组允许直接创建时按钮是「创建任务」，任务立即出现在对方日程里并通知对方；需要审批时按钮是「提交申请」，审批通过后才生效。']],
+    ['执行与完成',['到了安排的时间，任务自动从「待开始」变成「进行中」，也可以在详情里点「开始任务」。','做完后点「记录完成」，填写完成总结、实际耗时（分钟）和工作感受（顺利 / 一般 / 困难 / 阻塞）。','任务完成后直接结束，不需要审批；之后可以点「修改完成记录」更正。','合并了多期的固定任务，一次完成即可结清全部期次。']],
+    ['修改与指派',['管理员或有管理权限的任务安排人、项目 Owner 可以「直接调整任务」；执行人需要改时点「申请修改任务」，写明理由并等待审批。','有管理权限时，「调整任务指派」可以把任务换给别人，原负责人和新负责人都会收到通知。','项目 Owner 可以在项目任务列表里直接点「调整指派」。','「删除此任务」会把任务从日历移除，需要确认。']],
+    ['例子',['陈曦想把「官网首屏改版」的截止从周五改到下周一。她是执行人，于是点「申请修改任务」，写上「设计稿要等品牌确认」。审批人在收件箱里看到这条修改申请，点「同意修改」后，日期自动更新，陈曦收到通知。'],'example'],
+    ['谁能用',['所有人都能处理分给自己的任务。','新建与修改是否需要审批，由「系统设置 → 成员与权限」里的规则组决定。'],'who'],
   ]},
-  {id:'repeats',title:'固定任务',icon:'repeat',lead:'每天、每周或每月都要做的事，定一次规则自动生成。',parts:[
+  {id:'approval',title:'审批与打回',icon:'inbox',demo:'approval',lead:'需要审批的申请怎么走，完成后的工作怎么退回补充。',parts:[
+    ['需要审批的事',['所在规则组设为「需要审批」时，新建项目、临时任务或项目任务都会先成为申请。','执行人修改任务（日期、内容等）需要审批人同意。','Owner 提交的结项需要管理员同意。','任务完成不需要审批。'],'list'],
+    ['审批人怎么处理',['申请出现在审批人的收件箱，卡片上直接有「同意」「驳回」。','驳回时必须写原因，申请人会收到。','同意后，任务或项目立即生效，申请人收到结果通知。']],
+    ['打回',['Owner 对已完成的任务不满意时，在任务详情点「打回」，写明哪里还需要补充。','任务回到负责人的待办并排到今天，原因写在卡上，负责人收到通知。'],'steps'],
+    ['注意',['审批和打回都会写进任务记录，任务详情底部可以看到谁在什么时候做了什么。'],'note'],
+  ],extraDemo:'rework'},
+  {id:'repeats',title:'固定任务',icon:'repeat',demo:'repeat',lead:'每天、每周或每月都要做的事，定一次规则自动生成。',parts:[
     ['制定规则',['在项目空间点「制定固定任务」，或新建任务时选「固定任务」。','所属项目可选，选「不挂项目」就是个人或团队的例行事项。','「安排给」可以多选，每人各生成一份。','周期可选：每天、工作日、每周（可设每 1–4 周一次和每周几执行）、每月（设执行日，月份天数不够时取最后一天）、指定日期。','再填时间、预计时长、优先级和可选的结束日期，点「保存固定任务」。']],
-    ['之后',['系统按规则预生成未来半年的任务，调度器每天继续补齐；可排期上限随今天滚动到两年后。','某一次不需要做时，在规则里点「挖空本次」跳过那一天。','「系统设置 → 日程 → 固定任务递延合并」开启时，同一条规则连续几期没做完会合成一张卡，完成一次即可结清。']],
+    ['之后',['系统按规则预生成未来半年的任务，调度器每天继续补齐；可排期上限随今天滚动到两年后。','某一次不需要做时，在规则里点「挖空本次」跳过那一天。','停用规则后不再生成新的任务，已经生成的保留。'],'list'],
+    ['递延合并',['「系统设置 → 日程 → 固定任务递延合并」开启时，同一条规则连续几期没做完会合成一张卡，标着「N 期」。','点一次「完成全部 N 期」即可全部结清；原始记录都保留。'],'list'],
+    ['例子',['团队晨会定为每周一、三、五 09:30、15 分钟，安排给林默和周一。保存后两人的日程里都排上了之后半年的晨会；国庆那周的周三不开，就在规则里挖空那一天。'],'example'],
+  ],extraDemo:'stack'},
+  {id:'projects',title:'项目空间',icon:'folder',demo:'tree',lead:'左边是目录，中间是项目，项目里是任务、会议和文件。',parts:[
+    ['目录',['「全部项目」列出你能看到的所有项目。','管理员可以点目录标题旁的 + 新建文件夹，点文件夹右侧的铅笔重命名或删除；删除文件夹不会删除里面的项目。','有权限的人可以拖动文件夹和项目调整顺序，把项目拖到文件夹上就放进去。','点项目左侧的箭头展开，能直接看到它的会议和文件；点会议打开会议，点文件下载。','选中的行有一块底色，换选时这块底色会滑到新的位置。目录调窄时只列文件夹和项目，收起时只剩图标。'],'list'],
+    ['全部项目与文件夹页',['每个项目一张卡：状态、简介、任务完成进度、成员头像、截止日期和你在这个项目里的待办数。','右上角「排序」可以按目录顺序、名称、截止日期、完成度或最近创建排列。','点卡片进入项目。'],'list'],
+    ['项目页',['顶部路径「全部项目 / 文件夹」可以点回上一层。','标题右侧是「新建任务」；「更多」里有项目设置、完成项目、退出项目和删除项目。','标题下面一行是状态、Owner、起止日期和完成进度。'],'list'],
+    ['五个标签',['任务：项目的全部任务（协作者只看到分给自己的）；右上角选排序，选「手动」时 Owner 可以拖动调整顺序；下面单独列出固定任务规则。','会议：左边是会议列表，右边是打开的会议（见「会议」一章）。','文件：上传、下载、删除（见下）。','成员：Owner 和协作者各一行；Owner 可以填写每人的分工，离开输入框即保存；右侧是项目周期内每人进行中、已完成的任务数和工时；Owner 和管理员可以「添加协作者」或移出成员。','概况：立项、执行、结项三个阶段和日期，时间进度与任务进度，「放在文件夹」，以及项目背景。'],'list'],
+    ['注意',['切到另一个项目时，停留在同一个标签：看完一个项目的文件，点下一个项目就直接是它的文件。'],'note'],
   ]},
-  {id:'projects',title:'项目空间',icon:'folder',lead:'左边是目录，中间是项目，项目里是任务、会议和文件。',parts:[
-    ['目录',['「全部项目」列出你能看到的所有项目。','管理员可以点目录标题旁的 + 新建文件夹，点文件夹右侧的铅笔重命名或删除；删除文件夹不会删除里面的项目。','有权限的人可以拖动文件夹和项目调整顺序，把项目拖到文件夹上就放进去。','点项目左侧的箭头展开，能直接看到它的会议和文件；点会议打开会议，点文件下载。','选中的行有一块底色，换选时这块底色会滑到新的位置。']],
-    ['全部项目与文件夹页',['每个项目一张卡：状态、简介、任务完成进度、成员头像、截止日期和你在这个项目里的待办数。','右上角「排序」可以按目录顺序、名称、截止日期、完成度或最近创建排列。','点卡片进入项目。']],
-    ['项目页',['顶部路径「全部项目 / 文件夹」可以点回上一层。','标题右侧是「新建任务」；「更多」里有项目设置、完成项目、退出项目和删除项目。','标题下面一行是状态、Owner、起止日期和完成进度。']],
-    ['任务标签',['列出项目的全部任务（协作者只看到分给自己的）。','右上角可以选排序方式；选「手动」时 Owner 可以拖动任务调整顺序。','下面单独列出这个项目的固定任务规则。']],
-    ['会议标签',['左边是会议列表，右边是打开的会议；详见「会议」一章。']],
-    ['文件标签',['点「新增文件 → 上传文件」，或直接把文件拖到列表上，单个文件不超过 20MB。','点文件名下载；上传者、项目 Owner 和管理员可以删除。']],
-    ['成员标签',['列出 Owner 和协作者，每人一行。','Owner 可以填写每人的分工，离开输入框即保存。','右侧显示项目周期内每人进行中、已完成的任务数和工时。','Owner 和管理员可以点「添加协作者」直接把人加进项目，也可以移出成员。']],
-    ['概况标签',['立项、执行、结项三个阶段和日期。','时间进度（第几天 / 共几天）和任务进度。','「放在文件夹」可以把项目移到别的文件夹。','项目背景：Owner 写下为什么做、目标和边界，改动后点「保存」。']],
+  {id:'files',title:'项目文件',icon:'file',demo:'upload',lead:'把项目资料放在项目里，所有成员都能取用。',parts:[
+    ['上传',['在项目的「文件」标签点「新增文件 → 上传文件」，或直接把文件从电脑拖到列表上。','单个文件不超过 20MB，可以一次选多个。']],
+    ['下载与删除',['点文件名即可下载。','上传者、项目 Owner 和管理员可以删除；鼠标移到那一行时右侧出现删除按钮，删除后不可恢复。'],'list'],
+    ['项目结束以后',['项目结项后，文件和会议仍能在项目目录的「归档文件」里只读查看和下载。'],'list'],
   ]},
-  {id:'project-life',title:'项目的一生',icon:'gantt',lead:'从申请、审批、协作到结项和归档。',parts:[
+  {id:'project-life',title:'项目的一生',icon:'gantt',demo:'project-life',lead:'从申请、审批、协作到结项和归档。',parts:[
     ['新建或申请',['点「新建项目」或「申请项目」，填写项目名称、项目描述、开始日期、截止日期（长期项目可留空）、Owner 和协作者。','规则组允许直接创建时项目立即生效；需要审批时提交给管理员，审批通过后才出现在项目空间。','添加协作者后会直接加入项目并收到通知，无需接受邀请。']],
-    ['执行中',['Owner 负责分派任务、维护背景与分工；协作者处理自己的任务。','协作者可以在「更多 → 退出项目」离开，已有的任务和记录保留，重新加入后原样回来。','「项目设置」可以改名称、描述、起止日期和 Owner，并管理协作者。']],
+    ['执行中',['Owner 负责分派任务、维护背景与分工；协作者处理自己的任务。','协作者可以在「更多 → 退出项目」离开，已有的任务和记录保留，重新加入后原样回来。','「项目设置」可以改名称、描述、起止日期和 Owner，并管理协作者。'],'list'],
     ['结项',['Owner 在「更多 → 完成项目」提交结项报告，等待管理员审批；管理员也可直接完成项目。','管理员在收件箱同意后项目结项，从日程和项目列表中移出，进入成果库。','项目文件和会议在结项后仍能在项目目录的「归档文件」里只读查看。']],
-    ['删除',['「更多 → 删除项目」会删除项目及其全部任务和记录，需要输入完整项目名确认，不可恢复。']],
+    ['删除',['「更多 → 删除项目」会删除项目及其全部任务、记录、文件、会议和项目频道的消息，需要输入完整项目名确认，不可恢复。'],'note'],
   ]},
-  {id:'meetings',title:'会议',icon:'chat',lead:'记录会议原稿，用模板整理成纪要。',parts:[
-    ['新增会议',['在项目页的「会议」标签点「新增会议」，或在「文件」标签的「新增文件」里选「新增会议」。只有项目 Owner 和管理员可以新增。','填写会议名称、安排时间、参会人（用逗号或顿号分隔）和议程。']],
+  {id:'meetings',title:'会议',icon:'chat',demo:'meeting',lead:'记录会议原稿，用模板整理成纪要。',parts:[
+    ['新增会议',['在项目页的「会议」标签点「新增会议」，或在「文件」标签的「新增文件」里选「新增会议」。','填写会议名称、安排时间、参会人（用逗号或顿号分隔）和议程。']],
     ['记录原稿',['点「开始实时录入」用麦克风边说边转成文字，再点一次停止；浏览器不支持时可以直接粘贴转录原稿。','原稿会自动保存，离开前有未保存的修改会提醒你。']],
     ['生成纪要',['原稿有内容后点「根据模板生成」，AI 按「系统设置 → 会议纪要提示词」整理出会议结论、待办和风险。','生成的纪要显示在原稿下方，随会议一起保存，之后可以重新生成。']],
+    ['谁能用',['只有项目 Owner 和管理员可以新增会议；项目成员都能查看。','生成纪要需要管理员先在「系统设置 → AI 接入与模型」配置模型。'],'who'],
   ]},
   {id:'timeline',title:'项目时间轴',icon:'gantt',lead:'所有项目在时间上的排布。',parts:[
-    ['怎么看',['每个项目一条横条，从开始日期到截止日期；没有截止日期的显示为长期。','日期有问题的项目会标出「日期待修正」，提醒 Owner 修改起止日期。','右上角可以直接新建项目。']],
+    ['怎么看',['每个项目一条横条，从开始日期到截止日期；没有截止日期的显示为长期。','左右箭头翻看前后时段，「今天」回到当前。','日期有问题的项目会标出「日期待修正」，提醒 Owner 修改起止日期。','右上角可以直接新建项目。'],'list'],
   ]},
-  {id:'inbox',title:'收件箱',icon:'inbox',lead:'所有通知和待你处理的申请。',parts:[
-    ['会收到什么',['任务指派、任务自动开始、任务申请、修改申请、项目申请、协作者加入通知、项目完成审批、沟通区里 @ 到你的消息等。','需要你处理的申请上直接有按钮：同意创建 / 驳回申请、同意修改、同意完成、接受 / 拒绝邀请、去沟通区。','驳回时要写原因，对方会收到。']],
+  {id:'inbox',title:'收件箱',icon:'inbox',demo:'inbox',lead:'所有通知和待你处理的申请。',parts:[
+    ['会收到什么',['任务指派、任务自动开始、任务申请、修改申请、项目申请、协作者加入通知、项目完成审批、沟通区里 @ 到你的消息等。','需要你处理的申请上直接有按钮：同意创建 / 驳回申请、同意修改、同意完成、去沟通区。','驳回时要写原因，对方会收到。'],'list'],
     ['整理',['点「全部标为已读」清掉未读。','点「管理」进入选择模式，勾选后「删除所选」。']],
+    ['注意',['已读的普通通知只保留最近 200 条在页面里；未读和待处理的申请不受影响。'],'note'],
   ]},
-  {id:'chat',title:'沟通区',icon:'chat',lead:'团队和各项目的聊天频道。',parts:[
-    ['频道',['左侧列出你能进入的频道：团队频道和你参与的每个项目。','有未读消息的频道显示未读数；顶栏的沟通区图标出现红点。']],
-    ['发消息',['在底部输入后点「发送」。','输入 @ 选择成员，对方会收到通知；@所有人 会通知频道里的全体成员。']],
-    ['成员与在线',['右侧显示频道成员，以及谁在线、最后活跃时间。']],
+  {id:'chat',title:'沟通区',icon:'chat',demo:'chat',lead:'团队和各项目的聊天频道。',parts:[
+    ['频道',['左侧列出你能进入的频道：「沟通」「闲聊」两个团队频道，以及你参与的每个项目。','有未读消息的频道显示未读数；顶栏的沟通区图标出现红点。'],'list'],
+    ['发消息',['在底部输入后点「发送」，单条不超过 1000 字。','输入 @ 选择成员，对方会收到通知；@所有人 会通知频道里的全体成员。']],
+    ['成员与在线',['右侧显示频道成员，以及谁在线、最后活跃时间。'],'list'],
+    ['注意',['项目结项后，它的频道变为只读，沟通记录在成果库里查看；项目被删除时频道消息一并删除。'],'note'],
   ]},
-  {id:'archive',title:'档案室',icon:'archive',lead:'每天的日志、个人档案和团队日报周报。',parts:[
+  {id:'archive',title:'档案室',icon:'archive',demo:'archive',lead:'每天的个人档案，以及团队日报和周报。',parts:[
     ['我的档案',['普通成员点档案室右上角的今日按钮，打开今天的档案。','档案分四栏：今日完成、未完成与阻塞、明日计划和随记；系统会先把当天的工作日志整理进去，你补充后点「保存」。','档案只有你自己和管理员能看到。','按月份翻看以前的档案，已记录的日子有标记。']],
-    ['团队日报与周报',['系统每天自动汇总团队日报：完成任务数、完成工时、各项目进展（Owner 汇报或系统汇总）和成员总结。','管理员可以打开任意一天的日报修改，修改过的会标「已改」。','管理员可以在页面内查看本周周报，切换周次并打开其中的日报。']],
+    ['团队日报与周报',['系统每天自动汇总团队日报：完成任务数、完成工时、各项目进展（Owner 汇报或系统汇总）和成员总结。','管理员可以打开任意一天的日报修改，修改过的会标「已改」。','周报结合本周完成项目的描述和结项说明呈现成果，并按未完成项目列出剩余工作；可切换周次并打开每日记录。']],
     ['自动补报',['开启「系统设置 → 日报与补报 → 自动补报」后，到点时前一天没交项目日报的项目会自动汇总成一份补报，交给 Owner 确认。']],
   ]},
   {id:'achievements',title:'成果库',icon:'award',lead:'已结项项目的完整档案，仅管理员可见。',parts:[
-    ['内容',['顶部统计已完成项目数和累计完成的子任务数。','每个项目一张卡：Owner、结项时间、任务完成情况、生命周期（创建、审批启动、提交结项、完成）和结项报告。','可以从卡片进入项目文件、沟通记录和项目详情。']],
+    ['内容',['顶部统计已完成项目数和累计完成的子任务数。','每个项目一张卡：Owner、结项时间、任务完成情况、生命周期（创建、审批启动、提交结项、完成）和结项报告。','可以从卡片进入项目文件、沟通记录和项目详情。'],'list'],
   ]},
-  {id:'assistant',title:'AI 助手',icon:'sparkles',lead:'用自然语言查询、规划和安排工作。',parts:[
+  {id:'assistant',title:'AI 助手',icon:'sparkles',demo:'assistant',lead:'用自然语言查询、规划和安排工作。',parts:[
     ['打开与提问',['点顶栏「AI 助手」打开右侧面板，直接输入问题，比如「今天有哪些任务要交」「团队这周的负载怎么样」。','点麦克风可以语音输入，再点一次结束并转成文字。','「对话记录」可以回到以前的对话；生成中可以点「停止」。']],
     ['规划模式',['点输入框旁的规划按钮，用一句话说要安排的事，比如「下周把季度复盘做完：整理数据、出初稿、找人评审」。','助手会起草创建、修改或删除的卡片；你逐张检查、修改，接受或拒绝，确认前不会改动任何数据。']],
-    ['能做到哪一步',['每个人的助手权限由规则组决定：关闭、查询与规划，或可代为操作。','可代为操作时，助手会一步步执行并在每步后核对结果；遇到需要你确认的操作会停下来等「确认执行」。','面板顶部显示当前模型；管理员配置了多个可选模型时可以切换。还没配置时，管理员可以去「系统设置 → AI 接入与模型」配置。']],
+    ['能做到哪一步',['每个人的助手权限由规则组决定：关闭、查询与规划，或可代为操作。','可代为操作时，助手会一步步执行并在每步后核对结果；遇到需要你确认的操作会停下来等「确认执行」。','面板顶部显示当前模型；管理员配置了多个可选模型时可以切换。还没配置时，管理员可以去「系统设置 → AI 接入与模型」配置。'],'list'],
+    ['注意',['助手只能看到你本来就能看到的项目和任务；起草的卡片若缺少信息，会标出需要你补充的地方，不会擅自编造负责人。'],'note'],
   ]},
-  {id:'widget',title:'桌面小组件',icon:'clock',lead:'悬浮在桌面上的今日待办和番茄钟。',parts:[
+  {id:'widget',title:'桌面小组件',icon:'clock',demo:'widget',lead:'悬浮在桌面上的今日待办和番茄钟。',parts:[
     ['打开',['点顶栏的小组件图标，会弹出一个始终在最前的小窗口（需要较新版本的 Chrome 或 Edge）。']],
-    ['使用',['上半部分是番茄钟：专注 25 分钟、休息 5 分钟，可以开始 / 暂停、重置、切换；一轮结束会提醒你。','下半部分是今天的任务，勾选即记为完成。','小窗口每分钟自动同步一次。']],
+    ['使用',['上半部分是番茄钟：专注 25 分钟、休息 5 分钟，可以开始 / 暂停、重置、切换；一轮结束会提醒你。','下半部分是今天的任务，勾选即记为完成。','小窗口每分钟自动同步一次。'],'list'],
   ]},
   {id:'search',title:'搜索与快捷键',icon:'search',lead:'不用鼠标也能快速到达。',parts:[
-    ['搜索',['按 / 或点顶栏放大镜，输入关键词即可找到任务和项目。','在系统设置页按 / 是搜索设置项。']],
-    ['快捷键',['? 打开快捷键列表；H 使用教程；N 新建任务；T 今日任务；W 周视图；P 项目空间；I 收件箱；Esc 关闭弹窗或面板。','在输入框里打字时快捷键不会触发。']],
+    ['搜索',['按 / 或点顶栏放大镜，输入关键词即可找到任务和项目。','在系统设置页按 / 是搜索设置项。'],'list'],
+    ['快捷键',['? 打开快捷键列表；H 使用教程；N 新建任务；T 今日任务；W 周视图；P 项目空间；I 收件箱；Esc 关闭弹窗或面板。','在输入框里打字时快捷键不会触发。'],'list'],
   ]},
   {id:'accounts',title:'账户管理',icon:'users',lead:'添加和维护团队账户，仅管理员可见。',parts:[
     ['添加账户',['点「添加账户」，填写账户名、中文名（可留空）、初始密码和权限组。']],
-    ['维护',['每个账户可以停用 / 启用、重置密码、设置中文名，或调整权限组（superadmin、管理员、普通用户）。','点「管理」可以多选账户批量操作。','删除账户不可撤销，需要输入账户名确认；仍负责进行中项目或有未完成任务的账户不能删除，要先转交。']],
+    ['维护',['每个账户可以停用 / 启用、重置密码、设置中文名，或调整权限组（superadmin、管理员、普通用户）。','点「管理」可以多选账户批量操作。'],'list'],
+    ['注意',['删除账户不可撤销，需要输入账户名确认；仍负责进行中项目或有未完成任务的账户不能删除，要先转交。'],'note'],
   ]},
-  {id:'settings',title:'系统设置',icon:'settings',lead:'对全体成员生效的规则，仅管理员可见。',parts:[
-    ['查找设置',['左侧按类别跳转，顶部搜索框可以直接搜设置项。','改过默认值的设置左侧有一条竖线，点「恢复默认」改回。']],
-    ['成员与权限',['规则组分别设定项目和任务的创建方式（直接创建、需要审批或不允许），以及 AI 助手的使用范围（关闭、查询与规划或可代为操作）。','点「新建规则组」创建新组并选择成员；没分到任何组的成员按「默认规则」。','「账户与权限组」进入账户管理。']],
-    ['日程',['每周从哪天开始：影响周视图、档案室的周范围和周报。','固定任务递延合并：开启后同一固定任务没做完的几期合成一张卡。']],
-    ['日报与补报',['自动补报：开启后到点自动为没交日报的项目生成补报。','补报时间：每天、每周固定几天或指定日期，再选具体时间。','立即运行：不等调度器，马上检查一次。']],
-    ['会议纪要提示词',['会议生成纪要时交给 AI 的系统提示词，对所有项目生效。','可以用 {{title}}、{{agenda}}、{{transcript}} 引用会议标题、议程和原稿。']],
-    ['AI 接入与模型',['来源：添加对话模型来源或语音转写来源，填服务商、名称、API 地址和密钥，「保存并测试」会验证并取回可用模型；可测试、编辑、删除。','使用场景：对话助手、规划任务、会议纪要、语音转写分别选来源和模型；规划任务和会议纪要可以跟随对话助手。','单次对话容量：每轮发送给助手的总输入容量，包括指令、历史、工具和查询结果；模型窗口小时选「精简」。']],
+  {id:'settings',title:'系统设置',icon:'settings',demo:'rules',lead:'对全体成员生效的规则，仅管理员可见。',parts:[
+    ['查找设置',['左侧按类别跳转，顶部搜索框可以直接搜设置项。','改过默认值的设置左侧有一条竖线，点「恢复默认」改回。'],'list'],
+    ['成员与权限',['规则组分别设定项目和任务的创建方式（直接创建、需要审批或不允许），以及 AI 助手的使用范围（关闭、查询与规划或可代为操作）。','点「新建规则组」创建新组并选择成员；没分到任何组的成员按「默认规则」。','「账户与权限组」进入账户管理。'],'list'],
+    ['日程',['每周从哪天开始：影响周视图、档案室的周范围和周报。','固定任务递延合并：开启后同一固定任务没做完的几期合成一张卡。'],'list'],
+    ['日报与补报',['自动补报：开启后到点自动为没交日报的项目生成补报。','补报时间：每天、每周固定几天或指定日期，再选具体时间。','立即运行：不等调度器，马上检查一次。'],'list'],
+    ['会议纪要提示词',['会议生成纪要时交给 AI 的系统提示词，对所有项目生效。','可以用 {{title}}、{{agenda}}、{{transcript}} 引用会议标题、议程和原稿。'],'list'],
+    ['AI 接入与模型',['来源：添加对话模型来源或语音转写来源，填服务商、名称、API 地址和密钥，「保存并测试」会验证并取回可用模型；可测试、编辑、删除。','使用场景：对话助手、规划任务、会议纪要、语音转写分别选来源和模型；规划任务和会议纪要可以跟随对话助手。','单次对话容量：每轮发送给助手的总输入容量，包括指令、历史、工具和查询结果；模型窗口小时选「精简」。'],'list'],
   ]},
   {id:'automation',title:'系统自动完成的事',icon:'clock',lead:'不需要操作，但值得知道的后台规则。',parts:[
-    ['每半分钟',['到点的任务自动开始，并通知项目 Owner。','按固定任务规则生成之后的任务。']],
-    ['每天',['没做完的任务递延到下一天，保留递延链。','生成团队日报；开启自动补报时为没交日报的项目生成补报。']],
+    ['每半分钟',['到点的任务自动开始，并通知项目 Owner。','按固定任务规则补齐之后的任务。'],'list'],
+    ['每天',['没做完的任务递延到下一天，保留递延链。','23:30 为每位成员整理当天档案；到补报时间生成团队日报，开启自动补报时为没交日报的项目生成补报。'],'list'],
+    ['停机之后',['服务器停了几天再启动，会一次补上这些天的递延、档案和日报，不会重复也不会漏。'],'note'],
   ]},
 ];
+const GUIDE_KIND={example:'例子',note:'注意',who:'谁能用'};
+function guidePart([h,items,kind='steps']){
+  if(GUIDE_KIND[kind])return `<aside class="guide-callout is-${kind}"><b>${escapeHTML(h===GUIDE_KIND[kind]?h:`${GUIDE_KIND[kind]} · ${h}`)}</b>`
+    +items.map(s=>`<p>${escapeHTML(s)}</p>`).join('')+`</aside>`;
+  const tag=kind==='list'?'ul':'ol';
+  return `<section><h3>${escapeHTML(h)}</h3><${tag}>${items.map(s=>`<li>${escapeHTML(s)}</li>`).join('')}</${tag}></section>`;
+}
 function renderGuide(){
   const box=$('#guideContent'),toc=$('#guideToc');if(!box||!toc)return;
+  const start=$('#startTourBtn');if(start)start.onclick=startTour;
   toc.innerHTML=GUIDE.map(c=>`<a class="guide-toc-item" href="#guide-${c.id}" data-guide="${c.id}">${icon(c.icon)}<span>${escapeHTML(c.title)}</span></a>`).join('');
   box.innerHTML=GUIDE.map((c,i)=>`<article class="guide-chapter" id="guide-${c.id}" tabindex="-1"><header><span class="guide-index">${String(i+1).padStart(2,'0')}</span>`
     +`<h2>${escapeHTML(c.title)}</h2><p>${escapeHTML(c.lead)}</p></header>`
-    +c.parts.map(([h,steps])=>`<section><h3>${escapeHTML(h)}</h3><ol>${steps.map(s=>`<li>${escapeHTML(s)}</li>`).join('')}</ol></section>`).join('')
+    +(c.demo?guideDemoHTML(c.demo):'')+c.parts.map(guidePart).join('')+(c.extraDemo?guideDemoHTML(c.extraDemo):'')
     +`</article>`).join('');
   $$('#guideToc [data-guide]').forEach(a=>a.onclick=e=>{e.preventDefault();
     const chapter=$(`#guide-${a.dataset.guide}`);chapter?.scrollIntoView?.({behavior:navReducedMotion()?'auto':'smooth',block:'start'});chapter?.focus?.({preventScroll:true});
     $$('#guideToc [data-guide]').forEach(x=>x.classList.toggle('is-on',x===a))});
+  bindGuideDemos(box);
+}
+/* 导览: a guided walk through the real interface. Each step opens its page,
+   lights up one control and explains it beside it; the light glides from
+   control to control. Esc leaves, ← → turn the page. It runs once per account
+   on first visit and any time from 使用教程. */
+const TOUR=[
+  {ch:'开始',title:'欢迎来到战略小组台账',body:'两分钟走一遍主线：安排任务 → 跟进项目 → 处理收件箱 → 写档案。随时按 Esc 或点「跳过」退出，← → 键也能翻页。'},
+  {ch:'今天',view:'today',target:'#addTaskBtn',title:'新建任务',body:'按 N 或点这里。选项目任务、临时任务或固定任务，再定负责人、日期、时间和时长。所在规则组需要审批时，这里会显示「申请任务」。'},
+  {ch:'今天',view:'today',target:'.daily-progress',title:'今天做到哪了',body:'今日进度按已完成的任务计算。右上角的箭头可以前后翻一天。'},
+  {ch:'今天',view:'today',target:'.quick-tabs',title:'全部 · 待处理 · 已完成',body:'切换下面列表的范围。点任何一张任务卡打开详情：开始、记录完成、申请修改、递延都在那里。没做完的任务第二天会自动递延。'},
+  {ch:'今天',target:'.sidebar-section',title:'快捷筛选',body:'P0 重要任务、进行中、已递延：点一下就跳到今日任务，只列出这一类。'},
+  {ch:'周视图',view:'calendar',target:'#weekCarousel',title:'一周的安排',body:'七天一列，左右箭头翻周，点某一天看当天全部任务。'},
+  {ch:'项目',view:'projects',prep:()=>openProjectSpace(''),target:'#projectNav',title:'项目目录',body:'文件夹 → 项目 → 会议和文件。点项目左边的箭头展开它的会议和文件；有权限的人可以拖动排序、把项目拖进文件夹。拖右边缘调宽窄，点顶部箭头收起。'},
+  {ch:'项目',view:'projects',target:'#projectGrid',title:'全部项目',body:'每个项目一张卡：进度、成员、截止日期和你在其中的待办。点卡片进入项目。'},
+  {ch:'项目',view:'projects',prep:()=>{const p=visibleProjects()[0];if(p&&UI.space!==p.id)openProjectSpace(p.id)},target:'#projectSpace .space-tabs',title:'一个项目里',body:'任务、会议、文件、成员、概况五个标签。在目录里点会议或文件，会直接切到对应的标签。'},
+  {ch:'项目',view:'projects',target:'#projectActions',title:'项目的操作',body:'主按钮是新建任务；项目设置、完成项目、退出项目和删除项目都收在「更多」里。'},
+  {ch:'收件箱',view:'inbox',target:'#inboxList',title:'收件箱',body:'指派、审批、邀请、@ 你的消息都在这里。需要你处理的通知上直接有同意、驳回、接受等按钮。'},
+  {ch:'沟通',target:'#chatEntryBtn',title:'沟通区',body:'团队频道和每个项目各自的频道。输入 @ 提到成员，@所有人 会通知整个频道。'},
+  {ch:'档案',view:'archive',target:'#archiveView .page-intro',title:'档案室',body:'每天的档案：今日完成、未完成与阻塞、明日计划和随记。管理员在这里看团队日报和周报。'},
+  {ch:'助手',target:'#agentBtn',title:'AI 助手',body:'用一句话查询或安排工作。规划模式会起草任务和项目卡片，你逐张确认后才会生效。'},
+  {ch:'助手',target:'#pipBtn',title:'桌面小组件',body:'悬浮在桌面上的今日待办和番茄钟，勾选就记为完成。'},
+  {ch:'助手',target:'.topbar [aria-label="搜索"]',title:'搜索与快捷键',body:'按 / 搜任务和项目，按 ? 查看全部快捷键。'},
+  {ch:'设置',view:'settings',admin:true,target:'#settingsNav',title:'系统设置',body:'规则组、日程、补报、会议纪要提示词和 AI 模型都在这里，修改对全员生效。'},
+  {ch:'完成',target:'.nav-item[data-view="guide"]',title:'就这些',body:'每个功能的详细说明都在「使用教程」里，按 H 打开；也可以在那里重新开始这段导览。'},
+];
+const TOUR_KEY='wc-tour-done';
+let tour=null,tourOfferTimer=0;
+function tourDone(){try{return localStorage.getItem(`${TOUR_KEY}:${S.user?.id}`)==='1'}catch(_){return true}}
+function cancelTourOffer(){if(tourOfferTimer)clearTimeout(tourOfferTimer);tourOfferTimer=0}
+function tourBusy(){return Boolean(UI.docDirty||meetingLive.session||meetingLive.active
+  ||$('#meetingEditor')?.dataset?.dirty==='true'
+  ||['#modalBackdrop','#taskDrawer','#agentPanel'].some(s=>{const el=$(s);return el&&!el.classList.contains('hidden')}))}
+function offerTour(){
+  if(tour||tourOfferTimer||!S.user||tourDone()||window.innerWidth<900)return;
+  const owner=S.user.id;
+  const offer=()=>{
+    tourOfferTimer=0;
+    if(tour||S.user?.id!==owner||tourDone()||window.innerWidth<900||document.body.classList.contains('auth-locked'))return;
+    if(tourBusy()){tourOfferTimer=setTimeout(offer,1000);return}
+    startTour();
+  };
+  tourOfferTimer=setTimeout(offer,700);
+}
+function startTour(){
+  if(tour||!S.user||document.body.classList.contains('auth-locked')||tourBusy())return;
+  cancelTourOffer();
+  const steps=TOUR.filter(s=>!s.admin||S.user?.admin);
+  tour={i:0,steps,owner:S.user.id,returnFocus:document.activeElement,
+    background:[...document.body.children].map(el=>({el,inert:el.inert}))};
+  tour.background.forEach(({el})=>el.inert=true);
+  const veil=document.createElement('div');veil.id='tourVeil';veil.className='tour-veil';
+  veil.setAttribute('role','dialog');veil.setAttribute('aria-modal','true');veil.setAttribute('aria-labelledby','tourTitle');
+  veil.innerHTML='<div class="tour-spot"></div><div class="tour-card" tabindex="-1"></div>';
+  document.body.appendChild(veil);
+  document.addEventListener('keydown',tourKey,true);document.addEventListener('focusin',tourFocus,true);
+  window.addEventListener('resize',tourPlace);window.addEventListener('scroll',tourPlace,true);
+  tourShow(0,1);
+}
+function endTour(markDone=true){
+  if(!tour)return;const ended=tour;tour=null;
+  $('#tourVeil')?.remove();document.removeEventListener('keydown',tourKey,true);document.removeEventListener('focusin',tourFocus,true);
+  window.removeEventListener('resize',tourPlace);window.removeEventListener('scroll',tourPlace,true);
+  ended.background.forEach(({el,inert})=>el.inert=inert);
+  if(markDone)try{localStorage.setItem(`${TOUR_KEY}:${ended.owner}`,'1')}catch(_){}
+  const focus=ended.returnFocus;
+  if(focus?.isConnected&&focus.getClientRects().length&&!focus.closest('[inert]'))focus.focus({preventScroll:true});
+  else $('.nav-item.active')?.focus({preventScroll:true});
+}
+function tourFocus(e){if(tour&&!e.target.closest('#tourVeil'))$('#tourVeil .tour-next')?.focus({preventScroll:true})}
+function tourKey(e){
+  if(!tour)return;
+  e.stopPropagation();
+  if(e.key==='Escape'){e.preventDefault();endTour();return}
+  if(e.key==='Tab'){
+    const buttons=[...$$('#tourVeil button')],i=buttons.indexOf(document.activeElement);
+    if(i<0||e.shiftKey&&i===0||!e.shiftKey&&i===buttons.length-1){e.preventDefault();buttons[e.shiftKey?buttons.length-1:0]?.focus()}
+    return;
+  }
+  if(e.key==='Enter'&&e.target.closest('#tourVeil button'))return;
+  const go={ArrowRight:1,Enter:1,ArrowLeft:-1}[e.key];
+  if(go){e.preventDefault();tourShow(tour.i+go,go)}
+}
+const tourVisible=el=>Boolean(el&&el.getClientRects().length&&getComputedStyle(el).visibility!=='hidden');
+function tourShow(i,dir){
+  if(!tour)return;
+  if(i>=tour.steps.length){endTour();return}
+  if(i<0)i=0;
+  const step=tour.steps[i];
+  if(step.view&&UI.view!==step.view)switchView(step.view);
+  step.prep?.();
+  const target=step.target?$(step.target):null;
+  if(step.target&&!tourVisible(target)){if(i+dir>=0&&i+dir<tour.steps.length)tourShow(i+dir,dir);else if(dir>0)endTour();return}
+  tour.i=i;tour.target=target;
+  target?.scrollIntoView?.({block:'center',inline:'nearest'});
+  const chapters=[...new Set(tour.steps.map(s=>s.ch))],last=i===tour.steps.length-1;
+  const card=$('#tourVeil .tour-card');if(!card)return;
+  card.innerHTML=`<div class="tour-crumbs">${chapters.map(c=>`<span${c===step.ch?' class="is-on"':''}>${escapeHTML(c)}</span>`).join('<i>·</i>')}</div>`
+    +`<h3 id="tourTitle">${escapeHTML(step.title)}</h3><p>${escapeHTML(step.body)}</p>`
+    +`<div class="tour-foot"><span class="tour-count">${i+1} / ${tour.steps.length}</span>`
+    +`${last?'':'<button type="button" class="text-btn tour-skip">跳过</button>'}<span class="tour-gap"></span>`
+    +`${i?'<button type="button" class="secondary-btn tour-prev">上一步</button>':''}`
+    +`<button type="button" class="primary-btn tour-next">${i===0?'开始':last?'完成':'下一步'}</button></div>`;
+  card.querySelector('.tour-next').onclick=()=>tourShow(tour.i+1,1);
+  const prev=card.querySelector('.tour-prev');if(prev)prev.onclick=()=>tourShow(tour.i-1,-1);
+  const skip=card.querySelector('.tour-skip');if(skip)skip.onclick=endTour;
+  requestAnimationFrame(()=>{tourPlace();card.querySelector('.tour-next')?.focus({preventScroll:true})});
+}
+/* The light sits 6px around the control; the card goes below it, above it or
+   beside it, whichever fits, and never leaves the window. */
+function tourPlace(){
+  const veil=$('#tourVeil');if(!tour||!veil)return;
+  const spot=veil.querySelector('.tour-spot'),card=veil.querySelector('.tour-card');
+  const vw=window.innerWidth,vh=window.innerHeight,gap=14,margin=16;
+  const r=tour.target?.getBoundingClientRect?.();
+  const box=r?{x:r.left-6,y:r.top-6,w:r.width+12,h:r.height+12}:{x:vw/2,y:vh/2,w:0,h:0};
+  Object.assign(spot.style,{left:`${box.x}px`,top:`${box.y}px`,width:`${box.w}px`,height:`${box.h}px`});
+  veil.classList.toggle('is-centered',!r);
+  const cw=card.offsetWidth,ch=card.offsetHeight;let x,y;
+  if(!r){x=(vw-cw)/2;y=(vh-ch)/2}
+  else if(box.y+box.h+gap+ch<=vh-margin){y=box.y+box.h+gap;x=box.x}
+  else if(box.y-gap-ch>=margin){y=box.y-gap-ch;x=box.x}
+  else if(box.x+box.w+gap+cw<=vw-margin){x=box.x+box.w+gap;y=box.y}
+  else{x=box.x-gap-cw;y=box.y}
+  card.style.left=`${Math.max(margin,Math.min(x,vw-cw-margin))}px`;
+  card.style.top=`${Math.max(margin,Math.min(y,vh-ch-margin))}px`;
 }
 function renderAll(){
   if(typeof ensureAccountCreateButton==='function')ensureAccountCreateButton();
@@ -3597,7 +4107,7 @@ function flyArchive(folder){
 }
 /* Archives are edited in place: every collected block is plain editable text
    on the page itself, and 保存 lights up once something changes. */
-const docText=el=>String(el?.innerText??el?.textContent??el?.value??'').replace(/\u00a0/g,' ').replace(/\n{3,}/g,'\n\n').trim();
+const docText=el=>String((el?.tagName==='TEXTAREA'?el.value:null)??el?.innerText??el?.textContent??el?.value??'').replace(/\u00a0/g,' ').replace(/\n{3,}/g,'\n\n').trim();
 const docEdit=(value,attrs)=>`<div class="doc-edit" contenteditable="plaintext-only" spellcheck="false" ${attrs}>${escapeHTML(value??'')}</div>`;
 /* 随记 under the three fixed blocks is the holder's own blank page: nothing
    fills it in, and it stays out of the team brief. */
@@ -3643,52 +4153,31 @@ function openTodayArchive(){
   pickArchive(S.today,true);
   openDiaryArchive(S.today,$(`#archiveCabinet .archive-file[data-date="${S.today}"]`));
 }
-/* 周报: one week of team briefs, from the team's first weekday like the week view, added
-   up and read in place. It opens over the archive box: the stats count up,
-   each day's bar rises, and the arrows slide to the week before or after. A
-   day opens that day's brief. */
-function weekSummary(week){
-  const briefs=week.briefs||[],sum=k=>briefs.reduce((n,b)=>n+Number(b.content?.totals?.[k]||0),0),people=new Map(),projects=new Map();
-  for(const b of briefs){
-    for(const m of b.content?.members||[]){const x=people.get(m.id)||{name:m.name,tasks:0,completed:0,load:0,days:0};x.tasks+=m.tasks||0;x.completed+=m.completed||0;x.load+=m.load||0;x.days+=1;people.set(m.id,x)}
-    for(const p of b.content?.projects||[]){const x=projects.get(p.id)||{name:p.name,owner:p.ownerName||p.owner||'',tasks:0,completed:0,days:0};x.tasks+=p.tasks||0;x.completed+=p.completed||0;x.days+=1;projects.set(p.id,x)}
-  }
-  const days=Array.from({length:7},(_,i)=>{const date=add(week.start,i),b=briefs.find(x=>x.date===date),
-    t=b?.content?.totals||{};return {date,has:Boolean(b),filed:Boolean(b&&b.filed!==false),tasks:t.tasks||0,
-    completed:t.completed||0,load:t.load||0}});
-  return {totals:{tasks:sum('tasks'),completed:sum('completed'),load:sum('load')},people:[...people.values()],
-    projects:[...projects.values()],days,
-    risks:briefs.flatMap(b=>(b.content?.risks||[]).map(r=>({date:b.date,text:r})))};
-}
+/* Weekly outcomes are computed from task events by the server. */
 function weekReportDocument(week){
-  const w=weekSummary(week),t=w.totals,pct=(a,b)=>b?Math.round(a/b*100):0,top=Math.max(1,...w.days.map(d=>d.tasks));
-  const bar=(done,all)=>`<span class="week-meter"><i style="--w:${pct(done,all)}%"></i></span>`;
-  const rows=(list,meta)=>list.length?`<div class="week-rows">${list.map((x,k)=>`<div class="week-row" style="--k:`
-    +`${k}"><strong>${escapeHTML(x.name)}</strong>${bar(x.completed,x.tasks)}<span>${meta(x)}</span></div>`).join('')}`
-    +`</div>`:'<p class="muted">—</p>';
-  const day=d=>{const n=new Date(`${d.date}T12:00:00`),later=d.date>S.today;
-    return `<button type="button" class="week-cell${d.has?'':' is-empty'}${d.date===S.today?' is-today':''}" data-date="`
-    +`${escapeHTML(d.date)}" ${d.filed?'':'disabled'} aria-label="${escapeHTML(archiveDay(d.date))}${d.has?` 完成 `
-    +`${d.completed}/${d.tasks}`:later?' 还没到':' 没有日报'}"><span class="week-cell-bar"><i style="--h:`
-    +`${(d.tasks/top*100).toFixed(1)}%;--done:${pct(d.completed,d.tasks)}%"></i></span><b>${n.getDate()}</b><small>`
-    +`${WEEKDAY_SHORT[n.getDay()]}</small><em>${d.has?`${d.completed}/${d.tasks}`:later?'':'—'}</em></button>`};
-  return `<article class="brief-doc week-report"><header class="brief-head"><div class="week-report-top">`
-    +`<div class="eyebrow">档案室 · 周报</div><div class="week-report-nav">`
+  const work=week.work||{},done=work.completedProjects||[],pending=work.unfinishedProjects||[],other=work.unfinishedOther||[],esc=escapeHTML;
+  const text=(label,value)=>value?`<p><span class="muted">${label}</span>${esc(String(value))}</p>`:'';
+  const people=p=>`Owner · ${esc(p.ownerName||'未指派')}${p.members?.length?' · 参与人：'+esc(p.members.join('、')):''}`;
+  const task=t=>`<li><div class="week-work-head"><strong>${esc(t.name)}</strong><span>${esc(t.assigneeName||'未指派')}</span></div>`
+    +`${text('剩余事项：',t.remaining)}${text('原因：',t.reason)}${text('后续安排：',t.scheduledOn>week.end?fmt(t.scheduledOn):'尚未安排到下周')}${text('截止日期：',t.deadline?fmt(t.deadline):'')}</li>`;
+  const completed=done.map(p=>`<li><div class="week-work-head"><strong>${esc(p.name)}</strong><time>${esc(fmt(p.completedOn))}</time></div>`
+    +`<small>${people(p)}</small><p class="week-project-summary">${esc(p.summary||[p.description,p.completionReport].filter(Boolean).join('\n'))}</p></li>`).join('');
+  const unfinished=pending.map(p=>`<li><div class="week-work-head"><strong>${esc(p.name)}</strong><span>${p.status==='pending_completion'?'待结项审批':'进行中'}</span></div>`
+    +`<small>${people(p)}</small>${text('项目内容：',p.description)}`
+    +`${p.status==='pending_completion'?'<p>已提交结项，等待审批</p>':''}`
+    +`${p.remaining?.length?`<ul class="week-remaining-list">${p.remaining.map(task).join('')}</ul>`:p.status==='pending_completion'?'':'<p class="muted">项目尚未结项，暂无已记录的未完成任务</p>'}</li>`).join('');
+  const remainingCount=pending.reduce((n,p)=>n+(p.remaining||[]).length,other.length);
+  return `<article class="brief-doc week-report"><header class="brief-head"><div class="week-report-top"><div class="eyebrow">档案室 · 周报</div><div class="week-report-nav">`
     +`<button type="button" class="icon-btn" data-week="-1" aria-label="上一周">${icon('chevron-left')}</button>`
-    +`<button type="button" class="icon-btn" data-week="1" ${week.end>=S.today?'disabled':''} aria-label="下一周">`
-    +`${icon('chevron-right')}</button></div></div><h2>${escapeHTML(fmt(week.start))} — ${escapeHTML(fmt(week.end))}`
-    +`</h2><div class="brief-stats"><div><b><span data-count="${t.completed}">${t.completed}</span>/<span data-count="`
-    +`${t.tasks}">${t.tasks}</span></b><span>完成任务</span></div><div><b><span data-count="`
-    +`${hours(t.load)}" data-decimals="1">${hours(t.load)}</span>h</b><span>完成工时</span></div><div><b data-count="`
-    +`${w.people.length}">${w.people.length}</b><span>位成员</span></div><div><b data-count="${w.projects.length}">`
-    +`${w.projects.length}</b><span>个项目</span></div></div></header>`
-    +`<section class="brief-section"><h3>每天</h3><div class="week-cells">${w.days.map(day).join('')}</div></section>`
-    +(w.risks.length?`<section class="brief-section"><h3>本周需要关注</h3><ul class="brief-risks">${w.risks.map(r=>`<li>`
-      +`<time>${escapeHTML(archiveDay(r.date))}</time>${escapeHTML(r.text)}</li>`).join('')}</ul></section>`:'')
-    +`<section class="brief-section"><h3>成员本周</h3>${rows(w.people,x=>`${x.completed}/${x.tasks} · ${hours(x.load)}h`)}`
-      +`</section>`
-    +`<section class="brief-section"><h3>项目本周</h3>${rows(w.projects,x=>`${x.completed}/${x.tasks} · ${x.days} 天有进展`)}`
-      +`</section></article>`;
+    +`<button type="button" class="icon-btn" data-week="1" ${week.end>=S.today?'disabled':''} aria-label="下一周">${icon('chevron-right')}</button></div></div>`
+    +`<h2>${esc(fmt(week.start))} — ${esc(fmt(week.end))}</h2><p class="muted">截至 ${esc(fmt(work.asOf||week.end))}</p>`
+    +`<div class="brief-stats"><div><b data-count="${done.length}">${done.length}</b><span>本周完成项目</span></div>`
+    +`<div><b data-count="${pending.length}">${pending.length}</b><span>待完成项目</span></div>`
+    +`<div><b data-count="${remainingCount}">${remainingCount}</b><span>剩余任务</span></div></div></header>`
+    +`<section class="brief-section"><h3>这周做了什么</h3>${completed?`<ul class="week-work-list">${completed}</ul>`:'<p class="muted">本周暂无已结项项目</p>'}</section>`
+    +`<section class="brief-section"><h3>还有什么没做</h3>${unfinished?`<ul class="week-work-list">${unfinished}</ul>`:'<p class="muted">暂无待完成项目</p>'}`
+    +`${other.length?`<h4>其他待续事项</h4><ul class="week-work-list">${other.map(task).join('')}</ul>`:''}</section>`
+    +`<footer class="week-daily-links">${(week.briefs||[]).filter(b=>b.filed!==false).map(b=>`<button type="button" class="text-btn week-cell" data-date="${esc(b.date)}">${esc(fmt(b.date))} 日报</button>`).join('')}</footer></article>`;
 }
 /* Numbers run up from zero as the report settles; a tap shows them at once. */
 function countUp(root){
@@ -3789,7 +4278,10 @@ document.addEventListener('keydown',e=>{
   if(e.target.closest('input,textarea,select,[contenteditable],.archive-ruler'))return;
   if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();stepArchive(e.key==='ArrowLeft'?1:-1)}});
 addEventListener('resize',()=>{if(UI.view==='archive')fitArchiveDrawer($('#archiveCabinet .drawer-stage'))});
-$$('.filter-link').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;switchView('today')});
+/* A quick filter narrows 今日任务; picking the one already on goes back to 全部. */
+$$('.filter-link').forEach(b=>b.onclick=()=>{UI.filter=UI.view==='today'&&UI.filter===b.dataset.filter?'all':b.dataset.filter;switchView('today')});
+function syncFilterLinks(){$$('.filter-link').forEach(b=>{const on=UI.view==='today'&&UI.filter===b.dataset.filter;
+  b.classList.toggle('is-on',on);b.setAttribute('aria-pressed',String(on))})}
 $$('.quick-tab').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;renderToday()});
 $('#prevDay').onclick=()=>{UI.dayOffset=(UI.dayOffset||0)-1;renderToday()};
 $('#nextDay').onclick=()=>{if(displayDay()>=DATE_HORIZON){toast(`日期范围目前只支持到 `
@@ -5294,7 +5786,9 @@ const CHAT_PRESENCE_MS=15000;
 /* A broadcast is a sentinel rather than an account id, so it can never
    collide with a real member and needs no row of its own. */
 const CHAT_EVERYONE='*';
-let chatPollTimer=0,chatPresenceTimer=0,chatLastAt='',chatLastDay='';
+let chatPollTimer=0,chatPresenceTimer=0,chatLastAt='',chatLastDay='',chatFirstAt='';
+let chatFirstCursor=null,chatLastCursor=null;
+let chatLoadGeneration=0;
 let chatChannel='general',chatPresence={},chatMentionQuery=null,chatMentionIndex=0;
 /* One line of the newest message per room, sent along with chat.list so the
    sidebar can read like a list of conversations. */
@@ -5451,17 +5945,22 @@ function chatBubble(m,withDay){
 }
 async function loadChat(reset){
   const log=$('#chatLog');if(!log)return;
-  let rows=[];
+  if(reset)chatLoadGeneration++;
+  const generation=chatLoadGeneration,channel=chatChannel,owner=S.user?.id;
+  let rows=[],more=false,firstCursor=null,lastCursor=null;
   try{
-    const scope={channel:chatChannel};
-    const data=await api('/api/action',{action:'chat.list',data:reset?scope:{...scope,since:chatLastAt}});
-    rows=data.messages||[];
+    const scope={channel};
+    const data=await api('/api/action',{action:'chat.list',data:reset?scope:{...scope,...(chatLastCursor?{sinceCursor:chatLastCursor}:{since:chatLastAt})}});
+    if(generation!==chatLoadGeneration||channel!==chatChannel||owner!==S.user?.id||!log.isConnected)return;
+    rows=data.messages||[];more=Boolean(data.more);
+    firstCursor=data.beforeCursor;lastCursor=data.sinceCursor;
     if(data.previews)chatPreviews=data.previews;
   }catch(e){
+    if(generation!==chatLoadGeneration||channel!==chatChannel||owner!==S.user?.id)return;
     if(reset)log.innerHTML=`<p class="chat-empty">读不到消息：${escapeHTML(e?.message||'加载失败')}</p>`;
     return;
   }
-  if(reset){log.innerHTML='';chatLastAt='';chatLastDay=''}
+  if(reset){log.innerHTML='';chatLastAt='';chatLastDay='';chatFirstAt='';chatFirstCursor=null;chatLastCursor=null}
   if(!rows.length){
     if(reset)log.innerHTML=chatChannel==='general'
       ?'<p class="chat-empty">暂无消息</p>'
@@ -5478,10 +5977,36 @@ async function loadChat(reset){
     if(day)chatLastDay=day;
     if(m.createdAt)chatLastAt=m.createdAt;
   });
+  chatLastCursor=lastCursor||null;
+  if(reset){chatFirstAt=rows[0]?.createdAt||'';chatFirstCursor=firstCursor||null;if(more)log.insertAdjacentHTML('afterbegin',chatMoreButton())}
+  bindChatMore();
   if(reset||nearBottom)log.scrollTop=log.scrollHeight;
   /* The list carries the newest line of every room, so a poll keeps it fresh. */
   renderChatChannels();
   reportChatRead(chatLastAt);
+}
+/* Older history comes a page at a time from the top of the log; the reader
+   stays on the line they were reading. */
+const chatMoreButton=()=>'<button type="button" class="chat-more" id="chatMore">加载更早的消息</button>';
+function bindChatMore(){const b=$('#chatMore');if(b)b.onclick=loadEarlierChat}
+async function loadEarlierChat(){
+  const log=$('#chatLog'),button=$('#chatMore');if(!log||!button||!chatFirstAt)return;
+  const channel=chatChannel,owner=S.user?.id,generation=chatLoadGeneration;button.disabled=true;button.textContent='加载中…';
+  let data;
+  try{data=await api('/api/action',{action:'chat.list',data:{channel,...(chatFirstCursor?{beforeCursor:chatFirstCursor}:{before:chatFirstAt}),limit:120}})}
+  catch(e){button.disabled=false;button.textContent='加载更早的消息';toast(e.message);return}
+  if(channel!==chatChannel||owner!==S.user?.id||generation!==chatLoadGeneration||!button.isConnected)return;
+  const rows=data.messages||[];let day='',html='';
+  rows.forEach(m=>{const d=(m.createdAt||'').slice(0,10);html+=chatBubble(m,Boolean(d)&&d!==day);if(d)day=d});
+  /* The day already shown at the top no longer starts there. */
+  const before=log.scrollHeight;
+  const firstDay=log.querySelector('.chat-day');
+  if(firstDay&&rows.length&&(rows[rows.length-1].createdAt||'').slice(0,10)===(chatFirstAt||'').slice(0,10))firstDay.remove();
+  button.insertAdjacentHTML('afterend',html);
+  if(rows[0]?.createdAt)chatFirstAt=rows[0].createdAt;
+  if(rows.length)chatFirstCursor=data.beforeCursor||null;
+  if(data.more){button.disabled=false;button.textContent='加载更早的消息'}else button.remove();
+  log.scrollTop+=log.scrollHeight-before;
 }
 async function reportChatRead(at){
   const channel=chatChannel;

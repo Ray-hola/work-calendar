@@ -140,6 +140,7 @@ MAX_AUDIO_BYTES = 8_000_000
 # snapshot never carries them; only the list of files travels with the state.
 # Like the audio route, the bound is raised per-route in do_POST.
 FILES_PATH = '/api/files'
+FILE_TEXT_PATH = FILES_PATH + '/text'
 MAX_FILE_BYTES = 20_000_000
 TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'task_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages', 'messages', 'folders', 'files', 'agent_conversations', 'agent_drafts', 'agent_receipts', 'meetings')
 
@@ -235,6 +236,29 @@ def required(data, key):
     if not value:
         raise Problem(400, f'请填写 {key}')
     return value
+
+PREVIEW_TEXT = ('.txt', '.md', '.csv', '.log', '.json')
+
+def preview_type(name, raw):
+    """The type to show a file as in the browser, or None to download it.
+    Judged by the bytes, not the name, so a page renamed to .png still downloads."""
+    if raw.startswith(b'\x89PNG\r\n\x1a\n'):
+        return 'image/png'
+    if raw.startswith(b'\xff\xd8\xff'):
+        return 'image/jpeg'
+    if raw[:6] in (b'GIF87a', b'GIF89a'):
+        return 'image/gif'
+    if raw[:4] == b'RIFF' and raw[8:12] == b'WEBP':
+        return 'image/webp'
+    if raw.startswith(b'%PDF-'):
+        return 'application/pdf'
+    if str(name).lower().endswith(PREVIEW_TEXT):
+        try:
+            raw.decode('utf-8')
+        except UnicodeDecodeError:
+            return None
+        return 'text/plain; charset=utf-8'
+    return None
 
 def valid_date(value):
     try:
@@ -563,10 +587,13 @@ class Store:
         title = required(data, 'title')[:120]
         participants = data.get('participants') if isinstance(data.get('participants'), list) else []
         participants = [str(x).strip() for x in participants if str(x).strip()][:50]
+        minutes = str(data.get('minutes') or '')
+        if len(minutes) > 50000:
+            raise Problem(400, '会议纪要不能超过 50000 字')
         record = {'projectId': project_id, 'title': title,
                   'scheduledAt': str(data.get('scheduledAt') or '').strip()[:40],
                   'participants': participants, 'agenda': str(data.get('agenda') or '').strip()[:10000],
-                  'rawTranscript': str(data.get('rawTranscript') or '')[:200000], 'minutes': '',
+                  'rawTranscript': str(data.get('rawTranscript') or '')[:200000], 'minutes': minutes,
                   'status': 'recording' if data.get('rawTranscript') else 'scheduled', 'createdBy': user['id'], 'createdAt': timestamp(), 'updatedAt': timestamp()}
         return self.put('meetings', record)
 
@@ -581,6 +608,11 @@ class Store:
         meeting['rawTranscript'] = text
         for key, limit in (('title', 120), ('agenda', 10000), ('scheduledAt', 40)):
             if key in data: meeting[key] = str(data.get(key) or '').strip()[:limit]
+        if 'minutes' in data:
+            minutes = str(data.get('minutes') or '')
+            if len(minutes) > 50000:
+                raise Problem(400, '会议纪要不能超过 50000 字')
+            meeting['minutes'] = minutes
         if isinstance(data.get('participants'), list): meeting['participants'] = [str(x).strip() for x in data['participants'] if str(x).strip()][:50]
         meeting['status'] = 'recording' if data.get('recording') else ('ended' if meeting.get('status') == 'recording' else meeting.get('status', 'scheduled'))
         meeting['updatedAt'] = timestamp()
@@ -2029,6 +2061,23 @@ class Store:
             if not row:raise Problem(404,'文件内容已丢失')
             return f,bytes(row['data'])
 
+    def update_text_file(self, user, data):
+        """Replace the content of a Markdown or text file; whoever may delete it may edit it."""
+        f = self.get('files', required(data, 'id'))
+        p = self.get('projects', f['projectId'])
+        if not self.can_view_project(user, p):
+            raise Problem(403, '项目已归档或无权访问')
+        if not (user['admin'] or p['owner'] == user['id'] or f.get('uploader') == user['id']):
+            raise Problem(403, '只有上传者、项目 Owner 或管理员可以修改这个文件')
+        if not str(f.get('name', '')).lower().endswith(PREVIEW_TEXT):
+            raise Problem(400, '只有文本文件可以在线修改')
+        raw = str(data.get('text') or '').encode('utf-8')
+        if len(raw) > MAX_FILE_BYTES:
+            raise Problem(413, '文件不能超过 20MB')
+        self.db.execute('UPDATE file_blobs SET data=? WHERE id=?', (sqlite3.Binary(raw), f['id']))
+        f.update(size=len(raw), updatedAt=timestamp(), updatedBy=user['id'])
+        return self.put('files', f)
+
     def drop_file(self, id):
         self.db.execute('DELETE FROM file_blobs WHERE id=?',(id,))
         self.db.execute('DELETE FROM files WHERE id=?',(id,))
@@ -2872,7 +2921,7 @@ class Store:
             # Never persist credentials or chat message bodies in the audit log.
             details = ({k: data.get(k) for k in ('kind', 'operation', 'id', 'sessionId')} if action == 'work.card.apply'
                        else {'projects': len(data.get('projects') or []), 'tasks': len(data.get('tasks') or [])} if action == 'work.cards.preview'
-                       else {k:v for k,v in data.items() if k not in ('password', 'apiKey', 'messages')})
+                       else {k:(f'<{len(v)} 字>' if isinstance(v, str) and len(v) > 500 else v) for k,v in data.items() if k not in ('password', 'apiKey', 'messages')})
             self.audit(user['id'], action, details)
             return result or {'ok':True}
 
@@ -2964,14 +3013,29 @@ class Store:
             limit = max(1, min(300, int(data.get('limit') or 120)))
         except (TypeError, ValueError):
             limit = 120
+        # `before` pages back through older history; `more` says whether any is left.
+        before = str(data.get('before') or '')
         where, args = f'{CHAT_CHANNEL_SQL}=?', [channel]
-        if since:
-            where += f" AND {CHAT_TIME_SQL}>?"
-            args.append(since)
-        rows = [json.loads(r['data']) for r in self.db.execute(
-            f'SELECT data FROM messages WHERE {where} ORDER BY {CHAT_TIME_SQL} DESC, rowid DESC LIMIT ?', (*args, limit))]
-        rows.reverse()
-        return {'messages': rows, 'now': timestamp(), 'channel': channel,
+        # Keep the complete ordering key: timestamps are not unique. Legacy
+        # timestamp-only callers still work, while new clients use both keys.
+        for key, legacy, op in (('sinceCursor', since, '>'), ('beforeCursor', before, '<')):
+            cursor = data.get(key)
+            if cursor is not None:
+                if (not isinstance(cursor, dict) or not isinstance(cursor.get('at'), str)
+                        or type(cursor.get('rowid')) is not int or cursor['rowid'] < 1):
+                    raise Problem(400, '消息分页位置无效，请重新打开频道')
+                where += f' AND ({CHAT_TIME_SQL}, rowid){op}(?, ?)'
+                args.extend((cursor['at'], cursor['rowid']))
+            elif legacy:
+                where += f' AND {CHAT_TIME_SQL}{op}?'
+                args.append(legacy)
+        records = list(self.db.execute(
+            f'SELECT rowid AS cursor_id, data FROM messages WHERE {where} ORDER BY {CHAT_TIME_SQL} DESC, rowid DESC LIMIT ?', (*args, limit + 1)))
+        more = len(records) > limit
+        records = records[:limit][::-1]
+        rows = [json.loads(r['data']) for r in records]
+        cursor = lambda i: {'at': rows[i].get('createdAt') or '', 'rowid': records[i]['cursor_id']} if records else None
+        return {'messages': rows, 'more': more, 'beforeCursor': cursor(0), 'sinceCursor': cursor(-1), 'now': timestamp(), 'channel': channel,
                 'previews': self.chat_previews(user)}
 
     def chat_previews(self, user):
@@ -3167,6 +3231,7 @@ class Store:
         if action=='meeting.prompt.update': return self.set_meeting_prompt(user, d)
         if action=='meeting.list': return self.meeting_list(user, d)
         if action=='meeting.get': return self.meeting_get(user, d)
+        if action=='file.text.update': return self.update_text_file(user, d)
         if action=='meeting.create': return self.meeting_create(user, d)
         if action=='meeting.transcript.update': return self.meeting_update_transcript(user, d)
         if action=='chat.list':
@@ -4169,7 +4234,7 @@ class Store:
             self.audit(user['id'],'brief.update',{'date':day})
             return self.apply_brief_edits(brief)
         if action=='brief.week':
-            # One week of team reports for export, from the team's first day of
+            # Supporting daily reports follow the team's first day of
             # the week like the week view: filed ones as they stand, days not
             # filed yet assembled on the spot.
             self.admin(user)
@@ -4186,7 +4251,9 @@ class Store:
                     brief=self.compose_brief(ds)
                     if brief:brief['filed']=False
                 if brief:briefs.append(self.apply_brief_edits(brief))
-            return {'start':start.isoformat(),'end':(start+timedelta(days=6)).isoformat(),'briefs':briefs}
+            end=(start+timedelta(days=6)).isoformat()
+            return {'start':start.isoformat(),'end':end,'briefs':briefs,
+                    'work':self.week_work(start.isoformat(),min(end,today))}
         if action=='inbox.delete':
             # Only the recipient's own notices. Invitations are answered, not
             # deleted, so they are not touched here.
@@ -4348,6 +4415,68 @@ class Store:
                 'load':sum(int(t.get('duration',0) or 0) for t in done),
                 'loadTotal':sum(int(t.get('duration',0) or 0) for t in tasks),
                 'content':content}
+
+    def week_work(self, start, cutoff):
+        """Weekly project outcomes, plus work remaining at the reporting cutoff.
+        Completed tasks alone never imply that a project has been completed.
+        """
+        result={'asOf':cutoff,'completedProjects':[],'unfinishedProjects':[],'unfinishedOther':[]}
+        if start>cutoff:return result
+        def day(value, fallback=''):
+            try:return datetime.fromisoformat(str(value)).astimezone(now().tzinfo).date().isoformat()
+            except (ValueError,TypeError):return fallback
+        tasks=self.all('tasks');by_id={t['id']:t for t in tasks};chains={};events={};future_changes=set()
+        for t in tasks:chains.setdefault(self._lineage_root(t,by_id),[]).append(t)
+        for log in self.all('logs'):
+            t=by_id.get(log.get('taskId'))
+            if not t:continue
+            root=self._lineage_root(t,by_id)
+            if day(log.get('createdAt'),log.get('date',''))<=cutoff:events.setdefault(root,[]).append(log)
+            elif log.get('kind') in ('skip','restore','reopen'):future_changes.add(root)
+        remaining={}
+        for root,chain in chains.items():
+            known=[t for t in chain if day(t.get('createdAt'),t.get('date',''))<=cutoff]
+            if not known:continue
+            logs=sorted(events.get(root,[]),key=lambda l:(str(l.get('createdAt') or l.get('date','')),str(l.get('id',''))))
+            if not any(t.get('date','9999')<=cutoff for t in known) and not logs:continue
+            t=max(known,key=lambda x:(x.get('date',''),x.get('createdAt','')))
+            states=[l for l in logs if l.get('kind') in ('complete','reopen','skip','restore','defer')]
+            last=states[-1] if states else None
+            done=last.get('kind')=='complete' if last else (t.get('status')=='done' and day(t.get('completedAt'),t.get('date',''))<=cutoff)
+            skipped=last.get('kind')=='skip' if last else (root not in future_changes and t.get('status') in ('skipped','rejected','pending'))
+            if done or skipped:continue
+            detail=next((l for l in reversed(logs) if l.get('kind') in ('defer','reopen')), {})
+            remaining.setdefault(t.get('projectId'),[]).append({'taskId':t['id'],'name':t.get('name',''),
+                'assigneeName':self.display_name(t.get('assignee')),'remaining':detail.get('remaining') or t.get('desc') or t.get('name',''),
+                'reason':detail.get('reason',''),'scheduledOn':t.get('date',''),'deadline':t.get('deadline'),
+                'status':'doing' if t.get('status')=='doing' else 'todo'})
+        for p in self.all('projects'):
+            if p.get('status') in ('pending','rejected'):continue
+            completed=day(p.get('completedAt'))
+            row={'projectId':p['id'],'name':p.get('name',''),'description':p.get('desc',''),
+                 'ownerName':self.display_name(p.get('owner')),
+                 'members':[self.display_name(m) for m,state in (p.get('members') or {}).items() if state=='accepted']}
+            if p.get('status') in ('done','archived') and completed and completed<=cutoff:
+                if completed>=start:
+                    report=str(p.get('completionReport') or '').strip()
+                    description=str(p.get('desc') or '').strip()
+                    summary=f'本周完成「{p.get("name","")}」。'
+                    if description:summary+='\n项目内容：'+description
+                    summary+='\n完成情况：'+(report or '已结项，未填写完成描述')
+                    result['completedProjects'].append({**row,'completedOn':completed,'completionReport':report,'summary':summary})
+                continue
+            known_since=day(p.get('createdAt'),p.get('start',''))
+            if known_since>cutoff or (p.get('start') or '')>cutoff:continue
+            if not known_since and cutoff<now().date().isoformat() and not remaining.get(p['id']):continue
+            # A completion request is still outstanding until approval.
+            if p.get('status') in ('active','pending_completion') or completed>cutoff:
+                waiting=p.get('status')=='pending_completion' and day(p.get('completionRequestedAt'))<=cutoff
+                result['unfinishedProjects'].append({**row,'status':'pending_completion' if waiting else 'active',
+                    'remaining':sorted(remaining.get(p['id'],[]),key=lambda t:(t['scheduledOn'],t['taskId']))})
+        result['unfinishedOther']=remaining.get(None,[])
+        result['completedProjects'].sort(key=lambda p:(p['completedOn'],p['projectId']))
+        result['unfinishedProjects'].sort(key=lambda p:(p['name'],p['projectId']))
+        return result
 
     def compose_brief(self, day, at=None):
         """Assemble one team report for a day without filing it: every member's
@@ -4639,11 +4768,16 @@ def main():
                 if self.path=='/api/state':self.send(200,store.snapshot(store.authenticate(self.token())));return
                 if self.path=='/api/health':self.send(200,{'ok':True,'timezone':'Asia/Shanghai'});return
                 if self.path.startswith(FILES_PATH+'/'):
-                    # Always a download, never rendered: an uploaded page must
-                    # not run as this site.
+                    # A download by default. ?preview=1 shows a file in the browser
+                    # only when its bytes prove it is a raster image, a PDF or plain
+                    # text: an uploaded page never runs as this site. Images and text
+                    # sit under a sandbox that runs nothing; a PDF is left to the
+                    # browser's own viewer, which that sandbox would block.
                     f,raw=store.read_file(store.authenticate(self.token()),urllib.parse.unquote(self.path[len(FILES_PATH)+1:].split('?')[0]))
-                    self.send_response(200);self.send_header('Content-Type','application/octet-stream')
-                    self.send_header('Content-Disposition',"attachment; filename*=UTF-8''"+urllib.parse.quote(f['name']))
+                    shown=preview_type(f['name'],raw) if 'preview=1' in self.path.partition('?')[2].split('&') else None
+                    self.send_response(200);self.send_header('Content-Type',shown or 'application/octet-stream')
+                    self.send_header('Content-Disposition',("inline" if shown else "attachment")+"; filename*=UTF-8''"+urllib.parse.quote(f['name']))
+                    if shown and shown!='application/pdf':self.send_header('Content-Security-Policy',"sandbox; default-src 'none'; img-src 'self'; style-src 'unsafe-inline'")
                     self.send_header('Cache-Control','private, no-store');self.send_header('X-Content-Type-Options','nosniff')
                     self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
                 filename={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/styles.css':'styles.css'}.get(self.path.split('?')[0])
@@ -4660,8 +4794,14 @@ def main():
                 # below raises the ceiling just for that one upload, so a long
                 # clip is not silently turned into a 413 with a text-shaped error.
                 route=self.path.split('?')[0]
-                limit=MAX_AUDIO_BYTES if route==TRANSCRIBE_PATH else MAX_FILE_BYTES if route==FILES_PATH else 200_000
-                if size>limit:raise Problem(413,'文件不能超过 20MB' if route==FILES_PATH else '请求内容过大')
+                limit=MAX_AUDIO_BYTES if route==TRANSCRIBE_PATH else MAX_FILE_BYTES if route in (FILES_PATH,FILE_TEXT_PATH) else 200_000
+                if size>limit:raise Problem(413,'文件不能超过 20MB' if route in (FILES_PATH,FILE_TEXT_PATH) else '请求内容过大')
+                if route==FILE_TEXT_PATH:
+                    user=store.authenticate(self.token())
+                    file_id=(urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('id') or [''])[0]
+                    try: text=(self.rfile.read(size) if size>0 else b'').decode('utf-8')
+                    except UnicodeDecodeError:raise Problem(400,'文本文件必须使用 UTF-8 编码')
+                    self.send(200,store.action(user,'file.text.update',{'id':file_id,'text':text}));return
                 if route==FILES_PATH:
                     # Raw bytes, like the audio route; the name rides in a header.
                     user=store.authenticate(self.token())
