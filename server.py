@@ -96,6 +96,13 @@ CHAT_CHANNELS = (('general', '沟通'), ('lounge', '闲聊'))
 CHAT_DEFAULT = 'general'
 CHAT_LEGACY = 'all'          # the pre-channel hall; folded into 沟通
 CHAT_EVERYONE = '*'          # a broadcast, not an account id
+# chat_normalize as SQL: no channel (or the legacy hall) means 沟通. An index on
+# this expression lets each room be read without scanning every message.
+_CHAT_RAW = "COALESCE(NULLIF(json_extract(data,'$.channel'),''),'" + CHAT_DEFAULT + "')"
+CHAT_CHANNEL_SQL = f"CASE WHEN {_CHAT_RAW}='{CHAT_LEGACY}' THEN '{CHAT_DEFAULT}' ELSE {_CHAT_RAW} END"
+# Notices the page acts on by reference; they stay in the state however old.
+ACTIONABLE_NOTICES = ('approval', 'project_completion', 'task_edit_approval', 'task_request')
+READ_NOTICES_KEPT = 200
 
 # The assistant proxy is the one place a browser can make the server send a body
 # it did not write, so its size is bounded twice, for two different reasons.
@@ -294,6 +301,8 @@ class Store:
         for table in TABLES:
             self.db.execute(f'CREATE TABLE IF NOT EXISTS {table} (id TEXT PRIMARY KEY, data TEXT NOT NULL)')
         self.db.execute('CREATE TABLE IF NOT EXISTS file_blobs (id TEXT PRIMARY KEY, data BLOB NOT NULL)')
+        self.db.execute(f'CREATE INDEX IF NOT EXISTS messages_by_channel ON messages({CHAT_CHANNEL_SQL})')
+        self.db.execute("CREATE INDEX IF NOT EXISTS notifications_by_recipient ON notifications(json_extract(data,'$.to'))")
         self.db.commit()
         # One JSON record stores the global automatic collection policy.  The
         # default keeps the existing behaviour: collect the previous day's
@@ -526,6 +535,18 @@ class Store:
         return ('你是会议纪要整理助手。请只根据原始转录整理，不要补造事实。'
                 '输出简洁的 Markdown，包含：会议结论、待办事项（负责人/截止时间/事项）、'
                 '风险与待确认问题。若原稿没有对应信息，写“未提及”。')
+
+    @staticmethod
+    def meeting_summary(m):
+        """What lists need: everything but the transcript and minutes text."""
+        raw, minutes = m.get('rawTranscript') or '', m.get('minutes') or ''
+        return {**{k: v for k, v in m.items() if k not in ('rawTranscript', 'minutes')},
+                'transcriptChars': len(raw), 'hasMinutes': bool(minutes)}
+
+    def meeting_get(self, user, data):
+        m = self.get('meetings', str(data.get('id') or ''))
+        self._meeting_project(user, m.get('projectId'), readonly=True)
+        return m
 
     def meeting_list(self, user, data):
         project_id = str(data.get('projectId') or '').strip()
@@ -1929,6 +1950,14 @@ class Store:
         if fresh:record['fresh']=True
         return self.put('notifications', record)
 
+    def notices_for(self, account):
+        rows = [json.loads(r['data']) for r in self.db.execute(
+            "SELECT data FROM notifications WHERE json_extract(data,'$.to')=? ORDER BY rowid", (account,))]
+        rows = [n for n in rows if '12:00 初稿' not in str(n.get('title', ''))]
+        settled = [i for i, n in enumerate(rows) if n.get('read') and n.get('kind') not in ACTIONABLE_NOTICES]
+        dropped = set(settled[:-READ_NOTICES_KEPT]) if len(settled) > READ_NOTICES_KEPT else set()
+        return [n for i, n in enumerate(rows) if i not in dropped]
+
     def recent_audit(self, limit):
         rows = self.db.execute('SELECT data FROM audit ORDER BY rowid DESC LIMIT ?', (limit,)).fetchall()
         return [json.loads(r['data']) for r in reversed(rows)]
@@ -2661,7 +2690,7 @@ class Store:
         task_requests=[r for r in self.all('task_requests') if user['admin'] or r.get('requester')==user['id'] or r.get('projectId') in owned]
         automation=next((x.get('value',{}) for x in self.all('settings') if x.get('id')=='automation'),{})
         return {'user':user,'users':self.users(),'today':at.date().isoformat(),'dateHorizon':calendar_end(at.date()).isoformat(),'weekStart':self.week_start(),'repeatStacking':self.repeat_stacking(),'projects':projects,
-'folders':folders,'fileArchives':file_archives,'files':[f for f in all_files if f.get('projectId') in file_pids],'meetings':[m for m in all_meetings if m.get('projectId') in file_pids],'meetingPrompt':self.meeting_prompt() if user['admin'] else None,'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees'] or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':[n for n in self.all('notifications') if n['to']==user['id'] and '12:00 初稿' not in str(n.get('title',''))], 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'taskRequests':task_requests, 'creationRules':self.creation_rules(user), 'creationPolicy':self.creation_policy() if user.get('role')=='superadmin' else None, 'accountOrder':next((x.get('value') or [] for x in self.all('settings') if x.get('id')=='account_order'),[]) if user['admin'] else [], 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or owner_of.get(s['projectId'])==user['id'])], 'chat':self.chat_summary(user),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.recent_audit(60) if user['admin'] else []}
+'folders':folders,'fileArchives':file_archives,'files':[f for f in all_files if f.get('projectId') in file_pids],'meetings':[self.meeting_summary(m) for m in all_meetings if m.get('projectId') in file_pids],'meetingPrompt':self.meeting_prompt() if user['admin'] else None,'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees'] or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':self.notices_for(user['id']), 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'taskRequests':task_requests, 'creationRules':self.creation_rules(user), 'creationPolicy':self.creation_policy() if user.get('role')=='superadmin' else None, 'accountOrder':next((x.get('value') or [] for x in self.all('settings') if x.get('id')=='account_order'),[]) if user['admin'] else [], 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or owner_of.get(s['projectId'])==user['id'])], 'chat':self.chat_summary(user),'profiles':[self.profile(u['id']) for u in self.users() if user['admin'] or u['id']==user['id'] or any(p['owner']==user['id'] and u['id'] in p['members'] for p in projects)], 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'audit':self.recent_audit(60) if user['admin'] else []}
 
     def diary_statistics(self, viewer, start=None, end=None):
         """Return daily completion/load summaries for the diary dashboard.
@@ -2907,11 +2936,15 @@ class Store:
             limit = max(1, min(300, int(data.get('limit') or 120)))
         except (TypeError, ValueError):
             limit = 120
-        rows = [m for m in self.all('messages')
-                if self.chat_normalize(m) == channel
-                and (not since or str(m.get('createdAt', '')) > since)]
+        where, args = f'{CHAT_CHANNEL_SQL}=?', [channel]
+        if since:
+            where += " AND COALESCE(json_extract(data,'$.createdAt'),'')>?"
+            args.append(since)
+        rows = [json.loads(r['data']) for r in self.db.execute(
+            f'SELECT data FROM messages WHERE {where} ORDER BY rowid DESC LIMIT ?', (*args, limit))]
+        rows.reverse()
         rows.sort(key=lambda m: m.get('createdAt', ''))
-        return {'messages': rows[-limit:], 'now': timestamp(), 'channel': channel,
+        return {'messages': rows, 'now': timestamp(), 'channel': channel,
                 'previews': self.chat_previews(user)}
 
     def chat_previews(self, user):
@@ -2921,19 +2954,16 @@ class Store:
         never surfaces outside 成果库 — and trimmed hard, because this travels
         with every poll.
         """
-        visible = set(self.chat_visible_channels(user))
         previews = {}
-        for m in self.all('messages'):
-            channel = self.chat_normalize(m)
-            if channel not in visible:
-                continue
-            at = str(m.get('createdAt', ''))
-            # Rows come in insertion order, so on a timestamp tie (the Windows
-            # clock ticks every ~16 ms) the later message is the newer one.
-            if channel in previews and previews[channel]['createdAt'] > at:
-                continue
-            previews[channel] = {'body': str(m.get('body', ''))[:60],
-                                 'author': m.get('author', ''), 'createdAt': at}
+        for channel in self.chat_visible_channels(user):
+            # The newest row of the room; on a timestamp tie (the Windows clock
+            # ticks every ~16 ms) the later insert is the newer message.
+            row = self.db.execute(f'SELECT data FROM messages WHERE {CHAT_CHANNEL_SQL}=? ORDER BY rowid DESC LIMIT 1',
+                                  (channel,)).fetchone()
+            if row:
+                m = json.loads(row['data'])
+                previews[channel] = {'body': str(m.get('body', ''))[:60],
+                                     'author': m.get('author', ''), 'createdAt': str(m.get('createdAt', ''))}
         return previews
 
     def chat_send(self, user, data):
@@ -2989,7 +3019,7 @@ class Store:
             # First write since the room gained channels: seed every room that
             # exists now with the old all-covering watermark.
             seeded = set(self.chat_visible_channels(user))
-            seeded.update(self.chat_normalize(m) for m in self.all('messages'))
+            seeded.update(r[0] for r in self.db.execute(f'SELECT DISTINCT {CHAT_CHANNEL_SQL} FROM messages'))
             book = {cid: str(raw or '') for cid in seeded}
         book[channel] = at
         state[user['id']] = book
@@ -3024,19 +3054,20 @@ class Store:
         Counted per room as well as in total: a badge on the room tells you
         something happened, not where, and the room has several doors.
         """
-        rows = self.all('messages')
-        visible = set(self.chat_visible_channels(user))
+        book = self.chat_settings('chat-read').get(user['id'], '')
+        read_at = lambda channel: str(book.get(channel) or '') if isinstance(book, dict) else str(book or '')
         by_channel = {}
-        for m in rows:
-            if m.get('author') == user['id']:
-                continue
-            channel = self.chat_normalize(m)
-            if channel not in visible:
-                continue
-            if str(m.get('createdAt', '')) > self.chat_read_at(user['id'], channel):
-                by_channel[channel] = by_channel.get(channel, 0) + 1
-        last = rows[-1] if rows else {}
-        return {'count': len(rows), 'unread': sum(by_channel.values()),
+        for channel in self.chat_visible_channels(user):
+            unread = self.db.execute(
+                f"SELECT count(*) FROM messages WHERE {CHAT_CHANNEL_SQL}=? "
+                "AND COALESCE(json_extract(data,'$.createdAt'),'')>? AND COALESCE(json_extract(data,'$.author'),'')<>?",
+                (channel, read_at(channel), user['id'])).fetchone()[0]
+            if unread:
+                by_channel[channel] = unread
+        total = self.db.execute('SELECT count(*) FROM messages').fetchone()[0]
+        newest = self.db.execute('SELECT data FROM messages ORDER BY rowid DESC LIMIT 1').fetchone()
+        last = json.loads(newest['data']) if newest else {}
+        return {'count': total, 'unread': sum(by_channel.values()),
                 'byChannel': by_channel,
                 'lastAt': last.get('createdAt', ''),
                 'lastBy': last.get('author', '')}
@@ -3108,6 +3139,7 @@ class Store:
     def _action(self, user, action, d):
         if action=='meeting.prompt.update': return self.set_meeting_prompt(user, d)
         if action=='meeting.list': return self.meeting_list(user, d)
+        if action=='meeting.get': return self.meeting_get(user, d)
         if action=='meeting.create': return self.meeting_create(user, d)
         if action=='meeting.transcript.update': return self.meeting_update_transcript(user, d)
         if action=='chat.list':
@@ -3434,6 +3466,9 @@ class Store:
                         self.db.execute('DELETE FROM repeats WHERE id=?',(r['id'],))
                 for f in self.all('files'):
                     if f.get('projectId')==p['id']:self.drop_file(f['id'])
+                for m in self.all('meetings'):
+                    if m.get('projectId')==p['id']:self.db.execute('DELETE FROM meetings WHERE id=?',(m['id'],))
+                self.db.execute(f'DELETE FROM messages WHERE {CHAT_CHANNEL_SQL}=?',(p['id'],))
                 self.db.execute('DELETE FROM projects WHERE id=?',(p['id'],))
             self.audit(user['id'],'project.delete',{'project':p['name'],'projectId':p['id'],**counts})
             for member,status in (p.get('members') or {}).items():

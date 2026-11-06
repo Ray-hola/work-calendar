@@ -1270,7 +1270,7 @@ function projectSpaceTabs(p){
 function bindProjectAreaTabs(p){$$('#projectSpace [data-space-area]').forEach(b=>b.onclick=()=>projectArea(p,b.dataset.spaceArea))}
 function projectMeetingList(p){
   const meetings=(S.meetings||[]).filter(m=>m.projectId===p.id).sort((a,b)=>String(b.scheduledAt||b.createdAt).localeCompare(String(a.scheduledAt||a.createdAt)));
-  return meetings.map(m=>`<button type="button" class="meeting-row" data-meeting="${escapeHTML(m.id)}"><span class="meeting-icon">${icon('chat')}</span><span class="meeting-copy"><strong>${escapeHTML(m.title)}</strong><small>${escapeHTML(m.scheduledAt||'未安排')} · ${m.minutes?'已整理':'待整理'}</small></span>${icon('chevron-right')}</button>`).join('')||'<p class="muted space-empty">还没有会议</p>';
+  return meetings.map(m=>`<button type="button" class="meeting-row" data-meeting="${escapeHTML(m.id)}"><span class="meeting-icon">${icon('chat')}</span><span class="meeting-copy"><strong>${escapeHTML(m.title)}</strong><small>${escapeHTML(m.scheduledAt||'未安排')} · ${m.minutes||m.hasMinutes?'已整理':'待整理'}</small></span>${icon('chevron-right')}</button>`).join('')||'<p class="muted space-empty">还没有会议</p>';
 }
 function projectMeetings(p,readonly=false){
   return `<section class="space-section space-meetings"><div class="space-head"><h2>项目会议</h2>${!readonly&&canManageProject(p)?'<button type="button" class="secondary-btn" id="newProjectMeeting">新增会议</button>':''}</div>`
@@ -1301,13 +1301,21 @@ function meetingMount(html){
   const pane=UI.spaceArea==='meetings'&&UI.space?$('#meetingEditor'):null;
   if(pane){pane.innerHTML=html;pane.dataset.dirty='false'}else openModal(html);
 }
+/* The state carries meetings without their transcript and minutes; opening one
+   fetches the full record once and keeps it on the list entry. */
+const meetingChars=m=>m.rawTranscript!=null?m.rawTranscript.length:(m.transcriptChars||0);
+function meetingLoaded(m){return !m||'rawTranscript' in m}
+async function loadMeeting(m){const full=await api('/api/action',{action:'meeting.get',data:{id:m.id}});Object.assign(m,full);return m}
 function openArchivedMeeting(p,id){
   const m=(S.meetings||[]).find(x=>x.id===id&&x.projectId===p.id);if(!m)return;
+  if(!meetingLoaded(m))return loadMeeting(m).then(()=>openArchivedMeeting(p,id)).catch(e=>toast(e.message));
   meetingMount(`<div class="eyebrow">${escapeHTML(p.name)} · 归档会议</div><h2>${escapeHTML(m.title)}</h2><p class="muted">${escapeHTML(m.scheduledAt||'未安排')} · ${escapeHTML((m.participants||[]).join('、'))}</p><p>${escapeHTML(m.agenda||'')}</p><label class="form-field">原始转录<textarea readonly rows="10">${escapeHTML(m.rawTranscript||'')}</textarea></label><section class="meeting-minutes-preview"><h3>会议纪要</h3><div class="meeting-minutes-body">${escapeHTML(m.minutes||'尚未生成')}</div></section><div class="modal-footer"><button type="button" class="secondary-btn" id="cancelAction">关闭</button></div>`);
   $('#cancelAction').onclick=()=>{const pane=$('#meetingEditor');if(pane)pane.innerHTML='<p class="muted space-empty">选择一场会议</p>';else closeModal()};
 }
 function openMeetingEditor(p,meetingId=null){
   if(meetingLive.session||meetingLive.active)return meetingStopLive().then(()=>openMeetingEditor(p,meetingId)).catch(e=>toast(e.message));
+  const listed=meetingId?(S.meetings||[]).find(m=>m.id===meetingId&&m.projectId===p.id):null;
+  if(!meetingLoaded(listed))return loadMeeting(listed).then(()=>openMeetingEditor(p,meetingId)).catch(e=>toast(e.message));
   const oldPane=$('#meetingEditor');
   if(oldPane?.dataset?.dirty==='true'&&!confirm('会议修改尚未保存，确定切换？'))return;
   if((S.fileArchives||[]).some(x=>x.id===p.id)){openArchivedMeeting(p,meetingId);return}
@@ -1621,8 +1629,8 @@ function projectFiles(p,readonly=false,includeMeetings=true){
     +`${canDrop(f)?`<button class="ghost-btn file-delete" data-file="${escapeHTML(f.id)}" aria-label="删除 ${escapeHTML(f.name)}" title="删除">`
     +`${icon('x')}</button>`:'<span></span>'}</div>`;
   const meeting=m=>`<button type="button" class="file-row meeting-row" data-meeting="${escapeHTML(m.id)}"><span class="file-ext is-meeting">会议</span>`
-    +`<span class="file-name">${escapeHTML(m.title)}</span><small>${escapeHTML(whenText(m.scheduledAt))} · ${m.minutes?'纪要已整理':'待整理'}`
-    +`${m.rawTranscript?` · 原稿 ${m.rawTranscript.length} 字`:''}</small><span class="meeting-arrow">${icon('chevron-right')}</span></button>`;
+    +`<span class="file-name">${escapeHTML(m.title)}</span><small>${escapeHTML(whenText(m.scheduledAt))} · ${m.minutes||m.hasMinutes?'纪要已整理':'待整理'}`
+    +`${meetingChars(m)?` · 原稿 ${meetingChars(m)} 字`:''}</small><span class="meeting-arrow">${icon('chevron-right')}</span></button>`;
   const rows=[...(S.files||[]).filter(f=>f.projectId===p.id).map(f=>({at:f.createdAt,html:file(f)})),
     ...(includeMeetings?(S.meetings||[]).filter(m=>m.projectId===p.id).map(m=>({at:m.scheduledAt||m.createdAt,html:meeting(m)})):[])]
     .sort((a,b)=>String(b.at||'').localeCompare(String(a.at||'')));
