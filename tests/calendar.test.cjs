@@ -2982,3 +2982,25 @@ test('a late chat page cannot replace cursors after changing account or channel'
     assert.equal(log.innerHTML,'current account content');assert.equal(a.run('chatLastCursor'),null);
   }
 });
+
+function guideDemoHarness(reduced=false){
+  const a=app(),timers=[],cleared=[],classes=new Set(),dots=Array.from({length:4},()=>({classList:{toggle(){}},setAttribute(){}}));
+  const play={},caption={},fig={dataset:{demo:'task-life'},classList:{toggle(c,on){on?classes.add(c):classes.delete(c)},add(c){classes.add(c)},contains:c=>classes.has(c)},
+    querySelector:s=>s==='.demo-play'?play:caption,querySelectorAll:()=>dots};
+  a.context.root={querySelectorAll:()=>[fig]};a.context.matchMedia=()=>({matches:reduced});
+  a.context.setInterval=fn=>{timers.push(fn);return timers.length};a.context.clearInterval=id=>cleared.push(id);
+  a.context.IntersectionObserver=class {observe(){} disconnect(){}};
+  a.run("UI.view='guide';bindGuideDemos(root)");return {a,fig,play,caption,dots,timers,cleared,classes};
+}
+test('tutorial demos advance only while visible and respect pause and leaving the guide',()=>{
+  const h=guideDemoHarness();h.timers[0]();assert.equal(h.fig.dataset.step,'0');
+  h.classes.add('is-visible');h.timers[0]();assert.equal(h.fig.dataset.step,'1');
+  h.play.onclick();h.timers[0]();assert.equal(h.fig.dataset.step,'1');assert.equal(h.play.textContent,'播放');
+  h.play.onclick();h.timers[0]();assert.equal(h.fig.dataset.step,'2');
+  h.a.run("UI.view='today'");h.timers[0]();assert.ok(h.cleared.includes(1));
+});
+test('reduced-motion tutorials wait for manual steps and retain the selected caption',()=>{
+  const h=guideDemoHarness(true);h.classes.add('is-visible');h.timers[0]();assert.equal(h.fig.dataset.step,'0');
+  assert.equal(h.play.textContent,'播放');h.dots[2].onclick();h.timers[0]();assert.equal(h.fig.dataset.step,'2');
+  assert.match(h.caption.textContent,/记录完成/);assert.equal(h.fig.dataset.paused,'1');
+});
