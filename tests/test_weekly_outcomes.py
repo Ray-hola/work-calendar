@@ -1,6 +1,9 @@
 import tempfile
 import unittest
 from pathlib import Path
+from datetime import datetime
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
 from server import Store,Problem,now
 
 class WeeklyOutcomesTests(unittest.TestCase):
@@ -142,3 +145,41 @@ class WeeklyOutcomesTests(unittest.TestCase):
         after=self.week();self.assertEqual([t['taskId'] for t in after['completedTasks']],['b-next']);self.assertEqual(after['unfinishedOther'],[])
         self.log('b-next','reopen','2026-11-05',reason='重新核实',stackPeriods=['a','b'])
         reopened=self.week();self.assertEqual(reopened['completedTasks'],[]);self.assertEqual([t['taskId'] for t in reopened['unfinishedOther']],['b-next'])
+
+    def test_fixed_task_stays_fixed_after_real_manual_defer_and_completion(self):
+        self.task('fixed',projectId=None,fixed=True,repeatId='r',type='固定安排',duration=30)
+        with patch('server.now',return_value=datetime(2026,11,3,12,tzinfo=ZoneInfo('Asia/Shanghai'))):
+            source=self.s.action(self.s.user('member'),'task.defer',{'id':'fixed','date':'2026-11-04','reason':'调整安排','remaining':'继续复盘'})
+        with patch('server.now',return_value=datetime(2026,11,4,12,tzinfo=ZoneInfo('Asia/Shanghai'))):
+            self.s.action(self.s.user('member'),'task.complete',{'id':source['supersededBy'],'summary':'复盘完成','actual':30})
+        row=self.week()['completedTasks'][0];self.assertTrue(row['fixed']);self.assertEqual(row['summary'],'复盘完成')
+
+    def test_equal_instant_states_use_log_insertion_order_not_random_ids(self):
+        self.task('t',projectId=None,status='todo')
+        self.s.put('logs',{'id':'z','taskId':'t','kind':'complete','createdAt':'2026-11-03T12:00:00+08:00','summary':'先完成'})
+        self.s.put('logs',{'id':'a','taskId':'t','kind':'reopen','createdAt':'2026-11-03T04:00:00Z','reason':'后打回'})
+        w=self.week();self.assertEqual(w['completedTasks'],[]);self.assertEqual(len(w['unfinishedOther']),1)
+
+    def test_migrated_legacy_completion_overrides_earlier_defer_and_keeps_feedback(self):
+        self.task('root',projectId=None,status='deferred')
+        self.task('legacy',projectId=None,originId='root',date='2026-11-04',status='pending_approval',submittedAt='2026-11-04T12:00:00+08:00',completionSummary='旧版提交成果',completionActual=35,completionFeeling='一般')
+        self.log('root','defer','2026-11-02',remaining='继续处理')
+        self.log('legacy','complete_pending','2026-11-04',summary='旧版提交成果',actual=35,feeling='一般',followup='需要核实')
+        self.s.settle_legacy_task_approvals()
+        w=self.week();self.assertEqual(w['unfinishedOther'],[]);self.assertEqual(len(w['completedTasks']),1)
+        row=w['completedTasks'][0];self.assertEqual((row['summary'],row['actual'],row['followup']),('旧版提交成果',35,'需要核实'))
+
+    def test_legacy_approval_sets_completion_date_but_does_not_replace_performer(self):
+        self.task('t',projectId=None,status='done',completedAt='2026-11-01T12:00:00+08:00',completedBy='member',completionSummary='旧版完成',completionActual=25)
+        self.log('t','complete_pending','2026-10-30',summary='旧版完成',actual=25,followup='原始反馈')
+        self.s.put('logs',{'taskId':'t','kind':'approval','decision':'approved','actor':'admin','createdAt':'2026-11-01T12:00:00+08:00'})
+        row=self.week()['completedTasks'][0];self.assertEqual((row['completedOn'],row['assigneeName'],row['summary'],row['followup']),('2026-11-01','member','旧版完成','原始反馈'))
+
+    def test_legacy_approval_does_not_leak_into_submission_week_or_override_same_time_reopen(self):
+        self.task('t',projectId=None,status='todo',submittedAt='2026-11-06T12:00:00+08:00')
+        self.log('t','complete_pending','2026-11-06',summary='等待旧版审批',actor='member')
+        self.s.put('logs',{'id':'z-approval','taskId':'t','kind':'approval','decision':'approved','actor':'admin','createdAt':'2026-11-07T12:00:00+08:00'})
+        self.assertEqual(self.week()['completedTasks'],[]);self.assertEqual(len(self.week()['unfinishedOther']),1)
+        approved=self.s.week_work('2026-11-07','2026-11-13');self.assertEqual(approved['completedTasks'][0]['assigneeName'],'member')
+        self.s.put('logs',{'id':'a-reopen','taskId':'t','kind':'reopen','createdAt':'2026-11-07T04:00:00Z','reason':'随后打回'})
+        after=self.s.week_work('2026-11-07','2026-11-13');self.assertEqual(after['completedTasks'],[]);self.assertEqual(len(after['unfinishedOther']),1)

@@ -4452,11 +4452,37 @@ class Store:
             try:
                 at=datetime.fromisoformat(str(log.get('createdAt') or log.get('date','')))
                 if at.tzinfo is None:at=at.replace(tzinfo=now().tzinfo)
-                return at.timestamp(),str(log.get('id',''))
-            except (ValueError,TypeError):return float('-inf'),str(log.get('id',''))
+                return at.timestamp()
+            except (ValueError,TypeError):return float('-inf')
         tasks=self.all('tasks');by_id={t['id']:t for t in tasks};projects=self.all('projects');project_by_id={p['id']:p for p in projects};chains={};events={};future_changes=set();covered_roots=set()
         for t in tasks:chains.setdefault(self._lineage_root(t,by_id),[]).append(t)
-        for log in self.all('logs'):
+        # Keep row insertion order when two events have the same instant.
+        raw_logs=sorted(self.all('logs'),key=event_order)
+        legacy_pending={};approved_pending=set();legacy_events=[];modern_roots=set()
+        for log in raw_logs:
+            t=by_id.get(log.get('taskId'))
+            if not t:continue
+            root=self._lineage_root(t,by_id)
+            if log.get('kind')=='complete':modern_roots.add(root)
+            elif log.get('kind')=='complete_pending':legacy_pending[root]=log
+            elif log.get('kind')=='approval' and log.get('decision')=='approved':
+                submitted=legacy_pending.get(root,{})
+                if submitted:approved_pending.add(submitted['id'])
+                legacy_events.append({**submitted,'id':log['id'],'kind':'complete','taskId':t['id'],'createdAt':log.get('createdAt'),
+                    'actor':submitted.get('actor') or t.get('completedBy') or t.get('assignee'),
+                    'summary':submitted.get('summary',t.get('completionSummary','')),
+                    'actual':submitted.get('actual',t.get('completionActual')),'feeling':submitted.get('feeling',t.get('completionFeeling',''))})
+        for log in raw_logs:
+            if log.get('kind')!='complete_pending' or log['id'] in approved_pending:continue
+            t=by_id.get(log.get('taskId'))
+            if not t:continue
+            retired=(t.get('approval') or {}).get('status')=='retired'
+            if retired or (t.get('status')=='done' and t.get('completedAt') and self._lineage_root(t,by_id) not in modern_roots):
+                at=(t.get('submittedAt') or log.get('createdAt')) if retired else t['completedAt']
+                legacy_events.append({**log,'kind':'complete','createdAt':at})
+        replacements={log['id']:log for log in legacy_events}
+        for original in raw_logs:
+            log=replacements.get(original['id'],original)
             t=by_id.get(log.get('taskId'))
             if not t:continue
             root=self._lineage_root(t,by_id)
@@ -4497,7 +4523,7 @@ class Store:
                         'actual':detail.get('actual') if detail else completed_task.get('completionActual'),
                         'feeling':detail.get('feeling','') if detail else completed_task.get('completionFeeling',''),
                         'followup':detail.get('followup','') if detail else '',
-                        'fixed':bool(completed_task.get('repeatId') or completed_task.get('fixed')),
+                        'fixed':any(x.get('repeatId') or x.get('fixed') for x in known),
                         'stackCount':(detail.get('stackCount') or len(detail.get('stackPeriods') or []) or 1) if detail else (completed_task.get('stackCount') or len(completed_task.get('stackPeriods') or []) or 1)})
                 continue
             if skipped:continue
