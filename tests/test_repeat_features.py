@@ -1,10 +1,10 @@
 """Fixed routine and automatic collection policy coverage."""
 import tempfile
 import unittest
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
-from server import Store, Problem, AGENT_WRITE_TOOLS, CALENDAR_END, now
+from server import Store, Problem, AGENT_WRITE_TOOLS, calendar_end, repeat_end, now
 
 
 class RepeatFeatureTests(unittest.TestCase):
@@ -75,28 +75,45 @@ class RepeatFeatureTests(unittest.TestCase):
         self.assertEqual(enabled['dates'], [day])
         self.assertEqual(enabled['time'], '03:15')
 
-    def test_calendar_horizon_is_inclusive_and_rejects_later_dates(self):
-        # Anchored to CALENDAR_END rather than literal dates, so widening the
-        # scheduling range does not require editing this test.
+    def test_calendar_horizon_rolls_with_today_and_is_inclusive(self):
+        # The last schedulable day is two years from today, not a fixed date,
+        # so the workbench keeps accepting dates as time passes.
         self.store.db.commit()
-        last = CALENDAR_END.isoformat()
-        beyond = (CALENDAR_END + timedelta(days=1)).isoformat()
-        day_before_last = (CALENDAR_END - timedelta(days=1)).isoformat()
+        last = calendar_end()
+        self.assertEqual(last, now().date() + timedelta(days=730))
+        self.assertEqual(calendar_end(date(2027, 5, 1)), date(2029, 4, 30), '过了旧上限 2027-04-30 也能继续排期')
+        beyond = (last + timedelta(days=1)).isoformat()
         with self.assertRaises(Problem):
             self.store.action(self.admin, 'project.create', {
                 'name': 'too late', 'start': beyond, 'cycle': 'infinite',
             })
-        repeat = self.store.action(self.admin, 'repeat.create', {
-            'name': 'horizon routine', 'assignees': ['test001'],
-            'start': day_before_last, 'frequency': 'daily',
+        far = self.store.action(self.admin, 'project.create', {
+            'name': 'far but allowed', 'start': last.isoformat(), 'cycle': 'infinite',
         })
-        tasks = [t for t in self.store.all('tasks') if t.get('repeatId') == repeat['id']]
-        self.assertEqual({t['date'] for t in tasks}, {day_before_last, last})
+        self.assertEqual(far['start'], last.isoformat())
         with self.assertRaises(Problem):
             self.store.action(self.admin, 'repeat.create', {
                 'name': 'outside routine', 'assignees': ['test001'],
-                'start': last, 'frequency': 'dates', 'dates': [beyond],
+                'start': now().date().isoformat(), 'frequency': 'dates', 'dates': [beyond],
             })
+
+    def test_fixed_tasks_are_generated_half_a_year_ahead(self):
+        # A daily rule fills the next ~6 months, not the whole two-year window;
+        # the scheduler extends it day by day.
+        self.store.db.commit()
+        today = now().date()
+        repeat = self.store.action(self.admin, 'repeat.create', {
+            'name': 'daily routine', 'assignees': ['test001'],
+            'start': today.isoformat(), 'frequency': 'daily',
+        })
+        dates = sorted(t['date'] for t in self.store.all('tasks') if t.get('repeatId') == repeat['id'])
+        self.assertEqual(dates[0], today.isoformat())
+        self.assertEqual(dates[-1], repeat_end().isoformat())
+        self.assertLess(len(dates), 200)
+        later = datetime.combine(today + timedelta(days=10), time(9, 0), now().tzinfo)
+        self.store.schedule(later)
+        dates = {t['date'] for t in self.store.all('tasks') if t.get('repeatId') == repeat['id']}
+        self.assertIn(repeat_end(today + timedelta(days=10)).isoformat(), dates, '调度器随日期顺延')
 
     def test_agent_capabilities_are_read_only_for_members(self):
         admin_caps = self.store.action(self.admin, 'agent.capabilities', {})
