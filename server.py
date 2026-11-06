@@ -4370,8 +4370,8 @@ class Store:
                     'assigneeName':self.display_name(event.get('actor') or base['assignee']),'completedOn':day(event.get('createdAt'),event.get('date','')),
                     'summary':detail.get('summary',''),'feeling':detail.get('feeling',''),
                     'followup':detail.get('followup',event.get('followup','')),'actual':detail.get('actual',0),'reopened':not done})
-            elif done and not t.get('carriedCompletion') and not t.get('stackCompletedBy') and start<=day(t.get('completedAt'),t.get('date',''))<=cutoff:
-                result['completed'].append({**base,'completedOn':day(t.get('completedAt'),t.get('date','')),
+            elif done and not t.get('carriedCompletion') and not t.get('stackCompletedBy') and start<=day(t.get('completedAt') or t.get('submittedAt'))<=cutoff:
+                result['completed'].append({**base,'completedOn':day(t.get('completedAt') or t.get('submittedAt')),
                     'summary':t.get('completionSummary',''),'feeling':t.get('completionFeeling',''),
                     'followup':'','actual':t.get('completionActual') or 0,'reopened':False})
             if not done and not skipped:

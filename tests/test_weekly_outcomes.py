@@ -63,3 +63,7 @@ class WeeklyOutcomesTests(unittest.TestCase):
     def test_legacy_completion_never_reports_estimate_as_actual_time(self):
         self.task('a',status='done',duration=120,completedAt='2026-11-03T12:00:00+08:00')
         self.assertEqual(self.week()['completed'][0]['actual'],0)
+
+    def test_missing_completion_time_is_not_invented_from_scheduled_date(self):
+        self.task('a',status='done')
+        self.assertEqual(self.week()['completed'],[])
