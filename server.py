@@ -4146,7 +4146,7 @@ class Store:
             self.audit(user['id'],'brief.update',{'date':day})
             return self.apply_brief_edits(brief)
         if action=='brief.week':
-            # One week of team reports for export, from the team's first day of
+            # Supporting daily reports follow the team's first day of
             # the week like the week view: filed ones as they stand, days not
             # filed yet assembled on the spot.
             self.admin(user)
@@ -4163,7 +4163,9 @@ class Store:
                     brief=self.compose_brief(ds)
                     if brief:brief['filed']=False
                 if brief:briefs.append(self.apply_brief_edits(brief))
-            return {'start':start.isoformat(),'end':(start+timedelta(days=6)).isoformat(),'briefs':briefs}
+            end=(start+timedelta(days=6)).isoformat()
+            return {'start':start.isoformat(),'end':end,'briefs':briefs,
+                    'work':self.week_work(start.isoformat(),min(end,today),briefs)}
         if action=='inbox.delete':
             # Only the recipient's own notices. Invitations are answered, not
             # deleted, so they are not touched here.
@@ -4325,6 +4327,85 @@ class Store:
                 'load':sum(int(t.get('duration',0) or 0) for t in done),
                 'loadTotal':sum(int(t.get('duration',0) or 0) for t in tasks),
                 'content':content}
+
+    def week_work(self, start, cutoff, briefs=()):
+        """One result per task lineage, using event time rather than scheduled date.
+        Historical weeks stop at their cutoff; later completions do not erase backlog.
+        Diary free notes are deliberately excluded from team feedback.
+        """
+        result={'asOf':cutoff,'completed':[],'unfinished':[],'feedback':[]}
+        if start>cutoff:return result
+        def day(value, fallback=''):
+            try:return datetime.fromisoformat(str(value)).astimezone(now().tzinfo).date().isoformat()
+            except (ValueError,TypeError):return fallback
+        tasks=self.all('tasks');all_logs=self.all('logs');by_id={t['id']:t for t in tasks};groups={};events={};future_changes=set()
+        for t in tasks:groups.setdefault(self._lineage_root(t,by_id),[]).append(t)
+        for log in all_logs:
+            t=by_id.get(log.get('taskId'))
+            if not t:continue
+            root=self._lineage_root(t,by_id)
+            if day(log.get('createdAt'),log.get('date',''))<=cutoff:events.setdefault(root,[]).append(log)
+            elif log.get('kind') in ('skip','restore','reopen'):future_changes.add(root)
+        projects={p['id']:p for p in self.all('projects')}
+        for root,chain in groups.items():
+            known=[t for t in chain if day(t.get('createdAt'),t.get('date',''))<=cutoff]
+            logs=sorted(events.get(root,[]),key=lambda l:(str(l.get('createdAt') or l.get('date','')),str(l.get('id',''))))
+            if not known:continue
+            t=max(known,key=lambda x:(x.get('date',''),x.get('createdAt','')))
+            if not any(x.get('date','9999')<=cutoff for x in known) and not logs:continue
+            base={'taskId':t['id'],'name':t.get('name',''),'assignee':t.get('assignee',''),
+                  'assigneeName':self.display_name(t.get('assignee')),'projectId':t.get('projectId'),
+                  'projectName':projects.get(t.get('projectId'),{}).get('name','临时任务')}
+            states=[l for l in logs if l.get('kind') in ('complete','reopen','skip','restore','defer')]
+            last=states[-1] if states else None
+            done=last.get('kind')=='complete' if last else (t.get('status')=='done' and day(t.get('completedAt'),t.get('date',''))<=cutoff)
+            future_state=root in future_changes
+            skipped=last.get('kind')=='skip' if last else (not future_state and t.get('status') in ('skipped','rejected','pending'))
+            completions=[l for l in logs if l.get('kind')=='complete' and start<=day(l.get('createdAt'),l.get('date',''))<=cutoff]
+            event=completions[-1] if completions else None
+            if event:
+                edits=[l for l in logs if l.get('kind')=='complete_edit' and str(l.get('createdAt',''))>=str(event.get('createdAt',''))]
+                detail=edits[-1] if edits else event
+                result['completed'].append({**base,'assignee':event.get('actor') or base['assignee'],
+                    'assigneeName':self.display_name(event.get('actor') or base['assignee']),'completedOn':day(event.get('createdAt'),event.get('date','')),
+                    'summary':detail.get('summary',''),'feeling':detail.get('feeling',''),
+                    'followup':detail.get('followup',event.get('followup','')),'actual':detail.get('actual',0),'reopened':not done})
+            elif done and not t.get('carriedCompletion') and not t.get('stackCompletedBy') and start<=day(t.get('completedAt'),t.get('date',''))<=cutoff:
+                result['completed'].append({**base,'completedOn':day(t.get('completedAt'),t.get('date','')),
+                    'summary':t.get('completionSummary',''),'feeling':t.get('completionFeeling',''),
+                    'followup':'','actual':t.get('completionActual',t.get('duration',0)),'reopened':False})
+            if not done and not skipped:
+                remaining=next((l for l in reversed(logs) if l.get('kind') in ('defer','reopen')), {})
+                result['unfinished'].append({**base,'remaining':remaining.get('remaining') or t.get('desc') or t.get('name',''),
+                    'reason':remaining.get('reason',''),'scheduledOn':t.get('date',''),'deadline':t.get('deadline'),
+                    'status':'doing' if t.get('status')=='doing' else 'todo'})
+        # Include written team feedback, not automatic placeholder summaries.
+        for diary in self.all('diaries'):
+            if diary.get('auto') or not start<=diary.get('date','')<=cutoff:continue
+            content={k:v for k,v in (diary.get('content') or {}).items() if k in ('done','risks','next') and v}
+            if content:result['feedback'].append({'date':diary['date'],'author':self.display_name(diary.get('author')),'source':'日记','content':content})
+        for report in self.all('reports'):
+            if report.get('kind') not in ('owner','collaborator') or not start<=report.get('date','')<=cutoff:continue
+            content=report.get('content')
+            if isinstance(content,dict):content={k:v for k,v in content.items() if k in ('done','progress','risks','next') and v}
+            if content:result['feedback'].append({'date':report['date'],'author':self.display_name(report.get('author')),'source':'项目汇报','projectId':report.get('projectId'),'projectName':projects.get(report.get('projectId'),{}).get('name',''),'content':content})
+        for brief in briefs:
+            for m in brief.get('content',{}).get('members',[]):
+                if not m.get('edited'):continue
+                author=m.get('name') or self.display_name(m.get('id'))
+                result['feedback']=[f for f in result['feedback'] if not (f['date']==brief['date'] and f['author']==author and f['source']=='日记')]
+                content={k:v for k,v in (m.get('summary') or {}).items() if k in ('done','risks','next') and v}
+                if content:result['feedback'].append({'date':brief['date'],'author':author,'source':'日报修订','content':content})
+            for p in brief.get('content',{}).get('projects',[]):
+                if not p.get('edited'):continue
+                author=p.get('ownerName') or self.display_name(p.get('owner'))
+                result['feedback']=[f for f in result['feedback'] if not (f['date']==brief['date'] and f['author']==author and f.get('projectId')==p['id'])]
+                content={k:v for k,v in (p.get('content') or {}).items() if k in ('done','progress','risks','next') and v}
+                if content:result['feedback'].append({'date':brief['date'],'author':author,'source':'项目日报修订','projectId':p['id'],'projectName':p.get('name',''),'content':content})
+        result['completed'].sort(key=lambda x:(x['completedOn'],x['taskId']))
+        result['unfinished'].sort(key=lambda x:(x['scheduledOn'],x['taskId']))
+        result['feedback'].sort(key=lambda x:(x['date'],x['author']))
+        return result
 
     def compose_brief(self, day, at=None):
         """Assemble one team report for a day without filing it: every member's

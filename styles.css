@@ -12864,3 +12864,14 @@ body.is-resizing-agent { user-select: none; }
 @media (prefers-reduced-motion: reduce) {
   .tour-spot, .tour-card { transition: none; }
 }
+
+/* Weekly outcomes reuse the archive document's type and spacing. */
+.week-work-list { list-style: none; padding: 0; margin: 0 0 22px; }
+.week-work-list > li { padding: 14px 0; border-bottom: 1px solid var(--line-soft); }
+.week-work-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.week-work-head strong { overflow-wrap: anywhere; min-width: 0; }
+.week-work-head time, .week-work-head > span { flex: none; font-size: 12px; color: var(--muted); }
+.week-work-list small { color: var(--muted); }
+.week-work-list p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 7px 0 0; }
+.week-daily-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.week-daily-links .week-cell { width: auto; height: 32px; padding: 0 10px; }
