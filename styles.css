@@ -11776,13 +11776,13 @@ body.is-resizing-agent { user-select: none; }
   display: none;
 }
 
-/* Files and meetings share one list. A row's delete waits for the pointer. */
+/* Keep deletion visible alongside the item it affects. */
 .space-files .file-list {
   display: grid;
 }
 
 .space-files .file-row {
-  grid-template-columns: 44px minmax(0, 1fr) auto 28px;
+  grid-template-columns: 44px minmax(0, 1fr) auto 44px;
   width: 100%;
   padding: 9px 6px;
   border-radius: 8px;
@@ -11832,26 +11832,18 @@ body.is-resizing-agent { user-select: none; }
 .space-files .file-delete {
   display: grid;
   place-items: center;
-  width: 28px;
+  width: 44px;
   height: 28px;
   padding: 0;
   border: 0;
-  color: var(--faint);
-  opacity: 0;
-}
-
-.space-files .file-row:hover .file-delete,
-.space-files .file-delete:focus-visible {
+  color: var(--muted);
   opacity: 1;
+  font-size: 12px;
 }
 
 .space-files .file-delete:hover {
   color: var(--danger);
   background: transparent;
-}
-
-@media (hover: none) {
-  .space-files .file-delete { opacity: 1; }
 }
 
 .space-empty {
@@ -11918,7 +11910,7 @@ body.is-resizing-agent { user-select: none; }
   }
 
   .space-files .file-row {
-    grid-template-columns: 40px minmax(0, 1fr) 28px;
+    grid-template-columns: 40px minmax(0, 1fr) 44px;
     row-gap: 2px;
   }
 
@@ -12502,6 +12494,52 @@ body.is-resizing-agent { user-select: none; }
 
 .space-meetings .meeting-row:hover {
   background: var(--surface-sunk);
+}
+
+.meeting-list-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.space-meetings .meeting-list-row .meeting-row {
+  flex: 1;
+  min-width: 0;
+  border-bottom: 0;
+}
+
+.content-row-delete {
+  flex: none;
+  width: 44px;
+  height: 28px;
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.content-row-delete:hover, .content-delete {
+  color: var(--danger);
+}
+
+.content-delete {
+  margin-right: auto;
+}
+
+.md-editor ~ .modal-footer {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 480px) {
+  .md-editor ~ .modal-footer {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .md-editor ~ .modal-footer > * {
+    width: 100%;
+    margin: 0;
+    justify-content: center;
+  }
 }
 
 .space-meetings .meeting-copy small {
