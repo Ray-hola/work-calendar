@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from server import Store, Problem, CHAT_DEFAULT, CHAT_LEGACY, READ_NOTICES_KEPT
+from server import Store, Problem, CHAT_DEFAULT, CHAT_LEGACY, CHAT_CHANNEL_SQL, CHAT_TIME_SQL, READ_NOTICES_KEPT
 
 
 def legacy_channel(m):
@@ -73,6 +73,50 @@ class StatePayloadTests(unittest.TestCase):
         self.assertEqual(full['rawTranscript'], '原稿' * 500)
         with self.assertRaises(Problem):
             self.store.action(self.outsider, 'meeting.get', {'id': meeting['id']})
+
+    def test_chat_limits_by_timestamp_with_insertion_order_breaking_ties(self):
+        for message_id, clock in [('latest', '12:00'), ('old', '11:59'), ('tie', '12:00')]:
+            self.store.put('messages', {'id': message_id, 'channel': CHAT_LEGACY, 'author': 'test001',
+                                        'body': message_id, 'createdAt': f'2026-11-05T{clock}:00+08:00'})
+        self.store.db.commit()
+        listed = self.store.chat_list(self.mate, {'channel': CHAT_DEFAULT, 'limit': 2})['messages']
+        self.assertEqual([m['id'] for m in listed], ['latest', 'tie'])
+        self.assertEqual(self.store.chat_previews(self.mate)[CHAT_DEFAULT]['body'], 'tie')
+        since = self.store.chat_list(self.mate, {'channel': CHAT_DEFAULT, 'limit': 1,
+                                                'since': '2026-11-05T11:59:30+08:00'})['messages']
+        self.assertEqual([m['id'] for m in since], ['tie'])
+        plan = self.store.db.execute(f'EXPLAIN QUERY PLAN SELECT data FROM messages WHERE {CHAT_CHANNEL_SQL}=? '
+                                     f'ORDER BY {CHAT_TIME_SQL} DESC, rowid DESC LIMIT 2', (CHAT_DEFAULT,)).fetchall()
+        detail = ' '.join(row['detail'] for row in plan)
+        self.assertIn('messages_by_channel_time', detail)
+        self.assertNotIn('TEMP B-TREE', detail, '时间排序应继续使用频道索引')
+
+    def test_delete_card_rechecks_new_and_changed_meetings_and_messages(self):
+        for table in ('meetings', 'messages'):
+            with self.subTest(table=table):
+                card = self.store.prepare_work_cards(self.owner, {'projects': [
+                    {'operation': 'delete', 'id': self.project['id']} ]})['projects'][0]
+                record = self.store.put(table, {'projectId': self.project['id'], 'channel': self.project['id'],
+                                                'title': '新会议', 'body': '新消息', 'rawTranscript': '新原稿'})
+                self.store.db.commit()
+                data = {'kind': 'project', 'operation': 'delete', 'id': self.project['id'], 'confirmed': True,
+                        'confirm': self.project['name'], 'cardId': 'delete-probe-' + table, 'revision': card['revision']}
+                with self.assertRaises(Problem) as stale:
+                    self.store.action(self.owner, 'work.card.apply', data)
+                self.assertEqual(stale.exception.status, 409)
+                fresh = self.store.prepare_work_cards(self.owner, {'projects': [
+                    {'operation': 'delete', 'id': self.project['id']} ]})['projects'][0]
+                self.assertEqual(fresh['impact'][table], 1)
+                self.store.put(table, {**record, 'rawTranscript': '原稿已变化', 'body': '消息已变化'})
+                self.store.db.commit()
+                with self.assertRaises(Problem) as changed:
+                    self.store.action(self.owner, 'work.card.apply', {**data, 'revision': fresh['revision']})
+                self.assertEqual(changed.exception.status, 409)
+        fresh = self.store.prepare_work_cards(self.owner, {'projects': [
+            {'operation': 'delete', 'id': self.project['id']} ]})['projects'][0]
+        self.store.action(self.owner, 'work.card.apply', {**data, 'revision': fresh['revision']})
+        self.assertEqual(self.store.all('meetings'), [])
+        self.assertEqual(self.store.all('messages'), [])
 
     def test_old_read_notices_are_capped_but_unread_and_actionable_ones_stay(self):
         for i in range(READ_NOTICES_KEPT + 50):

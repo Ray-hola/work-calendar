@@ -100,6 +100,7 @@ CHAT_EVERYONE = '*'          # a broadcast, not an account id
 # this expression lets each room be read without scanning every message.
 _CHAT_RAW = "COALESCE(NULLIF(json_extract(data,'$.channel'),''),'" + CHAT_DEFAULT + "')"
 CHAT_CHANNEL_SQL = f"CASE WHEN {_CHAT_RAW}='{CHAT_LEGACY}' THEN '{CHAT_DEFAULT}' ELSE {_CHAT_RAW} END"
+CHAT_TIME_SQL = "COALESCE(json_extract(data,'$.createdAt'),'')"
 # Notices the page acts on by reference; they stay in the state however old.
 ACTIONABLE_NOTICES = ('approval', 'project_completion', 'task_edit_approval', 'task_request')
 READ_NOTICES_KEPT = 200
@@ -301,7 +302,8 @@ class Store:
         for table in TABLES:
             self.db.execute(f'CREATE TABLE IF NOT EXISTS {table} (id TEXT PRIMARY KEY, data TEXT NOT NULL)')
         self.db.execute('CREATE TABLE IF NOT EXISTS file_blobs (id TEXT PRIMARY KEY, data BLOB NOT NULL)')
-        self.db.execute(f'CREATE INDEX IF NOT EXISTS messages_by_channel ON messages({CHAT_CHANNEL_SQL})')
+        self.db.execute(f'CREATE INDEX IF NOT EXISTS messages_by_channel_time ON messages({CHAT_CHANNEL_SQL}, {CHAT_TIME_SQL})')
+        self.db.execute('DROP INDEX IF EXISTS messages_by_channel')
         self.db.execute("CREATE INDEX IF NOT EXISTS notifications_by_recipient ON notifications(json_extract(data,'$.to'))")
         self.db.commit()
         # One JSON record stores the global automatic collection policy.  The
@@ -1573,14 +1575,17 @@ class Store:
         if kind == 'project' and operation == 'delete':
             tasks = [t for t in self.all('tasks') if t.get('projectId') == row['id']]
             impact = {'tasks': len(tasks), 'files': sum(f.get('projectId') == row['id'] for f in self.all('files')),
-                      'repeats': sum(r.get('projectId') == row['id'] for r in self.all('repeats'))}
+                      'repeats': sum(r.get('projectId') == row['id'] for r in self.all('repeats')),
+                      'meetings': sum(m.get('projectId') == row['id'] for m in self.all('meetings')),
+                      'messages': sum(self.chat_normalize(m) == row['id'] for m in self.all('messages'))}
         # Full record and dependent records bind destructive confirmation to the
         # version the human reviewed, including same-count dependency changes.
         dependencies = {}
         if kind == 'project' and operation == 'delete':
             ids = {t['id'] for t in tasks}
-            for table in ('tasks', 'files', 'repeats', 'reports', 'logs', 'requests', 'task_requests', 'edit_requests', 'suggestions', 'notifications'):
+            for table in ('tasks', 'files', 'repeats', 'reports', 'logs', 'requests', 'task_requests', 'edit_requests', 'suggestions', 'notifications', 'meetings'):
                 dependencies[table] = sorted([r for r in self.all(table) if r.get('projectId') == row['id'] or r.get('taskId') in ids or r.get('reference') in ids | {row['id']}], key=lambda r: r['id'])
+            dependencies['messages'] = sorted([m for m in self.all('messages') if self.chat_normalize(m) == row['id']], key=lambda m: m['id'])
         value = json.dumps([row, dependencies], sort_keys=True, ensure_ascii=False, separators=(',', ':'))
         return hashlib.sha256(value.encode()).hexdigest(), impact
 
@@ -2938,12 +2943,11 @@ class Store:
             limit = 120
         where, args = f'{CHAT_CHANNEL_SQL}=?', [channel]
         if since:
-            where += " AND COALESCE(json_extract(data,'$.createdAt'),'')>?"
+            where += f" AND {CHAT_TIME_SQL}>?"
             args.append(since)
         rows = [json.loads(r['data']) for r in self.db.execute(
-            f'SELECT data FROM messages WHERE {where} ORDER BY rowid DESC LIMIT ?', (*args, limit))]
+            f'SELECT data FROM messages WHERE {where} ORDER BY {CHAT_TIME_SQL} DESC, rowid DESC LIMIT ?', (*args, limit))]
         rows.reverse()
-        rows.sort(key=lambda m: m.get('createdAt', ''))
         return {'messages': rows, 'now': timestamp(), 'channel': channel,
                 'previews': self.chat_previews(user)}
 
@@ -2956,9 +2960,9 @@ class Store:
         """
         previews = {}
         for channel in self.chat_visible_channels(user):
-            # The newest row of the room; on a timestamp tie (the Windows clock
+            # The newest timestamp in the room; on a tie (the Windows clock
             # ticks every ~16 ms) the later insert is the newer message.
-            row = self.db.execute(f'SELECT data FROM messages WHERE {CHAT_CHANNEL_SQL}=? ORDER BY rowid DESC LIMIT 1',
+            row = self.db.execute(f'SELECT data FROM messages WHERE {CHAT_CHANNEL_SQL}=? ORDER BY {CHAT_TIME_SQL} DESC, rowid DESC LIMIT 1',
                                   (channel,)).fetchone()
             if row:
                 m = json.loads(row['data'])

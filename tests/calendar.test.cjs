@@ -2015,12 +2015,12 @@ test('delete cards cannot submit before human confirmation and never use automat
   assert.ok(!a.run('planCardsHTML({...planDraft({tasks:[raw]})})').includes('<pre'));
 });
 test('project deletion shows impact and requires the full original name, independent of editable titles',()=>{
-  const a=planningApp();a.run(`var board=planDraft({projects:[{operation:'delete',id:'p',revision:'r',before:{name:'重要项目',owner:'test001'},impact:{tasks:12,files:3,repeats:2}}]});`);
+  const a=planningApp();a.run(`var board=planDraft({projects:[{operation:'delete',id:'p',revision:'r',before:{name:'重要项目',owner:'test001'},impact:{tasks:12,files:3,repeats:2,meetings:4,messages:15}}]});`);
   assert.ok(a.run('planProblems(board,board.projects[0]).confirm'));
   a.run("board.projects[0].confirm='重要';board.projects[0].name='重要'");
   assert.ok(a.run('planProblems(board,board.projects[0]).confirm'));
   a.run("board.projects[0].confirm='重要项目'");assert.deepEqual(a.json('planProblems(board,board.projects[0])'),{});
-  const html=a.run('planCardsHTML(board)');assert.ok(html.includes('12 项任务')&&html.includes('3 个附件')&&html.includes('2 条固定安排'));
+  const html=a.run('planCardsHTML(board)');assert.ok(html.includes('12 项任务')&&html.includes('3 个附件')&&html.includes('2 条固定安排')&&html.includes('4 场会议')&&html.includes('15 条沟通记录'));
 });
 test('a member change card follows approval rights and requires a reason instead of rewriting task ownership',()=>{
   const a=planningApp();a.context.raw=mutationTask({name:'申请修改',before:{...mutationTask().before,creator:'test002'}});
@@ -2736,4 +2736,65 @@ test('prompt reset replaces dirty editor and its saved baseline without racing a
 test('archived meeting opens escaped read-only transcript and minutes without mutation controls',()=>{
   const a=app();a.context.document={querySelector:()=>({})};a.run("openModal=html=>{globalThis.archivedHTML=html};S.fileArchives=[{id:'p1'}];S.meetings=[{id:'m1',projectId:'p1',title:'周会',rawTranscript:'<script>bad</script>',minutes:'结论'}];openMeetingEditor({id:'p1',name:'项目'},'m1')");
   const html=a.context.archivedHTML;assert.match(html,/<textarea readonly/);assert.match(html,/&lt;script&gt;/);assert.match(html,/结论/);assert.doesNotMatch(html,/id="(?:saveMeeting|meetingLiveBtn|generateMeetingMinutes)"/);
+});
+
+function lazyMeetingApp(){
+  const h=meetingApp(),pending=[],mounts=[],notices=[];
+  h.a.context.pending=pending;h.a.context.mounts=mounts;h.a.context.notices=notices;
+  h.a.context.fetch=(url,options)=>new Promise(resolve=>pending.push({
+    id:JSON.parse(options.body).data.id,
+    reply:full=>resolve({ok:true,text:async()=>JSON.stringify(full)}),
+    fail:()=>resolve({ok:false,text:async()=>JSON.stringify({error:'加载失败'})})
+  }));
+  h.a.run(`toast=msg=>notices.push(msg);openModal=html=>{cancelMeetingOpen();mounts.push(html)};
+    renderProjects=()=>{};S.user={id:'owner'};UI.view='projects';UI.space='p1';UI.spaceArea='overview';UI.docDirty=false;
+    S.projects=[{id:'p1',name:'项目',owner:'owner'},{id:'p2',name:'另一个项目',owner:'owner'}];
+    S.meetings=[{id:'a',projectId:'p1',title:'A',revision:0},{id:'b',projectId:'p1',title:'B',revision:0}];`);
+  return {...h,pending,mounts,notices,open:id=>h.a.run(`openMeetingEditor(S.projects[0],${JSON.stringify(id)})`),
+    full:(id,revision=0)=>({id,projectId:'p1',title:id.toUpperCase(),rawTranscript:'原稿 '+id,minutes:'纪要 '+id,revision})};
+}
+
+test('lazy meeting loading keeps the last selection and ignores an earlier reply',async()=>{
+  const h=lazyMeetingApp(),first=h.open('a'),last=h.open('b');
+  assert.deepEqual(h.pending.map(p=>p.id),['a','b']);assert.equal(h.notices[0],'正在加载会议…');
+  h.pending[1].reply(h.full('b'));await last;
+  h.pending[0].reply(h.full('a'));await first;
+  assert.equal(h.mounts.length,1);assert.match(h.mounts[0],/<h2>B<\/h2>/);
+});
+
+test('pending meeting replies cannot reopen after navigation, account changes or cancellation',async()=>{
+  for(const transition of ["UI.view='calendar'","S.user={id:'another'}",
+    "openProjectSpace('p2');openProjectSpace('p1')","openFolderView('f');openProjectSpace('p1')",
+    "projectArea(S.projects[0],'files');projectArea(S.projects[0],'overview')",'cancelMeetingOpen()','meetingCancelCapture()']){
+    const h=lazyMeetingApp(),opening=h.open('a');h.a.run(transition);
+    h.pending[0].reply(h.full('a'));await opening;
+    assert.equal(h.mounts.length,0,transition);
+  }
+});
+
+test('meeting loads attach to a refreshed list without re-fetching or overwriting a newer revision',async()=>{
+  const h=lazyMeetingApp(),opening=h.open('a');
+  h.a.run("S.meetings=S.meetings.map(m=>({...m}))");h.pending[0].reply(h.full('a'));await opening;
+  assert.equal(h.pending.length,1);assert.equal(h.mounts.length,1);
+  assert.equal(h.a.run('S.meetings[0].rawTranscript'),'原稿 a');
+  const newer=lazyMeetingApp(),pending=newer.open('a');newer.a.run('S.meetings[0].revision=2');
+  newer.pending[0].reply(newer.full('a',1));await pending;
+  assert.equal(newer.mounts.length,0);assert.equal(newer.a.run('S.meetings[0].revision'),2);
+  assert.equal(newer.notices.at(-1),'会议已更新，请重新打开');
+});
+
+test('archived meeting lazy loading also ignores out-of-order and stale errors',async()=>{
+  const h=lazyMeetingApp();h.a.run("S.fileArchives=[{id:'p1'}]");
+  const first=h.open('a'),last=h.open('b');h.pending[1].reply(h.full('b'));await last;
+  h.pending[0].fail();await first;
+  assert.equal(h.mounts.length,1);assert.match(h.mounts[0],/归档会议/);assert.match(h.mounts[0],/<h2>B<\/h2>/);
+  assert.doesNotMatch(h.mounts[0],/id="saveMeeting"/);assert.ok(!h.notices.includes('加载失败'));
+});
+
+test('a failed meeting load is retryable and a dirty modal is not overwritten without consent',async()=>{
+  const h=lazyMeetingApp(),failed=h.open('a');h.pending[0].fail();await failed;
+  assert.equal(h.mounts.length,0);assert.equal(h.notices.at(-1),'加载失败');
+  const retry=h.open('a');h.a.context.confirm=()=>false;h.a.run('UI.docDirty=true');
+  h.pending[1].reply(h.full('a'));await retry;assert.equal(h.mounts.length,0);
+  h.a.run('UI.docDirty=false');await h.open('a');assert.equal(h.mounts.length,1);
 });
