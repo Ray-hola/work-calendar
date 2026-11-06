@@ -2840,3 +2840,16 @@ test('a failed meeting load is retryable and a dirty modal is not overwritten wi
   h.pending[1].reply(h.full('a'));await retry;assert.equal(h.mounts.length,0);
   h.a.run('UI.docDirty=false');await h.open('a');assert.equal(h.mounts.length,1);
 });
+
+
+test('the account settings row opens once by mouse, Enter or Space and has no nested button',()=>{
+  const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8');
+  const markup=html.match(/<div[^>]*data-settings-go="accounts"[\s\S]*?<\/section>/)[0];
+  assert.match(markup,/<div(?=[^>]*role="button")(?=[^>]*tabindex="0")[^>]*>/);assert.doesNotMatch(markup,/<button\b/);
+  const a=app(),row={dataset:{settingsGo:'accounts'}},views=[];
+  a.context.views=views;a.context.document={querySelectorAll:()=>[row]};a.run('switchView=view=>views.push(view)');
+  const start=source.indexOf("$$('#settingsView [data-settings-go]')");
+  a.run(source.slice(start,source.indexOf("$$('#settingsView [data-settings-page]')",start)));
+  row.onclick();let prevented=0;for(const key of ['Enter',' ','ArrowDown'])row.onkeydown({key,preventDefault(){prevented++}});
+  assert.deepEqual(views,['accounts','accounts','accounts']);assert.equal(prevented,2);
+});
