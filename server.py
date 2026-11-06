@@ -4146,7 +4146,7 @@ class Store:
             self.audit(user['id'],'brief.update',{'date':day})
             return self.apply_brief_edits(brief)
         if action=='brief.week':
-            # One week of team reports for export, from the team's first day of
+            # Supporting daily reports follow the team's first day of
             # the week like the week view: filed ones as they stand, days not
             # filed yet assembled on the spot.
             self.admin(user)
@@ -4163,7 +4163,9 @@ class Store:
                     brief=self.compose_brief(ds)
                     if brief:brief['filed']=False
                 if brief:briefs.append(self.apply_brief_edits(brief))
-            return {'start':start.isoformat(),'end':(start+timedelta(days=6)).isoformat(),'briefs':briefs}
+            end=(start+timedelta(days=6)).isoformat()
+            return {'start':start.isoformat(),'end':end,'briefs':briefs,
+                    'work':self.week_work(start.isoformat(),min(end,today))}
         if action=='inbox.delete':
             # Only the recipient's own notices. Invitations are answered, not
             # deleted, so they are not touched here.
@@ -4325,6 +4327,68 @@ class Store:
                 'load':sum(int(t.get('duration',0) or 0) for t in done),
                 'loadTotal':sum(int(t.get('duration',0) or 0) for t in tasks),
                 'content':content}
+
+    def week_work(self, start, cutoff):
+        """Weekly project outcomes, plus work remaining at the reporting cutoff.
+        Completed tasks alone never imply that a project has been completed.
+        """
+        result={'asOf':cutoff,'completedProjects':[],'unfinishedProjects':[],'unfinishedOther':[]}
+        if start>cutoff:return result
+        def day(value, fallback=''):
+            try:return datetime.fromisoformat(str(value)).astimezone(now().tzinfo).date().isoformat()
+            except (ValueError,TypeError):return fallback
+        tasks=self.all('tasks');by_id={t['id']:t for t in tasks};chains={};events={};future_changes=set()
+        for t in tasks:chains.setdefault(self._lineage_root(t,by_id),[]).append(t)
+        for log in self.all('logs'):
+            t=by_id.get(log.get('taskId'))
+            if not t:continue
+            root=self._lineage_root(t,by_id)
+            if day(log.get('createdAt'),log.get('date',''))<=cutoff:events.setdefault(root,[]).append(log)
+            elif log.get('kind') in ('skip','restore','reopen'):future_changes.add(root)
+        remaining={}
+        for root,chain in chains.items():
+            known=[t for t in chain if day(t.get('createdAt'),t.get('date',''))<=cutoff]
+            if not known:continue
+            logs=sorted(events.get(root,[]),key=lambda l:(str(l.get('createdAt') or l.get('date','')),str(l.get('id',''))))
+            if not any(t.get('date','9999')<=cutoff for t in known) and not logs:continue
+            t=max(known,key=lambda x:(x.get('date',''),x.get('createdAt','')))
+            states=[l for l in logs if l.get('kind') in ('complete','reopen','skip','restore','defer')]
+            last=states[-1] if states else None
+            done=last.get('kind')=='complete' if last else (t.get('status')=='done' and day(t.get('completedAt'),t.get('date',''))<=cutoff)
+            skipped=last.get('kind')=='skip' if last else (root not in future_changes and t.get('status') in ('skipped','rejected','pending'))
+            if done or skipped:continue
+            detail=next((l for l in reversed(logs) if l.get('kind') in ('defer','reopen')), {})
+            remaining.setdefault(t.get('projectId'),[]).append({'taskId':t['id'],'name':t.get('name',''),
+                'assigneeName':self.display_name(t.get('assignee')),'remaining':detail.get('remaining') or t.get('desc') or t.get('name',''),
+                'reason':detail.get('reason',''),'scheduledOn':t.get('date',''),'deadline':t.get('deadline'),
+                'status':'doing' if t.get('status')=='doing' else 'todo'})
+        for p in self.all('projects'):
+            if p.get('status') in ('pending','rejected'):continue
+            completed=day(p.get('completedAt'))
+            row={'projectId':p['id'],'name':p.get('name',''),'description':p.get('desc',''),
+                 'ownerName':self.display_name(p.get('owner')),
+                 'members':[self.display_name(m) for m,state in (p.get('members') or {}).items() if state=='accepted']}
+            if p.get('status') in ('done','archived') and completed and completed<=cutoff:
+                if completed>=start:
+                    report=str(p.get('completionReport') or '').strip()
+                    description=str(p.get('desc') or '').strip()
+                    summary=f'本周完成「{p.get("name","")}」。'
+                    if description:summary+='\n项目内容：'+description
+                    summary+='\n完成情况：'+(report or '已结项，未填写完成描述')
+                    result['completedProjects'].append({**row,'completedOn':completed,'completionReport':report,'summary':summary})
+                continue
+            known_since=day(p.get('createdAt'),p.get('start',''))
+            if known_since>cutoff or (p.get('start') or '')>cutoff:continue
+            if not known_since and cutoff<now().date().isoformat() and not remaining.get(p['id']):continue
+            # A completion request is still outstanding until approval.
+            if p.get('status') in ('active','pending_completion') or completed>cutoff:
+                waiting=p.get('status')=='pending_completion' and day(p.get('completionRequestedAt'))<=cutoff
+                result['unfinishedProjects'].append({**row,'status':'pending_completion' if waiting else 'active',
+                    'remaining':sorted(remaining.get(p['id'],[]),key=lambda t:(t['scheduledOn'],t['taskId']))})
+        result['unfinishedOther']=remaining.get(None,[])
+        result['completedProjects'].sort(key=lambda p:(p['completedOn'],p['projectId']))
+        result['unfinishedProjects'].sort(key=lambda p:(p['name'],p['projectId']))
+        return result
 
     def compose_brief(self, day, at=None):
         """Assemble one team report for a day without filing it: every member's
