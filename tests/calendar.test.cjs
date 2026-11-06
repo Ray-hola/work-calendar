@@ -2954,7 +2954,7 @@ test('project rail resize is available on tablet and reserves content space down
   assert.match(a.run("TOUR.find(s=>s.ch==='档案').body"),/看团队日报和周报/);
 });
 
-test('project weekly report escapes summaries and has honest empty states',()=>{const a=app();a.run("S.today='2026-11-06'");const empty=a.run("weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{}})");assert.match(empty,/暂无待完成项目/);assert.match(empty,/本周暂无已结项项目/);const html=a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{completedProjects:[{name:'<img>',completedOn:'2026-11-02',summary:'<script>bad</script>'}]}})`);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<img>|<script>/)});
+test('project weekly report escapes summaries and has honest empty states',()=>{const a=app();a.run("S.today='2026-11-06'");const empty=a.run("weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{}})");assert.match(empty,/暂无待完成项目/);assert.match(empty,/本周暂无已完成项目或任务/);const html=a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{completedProjects:[{name:'<img>',completedOn:'2026-11-02',summary:'<script>bad</script>'}]}})`);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<img>|<script>/)});
 
 
 test('markdown renders the common marks and never lets markup or scripts through',()=>{
@@ -3086,4 +3086,23 @@ test('fresh work follows added and replaced task/project lists while notices cha
   assert.deepEqual(a.json('[...freshRefs()].sort()'),['later','p2']);
   a.run('S.notifications[0].read=true');assert.deepEqual(a.json('[...freshRefs()]'),['p2']);
   a.run("S.projects=[{id:'p'},{id:'replacement'}];S.tasks=[{id:'t'},{id:'other'}]");assert.deepEqual(a.json('[...freshRefs()]'),[]);
+});
+
+test('weekly report includes completed standalone tasks without requiring a completed project',()=>{
+  const a=app();a.run("S.today='2026-11-06'");const html=a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{completedTasks:[{taskId:'temp',name:'整理六家报价',projectId:null,description:'核对价格口径',completedOn:'2026-11-03',assigneeName:'小王',summary:'已完成报价对齐',actual:45,feeling:'困难',followup:'需要复核'}]}})`);
+  const done=html.split('这周做了什么')[1].split('还有什么没做')[0];
+  for(const text of ['临时任务','整理六家报价','核对价格口径','已完成报价对齐','困难','需要复核','小王','45 分钟'])assert.ok(done.includes(text),text);
+  assert.doesNotMatch(done,/暂无已完成项目或任务/);assert.match(html,/data-count="1">1<\/b><span>本周完成任务/);
+});
+test('weekly project outcomes contain their task details once and preserve standalone fixed work',()=>{
+  const a=app();const html=a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{completedProjects:[{projectId:'p',name:'完整项目成果',completedOn:'2026-11-04',summary:'项目验收上线'}],completedTasks:[{taskId:'t',projectId:'p',projectName:'完整项目成果',name:'子任务独立成果',completedOn:'2026-11-03',summary:'完成联调'},{taskId:'repeat',projectId:null,fixed:true,name:'两期复盘',stackCount:2,completedOn:'2026-11-04',summary:'合并完成',actual:50}]}})`);
+  assert.equal(html.split('完整项目成果').length-1,1);assert.equal(html.split('子任务独立成果').length-1,1);assert.match(html,/固定任务/);assert.match(html,/两期复盘 · 2 期/);assert.match(html,/50 分钟/);assert.doesNotMatch(html,/100 分钟/);
+});
+test('weekly completed tasks can belong to an unfinished project without closing it',()=>{
+  const a=app();const html=a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{completedTasks:[{projectId:'p',projectName:'长期项目',name:'本周已交付部分',completedOn:'2026-11-03',summary:'接口已上线'}],unfinishedProjects:[{projectId:'p',name:'长期项目',status:'active',remaining:[{name:'下周验收',remaining:'继续验证',scheduledOn:'2026-11-09'}]}]}})`);
+  const done=html.split('这周做了什么')[1].split('还有什么没做')[0];assert.match(done,/本周已交付部分/);assert.match(done,/接口已上线/);assert.match(html,/还有什么没做[^]*下周验收/);assert.match(html,/data-count="0">0<\/b><span>本周完成项目/);
+});
+test('weekly task summaries and feedback are escaped and missing records are honest',()=>{
+  const a=app();const html=a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{completedTasks:[{projectId:'p',projectName:'<img>',name:'<script>任务</script>',description:'<svg>',completedOn:'2026-11-03',summary:'<iframe>',feeling:'<b>',followup:'<u>'},{projectId:null,name:'无总结任务',completedOn:'2026-11-04'}]}})`);
+  assert.doesNotMatch(html,/<img>|<script>|<svg>|<iframe>|<u>/);assert.match(html,/&lt;script&gt;任务&lt;\/script&gt;/);assert.match(html,/&lt;iframe&gt;/);assert.match(html,/&lt;u&gt;/);assert.match(html,/未填写完成总结/);
 });
