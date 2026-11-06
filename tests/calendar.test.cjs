@@ -2955,3 +2955,25 @@ test('project rail resize is available on tablet and reserves content space down
 });
 
 test('project weekly report escapes summaries and has honest empty states',()=>{const a=app();a.run("S.today='2026-11-06'");const empty=a.run("weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{}})");assert.match(empty,/暂无待完成项目/);assert.match(empty,/本周暂无已结项项目/);const html=a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{completedProjects:[{name:'<img>',completedOn:'2026-11-02',summary:'<script>bad</script>'}]}})`);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<img>|<script>/)});
+
+function guideDemoHarness(reduced=false){
+  const a=app(),timers=[],cleared=[],classes=new Set(),dots=Array.from({length:4},()=>({classList:{toggle(){}},setAttribute(){}}));
+  const play={},caption={},fig={dataset:{demo:'task-life'},classList:{toggle(c,on){on?classes.add(c):classes.delete(c)},add(c){classes.add(c)},contains:c=>classes.has(c)},
+    querySelector:s=>s==='.demo-play'?play:caption,querySelectorAll:()=>dots};
+  a.context.root={querySelectorAll:()=>[fig]};a.context.matchMedia=()=>({matches:reduced});
+  a.context.setInterval=fn=>{timers.push(fn);return timers.length};a.context.clearInterval=id=>cleared.push(id);
+  a.context.IntersectionObserver=class {observe(){} disconnect(){}};
+  a.run("UI.view='guide';bindGuideDemos(root)");return {a,fig,play,caption,dots,timers,cleared,classes};
+}
+test('tutorial demos advance only while visible and respect pause and leaving the guide',()=>{
+  const h=guideDemoHarness();h.timers[0]();assert.equal(h.fig.dataset.step,'0');
+  h.classes.add('is-visible');h.timers[0]();assert.equal(h.fig.dataset.step,'1');
+  h.play.onclick();h.timers[0]();assert.equal(h.fig.dataset.step,'1');assert.equal(h.play.textContent,'播放');
+  h.play.onclick();h.timers[0]();assert.equal(h.fig.dataset.step,'2');
+  h.a.run("UI.view='today'");h.timers[0]();assert.ok(h.cleared.includes(1));
+});
+test('reduced-motion tutorials wait for manual steps and retain the selected caption',()=>{
+  const h=guideDemoHarness(true);h.classes.add('is-visible');h.timers[0]();assert.equal(h.fig.dataset.step,'0');
+  assert.equal(h.play.textContent,'播放');h.dots[2].onclick();h.timers[0]();assert.equal(h.fig.dataset.step,'2');
+  assert.match(h.caption.textContent,/记录完成/);assert.equal(h.fig.dataset.paused,'1');
+});
