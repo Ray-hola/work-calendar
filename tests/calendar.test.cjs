@@ -55,11 +55,11 @@ test('navigation widths preserve content space and restore desired widths after 
   assert.equal(a.run('navigationLayout.project.width'),300);
 });
 
-test('stacked navigation can expand on tablet and phone without a side-by-side content reserve', () => {
+test('project navigation reserves tablet content space and stacks only on phones', () => {
   const a = app();
   a.run('navigationLayout.project.width=280;navigationLayout.chat.width=278');
   assert.equal(a.run("navigationWidth('project',1181,390)"),56);
-  assert.equal(a.run("navigationWidth('project',1180,390)"),280);
+  assert.equal(a.run("navigationWidth('project',1180,390)"),56);
   assert.equal(a.run("navigationWidth('project',390,340)"),280);
   assert.equal(a.run("navigationWidth('chat',761,390)"),64);
   assert.equal(a.run("navigationWidth('chat',760,340)"),278);
@@ -2908,4 +2908,59 @@ test('the account settings row opens once by mouse, Enter or Space and has no ne
   a.run(source.slice(start,source.indexOf("$$('#settingsView [data-settings-page]')",start)));
   row.onclick();let prevented=0;for(const key of ['Enter',' ','ArrowDown'])row.onkeydown({key,preventDefault(){prevented++}});
   assert.deepEqual(views,['accounts','accounts','accounts']);assert.equal(prevented,2);
+});
+
+function tourHarness(){
+  const a=app(),timers=[],writes=[],elements={},background=[{inert:false},{inert:true}],buttons=[];
+  let modal=false,locked=false,focusRestored=false;
+  const focus={isConnected:true,getClientRects:()=>[{}],closest:()=>null,focus(){focusRestored=true}};
+  const veil={setAttribute(){},remove(){delete elements['#tourVeil']}};
+  a.context.window={innerWidth:1280,addEventListener(){},removeEventListener(){}};
+  a.context.localStorage={getItem:()=>null,setItem:(k,v)=>writes.push([k,v])};
+  a.context.setTimeout=fn=>{timers.push(fn);return timers.length};a.context.clearTimeout=()=>{};
+  a.context.document={activeElement:focus,body:{children:background,classList:{contains:()=>locked},appendChild:el=>elements['#tourVeil']=el},
+    createElement:()=>veil,addEventListener(){},removeEventListener(){},querySelector:s=>s==='#modalBackdrop'?{classList:{contains:()=>!modal}}:elements[s]||null,
+    querySelectorAll:()=>buttons};
+  a.run("S.user={id:'owner'};tourShow=()=>{}");
+  return {a,timers,writes,background,buttons,setModal:v=>modal=v,setLocked:v=>locked=v,restored:()=>focusRestored};
+}
+test('automatic tour defers around a task draft and starts only after its dialog closes',()=>{
+  const h=tourHarness();h.setModal(true);h.a.run('offerTour();offerTour()');assert.equal(h.timers.length,1);
+  h.timers[0]();assert.equal(h.a.run('tour'),null);assert.equal(h.timers.length,2);
+  h.setModal(false);h.timers[1]();assert.equal(h.a.run('tour.owner'),'owner');
+});
+test('tour start refuses dirty edits, live recording and open dialogs',()=>{
+  const h=tourHarness();
+  h.a.run("UI.docDirty=true;startTour()");assert.equal(h.a.run('tour'),null);
+  h.a.run("UI.docDirty=false;meetingLive.active=true;startTour()");assert.equal(h.a.run('tour'),null);
+  h.a.run('meetingLive.active=false');h.setModal(true);h.a.run('startTour()');assert.equal(h.a.run('tour'),null);
+});
+test('pending tour offers cannot start under a different account, auth lock or phone viewport',()=>{
+  for(const change of ["S.user={id:'other'}","window.innerWidth=390"]){const h=tourHarness();h.a.run('offerTour()');h.a.run(change);h.timers[0]();assert.equal(h.a.run('tour'),null)}
+  const h=tourHarness();h.a.run('offerTour()');h.setLocked(true);h.timers[0]();assert.equal(h.a.run('tour'),null);
+});
+test('tour isolates the background, restores inert state and focus, and binds completion to its owner',()=>{
+  const h=tourHarness();h.a.run('startTour()');assert.ok(h.background.every(e=>e.inert));
+  h.a.run("S.user={id:'other'};endTour()");assert.deepEqual(h.background.map(e=>e.inert),[false,true]);assert.equal(h.restored(),true);
+  assert.deepEqual(h.writes,[['wc-tour-done:owner','1']]);
+  const cancelled=tourHarness();cancelled.a.run('startTour();endTour(false)');assert.equal(cancelled.writes.length,0);
+});
+test('tour Enter preserves focused button activation while navigation keys and background shortcuts stay isolated',()=>{
+  const h=tourHarness(),moves=[];h.a.context.moves=moves;h.a.run('startTour();tourShow=(i,dir)=>moves.push([i,dir])');
+  let prevented=0,stopped=0;
+  for(const key of ['Enter','n'])h.a.context.event={key,target:{closest:s=>key==='Enter'?{}:null},preventDefault(){prevented++},stopPropagation(){stopped++}},h.a.run('tourKey(event)');
+  assert.equal(prevented,0);assert.equal(stopped,2);assert.equal(moves.length,0);
+  h.a.context.event={key:'ArrowRight',target:{closest:()=>null},preventDefault(){prevented++},stopPropagation(){}};h.a.run('tourKey(event)');assert.deepEqual(JSON.parse(JSON.stringify(moves)),[[1,1]]);assert.equal(prevented,1);
+});
+test('tour Tab and Shift-Tab wrap within its buttons',()=>{
+  const h=tourHarness(),focused=[];h.buttons.push({focus:()=>focused.push(0)},{focus:()=>focused.push(1)});h.a.run('startTour()');
+  for(const [index,shiftKey] of [[1,false],[0,true]]){h.a.context.document.activeElement=h.buttons[index];h.a.context.event={key:'Tab',shiftKey,target:{},preventDefault(){},stopPropagation(){}};h.a.run('tourKey(event)')}
+  assert.deepEqual(focused,[0,1]);
+});
+test('project rail resize is available on tablet and reserves content space down to the phone breakpoint',()=>{
+  const a=app();a.context.window={innerWidth:1000};assert.equal(a.run("navigationResizeEnabled('project')"),true);
+  a.context.window.innerWidth=760;assert.equal(a.run("navigationResizeEnabled('project')"),false);
+  assert.equal(a.run("navigationBounds('project',1000,600).max"),260);
+  const css=fs.readFileSync(path.join(__dirname,'../styles.css'),'utf8');assert.doesNotMatch(css,/grid-template-columns:\s*208px/);
+  assert.match(a.run("TOUR.find(s=>s.ch==='档案').body"),/看团队日报和周报/);
 });

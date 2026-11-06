@@ -4747,7 +4747,7 @@ body.nav-dragging * {
 
 @media (max-width: 1400px) {
   #projectsView.active-view {
-    grid-template-columns: 208px minmax(0, 1fr);
+    grid-template-columns: var(--project-navigation-width, 208px) minmax(0, 1fr);
   }
 }
 

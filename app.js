@@ -75,7 +75,7 @@ const navigationLayout=readNavigationLayout();
 let navigationDrag=null,navigationFrame=0,navigationFadeFrame=0;
 function navigationBounds(kind,viewport,available){
   const c=NAVIGATION[kind];
-  const stacked=kind==='project'?viewport<=1180:viewport<=760;
+  const stacked=viewport<=760;
   const room=kind==='main'?viewport-490:!stacked&&Number.isFinite(available)?available-340:c.max;
   const initial=viewport<=1180?{main:216,chat:184}[kind]:undefined;
   return {min:c.min,max:Math.max(c.min,Math.min(c.max,room)),default:initial??c.width};
@@ -155,7 +155,7 @@ function finishNavigationDrag(cancelled=false){
   try{drag.handle.releasePointerCapture(drag.pointerId)}catch(_){}
   applyNavigationLayout();if(!cancelled)saveNavigationLayout();
 }
-function navigationResizeEnabled(kind){return window.innerWidth>(kind==='project'?1180:760)}
+function navigationResizeEnabled(kind){return window.innerWidth>760}
 function initNavigationLayout(){
   const main=$('.sidebar'),chat=$('.chat-side');
   if(main){
@@ -345,7 +345,7 @@ const status=t=>{
 };
 const projectName=t=>(S.projects.find(p=>p.id===t.projectId)||{}).name||'个人';
 function toast(msg){const e=$('#toast');e.textContent=msg;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200)}
-function showAuth(){meetingCancelCapture();meetingStopLive().catch(()=>{});if(typeof agentCancelVoice==='function')agentCancelVoice();document.body.classList.add('auth-locked');let e=$('#authScreen');if(!e){e=document.createElement('section');e.id='authScreen';document.body.prepend(e)}const local=location.protocol==='file:';e.innerHTML=`<div class="auth-card"><div class="brand"><span class="brand-mark">战</span><span>战略小组<br><strong>台账</strong></span></div><h1>登录工作台</h1><form id="loginForm"><label>账户<input id="loginUser" autocomplete="username" value="superadmin" required></label><label>密码<input id="loginPass" type="password" autocomplete="current-password" required></label><button class="primary-btn" type="submit" ${local?'disabled':''}>${local?'请先启动本地服务':'进入工作台'}</button><div id="loginError" class="login-error">${local?'请在工作区运行 ./run.sh，然后访问 http://127.0.0.1:4173/':''}</div></form></div>`;$('#loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/login',{username:$('#loginUser').value,password:$('#loginPass').value});document.body.classList.remove('auth-locked');e.target.closest('#authScreen').remove();await refresh();switchView('calendar')}catch(err){$('#loginError').textContent=err.message}}}
+function showAuth(){cancelTourOffer();endTour(false);meetingCancelCapture();meetingStopLive().catch(()=>{});if(typeof agentCancelVoice==='function')agentCancelVoice();document.body.classList.add('auth-locked');let e=$('#authScreen');if(!e){e=document.createElement('section');e.id='authScreen';document.body.prepend(e)}const local=location.protocol==='file:';e.innerHTML=`<div class="auth-card"><div class="brand"><span class="brand-mark">战</span><span>战略小组<br><strong>台账</strong></span></div><h1>登录工作台</h1><form id="loginForm"><label>账户<input id="loginUser" autocomplete="username" value="superadmin" required></label><label>密码<input id="loginPass" type="password" autocomplete="current-password" required></label><button class="primary-btn" type="submit" ${local?'disabled':''}>${local?'请先启动本地服务':'进入工作台'}</button><div id="loginError" class="login-error">${local?'请在工作区运行 ./run.sh，然后访问 http://127.0.0.1:4173/':''}</div></form></div>`;$('#loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/login',{username:$('#loginUser').value,password:$('#loginPass').value});document.body.classList.remove('auth-locked');e.target.closest('#authScreen').remove();await refresh();switchView('calendar')}catch(err){$('#loginError').textContent=err.message}}}
 /* Accounts that have signed in on this browser, newest first. The switcher
    offers only these, so it never lists the whole team to everyone. */
 const KNOWN_ACCOUNTS_KEY='wc-accounts';
@@ -355,7 +355,7 @@ async function refresh(){
   let next;
   try{next=await getState()}catch(e){if(e.status===401){showAuth();return}throw e}
   if(S.user?.id!==next.user.id){
-    meetingCancelCapture();
+    cancelTourOffer();endTour(false);meetingCancelCapture();
     if(S.user&&typeof agentResetUser==='function')agentResetUser();
     Object.assign(UI,{space:'',folder:'',view:'calendar',member:'all',filter:'all',selectedWeek:0,detailDate:null,timelineScroll:null,dayOffset:0});
   }
@@ -3107,7 +3107,7 @@ const TOUR=[
   {ch:'项目',view:'projects',target:'#projectActions',title:'项目的操作',body:'主按钮是新建任务；项目设置、完成项目、退出项目和删除项目都收在「更多」里。'},
   {ch:'收件箱',view:'inbox',target:'#inboxList',title:'收件箱',body:'指派、审批、邀请、@ 你的消息都在这里。需要你处理的通知上直接有同意、驳回、接受等按钮。'},
   {ch:'沟通',target:'#chatEntryBtn',title:'沟通区',body:'团队频道和每个项目各自的频道。输入 @ 提到成员，@所有人 会通知整个频道。'},
-  {ch:'档案',view:'archive',target:'#archiveView .page-intro',title:'档案室',body:'每天的档案：今日完成、未完成与阻塞、明日计划和随记。管理员在这里看团队日报、导出周报。'},
+  {ch:'档案',view:'archive',target:'#archiveView .page-intro',title:'档案室',body:'每天的档案：今日完成、未完成与阻塞、明日计划和随记。管理员在这里看团队日报和周报。'},
   {ch:'助手',target:'#agentBtn',title:'AI 助手',body:'用一句话查询或安排工作。规划模式会起草任务和项目卡片，你逐张确认后才会生效。'},
   {ch:'助手',target:'#pipBtn',title:'桌面小组件',body:'悬浮在桌面上的今日待办和番茄钟，勾选就记为完成。'},
   {ch:'助手',target:'.topbar [aria-label="搜索"]',title:'搜索与快捷键',body:'按 / 搜任务和项目，按 ? 查看全部快捷键。'},
@@ -3115,31 +3115,61 @@ const TOUR=[
   {ch:'完成',target:'.nav-item[data-view="guide"]',title:'就这些',body:'每个功能的详细说明都在「使用教程」里，按 H 打开；也可以在那里重新开始这段导览。'},
 ];
 const TOUR_KEY='wc-tour-done';
-let tour=null;
+let tour=null,tourOfferTimer=0;
 function tourDone(){try{return localStorage.getItem(`${TOUR_KEY}:${S.user?.id}`)==='1'}catch(_){return true}}
-function offerTour(){if(!tour&&S.user&&!tourDone()&&window.innerWidth>=900)setTimeout(()=>{if(!tour&&!tourDone())startTour()},700)}
+function cancelTourOffer(){if(tourOfferTimer)clearTimeout(tourOfferTimer);tourOfferTimer=0}
+function tourBusy(){return Boolean(UI.docDirty||meetingLive.session||meetingLive.active
+  ||$('#meetingEditor')?.dataset?.dirty==='true'
+  ||['#modalBackdrop','#taskDrawer','#agentPanel'].some(s=>{const el=$(s);return el&&!el.classList.contains('hidden')}))}
+function offerTour(){
+  if(tour||tourOfferTimer||!S.user||tourDone()||window.innerWidth<900)return;
+  const owner=S.user.id;
+  const offer=()=>{
+    tourOfferTimer=0;
+    if(tour||S.user?.id!==owner||tourDone()||window.innerWidth<900||document.body.classList.contains('auth-locked'))return;
+    if(tourBusy()){tourOfferTimer=setTimeout(offer,1000);return}
+    startTour();
+  };
+  tourOfferTimer=setTimeout(offer,700);
+}
 function startTour(){
-  if(tour)return;
-  if(!$('#modalBackdrop')?.classList.contains('hidden'))closeModal();
+  if(tour||!S.user||document.body.classList.contains('auth-locked')||tourBusy())return;
+  cancelTourOffer();
   const steps=TOUR.filter(s=>!s.admin||S.user?.admin);
-  tour={i:0,steps,from:UI.view};
+  tour={i:0,steps,owner:S.user.id,returnFocus:document.activeElement,
+    background:[...document.body.children].map(el=>({el,inert:el.inert}))};
+  tour.background.forEach(({el})=>el.inert=true);
   const veil=document.createElement('div');veil.id='tourVeil';veil.className='tour-veil';
   veil.setAttribute('role','dialog');veil.setAttribute('aria-modal','true');veil.setAttribute('aria-labelledby','tourTitle');
   veil.innerHTML='<div class="tour-spot"></div><div class="tour-card" tabindex="-1"></div>';
   document.body.appendChild(veil);
-  document.addEventListener('keydown',tourKey,true);window.addEventListener('resize',tourPlace);
+  document.addEventListener('keydown',tourKey,true);document.addEventListener('focusin',tourFocus,true);
+  window.addEventListener('resize',tourPlace);window.addEventListener('scroll',tourPlace,true);
   tourShow(0,1);
 }
-function endTour(){
-  if(!tour)return;tour=null;
-  $('#tourVeil')?.remove();document.removeEventListener('keydown',tourKey,true);window.removeEventListener('resize',tourPlace);
-  try{localStorage.setItem(`${TOUR_KEY}:${S.user?.id}`,'1')}catch(_){}
+function endTour(markDone=true){
+  if(!tour)return;const ended=tour;tour=null;
+  $('#tourVeil')?.remove();document.removeEventListener('keydown',tourKey,true);document.removeEventListener('focusin',tourFocus,true);
+  window.removeEventListener('resize',tourPlace);window.removeEventListener('scroll',tourPlace,true);
+  ended.background.forEach(({el,inert})=>el.inert=inert);
+  if(markDone)try{localStorage.setItem(`${TOUR_KEY}:${ended.owner}`,'1')}catch(_){}
+  const focus=ended.returnFocus;
+  if(focus?.isConnected&&focus.getClientRects().length&&!focus.closest('[inert]'))focus.focus({preventScroll:true});
+  else $('.nav-item.active')?.focus({preventScroll:true});
 }
+function tourFocus(e){if(tour&&!e.target.closest('#tourVeil'))$('#tourVeil .tour-next')?.focus({preventScroll:true})}
 function tourKey(e){
   if(!tour)return;
+  e.stopPropagation();
+  if(e.key==='Escape'){e.preventDefault();endTour();return}
+  if(e.key==='Tab'){
+    const buttons=[...$$('#tourVeil button')],i=buttons.indexOf(document.activeElement);
+    if(i<0||e.shiftKey&&i===0||!e.shiftKey&&i===buttons.length-1){e.preventDefault();buttons[e.shiftKey?buttons.length-1:0]?.focus()}
+    return;
+  }
+  if(e.key==='Enter'&&e.target.closest('#tourVeil button'))return;
   const go={ArrowRight:1,Enter:1,ArrowLeft:-1}[e.key];
-  if(e.key==='Escape'){e.preventDefault();e.stopPropagation();endTour();return}
-  if(go){e.preventDefault();e.stopPropagation();tourShow(tour.i+go,go)}
+  if(go){e.preventDefault();tourShow(tour.i+go,go)}
 }
 const tourVisible=el=>Boolean(el&&el.getClientRects().length&&getComputedStyle(el).visibility!=='hidden');
 function tourShow(i,dir){
