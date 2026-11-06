@@ -455,17 +455,12 @@ test('日记 and 档案室 are one 档案室: members file their own days, admin
   assert.ok(/data-scope="members" data-id="test002" data-field="done">联调/.test(editable) && /data-scope="projects" data-id="p" data-field="progress">/.test(editable), '每一块都能改，空的也能补');
   assert.ok(/已改/.test(editable));
   assert.ok(!/contenteditable/.test(a.run(`briefDocument(${JSON.stringify(brief)})`)), '导出和只读时是原样');
-  const week = a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',briefs:[${JSON.stringify(brief)},`
-    +`${JSON.stringify({...brief,date:'2026-11-02'})}]})`);
-  assert.ok(/档案室 · 周报/.test(week) && !/<!doctype/.test(week), '周报在应用里直接看，不再下载');
-  assert.ok(/data-count="2">2<\/span>\/<span data-count="4">4<\/span><\/b><span>完成任务/.test(week)
-    && /data-count="2.0" data-decimals="1">2.0<\/span>h/.test(week), '把一周加起来');
-  assert.equal((week.match(/class="week-cell[ "]/g) || []).length, 7, '每天一格，周六到周五');
-  assert.ok(/data-date="2026-11-01"(?![^>]*disabled)/.test(week) && /data-date="2026-11-03" disabled/.test(week),
-    '有日报的那天能点开，没到的不能');
-  assert.ok(/data-week="1" disabled/.test(week), '本周之后不能再往后翻');
-  assert.ok(/<time>11月1日 · 周日<\/time>要定版/.test(week), '本周需要关注带上日期');
-  assert.ok(/王二<\/strong><span class="week-meter"><i style="--w:50%">/.test(week), '成员本周的完成比例');
+  const week = a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',briefs:[${JSON.stringify(brief)}],work:{asOf:'2026-11-06',completedProjects:[{name:'官网改版',ownerName:'王二',members:['王二','王三'],completedOn:'2026-11-02',summary:'本周完成官网改版。项目内容：更新首页。完成情况：验收上线'}],unfinishedProjects:[{name:'验收项目',ownerName:'王三',description:'接口验收',status:'active',remaining:[{name:'最终验证',remaining:'补齐验证',reason:'环境未好',scheduledOn:'2026-11-09'}]}]}})`);
+  assert.match(week,/这周做了什么/);assert.match(week,/还有什么没做/);
+  for(const value of ['官网改版','更新首页','验收上线','验收项目','最终验证','环境未好','王三'])assert.ok(week.includes(value));
+  assert.match(week,/data-week="1" disabled/);assert.match(week,/data-date="2026-11-01"/);
+  assert.doesNotMatch(week,/大家的反馈|完成实际工时|成员本周|项目本周/);
+
 });
 
 test('inbox renders edit approval action for the request approver, including superadmin', () => {
@@ -1410,15 +1405,9 @@ test('a temp task handed to someone shows for both people in the project space',
   assert.equal(a.run('editApprover(S.tasks[0])'), 'superadmin', '派任务的人停用后由 superadmin 批');
 });
 
-test('the week report counts days put together on the spot, but only filed days open', () => {
-  const a=app();
-  a.run(`S.today='2026-11-02'`);
-  const days=a.json(`weekSummary({start:'2026-10-31',briefs:[
-    {date:'2026-10-31',filed:true,content:{totals:{tasks:4,completed:3}}},
-    {date:'2026-11-01',content:{totals:{tasks:1,completed:1}}},
-    {date:'2026-11-02',filed:false,content:{totals:{tasks:2,completed:1}}}]}).days.slice(0,4)`);
-  assert.deepEqual(days.map(d=>[d.has,d.filed,d.tasks]), [[true,true,4],[true,true,1],[true,false,2],[false,false,0]]);
-  assert.equal(a.json(`weekSummary({start:'2026-10-31',briefs:[]}).totals.tasks`), 0);
+test('weekly report only links filed daily records and does not sum daily snapshots',()=>{
+  const a=app();a.run("S.today='2026-11-02'");const html=a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',briefs:[{date:'2026-10-31',filed:true},{date:'2026-11-01'},{date:'2026-11-02',filed:false}],work:{completed:[],unfinished:[]}})`);
+  assert.match(html,/data-date="2026-10-31"/);assert.match(html,/data-date="2026-11-01"/);assert.doesNotMatch(html,/data-date="2026-11-02"/);
 });
 
 test('a day sits at the same place on the ruler for ticks and the week band', () => {
@@ -2964,3 +2953,5 @@ test('project rail resize is available on tablet and reserves content space down
   const css=fs.readFileSync(path.join(__dirname,'../styles.css'),'utf8');assert.doesNotMatch(css,/grid-template-columns:\s*208px/);
   assert.match(a.run("TOUR.find(s=>s.ch==='档案').body"),/看团队日报和周报/);
 });
+
+test('project weekly report escapes summaries and has honest empty states',()=>{const a=app();a.run("S.today='2026-11-06'");const empty=a.run("weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{}})");assert.match(empty,/暂无待完成项目/);assert.match(empty,/本周暂无已结项项目/);const html=a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{completedProjects:[{name:'<img>',completedOn:'2026-11-02',summary:'<script>bad</script>'}]}})`);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<img>|<script>/)});
