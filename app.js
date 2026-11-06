@@ -5420,6 +5420,8 @@ const CHAT_PRESENCE_MS=15000;
    collide with a real member and needs no row of its own. */
 const CHAT_EVERYONE='*';
 let chatPollTimer=0,chatPresenceTimer=0,chatLastAt='',chatLastDay='',chatFirstAt='';
+let chatFirstCursor=null,chatLastCursor=null;
+let chatLoadGeneration=0;
 let chatChannel='general',chatPresence={},chatMentionQuery=null,chatMentionIndex=0;
 /* One line of the newest message per room, sent along with chat.list so the
    sidebar can read like a list of conversations. */
@@ -5576,17 +5578,22 @@ function chatBubble(m,withDay){
 }
 async function loadChat(reset){
   const log=$('#chatLog');if(!log)return;
-  let rows=[],more=false;
+  if(reset)chatLoadGeneration++;
+  const generation=chatLoadGeneration,channel=chatChannel,owner=S.user?.id;
+  let rows=[],more=false,firstCursor=null,lastCursor=null;
   try{
-    const scope={channel:chatChannel};
-    const data=await api('/api/action',{action:'chat.list',data:reset?scope:{...scope,since:chatLastAt}});
+    const scope={channel};
+    const data=await api('/api/action',{action:'chat.list',data:reset?scope:{...scope,...(chatLastCursor?{sinceCursor:chatLastCursor}:{since:chatLastAt})}});
+    if(generation!==chatLoadGeneration||channel!==chatChannel||owner!==S.user?.id||!log.isConnected)return;
     rows=data.messages||[];more=Boolean(data.more);
+    firstCursor=data.beforeCursor;lastCursor=data.sinceCursor;
     if(data.previews)chatPreviews=data.previews;
   }catch(e){
+    if(generation!==chatLoadGeneration||channel!==chatChannel||owner!==S.user?.id)return;
     if(reset)log.innerHTML=`<p class="chat-empty">读不到消息：${escapeHTML(e?.message||'加载失败')}</p>`;
     return;
   }
-  if(reset){log.innerHTML='';chatLastAt='';chatLastDay='';chatFirstAt=''}
+  if(reset){log.innerHTML='';chatLastAt='';chatLastDay='';chatFirstAt='';chatFirstCursor=null;chatLastCursor=null}
   if(!rows.length){
     if(reset)log.innerHTML=chatChannel==='general'
       ?'<p class="chat-empty">暂无消息</p>'
@@ -5603,7 +5610,8 @@ async function loadChat(reset){
     if(day)chatLastDay=day;
     if(m.createdAt)chatLastAt=m.createdAt;
   });
-  if(reset){chatFirstAt=rows[0]?.createdAt||'';if(more)log.insertAdjacentHTML('afterbegin',chatMoreButton())}
+  chatLastCursor=lastCursor||null;
+  if(reset){chatFirstAt=rows[0]?.createdAt||'';chatFirstCursor=firstCursor||null;if(more)log.insertAdjacentHTML('afterbegin',chatMoreButton())}
   bindChatMore();
   if(reset||nearBottom)log.scrollTop=log.scrollHeight;
   /* The list carries the newest line of every room, so a poll keeps it fresh. */
@@ -5616,19 +5624,20 @@ const chatMoreButton=()=>'<button type="button" class="chat-more" id="chatMore">
 function bindChatMore(){const b=$('#chatMore');if(b)b.onclick=loadEarlierChat}
 async function loadEarlierChat(){
   const log=$('#chatLog'),button=$('#chatMore');if(!log||!button||!chatFirstAt)return;
-  const channel=chatChannel;button.disabled=true;button.textContent='加载中…';
+  const channel=chatChannel,owner=S.user?.id,generation=chatLoadGeneration;button.disabled=true;button.textContent='加载中…';
   let data;
-  try{data=await api('/api/action',{action:'chat.list',data:{channel,before:chatFirstAt,limit:120}})}
+  try{data=await api('/api/action',{action:'chat.list',data:{channel,...(chatFirstCursor?{beforeCursor:chatFirstCursor}:{before:chatFirstAt}),limit:120}})}
   catch(e){button.disabled=false;button.textContent='加载更早的消息';toast(e.message);return}
-  if(channel!==chatChannel||!button.isConnected)return;
+  if(channel!==chatChannel||owner!==S.user?.id||generation!==chatLoadGeneration||!button.isConnected)return;
   const rows=data.messages||[];let day='',html='';
   rows.forEach(m=>{const d=(m.createdAt||'').slice(0,10);html+=chatBubble(m,Boolean(d)&&d!==day);if(d)day=d});
   /* The day already shown at the top no longer starts there. */
+  const before=log.scrollHeight;
   const firstDay=log.querySelector('.chat-day');
   if(firstDay&&rows.length&&(rows[rows.length-1].createdAt||'').slice(0,10)===(chatFirstAt||'').slice(0,10))firstDay.remove();
-  const before=log.scrollHeight;
   button.insertAdjacentHTML('afterend',html);
   if(rows[0]?.createdAt)chatFirstAt=rows[0].createdAt;
+  if(rows.length)chatFirstCursor=data.beforeCursor||null;
   if(data.more){button.disabled=false;button.textContent='加载更早的消息'}else button.remove();
   log.scrollTop+=log.scrollHeight-before;
 }

@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from server import Store, preview_type
+from server import Store, Problem, preview_type
 
 
 class ChatHistoryTests(unittest.TestCase):
@@ -44,6 +44,33 @@ class ChatHistoryTests(unittest.TestCase):
         latest = self.page(since='2026-11-05T12:58:00+08:00')
         self.assertEqual([m['body'] for m in latest['messages']], ['第 299 条'])
         self.assertFalse(latest['more'])
+
+    def test_tied_timestamps_cross_pages_without_losing_or_repeating_messages(self):
+        for i in range(245):
+            self.store.put('messages', {'channel': 'general', 'author': 'superadmin', 'body': f'tied {i}',
+                                       'createdAt': '2026-11-06T08:00:00.000000+08:00'})
+        self.store.db.commit()
+        page, seen = self.page(), []
+        while True:
+            seen = [m['body'] for m in page['messages']] + seen
+            if not page['more']:
+                break
+            page = self.page(beforeCursor=page['beforeCursor'])
+        self.assertEqual(seen, [f'第 {i} 条' for i in range(300)] + [f'tied {i}' for i in range(245)])
+
+    def test_poll_cursor_sees_messages_with_the_same_timestamp(self):
+        latest = self.page()
+        self.store.put('messages', {'channel': 'general', 'author': 'superadmin', 'body': 'same-time new message',
+                                   'createdAt': latest['messages'][-1]['createdAt']})
+        self.store.db.commit()
+        polled = self.page(sinceCursor=latest['sinceCursor'])
+        self.assertEqual([m['body'] for m in polled['messages']], ['same-time new message'])
+        self.assertFalse(self.page(sinceCursor=polled['sinceCursor'])['messages'])
+
+    def test_invalid_cursor_is_rejected(self):
+        for cursor in ('bad', {'at': 'time', 'rowid': True}, {'at': 'time', 'rowid': -1}):
+            with self.assertRaises(Problem):
+                self.page(beforeCursor=cursor)
 
 
 class PreviewTypeTests(unittest.TestCase):

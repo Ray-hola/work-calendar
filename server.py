@@ -2967,18 +2967,26 @@ class Store:
         # `before` pages back through older history; `more` says whether any is left.
         before = str(data.get('before') or '')
         where, args = f'{CHAT_CHANNEL_SQL}=?', [channel]
-        if since:
-            where += f" AND {CHAT_TIME_SQL}>?"
-            args.append(since)
-        if before:
-            where += f" AND {CHAT_TIME_SQL}<?"
-            args.append(before)
-        rows = [json.loads(r['data']) for r in self.db.execute(
-            f'SELECT data FROM messages WHERE {where} ORDER BY {CHAT_TIME_SQL} DESC, rowid DESC LIMIT ?', (*args, limit + 1))]
-        more = len(rows) > limit
-        rows = rows[:limit]
-        rows.reverse()
-        return {'messages': rows, 'more': more, 'now': timestamp(), 'channel': channel,
+        # Keep the complete ordering key: timestamps are not unique. Legacy
+        # timestamp-only callers still work, while new clients use both keys.
+        for key, legacy, op in (('sinceCursor', since, '>'), ('beforeCursor', before, '<')):
+            cursor = data.get(key)
+            if cursor is not None:
+                if (not isinstance(cursor, dict) or not isinstance(cursor.get('at'), str)
+                        or type(cursor.get('rowid')) is not int or cursor['rowid'] < 1):
+                    raise Problem(400, '消息分页位置无效，请重新打开频道')
+                where += f' AND ({CHAT_TIME_SQL}, rowid){op}(?, ?)'
+                args.extend((cursor['at'], cursor['rowid']))
+            elif legacy:
+                where += f' AND {CHAT_TIME_SQL}{op}?'
+                args.append(legacy)
+        records = list(self.db.execute(
+            f'SELECT rowid AS cursor_id, data FROM messages WHERE {where} ORDER BY {CHAT_TIME_SQL} DESC, rowid DESC LIMIT ?', (*args, limit + 1)))
+        more = len(records) > limit
+        records = records[:limit][::-1]
+        rows = [json.loads(r['data']) for r in records]
+        cursor = lambda i: {'at': rows[i].get('createdAt') or '', 'rowid': records[i]['cursor_id']} if records else None
+        return {'messages': rows, 'more': more, 'beforeCursor': cursor(0), 'sinceCursor': cursor(-1), 'now': timestamp(), 'channel': channel,
                 'previews': self.chat_previews(user)}
 
     def chat_previews(self, user):
