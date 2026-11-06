@@ -10834,7 +10834,7 @@ body.is-resizing-agent { user-select: none; }
 .project-nav-resource:hover { background: var(--surface-sunk); color: var(--ink); }
 .project-nav-resource > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-nav-resource .icon { width: 13px; height: 13px; flex-shrink: 0; }
-.nav-dragging .project-nav-resources, .nav-dragging .project-nav-project:has(.is-lifted) { display: none; }
+.nav-node.is-drag-source { display: none; }
 @media (max-width: 800px) { .meeting-workspace { grid-template-columns: 1fr; gap: 16px; } .meeting-detail { border-left: 0; padding-left: 0; padding-top: 16px; border-top: 1px solid var(--line-soft); } }
 .meeting-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 12px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--surface); color: var(--ink); text-align: left; cursor: pointer; }
 .meeting-row:hover { border-color: var(--accent-line); background: var(--surface-sunk); }
@@ -12144,3 +12144,502 @@ body.is-resizing-agent { user-select: none; }
   color: var(--ink);
   box-shadow: 0 1px 2px rgba(64,54,42,.10), 0 0 0 1px var(--line-strong);
 }
+
+/* 项目空间 v2 · 目录 → 项目 → 文件 ------------------------------------------
+   The directory sits on the page's own surface and runs the full height. A
+   folder's projects and a project's meetings and files hang off fork lines,
+   and the selection is one marker that travels between rows. Names wrap
+   rather than end in an ellipsis. */
+#projectsView.active-view {
+  min-height: calc(100vh - 80px);
+}
+
+.project-nav-rail {
+  background: var(--surface);
+  border-right: 1px solid var(--line-soft);
+}
+
+.project-nav {
+  padding: 18px 10px 28px;
+}
+
+.project-nav-tree {
+  gap: 1px;
+  z-index: 1;
+}
+
+.project-nav-all {
+  z-index: 1;
+}
+
+.nav-node {
+  position: relative;
+}
+
+.nav-branch {
+  position: relative;
+  margin-left: 12px;
+  padding-left: 12px;
+}
+
+/* Each child takes an elbow off the spine; every child but the last also
+   carries the spine on down past itself. */
+.nav-branch > .nav-node::before,
+.nav-branch > .nav-node:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: -12px;
+  pointer-events: none;
+  border-color: var(--line);
+  border-style: solid;
+  border-width: 0;
+}
+
+.nav-branch > .nav-node::before {
+  top: 0;
+  width: 10px;
+  height: 16px;
+  border-left-width: 1px;
+  border-bottom-width: 1px;
+  border-bottom-left-radius: 8px;
+}
+
+.nav-branch > .nav-node:not(:last-child)::after {
+  top: 0;
+  bottom: 0;
+  border-left-width: 1px;
+}
+
+.project-nav-resources > .nav-node::before,
+.project-nav-resources .nav-branch > .nav-node::before {
+  height: 15px;
+}
+
+/* Rows: caret, icon, name. The old per-level indents are replaced by branches. */
+.project-nav-project,
+.project-nav-folder-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  min-height: 32px;
+  height: auto;
+  margin-left: 0;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  transition: background var(--t-fast) var(--ease);
+}
+
+.project-nav-project[data-node-level="1"] {
+  margin-left: 0;
+}
+
+.project-nav-project:hover,
+.project-nav-folder-row:hover {
+  background: color-mix(in srgb, var(--surface-sunk) 70%, transparent);
+}
+
+.project-node-caret,
+.project-nav-caret {
+  flex: 0 0 20px;
+  width: 20px;
+  height: 32px;
+  border-radius: 6px;
+}
+
+.nav-row[data-level="1"] {
+  width: auto;
+  margin-left: 0;
+  font-size: 13px;
+}
+
+.nav-row[data-level="1"]::before {
+  display: none;
+}
+
+.project-nav-item,
+.project-nav-toggle {
+  height: auto;
+  min-height: 32px;
+  padding: 7px 8px 7px 2px;
+  align-items: flex-start;
+  line-height: 18px;
+}
+
+.project-nav-all {
+  padding-left: 8px;
+}
+
+.project-nav-item .icon,
+.project-nav-toggle .icon,
+.project-nav-toggle .nav-folder-icon {
+  margin-top: 1.5px;
+}
+
+.project-nav-item span.nav-text,
+.project-nav-toggle span.nav-text {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+
+.project-nav-item.is-on,
+.project-nav-folder-row.is-on,
+.project-nav-folder-row.is-on .project-nav-toggle {
+  background: transparent;
+  box-shadow: none;
+}
+
+.project-nav-item:hover {
+  background: transparent;
+}
+
+.project-nav-item b,
+.project-nav-toggle b,
+.project-nav-resource b {
+  margin-left: auto;
+  padding-left: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A project's meetings and files. */
+.project-nav-resources {
+  display: block;
+  margin: 0 0 4px 12px;
+  padding-left: 12px;
+  border-left: 0;
+}
+
+.project-nav-resource {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  width: 100%;
+  min-height: 30px;
+  padding: 6px 8px 6px 4px;
+  line-height: 18px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+.project-nav-resource.is-group {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.project-nav-resource > span {
+  min-width: 0;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+
+.project-nav-resource .icon {
+  margin-top: 2px;
+}
+
+.project-nav-resource b {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--faint);
+}
+
+/* The travelling selection. */
+@property --nav-y1 { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@property --nav-y2 { syntax: '<length>'; inherits: false; initial-value: 0px; }
+
+.nav-indicator {
+  position: absolute;
+  z-index: 0;
+  top: var(--nav-y1);
+  height: calc(var(--nav-y2) - var(--nav-y1));
+  border-radius: 8px;
+  background: var(--surface-sunk);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  pointer-events: none;
+  opacity: 0;
+}
+
+.nav-indicator.is-down {
+  transition: --nav-y2 .22s cubic-bezier(.2, .8, .2, 1), --nav-y1 .36s cubic-bezier(.2, .8, .2, 1) .04s,
+    left .3s var(--ease), width .3s var(--ease);
+}
+
+.nav-indicator.is-up {
+  transition: --nav-y1 .22s cubic-bezier(.2, .8, .2, 1), --nav-y2 .36s cubic-bezier(.2, .8, .2, 1) .04s,
+    left .3s var(--ease), width .3s var(--ease);
+}
+
+.project-nav-project.is-on .project-nav-item,
+.project-nav-folder-row.is-on .project-nav-toggle,
+.project-nav-all.is-on {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-indicator { transition: none !important; }
+}
+
+.nav-dragging .nav-indicator {
+  opacity: 0 !important;
+}
+
+/* Project page: name and actions on one line, then facts, then one tab bar. */
+#projectActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#projectActions.hidden {
+  display: none;
+}
+
+#projectSpace > .space-description {
+  margin: -10px 0 12px;
+  max-width: 72ch;
+  color: var(--ink-2);
+}
+
+.space-facts {
+  margin-bottom: 20px;
+}
+
+.space-owner {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.space-owner .avatar {
+  width: 20px;
+  height: 20px;
+  font-size: 9.5px;
+}
+
+.space-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.space-progress .progress {
+  width: 72px;
+}
+
+.space-progress .progress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.space-tabs {
+  position: sticky;
+  top: 60px;
+  z-index: 6;
+  background: var(--surface);
+}
+
+/* Panels sit on the page; only lists keep their hairlines. */
+.space-panel > .space-section {
+  padding: 4px 0 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.space-panel > .space-section + .space-section {
+  margin-top: 18px;
+  padding-top: 22px;
+  border-top: 1px solid var(--line-soft);
+}
+
+/* Task names wrap to a second line instead of ending in an ellipsis. */
+.space-tasks .project-task-open strong {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.45;
+}
+
+@media (min-width: 761px) {
+  .space-tasks .project-task-open strong { padding: 8px 0; }
+}
+
+@media (max-width: 1180px) {
+  .space-tabs { top: 56px; }
+}
+
+.space-head.is-toolbar {
+  justify-content: flex-end;
+  min-height: 0;
+  margin-bottom: 6px;
+}
+
+.space-head.is-toolbar:empty {
+  display: none;
+}
+
+/* Meetings: a list of rows on the left, the open meeting on the right. */
+.space-meetings .meeting-workspace {
+  grid-template-columns: minmax(220px, 0.8fr) minmax(0, 2fr);
+}
+
+.space-meetings .meeting-list {
+  gap: 0;
+}
+
+.space-meetings .meeting-row {
+  padding: 10px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: transparent;
+}
+
+.space-meetings .meeting-row:hover {
+  background: var(--surface-sunk);
+}
+
+.space-meetings .meeting-copy small {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 使用教程 ------------------------------------------------------------------ */
+.guide-layout {
+  display: grid;
+  grid-template-columns: 188px minmax(0, 1fr);
+  gap: 48px;
+  align-items: start;
+}
+
+.guide-toc {
+  position: sticky;
+  top: 84px;
+  display: grid;
+  gap: 2px;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+}
+
+.guide-toc-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.guide-toc-item .icon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+
+.guide-toc-item:hover {
+  background: var(--surface-sunk);
+  color: var(--ink);
+}
+
+.guide-toc-item.is-on {
+  background: var(--surface-sunk);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.guide-content {
+  display: grid;
+  gap: 8px;
+  max-width: 760px;
+}
+
+.guide-chapter {
+  scroll-margin-top: 84px;
+  padding: 8px 0 34px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.guide-chapter:last-child {
+  border-bottom: 0;
+}
+
+.guide-chapter header {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 14px;
+  align-items: baseline;
+  margin-bottom: 14px;
+}
+
+.guide-index {
+  grid-row: span 2;
+  font: 500 13px/1 var(--font-serif);
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.guide-chapter h2 {
+  margin: 0;
+  font: 400 26px/1.25 var(--font-serif);
+  color: var(--ink);
+}
+
+.guide-chapter header p {
+  margin: 6px 0 0;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+
+.guide-chapter section {
+  margin-top: 18px;
+}
+
+.guide-chapter h3 {
+  margin: 0 0 8px;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.guide-chapter ol {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 6px;
+}
+
+.guide-chapter li {
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: var(--ink-2);
+}
+
+.guide-chapter li::marker {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 900px) {
+  .guide-layout { grid-template-columns: 1fr; gap: 20px; }
+  .guide-toc { position: static; max-height: none; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+}
+
+/* Keep the meeting editor readable when the workspace stacks on a phone. */
+@media (max-width: 800px) {
+  .space-meetings .meeting-workspace { grid-template-columns: minmax(0, 1fr); }
+}
+@media (min-width: 1181px) {
+  .project-nav.is-nav-collapsed .nav-branch { margin-left: 0; padding-left: 0; }
+  .project-nav.is-nav-collapsed .nav-branch > .nav-node::before,
+  .project-nav.is-nav-collapsed .nav-branch > .nav-node::after { display: none; }
+}
+
+.project-nav-folder-row { height: auto; min-height: 32px; align-items: flex-start; }
