@@ -3154,7 +3154,7 @@ const GUIDE_DEMOS={
         <span class="dm-btn is-primary" data-point="1">进入工作台</span></div>
       <div class="dm-pane" data-in="2"><h6><span class="dm-avatar" data-point="2">林</span>林默 · 成员工作区</h6>
         <div class="dm-menu" data-in="3"><span data-point="3">个人资料</span><span>修改密码</span><span>登录其他账户</span><span class="is-muted">退出登录</span></div>
-        <div class="dm-min" data-in="3"><b>个人资料</b><span>昵称 · 头像 · 个性签名（中文名由管理员设置）</span></div></div>
+        <div class="dm-min" data-in="3"><b>个人资料</b><span>昵称 · 头像 · 个性签名（中文名由 superadmin 设置）</span></div></div>
     </div>`},
   'layout':{steps:['左侧是主导航和快捷筛选，顶栏是常用入口','点「P0 重要任务」，今日任务只留下最紧急的','点导航顶部的箭头，导航收成只显示图标'],html:`
     <div class="dm-shell">
@@ -3357,12 +3357,24 @@ function demoPoint(fig,step){
   const stage=fig.querySelector?.('.demo-stage'),ptr=stage?.querySelector?.('.demo-pointer');
   if(!ptr||typeof stage.getBoundingClientRect!=='function')return;
   const target=stage.querySelector(`[data-point~="${step}"]`);
+  const revision=ptr._pointRevision=(ptr._pointRevision||0)+1;
   clearTimeout(ptr._tap);ptr.classList.remove('is-tap');
   if(!target){ptr.classList.remove('is-on');return}
-  const s=stage.getBoundingClientRect(),r=target.getBoundingClientRect();
-  ptr.style.transform=`translate(${Math.round(r.left-s.left+Math.min(r.width*.6,r.width-6))}px,${Math.round(r.top-s.top+r.height*.6)}px)`;
-  ptr.classList.add('is-on');
-  ptr._tap=setTimeout(()=>ptr.classList.add('is-tap'),navReducedMotion()?0:650);
+  const place=()=>{
+    if(ptr._pointRevision!==revision||fig.isConnected===false||(UI.view&&UI.view!=='guide'))return;
+    const s=stage.getBoundingClientRect(),r=target.getBoundingClientRect();
+    if(!r.width||!r.height||target.checkVisibility?.({opacityProperty:true,visibilityProperty:true})===false){ptr.classList.remove('is-on');return}
+    ptr.style.transform=`translate(${Math.round(r.left-s.left+Math.min(r.width*.6,r.width-6))}px,${Math.round(r.top-s.top+r.height*.6)}px)`;
+    ptr.classList.add('is-on');
+    ptr._tap=setTimeout(()=>{if(ptr._pointRevision===revision)ptr.classList.add('is-tap')},navReducedMotion()?0:650);
+  };
+  // Flush the step styles, then wait for the target and its ancestors to settle.
+  target.getBoundingClientRect();
+  const moving=[];
+  if(!navReducedMotion())for(let el=target;el;el=el===stage?null:el.parentElement){
+    moving.push(...(el.getAnimations?.()||[]).filter(a=>(a.pending||a.playState==='running')&&a.effect?.getComputedTiming?.()?.iterations!==Infinity));
+  }
+  if(moving.length){ptr.classList.remove('is-on');Promise.allSettled(moving.map(a=>a.finished)).then(place)}else place();
 }
 function bindGuideDemos(root){
   const figs=[...root.querySelectorAll?.('.guide-demo')||[]];if(!figs.length)return;
@@ -3375,13 +3387,20 @@ function bindGuideDemos(root){
       play.onclick=()=>{const paused=fig.dataset.paused==='1';fig.dataset.paused=paused?'':'1';play.textContent=paused?'暂停':'播放'}}
   });
   clearInterval(UI.demoTimer);
+  UI.demoResize?.disconnect?.();
+  if(typeof ResizeObserver==='function'){
+    UI.demoResize=new ResizeObserver(entries=>entries.forEach(e=>{
+      const fig=e.target.closest('.guide-demo');if(fig)demoPoint(fig,Number(fig.dataset.step)||0);
+    }));
+    figs.forEach(f=>{const stage=f.querySelector('.demo-stage');if(stage)UI.demoResize.observe(stage)});
+  }
   if(typeof IntersectionObserver==='function'){
     UI.demoSeen?.disconnect?.();
     UI.demoSeen=new IntersectionObserver(entries=>entries.forEach(e=>e.target.classList.toggle('is-visible',e.isIntersecting)),{threshold:.35});
     figs.forEach(f=>UI.demoSeen.observe(f));
   }else figs.forEach(f=>f.classList.add('is-visible'));
   UI.demoTimer=setInterval(()=>{
-    if(UI.view!=='guide'){clearInterval(UI.demoTimer);return}
+    if(UI.view!=='guide'){clearInterval(UI.demoTimer);UI.demoResize?.disconnect?.();return}
     figs.forEach(fig=>{
       if(fig.dataset.paused==='1'||!fig.classList.contains('is-visible'))return;
       const n=GUIDE_DEMOS[fig.dataset.demo]?.steps.length||1,held=Number(fig.dataset.held||0)+1;
@@ -3403,11 +3422,11 @@ function guideDemoHTML(id){
 const GUIDE=[
   {id:'start',title:'开始使用',icon:'book-open',demo:'login',lead:'登录、三种角色和你自己的资料。',parts:[
     ['登录',['打开工作台，输入账户名和密码，点「进入工作台」。','登录状态保留 7 天；在别的设备登录不会挤掉当前设备。','同一浏览器登录过的账户会列在左上角账户菜单中，切换时仍需验证该账户密码。']],
-    ['三种角色',['superadmin：系统所有者，能做所有事，包括调整规则组、权限组和删除账户。','管理员：管理全部项目与任务、审批申请、查看成果库、管理账户（不含规则组）。','普通成员：处理分给自己的任务，按所在规则组新建项目或任务，参与被加入的项目。'],'list'],
-    ["三种角色能做什么",[["操作", "superadmin", "管理员", "普通成员"], ["处理分给自己的任务", "可以", "可以", "可以"], ["新建项目 / 任务", "直接创建", "直接创建", "按所在规则组"], ["审批申请", "可以", "可以", "项目 Owner 审批自己项目的申请"], ["成果库、账户管理", "可以", "可以", "看不到"], ["规则组、删除账户", "可以", "不可以", "看不到"]],"table"],
-    ['你的资料',['点左上角的头像打开账户菜单。','「个人资料」里可以改昵称、头像（选择图片 / 移除）和个性签名；中文名由管理员设置。','「修改密码」需要输入当前密码，新密码至少 6 位，改完后其他设备会退出登录。','「登录其他账户」切换到另一个账户；「退出登录」结束本设备的登录。']],
+    ['三种角色',['superadmin：系统所有者，负责系统配置、账户管理、审批与调度，不执行任务。','管理员：管理全部项目与任务、审批申请、查看成果库和账户列表，不执行任务。','普通成员：处理分给自己的任务，按所在规则组新建项目或任务，参与被加入的项目。'],'list'],
+    ["三种角色能做什么",[["操作", "superadmin", "管理员", "普通成员"], ["执行任务、记录完成", "不执行任务", "不执行任务", "仅分给自己的任务"], ["新建项目 / 任务", "直接创建", "直接创建", "按所在规则组"], ["审批申请", "可以", "可以", "项目 Owner 审批自己项目的申请"], ["查看成果库、账户列表", "可以", "可以", "看不到"], ["添加、停用账户或重置密码", "可以", "不可以", "不可以"], ["规则组、删除账户", "可以", "不可以", "看不到"]],"table"],
+    ['你的资料',['点左上角的头像打开账户菜单。','「个人资料」里可以改昵称、头像（选择图片 / 移除）和个性签名；中文名由 superadmin 设置。','「修改密码」需要输入当前密码，新密码至少 6 位，改完后其他设备会退出登录。','「登录其他账户」切换到另一个账户；「退出登录」结束本设备的登录。']],
     ['第一次进来',['第一次登录会自动开始约 2 分钟的导览，逐个点亮界面上的主要入口。','之后随时可以在「使用教程」页顶部点「开始导览」重看。'],'list'],
-    ["常见问题",[["忘记密码怎么办？", "请管理员在「账户管理」里为你重置密码，登录后再到「修改密码」换成自己的。"], ["为什么我的中文名改不了？", "中文名用在日报、成员列表等正式场合，由管理员统一设置；你可以改昵称。"], ["换了电脑要重新登录吗？", "要。每台设备单独登录，登录状态保留 7 天；改密码后所有设备都需要重新登录。"]],"faq"],
+    ["常见问题",[["忘记密码怎么办？", "请 superadmin 在「账户管理」里为你重置密码，登录后再到「修改密码」换成自己的。"], ["为什么我的中文名改不了？", "中文名用在日报、成员列表等正式场合，由 superadmin 统一设置；你可以改昵称。"], ["换了电脑要重新登录吗？", "要。每台设备单独登录，登录状态保留 7 天；改密码后所有设备都需要重新登录。"]],"faq"],
   ]},
   {id:'layout',title:'界面与导航',icon:'layout-grid',demo:'layout',lead:'左侧导航、顶栏和常用入口在哪里。',parts:[
     ['左侧主导航',['今日任务、周视图、档案室、项目空间、项目时间轴、收件箱、使用教程对所有人开放；成果库、账户管理、系统设置只对管理员显示。','导航右侧的数字是待处理数量，红点表示有新分到你的工作。','点导航顶部的箭头收成只显示图标；拖动导航右边缘调宽窄，双击边缘恢复默认宽度。'],'list'],
@@ -3436,7 +3455,7 @@ const GUIDE=[
     ['执行与完成',['到了安排的时间，任务自动从「待开始」变成「进行中」，也可以在详情里点「开始任务」。','做完后点「记录完成」，填写完成总结、实际耗时（分钟）和工作感受（顺利 / 一般 / 困难 / 阻塞）。','任务完成后直接结束，不需要审批；之后可以点「修改完成记录」更正。','合并了多期的固定任务，一次完成即可结清全部期次。']],
     ['修改与指派',['管理员或有管理权限的任务安排人、项目 Owner 可以「直接调整任务」；执行人需要改时点「申请修改任务」，写明理由并等待审批。','有管理权限时，「调整任务指派」可以把任务换给别人，原负责人和新负责人都会收到通知。','项目 Owner 可以在项目任务列表里直接点「调整指派」。','「删除此任务」会把任务从日历移除，需要确认。']],
     ['例子',['陈曦想把「官网首屏改版」的截止从周五改到下周一。她是执行人，于是点「申请修改任务」，写上「设计稿要等品牌确认」。审批人在收件箱里看到这条修改申请，点「同意修改」后，日期自动更新，陈曦收到通知。'],'example'],
-    ['谁能用',['所有人都能处理分给自己的任务。','新建与修改是否需要审批，由「系统设置 → 成员与权限」里的规则组决定。'],'who'],
+    ['谁能用',['普通成员处理分给自己的任务；管理员和 superadmin 负责管理、审批与调度，不执行任务。','新建与修改是否需要审批，由「系统设置 → 成员与权限」里的规则组决定。'],'who'],
     ["常见问题",[["为什么我看不到「新建任务」？", "你所在规则组的临时任务和项目任务都设为「不允许」。项目 Owner 在自己的项目里始终可以新建。"], ["完成记录写错了能改吗？", "能。打开任务详情点「修改完成记录」，总结、耗时和感受都可以改。"], ["任务被指派给了别人，我还能看到吗？", "不在你的今日任务里了；如果你是项目 Owner，仍能在项目的任务标签里看到。"]],"faq"],
   ]},
   {id:'approval',title:'审批与打回',icon:'inbox',demo:'approval',lead:'需要审批的申请怎么走，完成后的工作怎么退回补充。',parts:[
@@ -3527,11 +3546,11 @@ const GUIDE=[
     ['搜索',['按 / 或点顶栏放大镜，输入关键词即可找到任务和项目。','在系统设置页按 / 是搜索设置项。'],'list'],
     ['快捷键',['? 打开快捷键列表；H 使用教程；N 新建任务；T 今日任务；W 周视图；P 项目空间；I 收件箱；Esc 关闭弹窗或面板。','在输入框里打字时快捷键不会触发。'],'list'],
   ]},
-  {id:'accounts',title:'账户管理',icon:'users',demo:'accounts',lead:'添加和维护团队账户，仅管理员可见。',parts:[
-    ['添加账户',['点「添加账户」，填写账户名、中文名（可留空）、初始密码和权限组。']],
-    ['维护',['每个账户可以停用 / 启用、重置密码、设置中文名，或调整权限组（superadmin、管理员、普通用户）。','点「管理」可以多选账户批量操作。'],'list'],
-    ["三种权限组",[["权限组", "适合"], ["superadmin", "系统所有者，通常只有一位"], ["管理员", "负责审批、项目管理和账户维护的人"], ["普通用户", "团队成员，按规则组新建项目和任务"]],"table"],
-    ['注意',['删除账户不可撤销，需要输入账户名确认；仍负责进行中项目或有未完成任务的账户不能删除，要先转交。'],'note'],
+  {id:'accounts',title:'账户管理',icon:'users',demo:'accounts',lead:'管理员可查看账户列表；添加和维护账户仅限 superadmin。',parts:[
+    ['添加账户',['superadmin 点「添加账户」，填写账户名、中文名（可留空）、初始密码和权限组。']],
+    ['维护',['superadmin 可以停用 / 启用账户、重置密码、设置中文名，或调整权限组（superadmin、管理员、普通用户）。','superadmin 点「管理」可以多选账户批量操作；管理员可查看账户列表，但不能维护账户。'],'list'],
+    ["三种权限组",[["权限组", "适合"], ["superadmin", "系统所有者，通常只有一位"], ["管理员", "负责审批和项目管理，可查看账户列表"], ["普通用户", "团队成员，按规则组新建项目和任务"]],"table"],
+    ['注意',['删除账户仅限 superadmin，且不可撤销，需要输入账户名确认；仍负责进行中项目或有未完成任务的账户不能删除，要先转交。'],'note'],
   ]},
   {id:'settings',title:'系统设置',icon:'settings',demo:'rules',lead:'对全体成员生效的规则，仅管理员可见。',parts:[
     ['查找设置',['左侧按类别跳转，顶部搜索框可以直接搜设置项。','改过默认值的设置左侧有一条竖线，点「恢复默认」改回。'],'list'],

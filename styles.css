@@ -14755,6 +14755,12 @@ body.is-resizing-agent { user-select: none; }
 @container (max-width: 560px) {
   .dm-side { width: 118px; }
   .dm-shortcuts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dm-week.is-four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dm-week.is-four .dm-name { white-space: normal; overflow-wrap: anywhere; }
+}
+
+@container (max-width: 300px) {
+  .dm-week.is-four { grid-template-columns: 1fr; }
 }
 
 /* 使用教程 · 表格与常见问题 */

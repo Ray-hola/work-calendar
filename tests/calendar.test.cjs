@@ -3093,10 +3093,63 @@ test('the demo pointer travels to the step target, taps it, and hides when a ste
   const ptr={style:{},classList:{add:c=>cls.add(c),remove:c=>cls.delete(c)}};
   const target={getBoundingClientRect:()=>({left:140,top:70,width:100,height:20})};
   const stage={getBoundingClientRect:()=>({left:100,top:50}),querySelector:s=>s==='.demo-pointer'?ptr:s==='[data-point~="2"]'?target:null};
-  a.context.fig={querySelector:()=>stage};
+  a.context.fig={querySelector:()=>stage};a.run("UI.view='guide'");
   a.run('demoPoint(fig,2)');assert.equal(ptr.style.transform,'translate(100px,32px)');assert.ok(cls.has('is-on'));
   assert.ok(!cls.has('is-tap'));timers.at(-1)();assert.ok(cls.has('is-tap'));
   a.run('demoPoint(fig,3)');assert.ok(!cls.has('is-on'));assert.ok(!cls.has('is-tap'));
+});
+
+function movingDemoHarness(reduced=false){
+  const a=app(),timers=[],classes=new Set(),rect={left:140,top:70,width:20,height:20},animations=[];
+  const ptr={style:{},classList:{add:c=>classes.add(c),remove:c=>classes.delete(c)}};
+  const stage={getBoundingClientRect:()=>({left:100,top:50}),getAnimations:()=>[],
+    querySelector:s=>s==='.demo-pointer'?ptr:s==='[data-point~="2"]'?target:null,closest:()=>fig};
+  const parent={parentElement:stage,getAnimations:()=>animations};
+  const target={parentElement:parent,getBoundingClientRect:()=>({...rect}),getAnimations:()=>[],checkVisibility:()=>true};
+  const play={},caption={},fig={dataset:{demo:'layout',step:'2'},isConnected:true,
+    classList:{toggle(){},add(){},contains:()=>false},querySelector:s=>s==='.demo-stage'?stage:s==='.demo-play'?play:caption,querySelectorAll:()=>[]};
+  a.context.fig=fig;a.context.root={querySelectorAll:()=>[fig]};a.context.matchMedia=()=>({matches:reduced});
+  a.context.setTimeout=fn=>{timers.push(fn);return timers.length};a.context.clearTimeout=()=>{};
+  a.context.setInterval=fn=>{a.interval=fn;return 1};a.context.clearInterval=()=>{};
+  a.run("UI.view='guide'");return {a,fig,stage,target,ptr,rect,animations,classes,timers};
+}
+test('demo pointer waits for ancestor layout transitions and measures the final target',async()=>{
+  const h=movingDemoHarness();let finish;
+  h.animations.push({playState:'running',effect:{getComputedTiming:()=>({iterations:1})},finished:new Promise(r=>finish=r)});
+  h.a.run('demoPoint(fig,2)');assert.equal(h.ptr.style.transform,undefined);assert.ok(!h.classes.has('is-on'));
+  h.rect.left=130;finish();await new Promise(setImmediate);
+  assert.equal(h.ptr.style.transform,'translate(42px,32px)');assert.ok(h.classes.has('is-on'));
+  assert.ok(!h.classes.has('is-tap'));h.timers.at(-1)();assert.ok(h.classes.has('is-tap'));
+});
+test('an obsolete or detached demo cannot restore a pointer after its transition finishes',async()=>{
+  for(const change of [h=>{h.fig.dataset.step='0';h.a.run('demoPoint(fig,0)')},h=>{h.fig.isConnected=false},h=>h.a.run("UI.view='today'")]){
+    const h=movingDemoHarness();let finish;
+    h.animations.push({playState:'running',finished:new Promise(r=>finish=r)});
+    h.a.run('demoPoint(fig,2)');change(h);finish();await new Promise(setImmediate);
+    assert.ok(!h.classes.has('is-on'));assert.equal(h.timers.length,0);
+  }
+});
+test('demo resize realigns the selected step and disconnects after leaving the guide',()=>{
+  const h=movingDemoHarness();let resized,disconnected=0,observed;
+  h.a.context.ResizeObserver=class {constructor(fn){resized=fn}observe(el){observed=el}disconnect(){disconnected++}};
+  h.a.run('bindGuideDemos(root);demoStep(fig,2)');assert.equal(observed,h.stage);
+  assert.equal(h.ptr.style.transform,'translate(52px,32px)');h.rect.left=160;
+  resized([{target:h.stage}]);assert.equal(h.ptr.style.transform,'translate(72px,32px)');assert.equal(h.fig.dataset.step,'2');
+  h.a.run("UI.view='today'");h.a.interval();assert.equal(disconnected,1);
+});
+test('reduced-motion and hidden targets do not wait for or point at invisible controls',()=>{
+  const h=movingDemoHarness(true);h.animations.push({playState:'running',finished:new Promise(()=>{})});
+  h.a.run('demoPoint(fig,2)');assert.ok(h.classes.has('is-on'));
+  h.target.checkVisibility=()=>false;h.a.run('demoPoint(fig,2)');assert.ok(!h.classes.has('is-on'));
+});
+test('tutorial role guidance distinguishes task performers and superadmin account maintenance',()=>{
+  const a=app(),parts=a.json("GUIDE.find(c=>c.id==='start').parts"),table=parts.find(p=>p[2]==='table')[1];
+  assert.deepEqual(table.find(r=>r[0]==='执行任务、记录完成').slice(1),['不执行任务','不执行任务','仅分给自己的任务']);
+  assert.deepEqual(table.find(r=>r[0]==='添加、停用账户或重置密码').slice(1),['可以','不可以','不可以']);
+  assert.deepEqual(table.find(r=>r[0]==='查看成果库、账户列表').slice(1),['可以','可以','看不到']);
+  assert.match(parts.find(p=>p[2]==='faq')[1][0][1],/请 superadmin/);
+  const accounts=a.json("GUIDE.find(c=>c.id==='accounts')");assert.match(accounts.lead,/维护账户仅限 superadmin/);
+  assert.match(JSON.stringify(accounts.parts),/管理员可查看账户列表，但不能维护账户/);
 });
 
 test('lineage lookup follows newly added tasks and replacement snapshots',()=>{
