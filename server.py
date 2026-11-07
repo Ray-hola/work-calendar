@@ -4449,45 +4449,107 @@ class Store:
                 'content':content}
 
     def week_work(self, start, cutoff):
-        """Weekly project outcomes, plus work remaining at the reporting cutoff.
+        """Weekly project/task outcomes and work remaining at the cutoff.
         Completed tasks alone never imply that a project has been completed.
         """
-        result={'asOf':cutoff,'completedProjects':[],'unfinishedProjects':[],'unfinishedOther':[]}
+        result={'asOf':cutoff,'completedProjects':[],'completedTasks':[],'unfinishedProjects':[],'unfinishedOther':[]}
         if start>cutoff:return result
+        names={u['id']:u.get('displayName') or u['id'] for u in self.users()}
+        display=lambda account:names.get(account,account)
         def day(value, fallback=''):
             try:return datetime.fromisoformat(str(value)).astimezone(now().tzinfo).date().isoformat()
             except (ValueError,TypeError):return fallback
-        tasks=self.all('tasks');by_id={t['id']:t for t in tasks};chains={};events={};future_changes=set()
+        def event_order(log):
+            try:
+                at=datetime.fromisoformat(str(log.get('createdAt') or log.get('date','')))
+                if at.tzinfo is None:at=at.replace(tzinfo=now().tzinfo)
+                return at.timestamp()
+            except (ValueError,TypeError):return float('-inf')
+        tasks=self.all('tasks');by_id={t['id']:t for t in tasks};projects=self.all('projects');project_by_id={p['id']:p for p in projects};chains={};events={};future_changes=set();covered_roots=set()
         for t in tasks:chains.setdefault(self._lineage_root(t,by_id),[]).append(t)
-        for log in self.all('logs'):
+        # Keep row insertion order when two events have the same instant.
+        raw_logs=sorted(self.all('logs'),key=event_order)
+        legacy_pending={};approved_pending=set();legacy_events=[];modern_roots=set()
+        for log in raw_logs:
             t=by_id.get(log.get('taskId'))
             if not t:continue
             root=self._lineage_root(t,by_id)
-            if day(log.get('createdAt'),log.get('date',''))<=cutoff:events.setdefault(root,[]).append(log)
+            if log.get('kind')=='complete':modern_roots.add(root)
+            elif log.get('kind')=='complete_pending':legacy_pending[root]=log
+            elif log.get('kind')=='approval' and log.get('decision')=='approved':
+                submitted=legacy_pending.get(root,{})
+                if submitted:approved_pending.add(submitted['id'])
+                legacy_events.append({**submitted,'id':log['id'],'kind':'complete','taskId':t['id'],'createdAt':log.get('createdAt'),
+                    'actor':submitted.get('actor') or t.get('completedBy') or t.get('assignee'),
+                    'summary':submitted.get('summary',t.get('completionSummary','')),
+                    'actual':submitted.get('actual',t.get('completionActual')),'feeling':submitted.get('feeling',t.get('completionFeeling',''))})
+        for log in raw_logs:
+            if log.get('kind')!='complete_pending' or log['id'] in approved_pending:continue
+            t=by_id.get(log.get('taskId'))
+            if not t:continue
+            retired=(t.get('approval') or {}).get('status')=='retired'
+            if retired or (t.get('status')=='done' and t.get('completedAt') and self._lineage_root(t,by_id) not in modern_roots):
+                at=(t.get('submittedAt') or log.get('createdAt')) if retired else t['completedAt']
+                legacy_events.append({**log,'kind':'complete','createdAt':at})
+        replacements={log['id']:log for log in legacy_events}
+        for original in raw_logs:
+            log=replacements.get(original['id'],original)
+            t=by_id.get(log.get('taskId'))
+            if not t:continue
+            root=self._lineage_root(t,by_id)
+            if day(log.get('createdAt'),log.get('date',''))<=cutoff:
+                events.setdefault(root,[]).append(log)
+                if log.get('kind')=='complete':
+                    covered_roots.update(self._lineage_root(by_id[p],by_id) for p in (log.get('stackPeriods') or []) if p in by_id and self._lineage_root(by_id[p],by_id)!=root)
             elif log.get('kind') in ('skip','restore','reopen'):future_changes.add(root)
         remaining={}
         for root,chain in chains.items():
-            known=[t for t in chain if day(t.get('createdAt'),t.get('date',''))<=cutoff]
+            # A merged completion also settles deferred chains of covered periods.
+            if root in covered_roots:continue
+            known=[t for t in chain if day(t.get('createdAt'),day(t.get('completedAt'),t.get('date','')))<=cutoff]
             if not known:continue
-            logs=sorted(events.get(root,[]),key=lambda l:(str(l.get('createdAt') or l.get('date','')),str(l.get('id',''))))
-            if not any(t.get('date','9999')<=cutoff for t in known) and not logs:continue
+            logs=sorted(events.get(root,[]),key=event_order)
             t=max(known,key=lambda x:(x.get('date',''),x.get('createdAt','')))
             states=[l for l in logs if l.get('kind') in ('complete','reopen','skip','restore','defer')]
             last=states[-1] if states else None
             done=last.get('kind')=='complete' if last else (t.get('status')=='done' and day(t.get('completedAt'),t.get('date',''))<=cutoff)
             skipped=last.get('kind')=='skip' if last else (root not in future_changes and t.get('status') in ('skipped','rejected','pending'))
-            if done or skipped:continue
+            if done:
+                # Completion dates come from actual events, never the planned
+                # task date. A covered repeat period has no completion of its own.
+                if not last and t.get('stackCompletedBy'):continue
+                completed=day(last.get('createdAt'),day(t.get('completedAt'))) if last else day(t.get('completedAt'))
+                if completed and start<=completed<=cutoff:
+                    completed_task=by_id.get(last.get('taskId'),t) if last else t
+                    detail={}
+                    for log in logs:
+                        if log.get('kind')=='complete':detail=dict(log)
+                        elif log.get('kind')=='complete_edit':detail.update(log)
+                    project=project_by_id.get(completed_task.get('projectId'),{})
+                    result['completedTasks'].append({'taskId':completed_task['id'],'projectId':completed_task.get('projectId'),
+                        'projectName':project.get('name',''),'projectDescription':project.get('desc',''),
+                        'name':completed_task.get('name',''),'description':completed_task.get('desc',''),
+                        'assigneeName':display((last.get('actor') if last else None) or completed_task.get('completedBy') or completed_task.get('assignee')),
+                        'completedOn':completed,'summary':detail.get('summary','') if detail else completed_task.get('completionSummary',''),
+                        'actual':detail.get('actual') if detail else completed_task.get('completionActual'),
+                        'feeling':detail.get('feeling','') if detail else completed_task.get('completionFeeling',''),
+                        'followup':detail.get('followup','') if detail else '',
+                        'fixed':any(x.get('repeatId') or x.get('fixed') for x in known),
+                        'stackCount':(detail.get('stackCount') or len(detail.get('stackPeriods') or []) or 1) if detail else (completed_task.get('stackCount') or len(completed_task.get('stackPeriods') or []) or 1)})
+                continue
+            if skipped:continue
+            if not any(t.get('date','9999')<=cutoff for t in known) and not logs:continue
             detail=next((l for l in reversed(logs) if l.get('kind') in ('defer','reopen')), {})
             remaining.setdefault(t.get('projectId'),[]).append({'taskId':t['id'],'name':t.get('name',''),
-                'assigneeName':self.display_name(t.get('assignee')),'remaining':detail.get('remaining') or t.get('desc') or t.get('name',''),
+                'assigneeName':display(t.get('assignee')),'remaining':detail.get('remaining') or t.get('desc') or t.get('name',''),
                 'reason':detail.get('reason',''),'scheduledOn':t.get('date',''),'deadline':t.get('deadline'),
                 'status':'doing' if t.get('status')=='doing' else 'todo'})
-        for p in self.all('projects'):
+        for p in projects:
             if p.get('status') in ('pending','rejected'):continue
             completed=day(p.get('completedAt'))
             row={'projectId':p['id'],'name':p.get('name',''),'description':p.get('desc',''),
-                 'ownerName':self.display_name(p.get('owner')),
-                 'members':[self.display_name(m) for m,state in (p.get('members') or {}).items() if state=='accepted']}
+                 'ownerName':display(p.get('owner')),
+                 'members':[display(m) for m,state in (p.get('members') or {}).items() if state=='accepted']}
             if p.get('status') in ('done','archived') and completed and completed<=cutoff:
                 if completed>=start:
                     report=str(p.get('completionReport') or '').strip()
@@ -4507,6 +4569,7 @@ class Store:
                     'remaining':sorted(remaining.get(p['id'],[]),key=lambda t:(t['scheduledOn'],t['taskId']))})
         result['unfinishedOther']=remaining.get(None,[])
         result['completedProjects'].sort(key=lambda p:(p['completedOn'],p['projectId']))
+        result['completedTasks'].sort(key=lambda t:(t['completedOn'],t['projectId'] or '',t['taskId']))
         result['unfinishedProjects'].sort(key=lambda p:(p['name'],p['projectId']))
         return result
 

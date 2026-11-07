@@ -2551,7 +2551,8 @@ test('meeting creation is guarded while a request is pending',async()=>{
   assert.equal(calls.length,1);
 });
 test('meeting edits made during save remain dirty and keep their newer input',async()=>{
-  const h=meetingApp(),pane={dataset:{dirty:'true'}};h.nodes['#meetingEditor']=pane;
+  const h=meetingApp(),pane={dataset:{dirty:'false'}};h.nodes['#meetingEditor']=pane;
+  h.a.run("UI.space='p1';UI.spaceArea='meetings';openMeetingEditor({id:'p1',name:'project'})");h.nodes['#meetingTitle'].value='周会';
   let release,submitted;h.a.context.fetch=async(path,options)=>{submitted=JSON.parse(options.body);await new Promise(r=>release=r);return {ok:true,text:async()=>JSON.stringify({id:'m1',revision:1,...submitted.data})}};
   h.nodes['#meetingTranscript'].value='提交版本';const save=h.nodes['#saveMeeting'].onclick();await settle();
   h.nodes['#meetingTitle'].value='保存期间的新标题';h.nodes['#meetingTranscript'].value='继续编辑的原稿';release();await save;
@@ -2954,7 +2955,7 @@ test('project rail resize is available on tablet and reserves content space down
   assert.match(a.run("TOUR.find(s=>s.ch==='档案').body"),/看团队日报和周报/);
 });
 
-test('project weekly report escapes summaries and has honest empty states',()=>{const a=app();a.run("S.today='2026-11-06'");const empty=a.run("weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{}})");assert.match(empty,/暂无待完成项目/);assert.match(empty,/本周暂无已结项项目/);const html=a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{completedProjects:[{name:'<img>',completedOn:'2026-11-02',summary:'<script>bad</script>'}]}})`);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<img>|<script>/)});
+test('project weekly report escapes summaries and has honest empty states',()=>{const a=app();a.run("S.today='2026-11-06'");const empty=a.run("weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{}})");assert.match(empty,/暂无待完成项目/);assert.match(empty,/本周暂无已完成项目或任务/);const html=a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{completedProjects:[{name:'<img>',completedOn:'2026-11-02',summary:'<script>bad</script>'}]}})`);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<img>|<script>/)});
 
 
 test('markdown renders the common marks and never lets markup or scripts through',()=>{
@@ -3071,6 +3072,87 @@ test('reduced-motion tutorials wait for manual steps and retain the selected cap
   assert.match(h.caption.textContent,/记录完成/);assert.equal(h.fig.dataset.paused,'1');
 });
 
+test('every tutorial chapter plays a demo whose step markers fit its captions',()=>{
+  const a=app();
+  const bad=a.json(`GUIDE.flatMap(c=>{const out=[];for(const id of [c.demo,c.extraDemo].filter(Boolean)){const d=GUIDE_DEMOS[id];
+    if(!d){out.push(c.id+':'+id+' missing');continue}
+    for(const m of d.html.matchAll(/data-(in|out|move|type|fill|narrow|point)="([\\d ]+)"/g))for(const n of m[2].split(' ').map(Number))
+      if((m[1]!=='point'&&n<1)||n>=d.steps.length)out.push(id+' '+m[0])}
+    if(!c.demo)out.push(c.id+' has no demo');return out})`);
+  assert.deepEqual(bad,[]);
+});
+test('tutorial tables and FAQs render escaped',()=>{
+  const a=app();
+  const table=a.run("guidePart(['状态',[['状态','意思'],['<b>','已完成']],'table'])");
+  assert.match(table,/<th>状态<\/th><th>意思<\/th>/);assert.match(table,/<td>&lt;b&gt;<\/td><td>已完成<\/td>/);
+  const faq=a.run("guidePart(['常见问题',[['能改吗？','<i>能</i>']],'faq'])");
+  assert.match(faq,/<details><summary>能改吗？<\/summary><p>&lt;i&gt;能&lt;\/i&gt;<\/p><\/details>/);
+});
+test('the demo pointer travels to the step target, taps it, and hides when a step has none',()=>{
+  const a=app(),timers=[],cls=new Set();a.context.setTimeout=fn=>{timers.push(fn);return timers.length};a.context.clearTimeout=()=>{};
+  a.context.matchMedia=()=>({matches:false});
+  const ptr={style:{},classList:{add:c=>cls.add(c),remove:c=>cls.delete(c)}};
+  const target={getBoundingClientRect:()=>({left:140,top:70,width:100,height:20})};
+  const stage={getBoundingClientRect:()=>({left:100,top:50}),querySelector:s=>s==='.demo-pointer'?ptr:s==='[data-point~="2"]'?target:null};
+  a.context.fig={querySelector:()=>stage};a.run("UI.view='guide'");
+  a.run('demoPoint(fig,2)');assert.equal(ptr.style.transform,'translate(100px,32px)');assert.ok(cls.has('is-on'));
+  assert.ok(!cls.has('is-tap'));timers.at(-1)();assert.ok(cls.has('is-tap'));
+  a.run('demoPoint(fig,3)');assert.ok(!cls.has('is-on'));assert.ok(!cls.has('is-tap'));
+});
+
+function movingDemoHarness(reduced=false){
+  const a=app(),timers=[],classes=new Set(),rect={left:140,top:70,width:20,height:20},animations=[];
+  const ptr={style:{},classList:{add:c=>classes.add(c),remove:c=>classes.delete(c)}};
+  const stage={getBoundingClientRect:()=>({left:100,top:50}),getAnimations:()=>[],
+    querySelector:s=>s==='.demo-pointer'?ptr:s==='[data-point~="2"]'?target:null,closest:()=>fig};
+  const parent={parentElement:stage,getAnimations:()=>animations};
+  const target={parentElement:parent,getBoundingClientRect:()=>({...rect}),getAnimations:()=>[],checkVisibility:()=>true};
+  const play={},caption={},fig={dataset:{demo:'layout',step:'2'},isConnected:true,
+    classList:{toggle(){},add(){},contains:()=>false},querySelector:s=>s==='.demo-stage'?stage:s==='.demo-play'?play:caption,querySelectorAll:()=>[]};
+  a.context.fig=fig;a.context.root={querySelectorAll:()=>[fig]};a.context.matchMedia=()=>({matches:reduced});
+  a.context.setTimeout=fn=>{timers.push(fn);return timers.length};a.context.clearTimeout=()=>{};
+  a.context.setInterval=fn=>{a.interval=fn;return 1};a.context.clearInterval=()=>{};
+  a.run("UI.view='guide'");return {a,fig,stage,target,ptr,rect,animations,classes,timers};
+}
+test('demo pointer waits for ancestor layout transitions and measures the final target',async()=>{
+  const h=movingDemoHarness();let finish;
+  h.animations.push({playState:'running',effect:{getComputedTiming:()=>({iterations:1})},finished:new Promise(r=>finish=r)});
+  h.a.run('demoPoint(fig,2)');assert.equal(h.ptr.style.transform,undefined);assert.ok(!h.classes.has('is-on'));
+  h.rect.left=130;finish();await new Promise(setImmediate);
+  assert.equal(h.ptr.style.transform,'translate(42px,32px)');assert.ok(h.classes.has('is-on'));
+  assert.ok(!h.classes.has('is-tap'));h.timers.at(-1)();assert.ok(h.classes.has('is-tap'));
+});
+test('an obsolete or detached demo cannot restore a pointer after its transition finishes',async()=>{
+  for(const change of [h=>{h.fig.dataset.step='0';h.a.run('demoPoint(fig,0)')},h=>{h.fig.isConnected=false},h=>h.a.run("UI.view='today'")]){
+    const h=movingDemoHarness();let finish;
+    h.animations.push({playState:'running',finished:new Promise(r=>finish=r)});
+    h.a.run('demoPoint(fig,2)');change(h);finish();await new Promise(setImmediate);
+    assert.ok(!h.classes.has('is-on'));assert.equal(h.timers.length,0);
+  }
+});
+test('demo resize realigns the selected step and disconnects after leaving the guide',()=>{
+  const h=movingDemoHarness();let resized,disconnected=0,observed;
+  h.a.context.ResizeObserver=class {constructor(fn){resized=fn}observe(el){observed=el}disconnect(){disconnected++}};
+  h.a.run('bindGuideDemos(root);demoStep(fig,2)');assert.equal(observed,h.stage);
+  assert.equal(h.ptr.style.transform,'translate(52px,32px)');h.rect.left=160;
+  resized([{target:h.stage}]);assert.equal(h.ptr.style.transform,'translate(72px,32px)');assert.equal(h.fig.dataset.step,'2');
+  h.a.run("UI.view='today'");h.a.interval();assert.equal(disconnected,1);
+});
+test('reduced-motion and hidden targets do not wait for or point at invisible controls',()=>{
+  const h=movingDemoHarness(true);h.animations.push({playState:'running',finished:new Promise(()=>{})});
+  h.a.run('demoPoint(fig,2)');assert.ok(h.classes.has('is-on'));
+  h.target.checkVisibility=()=>false;h.a.run('demoPoint(fig,2)');assert.ok(!h.classes.has('is-on'));
+});
+test('tutorial role guidance distinguishes task performers and superadmin account maintenance',()=>{
+  const a=app(),parts=a.json("GUIDE.find(c=>c.id==='start').parts"),table=parts.find(p=>p[2]==='table')[1];
+  assert.deepEqual(table.find(r=>r[0]==='执行任务、记录完成').slice(1),['不执行任务','不执行任务','仅分给自己的任务']);
+  assert.deepEqual(table.find(r=>r[0]==='添加、停用账户或重置密码').slice(1),['可以','不可以','不可以']);
+  assert.deepEqual(table.find(r=>r[0]==='查看成果库、账户列表').slice(1),['可以','可以','看不到']);
+  assert.match(parts.find(p=>p[2]==='faq')[1][0][1],/请 superadmin/);
+  const accounts=a.json("GUIDE.find(c=>c.id==='accounts')");assert.match(accounts.lead,/维护账户仅限 superadmin/);
+  assert.match(JSON.stringify(accounts.parts),/管理员可查看账户列表，但不能维护账户/);
+});
+
 test('lineage lookup follows newly added tasks and replacement snapshots',()=>{
   const a=app();a.run("S.tasks=[{id:'root'},{id:'child',originId:'root'}]");
   assert.deepEqual(a.json('[...taskLineageIds(S.tasks[1])].sort()'),['child','root']);
@@ -3156,4 +3238,46 @@ test('a denied file deletion preserves the open unsaved file',async()=>{
   const h=contentDeleteApp();h.nodes['#mdFileEditor']={dataset:{fileId:'f'}};h.a.run('UI.docDirty=true');h.a.context.button={disabled:false};
   h.a.context.fetch=async()=>({ok:false,text:async()=>'{"error":"无权删除"}'});
   assert.equal(await h.a.run("deleteProjectFile(project,'f',button)"),false);assert.equal(h.a.run('S.files.length'),1);assert.equal(h.closes(),0);assert.equal(h.a.run('UI.docDirty'),true);assert.equal(h.a.context.button.disabled,false);
+});
+
+test('weekly report includes completed standalone tasks without requiring a completed project',()=>{
+  const a=app();a.run("S.today='2026-11-06'");const html=a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{completedTasks:[{taskId:'temp',name:'整理六家报价',projectId:null,description:'核对价格口径',completedOn:'2026-11-03',assigneeName:'小王',summary:'已完成报价对齐',actual:45,feeling:'困难',followup:'需要复核'}]}})`);
+  const done=html.split('这周做了什么')[1].split('还有什么没做')[0];
+  for(const text of ['临时任务','整理六家报价','核对价格口径','已完成报价对齐','困难','需要复核','小王','45 分钟'])assert.ok(done.includes(text),text);
+  assert.doesNotMatch(done,/暂无已完成项目或任务/);assert.match(html,/data-count="1">1<\/b><span>本周完成任务/);
+});
+test('weekly project outcomes contain their task details once and preserve standalone fixed work',()=>{
+  const a=app();const html=a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{completedProjects:[{projectId:'p',name:'完整项目成果',completedOn:'2026-11-04',summary:'项目验收上线'}],completedTasks:[{taskId:'t',projectId:'p',projectName:'完整项目成果',name:'子任务独立成果',completedOn:'2026-11-03',summary:'完成联调'},{taskId:'repeat',projectId:null,fixed:true,name:'两期复盘',stackCount:2,completedOn:'2026-11-04',summary:'合并完成',actual:50}]}})`);
+  assert.equal(html.split('完整项目成果').length-1,1);assert.equal(html.split('子任务独立成果').length-1,1);assert.match(html,/固定任务/);assert.match(html,/两期复盘 · 2 期/);assert.match(html,/50 分钟/);assert.doesNotMatch(html,/100 分钟/);
+});
+test('weekly completed tasks can belong to an unfinished project without closing it',()=>{
+  const a=app();const html=a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{completedTasks:[{projectId:'p',projectName:'长期项目',name:'本周已交付部分',completedOn:'2026-11-03',summary:'接口已上线'}],unfinishedProjects:[{projectId:'p',name:'长期项目',status:'active',remaining:[{name:'下周验收',remaining:'继续验证',scheduledOn:'2026-11-09'}]}]}})`);
+  const done=html.split('这周做了什么')[1].split('还有什么没做')[0];assert.match(done,/本周已交付部分/);assert.match(done,/接口已上线/);assert.match(html,/还有什么没做[^]*下周验收/);assert.match(html,/data-count="0">0<\/b><span>本周完成项目/);
+});
+test('weekly task summaries and feedback are escaped and missing records are honest',()=>{
+  const a=app();const html=a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{completedTasks:[{projectId:'p',projectName:'<img>',name:'<script>任务</script>',description:'<svg>',completedOn:'2026-11-03',summary:'<iframe>',feeling:'<b>',followup:'<u>'},{projectId:null,name:'无总结任务',completedOn:'2026-11-04'}]}})`);
+  assert.doesNotMatch(html,/<img>|<script>|<svg>|<iframe>|<u>/);assert.match(html,/&lt;script&gt;任务&lt;\/script&gt;/);assert.match(html,/&lt;iframe&gt;/);assert.match(html,/&lt;u&gt;/);assert.match(html,/未填写完成总结/);
+});
+
+
+test('Markdown modal close ignores a duplicate cancel button in a hidden meeting pane',async()=>{
+  const {a,nodes}=markdownFileApp();let closed=0;const background=()=>{};
+  nodes['#cancelAction']={onclick:background};nodes['#modalContent #cancelAction']={};
+  a.context.fetch=async()=>({ok:true,text:async()=> 'markdown'});a.context.onClosed=()=>closed++;a.run('closeModal=onClosed');
+  await a.run("openMarkdownFile({id:'p',name:'project',owner:'owner'},'f')");
+  assert.equal(nodes['#cancelAction'].onclick,background);assert.equal(typeof nodes['#modalContent #cancelAction'].onclick,'function');
+  nodes['#modalContent #cancelAction'].onclick();assert.equal(closed,1);
+});
+test('meeting modal binds save and deletion to its own controls instead of a hidden pane',async()=>{
+  const {a,nodes,calls}=meetingApp(),modal={};
+  for(const id of ['meetingTitle','meetingScheduledAt','meetingParticipants','meetingAgenda','meetingTranscript','saveMeeting','generateMeetingMinutes','meetingLiveBtn','meetingLiveState','cancelAction','meetingMinutes'])modal['#'+id]={value:'',isConnected:true,addEventListener(){},dataset:{}};
+  const oldDelete=()=>{},oldClose=nodes['#cancelAction'].onclick;
+  nodes['#deleteMeeting']={onclick:oldDelete};modal['#deleteMeeting']={classList:{toggle(){}}};
+  nodes['#meetingEditor']={id:'meetingEditor',dataset:{meetingId:'background',dirty:'false'},innerHTML:'background'};
+  nodes['#modalContent']={id:'modalContent',dataset:{},querySelector:s=>modal[s]};
+  a.run("S.user={id:'owner'};UI.space='p1';UI.spaceArea='files';S.meetings=[{id:'m',projectId:'p1',createdBy:'owner',rawTranscript:'',minutes:''}];openMeetingEditor({id:'p1',name:'project',owner:'owner',status:'active'},'m')");
+  assert.equal(nodes['#deleteMeeting'].onclick,oldDelete);assert.equal(nodes['#cancelAction'].onclick,oldClose);
+  assert.equal(typeof modal['#deleteMeeting'].onclick,'function');assert.equal(typeof modal['#cancelAction'].onclick,'function');
+  modal['#meetingTitle'].value='modal title';await modal['#saveMeeting'].onclick();
+  assert.equal(calls.at(-1).data.title,'modal title');assert.equal(nodes['#meetingEditor'].innerHTML,'background');
 });

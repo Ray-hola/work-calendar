@@ -1406,7 +1406,7 @@ const MEETING_PROMPT_DEFAULT='你是会议纪要整理助手。请只根据原�
 function meetingMount(html,id=''){
   const pane=UI.spaceArea==='meetings'&&UI.space?$('#meetingEditor'):null;
   if(pane){pane.innerHTML=html;pane.dataset.dirty='false'}else openModal(html);
-  const root=pane||$('#modalContent');if(root?.dataset)root.dataset.meetingId=id;
+  const root=pane||$('#modalContent');if(root?.dataset)root.dataset.meetingId=id;return root;
 }
 /* The state carries meetings without their transcript and minutes; opening one
    fetches the full record once and keeps it on the list entry. */
@@ -1432,8 +1432,9 @@ function openArchivedMeeting(p,id){
   cancelMeetingOpen();
   const m=(S.meetings||[]).find(x=>x.id===id&&x.projectId===p.id);if(!m)return;
   if(!meetingLoaded(m))return loadMeeting(m,()=>openArchivedMeeting(p,id));
-  meetingMount(`<div class="eyebrow">${escapeHTML(p.name)} · 归档会议</div><h2>${escapeHTML(m.title)}</h2><p class="muted">${escapeHTML(m.scheduledAt||'未安排')} · ${escapeHTML((m.participants||[]).join('、'))}</p><p>${escapeHTML(m.agenda||'')}</p><label class="form-field">原始转录<textarea readonly rows="10">${escapeHTML(m.rawTranscript||'')}</textarea></label><section class="meeting-minutes-preview"><h3>会议纪要</h3><div class="meeting-minutes-body md-body">${m.minutes?mdRender(m.minutes):'<p class="md-empty">尚未生成</p>'}</div></section><div class="modal-footer"><button type="button" class="secondary-btn" id="cancelAction">关闭</button></div>`);
-  $('#cancelAction').onclick=()=>{const pane=$('#meetingEditor');if(pane)pane.innerHTML='<p class="muted space-empty">选择一场会议</p>';else closeModal()};
+  const root=meetingMount(`<div class="eyebrow">${escapeHTML(p.name)} · 归档会议</div><h2>${escapeHTML(m.title)}</h2><p class="muted">${escapeHTML(m.scheduledAt||'未安排')} · ${escapeHTML((m.participants||[]).join('、'))}</p><p>${escapeHTML(m.agenda||'')}</p><label class="form-field">原始转录<textarea readonly rows="10">${escapeHTML(m.rawTranscript||'')}</textarea></label><section class="meeting-minutes-preview"><h3>会议纪要</h3><div class="meeting-minutes-body md-body">${m.minutes?mdRender(m.minutes):'<p class="md-empty">尚未生成</p>'}</div></section><div class="modal-footer"><button type="button" class="secondary-btn" id="cancelAction">关闭</button></div>`);
+  const close=root?.querySelector?root.querySelector('#cancelAction'):$('#cancelAction');
+  close.onclick=()=>{const pane=root&&root===$('#meetingEditor')?root:null;if(pane)pane.innerHTML='<p class="muted space-empty">选择一场会议</p>';else closeModal()};
 }
 function openMeetingEditor(p,meetingId=null){
   cancelMeetingOpen();
@@ -1447,30 +1448,32 @@ function openMeetingEditor(p,meetingId=null){
   const owner=S.user?.id,current=meetingId?(S.meetings||[]).find(m=>m.id===meetingId&&m.projectId===p.id):null,manage=canManageProject(p);if(meetingId&&!current){toast('会议已删除或无权访问');return}if(!current&&!manage){toast('只有项目 Owner 或管理员可以新增会议');return}
   if(current)meetingLive.revisions.set(`${S.user?.id}:${current.id}`,current.revision||0);
   const m=current||{title:'',scheduledAt:'',participants:[],agenda:'',rawTranscript:'',minutes:'',status:'scheduled'};
-  meetingMount(`<div class="eyebrow">${escapeHTML(p.name)} · 项目会议</div><h2>${current?escapeHTML(m.title):'新增会议'}</h2><div class="meeting-editor-grid"><label class="form-field">会议名称<input id="meetingTitle" maxlength="120" value="${escapeHTML(m.title)}"></label><label class="form-field">安排时间<input id="meetingScheduledAt" type="datetime-local" value="${escapeHTML(m.scheduledAt||'')}"></label></div><label class="form-field">参会人（用逗号分隔）<input id="meetingParticipants" value="${escapeHTML((m.participants||[]).join('、'))}"></label><label class="form-field">会议议程<textarea id="meetingAgenda" rows="3">${escapeHTML(m.agenda||'')}</textarea></label><label class="form-field">原始转录<textarea id="meetingTranscript" rows="10" maxlength="200000" placeholder="可粘贴实时转录原稿，或使用下方实时录入">${escapeHTML(m.rawTranscript||'')}</textarea></label><div class="meeting-live-bar"><button type="button" class="secondary-btn" id="meetingLiveBtn">开始实时录入</button><span id="meetingLiveState" class="muted"></span></div><section class="meeting-minutes-preview"><div class="space-head"><h3>整理后的会议纪要</h3><button type="button" class="secondary-btn" id="generateMeetingMinutes" ${current&&m.rawTranscript?'':'disabled'}>根据模板生成</button></div>${mdEditorHTML({id:'meetingMinutesEditor',inputId:'meetingMinutesInput',viewId:'meetingMinutes',value:m.minutes||'',rows:12,mode:'preview',empty:'尚未生成，可以点「根据模板生成」，也可以直接编辑',placeholder:'会议结论、待办、风险……（支持 Markdown）'})}</section><div class="modal-footer">${manage||current&&canDeleteMeeting(p,current)?`<button type="button" class="secondary-btn content-delete${current?'':' hidden'}" id="deleteMeeting">删除会议</button>`:''}<button type="button" class="secondary-btn" id="cancelAction">关闭</button><button type="button" class="primary-btn" id="saveMeeting">${current?'保存会议':'创建会议'}</button></div>`,m.id||'');
-  const text=$('#meetingTranscript'),save=$('#saveMeeting'),generate=$('#generateMeetingMinutes'),live=$('#meetingLiveBtn'),drop=$('#deleteMeeting');
-  const values=()=>({title:$('#meetingTitle').value.trim(),scheduledAt:$('#meetingScheduledAt').value,participants:$('#meetingParticipants').value.split(/[、,，]/).map(x=>x.trim()).filter(Boolean),agenda:$('#meetingAgenda').value});
+  const editorRoot=meetingMount(`<div class="eyebrow">${escapeHTML(p.name)} · 项目会议</div><h2>${current?escapeHTML(m.title):'新增会议'}</h2><div class="meeting-editor-grid"><label class="form-field">会议名称<input id="meetingTitle" maxlength="120" value="${escapeHTML(m.title)}"></label><label class="form-field">安排时间<input id="meetingScheduledAt" type="datetime-local" value="${escapeHTML(m.scheduledAt||'')}"></label></div><label class="form-field">参会人（用逗号分隔）<input id="meetingParticipants" value="${escapeHTML((m.participants||[]).join('、'))}"></label><label class="form-field">会议议程<textarea id="meetingAgenda" rows="3">${escapeHTML(m.agenda||'')}</textarea></label><label class="form-field">原始转录<textarea id="meetingTranscript" rows="10" maxlength="200000" placeholder="可粘贴实时转录原稿，或使用下方实时录入">${escapeHTML(m.rawTranscript||'')}</textarea></label><div class="meeting-live-bar"><button type="button" class="secondary-btn" id="meetingLiveBtn">开始实时录入</button><span id="meetingLiveState" class="muted"></span></div><section class="meeting-minutes-preview"><div class="space-head"><h3>整理后的会议纪要</h3><button type="button" class="secondary-btn" id="generateMeetingMinutes" ${current&&m.rawTranscript?'':'disabled'}>根据模板生成</button></div>${mdEditorHTML({id:'meetingMinutesEditor',inputId:'meetingMinutesInput',viewId:'meetingMinutes',value:m.minutes||'',rows:12,mode:'preview',empty:'尚未生成，可以点「根据模板生成」，也可以直接编辑',placeholder:'会议结论、待办、风险……（支持 Markdown）'})}</section><div class="modal-footer">${manage||current&&canDeleteMeeting(p,current)?`<button type="button" class="secondary-btn content-delete${current?'':' hidden'}" id="deleteMeeting">删除会议</button>`:''}<button type="button" class="secondary-btn" id="cancelAction">关闭</button><button type="button" class="primary-btn" id="saveMeeting">${current?'保存会议':'创建会议'}</button></div>`,m.id||'');
+  const field=selector=>editorRoot?.querySelector?editorRoot.querySelector(selector):$(selector);
+  const inlinePane=editorRoot&&editorRoot===$('#meetingEditor')?editorRoot:null;
+  const text=field('#meetingTranscript'),save=field('#saveMeeting'),generate=field('#generateMeetingMinutes'),live=field('#meetingLiveBtn'),drop=field('#deleteMeeting');
+  const values=()=>({title:field('#meetingTitle').value.trim(),scheduledAt:field('#meetingScheduledAt').value,participants:field('#meetingParticipants').value.split(/[、,，]/).map(x=>x.trim()).filter(Boolean),agenda:field('#meetingAgenda').value});
   let busy=false;
   const sync=()=>{save.disabled=busy;live.disabled=busy;generate.disabled=busy||!text.value.trim();if(drop){drop.disabled=busy;drop.classList?.toggle('hidden',!m.id||!canDeleteMeeting(p,m))}};
   const persist=async()=>{
     const data=values();if(!data.title)throw new Error('请填写会议名称');
     await meetingStopLive();
-    const transcript=text.value,minutes=$('#meetingMinutesInput')?.value||'';
+    const transcript=text.value,minutes=field('#meetingMinutesInput')?.value||'';
     const result=await api('/api/action',{action:m.id?'meeting.transcript.update':'meeting.create',data:{...(m.id?{id:m.id}:{projectId:p.id}),...data,rawTranscript:transcript,minutes,...(m.id?{expectedRevision:meetingLive.revisions.get(`${S.user?.id}:${m.id}`)??m.revision??0}:{})}});
     if(S.user?.id!==owner)throw new Error('账户已切换');
-    Object.assign(m,result);save.textContent='保存会议';meetingLive.revisions.set(`${S.user?.id}:${m.id}`,result.revision||0);const pane=$('#meetingEditor');const root=pane||$('#modalContent');if(root?.dataset)root.dataset.meetingId=m.id;const metadataChanged=JSON.stringify(values())!==JSON.stringify(data)||($('#meetingMinutesInput')?.value||'')!==minutes;if(pane){pane.dataset.dirty=String(metadataChanged||text.value!==transcript);pane.dataset.metadataDirty=String(metadataChanged)}else UI.docDirty=metadataChanged||text.value!==transcript;S.meetings=[...(S.meetings||[]).filter(x=>x.id!==m.id),m];return m;
+    Object.assign(m,result);save.textContent='保存会议';meetingLive.revisions.set(`${S.user?.id}:${m.id}`,result.revision||0);const pane=inlinePane;const root=editorRoot;if(root?.dataset)root.dataset.meetingId=m.id;const metadataChanged=JSON.stringify(values())!==JSON.stringify(data)||(field('#meetingMinutesInput')?.value||'')!==minutes;if(pane){pane.dataset.dirty=String(metadataChanged||text.value!==transcript);pane.dataset.metadataDirty=String(metadataChanged)}else UI.docDirty=metadataChanged||text.value!==transcript;S.meetings=[...(S.meetings||[]).filter(x=>x.id!==m.id),m];return m;
   };
   const run=async(work)=>{if(busy)return;busy=true;sync();try{await work()}catch(e){toast(e.message)}finally{busy=false;sync()}};
   if(drop)drop.onclick=()=>run(()=>deleteProjectMeeting(p,m.id,drop));
-  const closeEditor=()=>{const pane=$('#meetingEditor');if(pane){pane.innerHTML='<p class="muted space-empty">选择一场会议</p>';pane.dataset.dirty='false'}else closeModal()};
-  const markDirty=e=>{const pane=$('#meetingEditor');if(pane){pane.dataset.dirty='true';if(e.target.id!=='meetingTranscript')pane.dataset.metadataDirty='true'}else UI.docDirty=true;sync()};
-  ['#meetingTitle','#meetingScheduledAt','#meetingParticipants','#meetingAgenda','#meetingTranscript','#meetingMinutesInput'].forEach(id=>$(id)?.addEventListener('input',markDirty));
-  bindMdEditor($('#meetingMinutesEditor'));
-  $('#cancelAction').onclick=()=>run(async()=>{await persist();if($('#meetingEditor')?.dataset?.dirty==='true'){toast('已保存提交版本，仍有未保存修改');return}closeEditor();renderProjectSpace(p.id)});text.addEventListener('input',sync);sync();
-  save.onclick=()=>run(async()=>{await persist();if(!text.isConnected)return;const pane=$('#meetingEditor');if(!pane)closeModal();renderProjectSpace(p.id);renderProjectNav();toast('会议已保存')});
+  const closeEditor=()=>{const pane=inlinePane;if(pane){pane.innerHTML='<p class="muted space-empty">选择一场会议</p>';pane.dataset.dirty='false'}else closeModal()};
+  const markDirty=e=>{const pane=inlinePane;if(pane){pane.dataset.dirty='true';if(e.target.id!=='meetingTranscript')pane.dataset.metadataDirty='true'}else UI.docDirty=true;sync()};
+  ['#meetingTitle','#meetingScheduledAt','#meetingParticipants','#meetingAgenda','#meetingTranscript','#meetingMinutesInput'].forEach(id=>field(id)?.addEventListener('input',markDirty));
+  bindMdEditor(field('#meetingMinutesEditor'));
+  field('#cancelAction').onclick=()=>run(async()=>{await persist();if(inlinePane?.dataset?.dirty==='true'){toast('已保存提交版本，仍有未保存修改');return}closeEditor();renderProjectSpace(p.id)});text.addEventListener('input',sync);sync();
+  save.onclick=()=>run(async()=>{await persist();if(!text.isConnected)return;const pane=inlinePane;if(!pane)closeModal();renderProjectSpace(p.id);renderProjectNav();toast('会议已保存')});
   generate.onclick=()=>run(async()=>{
     generate.textContent='整理中…';
-    try{await persist();const updated=await api('/api/action',{action:'meeting.minutes.generate',data:{id:m.id}});if(S.user?.id!==owner)return;Object.assign(m,updated);if(text.isConnected){const editor=$('#meetingMinutesEditor');if(editor?.querySelector)mdSet(editor,updated.minutes||'');else{const view=$('#meetingMinutes');if(view)view.innerHTML=mdRender(updated.minutes||'未生成')}}toast('会议纪要已生成')}
+    try{await persist();const updated=await api('/api/action',{action:'meeting.minutes.generate',data:{id:m.id}});if(S.user?.id!==owner)return;Object.assign(m,updated);if(text.isConnected){const editor=field('#meetingMinutesEditor');if(editor?.querySelector)mdSet(editor,updated.minutes||'');else{const view=field('#meetingMinutes');if(view)view.innerHTML=mdRender(updated.minutes||'未生成')}}toast('会议纪要已生成')}
     finally{generate.textContent='根据模板生成'}
   });
   live.onclick=()=>run(async()=>{
@@ -1899,7 +1902,7 @@ async function openMarkdownFile(p,id){
     +`<div class="modal-footer">${editable?'<button type="button" class="secondary-btn content-delete" id="deleteMdFile">删除文件</button>':''}<a class="secondary-btn" href="/api/files/${encodeURIComponent(id)}" download="${escapeHTML(f.name)}">下载</a>`
     +`<button type="button" class="secondary-btn" id="cancelAction">关闭</button>${editable?'<button type="button" class="primary-btn" id="saveMdFile" disabled>保存</button>':''}</div>`);
   $('#modalBackdrop .modal')?.classList?.add('is-wide');
-  const editor=$('#mdFileEditor');editor.dataset.fileId=id;bindMdEditor(editor);$('#cancelAction').onclick=closeModal;
+  const editor=$('#mdFileEditor');editor.dataset.fileId=id;bindMdEditor(editor);$('#modalContent #cancelAction').onclick=closeModal;
   const drop=$('#deleteMdFile');if(drop)drop.onclick=()=>deleteProjectFile(p,id,drop);
   const input=$('#mdFileInput'),save=$('#saveMdFile');if(!save)return;
   let saved=text;
@@ -3189,13 +3192,81 @@ function fixedTask(){
    fill (data-fill with --w); the step classes s1…sN switch them on. */
 const card=(prio,name,meta,state,attrs='',cls='')=>`<div class="dm-card${cls?' '+cls:''}"${attrs}><b class="dm-prio is-${prio.toLowerCase()}">${prio}</b><span class="dm-name">${name}</span><small>${meta}</small><em class="dm-state">${state}</em></div>`;
 const GUIDE_DEMOS={
+  'login':{steps:['输入账户名和密码','点「进入工作台」','进入后点左上角的头像','账户菜单里改资料、改密码或切换账户'],html:`
+    <div class="dm-swap is-block">
+      <div class="dm-pane dm-dialog" data-out="2"><h6>登录工作台</h6>
+        <label>账户<i>linmo</i></label>
+        <label data-point="0">密码<i>••••••••</i></label>
+        <span class="dm-btn is-primary" data-point="1">进入工作台</span></div>
+      <div class="dm-pane" data-in="2"><h6><span class="dm-avatar" data-point="2">林</span>林默 · 成员工作区</h6>
+        <div class="dm-menu" data-in="3"><span data-point="3">个人资料</span><span>修改密码</span><span>登录其他账户</span><span class="is-muted">退出登录</span></div>
+        <div class="dm-min" data-in="3"><b>个人资料</b><span>昵称 · 头像 · 个性签名（中文名由 superadmin 设置）</span></div></div>
+    </div>`},
+  'layout':{steps:['左侧是主导航和快捷筛选，顶栏是常用入口','点「P0 重要任务」，今日任务只留下最紧急的','点导航顶部的箭头，导航收成只显示图标'],html:`
+    <div class="dm-shell">
+      <div class="dm-side" data-narrow="2" style="--narrow:44px">
+        <span class="dm-collapse" data-point="2">${icon('chevron-left')}</span>
+        ${[['calendar-check','今日任务','3'],['layout-grid','周视图',''],['folder','项目空间',''],['inbox','收件箱','2']].map(([i,l,n])=>`<span class="dm-nav">${icon(i)}<em data-out="2">${l}</em>${n?`<b data-out="2">${n}</b>`:''}</span>`).join('')}
+        <small data-out="2">快捷筛选</small>
+        <span class="dm-nav is-filter" data-point="1"><i class="dm-dot is-p0"></i><em data-out="2">P0 重要任务</em></span>
+        <span class="dm-nav is-filter"><i class="dm-dot is-doing"></i><em data-out="2">进行中</em></span></div>
+      <div class="dm-main"><div class="dm-top"><span>${icon('search')}</span><span>${icon('bell')}<i class="dm-badge">2</i></span><span class="dm-btn is-primary">${icon('plus')}新任务</span></div>
+        ${card('P0','提交方案初稿','16:00 · 2 小时','进行中')}
+        ${card('P1','晨会同步','09:30 · 15 分钟','已完成',' data-out="1"')}
+        ${card('P2','整理参考资料','17:00 · 30 分钟','待开始',' data-out="1"')}</div>
+    </div>`},
+  'timeline':{steps:['每个项目一条横条，从开始日期画到截止日期','竖线是今天；没有截止日期的长期项目画到右边缘','日期有问题的项目标出「日期待修正」','左右箭头翻看前后时段'],html:`
+    <div class="dm-pane dm-wide dm-gantt"><h6>项目时间轴 <span class="dm-arrows" data-point="3">${icon('chevron-left')}${icon('chevron-right')}</span></h6>
+      <div class="dm-gbody">
+        <div class="dm-gnames"><span></span><span>2027 战略规划</span><span>官网改版</span><span>团队周会</span><span>竞品月报</span></div>
+        <div class="dm-gcanvas"><div class="dm-gscroll" data-move="3" style="--to:translateX(-18%)">
+          <div class="dm-months"><span>10 月</span><span>11 月</span><span>12 月</span><span>1 月</span></div>
+          <div class="dm-lane"><i style="left:14%;width:30%"></i></div>
+          <div class="dm-lane"><i style="left:29%;width:35%"></i></div>
+          <div class="dm-lane"><i class="is-long" data-in="1" style="left:6%;right:0"></i></div>
+          <div class="dm-lane"><i class="is-bad" style="left:42%;width:5%"></i><em data-in="2" style="left:49%">日期待修正</em></div>
+          <b class="dm-today" data-in="1" style="left:35%"></b></div></div>
+      </div></div>`},
+  'achievements':{steps:['已结项的项目都收在成果库里，顶部是总数','每张卡写着生命周期和任务完成情况','卡上有结项报告，还能进项目文件和沟通记录'],html:`
+    <div class="dm-kpis is-row"><span><b>8</b>已完成项目</span><span><b>214</b>累计完成子任务</span></div>
+    <div class="dm-pane dm-wide"><h6>官网改版 <small>何雨 · 11月30日结项</small></h6>
+      <div class="dm-life is-dots" data-in="1">${['创建','审批启动','提交结项','完成'].map(x=>`<span>${x}</span>`).join('<i></i>')}</div>
+      <div class="dm-meter"><span>任务</span><div class="dm-bar"><i class="is-full" data-fill="1" style="--w:100%"></i></div><b>24 / 24</b></div>
+      <div class="dm-min" data-in="2" data-point="2"><b>结项报告</b><span>首屏与信息架构已上线，转化提升 18%</span></div>
+      <div class="dm-links" data-in="2"><span>项目文件</span><span>沟通记录</span><span>查看项目详情</span></div></div>`},
+  'search':{steps:['在任何页面按 /','输入关键词，任务和项目一起列出','按 N 直接新建任务','按 ? 查看全部快捷键'],html:`
+    <div class="dm-keys"><kbd class="is-hit" data-out="1">/</kbd><kbd class="is-hit" data-in="2" data-out="3">N</kbd><kbd class="is-hit" data-in="3">?</kbd></div>
+    <div class="dm-swap is-block">
+    <div class="dm-pane dm-wide dm-dialog" data-out="2"><h6>搜索任务与项目</h6><label>关键词<i><span data-type="1">报价</span></i></label>
+      <div class="dm-file" data-in="1"><b>任务</b><span>整理竞品报价</span><small>陈曦 · 2027 战略规划</small></div>
+      <div class="dm-file" data-in="1"><b>项目</b><span>竞品月报</span><small>Owner · 周一</small></div></div>
+    <div class="dm-pane dm-wide dm-dialog" data-in="2" data-out="3"><h6>新任务</h6><label>任务名称<i></i></label></div>
+    <div class="dm-pane dm-wide" data-in="3"><h6>快捷键</h6><div class="dm-shortcuts"><span><kbd>/</kbd>搜索</span><span><kbd>N</kbd>新建任务</span><span><kbd>T</kbd>今日任务</span><span><kbd>W</kbd>周视图</span><span><kbd>P</kbd>项目空间</span><span><kbd>I</kbd>收件箱</span><span><kbd>H</kbd>使用教程</span><span><kbd>Esc</kbd>关闭</span></div></div></div>`},
+  'accounts':{steps:['点「添加账户」','填好账户名、中文名、初始密码和权限组','新账户出现在列表里','停用后账户还在，但不能再登录'],html:`
+    <div class="dm-split">
+      <div class="dm-pane"><h6>账户管理 <span class="dm-btn" data-point="0">${icon('plus')}添加账户</span></h6>
+        <div class="dm-acct"><span class="dm-avatar">林</span><b>林默</b><small>普通用户</small><em>启用</em></div>
+        <div class="dm-acct"><span class="dm-avatar">周</span><b>周一</b><small>普通用户</small><em>启用</em></div>
+        <div class="dm-acct" data-in="2"><span class="dm-avatar">赵</span><b>赵六</b><small>普通用户</small><span class="dm-swap"><em data-out="3">启用</em><em class="is-off" data-in="3" data-point="3">已停用</em></span></div></div>
+      <div class="dm-pane dm-dialog" data-in="1" data-out="2"><h6>添加账户</h6><label>账户名<i><span data-type="1">zhaoliu</span></i></label><label>中文名称<i><span data-in="1">赵六</span></i></label>
+        <label>初始密码<i><span data-in="1">••••••••</span></i></label><label>权限组<i><span data-in="1">普通用户</span></i></label><span class="dm-btn is-primary" data-point="1">创建账户</span></div>
+    </div>`},
+  'automation':{steps:['09:30，到点的任务自动变成「进行中」','23:30，每个人的当天档案自动整理好','零点过后，没做完的任务递延到第二天','到补报时间，团队日报汇总完成'],html:`
+    <div class="dm-clockline"><i class="dm-hand"></i>
+      ${['09:30','23:30','00:00','00:30'].map((t,i)=>`<span class="dm-tick${i?'':' is-first'}"${i?` data-in="${i}"`:''}>${t}</span>`).join('')}</div>
+    <div class="dm-week is-four">
+      <div class="dm-col"><h6>任务</h6><div class="dm-card"><b class="dm-prio is-p1">P1</b><span class="dm-name">晨会同步</span><small>09:30</small><em class="dm-state is-doing">进行中</em></div></div>
+      <div class="dm-col"><h6>档案</h6><div class="dm-min" data-in="1"><b>今日完成</b><span>✓ 晨会同步</span></div></div>
+      <div class="dm-col"><h6>递延</h6><div class="dm-card is-carried" data-in="2"><b class="dm-prio is-p0">P0</b><span class="dm-name">提交方案初稿</span><small>由周四递延</small></div></div>
+      <div class="dm-col"><h6>日报</h6><div class="dm-kpis" data-in="3"><span><b>12</b>完成</span><span><b>5</b>成员</span></div></div>
+    </div>`},
   'new-task':{steps:['点「新建任务」打开表单','填好名称、负责人和时间','点「创建任务」','任务立刻出现在负责人的今日任务里','负责人收到指派通知'],html:`
     <div class="dm-split">
       <div class="dm-pane dm-dialog" data-out="3"><h6>新任务</h6>
-        <label>任务名称<i data-type="1">整理竞品报价</i></label>
-        <label>指派给<i data-in="1">陈曦</i></label>
-        <label>安排<i data-in="1">今天 14:00 · 60 分钟 · P1</i></label>
-        <span class="dm-btn is-primary">创建任务<i class="dm-tap" data-in="2" data-out="3"></i></span></div>
+        <label data-point="1">任务名称<i><span data-type="1">整理竞品报价</span></i></label>
+        <label>指派给<i><span data-in="1">陈曦</span></i></label>
+        <label>安排<i><span data-in="1">今天 14:00 · 60 分钟 · P1</span></i></label>
+        <span class="dm-btn is-primary" data-point="2">创建任务</span></div>
       <div class="dm-pane"><h6>陈曦 · 今日任务 <span class="dm-bell">${icon('bell')}<i data-in="4">1</i></span></h6>
         ${card('P1','晨会同步','09:30 · 15 分钟','进行中')}
         ${card('P1','整理竞品报价','14:00 · 60 分钟','待开始',' data-in="3"')}</div>
@@ -3204,7 +3275,7 @@ const GUIDE_DEMOS={
     <div class="dm-pane dm-wide"><h6>今日任务 <span class="dm-clock"><i data-out="1">13:58</i><i data-in="1">14:00</i></span></h6>
       <div class="dm-card"><b class="dm-prio is-p1">P1</b><span class="dm-name">整理竞品报价</span><small>14:00 · 60 分钟</small>
         <em class="dm-state" data-out="1">待开始</em><em class="dm-state is-doing" data-in="1" data-out="3">进行中</em><em class="dm-state is-done" data-in="3">${icon('check')}已完成</em></div>
-      <div class="dm-sheet" data-in="2" data-out="3"><span>完成总结</span><i data-type="2">已整理 6 家报价，见文件</i><span>实际耗时 <b>75 分钟</b> · 顺利</span></div>
+      <div class="dm-sheet" data-in="2" data-out="3"><span>完成总结</span><i><span data-type="2">已整理 6 家报价，见文件</span></i><span>实际耗时 <b>75 分钟</b> · 顺利</span></div>
       <div class="dm-meter"><span>今日进度</span><div class="dm-bar"><i data-fill="3" style="--w:50%"></i></div><b><i data-out="3">0 / 2</i><i data-in="3">1 / 2</i></b></div>
     </div>`},
   'defer':{steps:['周四还有一项没做完','过了零点，系统把它递延到周五','周五的卡片写明「由周四递延 · 第 1 次」，周四那张留作记录'],html:`
@@ -3217,51 +3288,51 @@ const GUIDE_DEMOS={
     </div>`},
   'repeat':{steps:['制定一条规则：每周一、三、五 09:30 晨会，15 分钟','保存后，系统按规则把之后的晨会排进每个人的日程','不需要的那一次，在规则里「挖空本次」'],html:`
     <div class="dm-rule"><span>${icon('repeat')}晨会同步</span><b>每周 一 · 三 · 五</b><small>09:30 · 15 分钟 · 林默、周一</small></div>
-    <div class="dm-week">${['一','二','三','四','五'].map((d,i)=>`<div class="dm-col"><h6>周${d}</h6>${i%2===0?`<div class="dm-mini" data-in="1"${i===4?' data-out="2"':''}>晨会</div>${i===4?'<div class="dm-mini is-skipped" data-in="2">已挖空</div>':''}`:''}</div>`).join('')}</div>`},
+    <div class="dm-week">${['一','二','三','四','五'].map((d,i)=>`<div class="dm-col"><h6>周${d}</h6>${i%2===0?`<div class="dm-mini" data-in="1"${i===4?' data-out="2" data-point="2"':''}>晨会</div>${i===4?'<div class="dm-mini is-skipped" data-in="2">已挖空</div>':''}`:''}</div>`).join('')}</div>`},
   'stack':{steps:['同一条固定任务，三期都没做完','开启「递延合并」后，它们合成一张卡，标着「3 期」','点一次「完成全部 3 期」就全部结清'],html:`
     <div class="dm-pane dm-wide"><h6>今日任务</h6>
       <div class="dm-stack">
         ${['周一','周三','周五'].map((d,i)=>`<div class="dm-card" data-move="1" style="--to:translateY(${-i*44}px)" data-out="1"><b class="dm-prio is-p1">P1</b><span class="dm-name">周报汇总</span><small>${d} · 30 分钟</small><em class="dm-state">已递延</em></div>`).join('')}
         <div class="dm-card is-stacked" data-in="1"><b class="dm-prio is-p1">P1</b><span class="dm-name">周报汇总 <i class="dm-count">3 期</i></span><small>30 分钟</small>
           <em class="dm-state" data-out="2">待开始</em><em class="dm-state is-done" data-in="2">${icon('check')}已完成</em></div>
-      </div><span class="dm-btn is-primary" data-in="1" data-out="2">完成全部 3 期</span></div>`},
+      </div><span class="dm-btn is-primary" data-in="1" data-out="2" data-point="1">完成全部 3 期</span></div>`},
   'approval':{steps:['所在规则组需要审批时，按钮显示「申请任务」','申请进入审批人的收件箱，上面直接有同意和驳回','同意后，任务出现在负责人的日程里，申请人收到结果'],html:`
     <div class="dm-split">
-      <div class="dm-pane"><h6>何雨</h6><span class="dm-btn">申请任务</span><div class="dm-swap is-block">
+      <div class="dm-pane"><h6>何雨</h6><span class="dm-btn" data-point="0">申请任务</span><div class="dm-swap is-block">
         <div class="dm-card" data-in="1" data-out="2"><b class="dm-prio is-p1">P1</b><span class="dm-name">官网首屏改版</span><small>等待审批</small><em class="dm-state">申请中</em></div>
         ${card('P1','官网首屏改版','周五 10:00 · 3 小时','待开始',' data-in="2"')}</div></div>
       <div class="dm-pane"><h6>收件箱 · 林默</h6>
         <div class="dm-notice" data-in="1"><b>任务申请</b><span>何雨 申请「官网首屏改版」</span>
-          <div><span class="dm-btn is-primary">同意创建<i class="dm-tap" data-in="2"></i></span><span class="dm-btn">驳回申请</span></div></div></div>
+          <div><span class="dm-btn is-primary" data-point="2">同意创建</span><span class="dm-btn">驳回申请</span></div></div></div>
     </div>`},
   'rework':{steps:['任务已完成','Owner 觉得还缺东西，点「打回」并写明原因','任务回到负责人的待办，排到今天，原因写在卡上'],html:`
     <div class="dm-split">
       <div class="dm-pane"><h6>周一 · 今日任务</h6>
         <div class="dm-swap is-block">${card('P1','市场规模数据','昨天 · 2 小时','已完成',' data-out="2"')}
         <div class="dm-card is-returned" data-in="2"><b class="dm-prio is-p1">P1</b><span class="dm-name">市场规模数据</span><small>打回：补上数据来源</small><em class="dm-state">待开始</em></div></div></div>
-      <div class="dm-pane dm-dialog" data-in="1" data-out="2"><h6>打回「市场规模数据」</h6><label>打回原因<i data-type="1">补上数据来源</i></label><span class="dm-btn is-primary">打回并通知</span></div>
+      <div class="dm-pane dm-dialog" data-in="1" data-out="2"><h6>打回「市场规模数据」</h6><label>打回原因<i><span data-type="1">补上数据来源</span></i></label><span class="dm-btn is-primary" data-point="1">打回并通知</span></div>
     </div>`},
   'tree':{steps:['目录：文件夹装着项目','点项目，选中块滑过去，项目在右边打开','项目下展开会议和文件，点会议直接进会议标签'],html:`
     <div class="dm-tree"><i class="dm-mark" data-move="1" style="--to:translateY(66px)"></i>
       <div class="dm-tnode">${icon('layout-grid')}全部项目</div>
       <div class="dm-tnode">${icon('folder')}年度战略</div>
-      <div class="dm-tbranch"><div class="dm-tnode">${icon('gantt')}2027 战略规划</div>
-        <div class="dm-tbranch" data-in="2"><div class="dm-tnode is-sub">${icon('chat')}会议 2</div><div class="dm-tnode is-sub">${icon('folder')}文件 5</div></div>
+      <div class="dm-tbranch"><div class="dm-tnode" data-point="1">${icon('gantt')}2027 战略规划</div>
+        <div class="dm-tbranch" data-in="2"><div class="dm-tnode is-sub" data-point="2">${icon('chat')}会议 2</div><div class="dm-tnode is-sub">${icon('folder')}文件 5</div></div>
         <div class="dm-tnode">${icon('gantt')}竞品月报</div></div>
     </div>
     <div class="dm-pane dm-page" data-in="1"><h6>2027 战略规划</h6><div class="dm-tabs"><b>任务</b><span>会议</span><span>文件</span><span>成员</span><span>概况</span></div>
       ${card('P0','确定三大战略主题','林默 · 11月4日','进行中')}</div>`},
   'upload':{steps:['把文件从电脑拖到「文件」标签','松手就开始上传，单个文件不超过 20MB','上传完成，所有成员都能下载'],html:`
     <div class="dm-pane dm-wide is-drop"><h6>文件 <span class="dm-btn">新增文件</span></h6>
-      <div class="dm-file" data-in="1"><b>PDF</b><span>竞品格局一页纸.pdf</span><small><i data-out="2">上传中…</i><i data-in="2">1.8 MB · 你 · 刚刚</i></small></div>
+      <div class="dm-file" data-in="1" data-point="1"><b>PDF</b><span>竞品格局一页纸.pdf</span><small><i data-out="2">上传中…</i><i data-in="2">1.8 MB · 你 · 刚刚</i></small></div>
       <div class="dm-file"><b>XLSX</b><span>资源分配表.xlsx</span><small>94 KB · 周一 · 昨天</small></div>
-      <div class="dm-drag" data-move="1" data-out="1" style="--to:translate(-120px,26px)"><b>PDF</b>竞品格局一页纸.pdf</div>
+      <div class="dm-drag" data-move="1" data-out="1" data-point="0" style="--to:translate(-120px,26px)"><b>PDF</b>竞品格局一页纸.pdf</div>
     </div>`},
   'meeting':{steps:['会议开始，点「开始实时录入」','边说边转成文字，原稿自动保存','点「根据模板生成」','AI 整理出会议结论、待办和风险'],html:`
     <div class="dm-split">
       <div class="dm-pane"><h6>原始转录 <span class="dm-rec" data-in="1" data-out="2">● 录入中</span></h6>
         <p class="dm-line" data-in="1">林默：先看方向，明年聚焦两条主线。</p><p class="dm-line" data-in="1">周一：资源表周五前补齐。</p><p class="dm-line" data-in="1">陈曦：竞品数据还差两家。</p>
-        <span class="dm-btn is-primary">根据模板生成<i class="dm-tap" data-in="2" data-out="3"></i></span></div>
+        <span class="dm-btn is-primary" data-point="2">根据模板生成</span></div>
       <div class="dm-pane"><h6>会议纪要</h6>
         <div class="dm-min" data-in="3"><b>会议结论</b><span>明年聚焦两条主线</span></div>
         <div class="dm-min" data-in="3"><b>待办</b><span>周一 · 资源表 · 周五前</span><span>陈曦 · 补两家竞品</span></div>
@@ -3271,48 +3342,48 @@ const GUIDE_DEMOS={
     <div class="dm-life">${['申请','执行','结项审批','成果库'].map((s,i)=>`<span class="dm-stage"${i?` data-in="${i}"`:''}>${s}</span>`).join('<i></i>')}</div>
     <div class="dm-pane dm-wide"><h6>官网改版 <span class="dm-swap"><em class="dm-state" data-out="1">待审批</em><em class="dm-state is-doing" data-in="1" data-out="3">进行中</em><em class="dm-state is-done" data-in="3">已完成</em></span></h6>
       <div class="dm-meter"><span>任务</span><div class="dm-bar"><i data-fill="1" style="--w:62%"></i><i class="is-full" data-fill="2" style="--w:100%"></i></div></div>
-      <div class="dm-sheet" data-in="2" data-out="3"><span>结项报告</span><i data-type="2">首屏与信息架构已上线，转化提升 18%</i></div>
+      <div class="dm-sheet" data-in="2" data-out="3"><span>结项报告</span><i><span data-type="2">首屏与信息架构已上线，转化提升 18%</span></i></div>
       <div class="dm-trophy" data-in="3">${icon('award')}已归入成果库</div></div>`},
   'inbox':{steps:['收件箱是空的','新的指派和 @ 进来，红点显示几条没看','又来一条修改申请','「全部标为已读」一次清掉'],html:`
     <div class="dm-pane dm-wide"><h6>收件箱 <span class="dm-bell">${icon('bell')}<i data-in="1" data-out="3"><i data-out="2">2</i><i data-in="2">3</i></i></span></h6>
       <div class="dm-notice is-unread" data-in="1"><b>任务指派</b><span>林默 把「整理竞品报价」指派给你</span></div>
       <div class="dm-notice is-unread" data-in="1"><b>沟通区</b><span>周一 在「2027 战略规划」里 @ 了你</span></div>
       <div class="dm-notice is-unread" data-in="2"><b>修改申请</b><span>何雨 申请把截止改到下周一</span></div>
-      <span class="dm-btn">全部标为已读<i class="dm-tap" data-in="3"></i></span></div>`},
+      <span class="dm-btn" data-point="3">全部标为已读</span></div>`},
   'chat':{steps:['在项目频道里输入 @','选中成员','发送后，对方收到通知，频道里也能看到'],html:`
     <div class="dm-pane dm-wide"><h6># 2027 战略规划</h6>
       <div class="dm-msg"><b>林默</b><span>今天下午对一下资源表</span></div>
       <div class="dm-msg is-mine" data-in="2"><b>你</b><span><mark>@陈曦</mark> 竞品还差两家，今天能补吗？</span></div>
-      <div class="dm-mention" data-out="2"><span class="is-on">陈曦</span><span>何雨</span><span>所有人</span></div>
-      <div class="dm-input"><i data-out="1">@陈</i><i data-in="1" data-out="2"><mark>@陈曦</mark> 竞品还差两家，今天能补吗？</i></div>
+      <div class="dm-mention" data-out="2"><span class="is-on" data-point="1">陈曦</span><span>何雨</span><span>所有人</span></div>
+      <div class="dm-input" data-point="0 2"><i data-out="1">@陈</i><i data-in="1" data-out="2"><mark>@陈曦</mark> 竞品还差两家，今天能补吗？</i></div>
       <span class="dm-ping" data-in="2">陈曦 ${icon('bell')}</span></div>`},
   'archive':{steps:['今天的档案还空着','系统先整理当天的完成和未完成','你补上明日计划和随记，点保存','第二天，团队日报汇总所有人和项目'],html:`
     <div class="dm-split">
       <div class="dm-pane"><h6>我的档案 · 11月5日</h6>
         <div class="dm-min"><b>今日完成</b><span data-in="1">✓ 整理竞品报价</span><span data-in="1">✓ 晨会同步</span></div>
         <div class="dm-min"><b>未完成与阻塞</b><span data-in="1">提交方案初稿（递延到明天）</span></div>
-        <div class="dm-min"><b>明日计划</b><span><i data-type="2">先交方案初稿，再约评审</i></span></div></div>
+        <div class="dm-min" data-point="2"><b>明日计划</b><span><i data-type="2">先交方案初稿，再约评审</i></span></div></div>
       <div class="dm-pane" data-in="3"><h6>团队日报 · 11月5日</h6>
         <div class="dm-kpis"><span><b>12</b>完成任务</span><span><b>18.5h</b>完成工时</span><span><b>5</b>位成员</span></div>
         <div class="dm-min"><b>项目进展</b><span>2027 战略规划 · 1/5 · Owner 汇报</span><span>官网改版 · 0/1 · 系统汇总</span></div></div>
     </div>`},
   'assistant':{steps:['打开规划模式','用一句话说要安排的事','助手起草出几张卡片：谁、哪天、多久','你逐张检查、修改，确认后才真正创建'],html:`
     <div class="dm-pane dm-wide"><h6>${icon('sparkles')}AI 助手 · 规划</h6>
-      <div class="dm-msg is-mine"><span><i data-type="1">下周把季度复盘做完：整理数据、出初稿、找林默评审</i></span></div>
+      <div class="dm-msg is-mine" data-in="1" data-point="1"><span><i data-type="1">下周把季度复盘做完：整理数据、出初稿、找林默评审</i></span></div>
       <div class="dm-drafts">${[['整理复盘数据','周一 · 周一 · 2 小时'],['写复盘初稿','周三 · 你 · 3 小时'],['复盘评审','周五 · 林默 · 1 小时']].map(([n,m],i)=>
         `<div class="dm-card is-draft" data-in="2" style="transition-delay:${i*.18}s"><b class="dm-prio is-p1">P1</b><span class="dm-name">${n}</span><small>${m}</small><em class="dm-state" data-out="3">草稿</em><em class="dm-state is-done" data-in="3">${icon('check')}已创建</em></div>`).join('')}</div>
-      <span class="dm-btn is-primary" data-in="2" data-out="3">接受所选</span></div>`},
+      <span class="dm-btn is-primary" data-in="2" data-out="3" data-point="3">接受所选</span></div>`},
   'widget':{steps:['点顶栏的桌面小组件图标','小组件浮在所有窗口之上','开始一轮 25 分钟专注','勾选今天的任务，直接记为完成'],html:`
     <div class="dm-pip" data-in="1"><h6>今日待办 <small>还剩 <span class="dm-num"><i data-out="3">2</i><i data-in="3">1</i></span> 项</small></h6>
-      <div class="dm-pomo"><b><i data-out="2">25:00</i><i data-in="2">24:13</i></b><span>专注 25 分钟</span><div class="dm-ring"><i data-fill="2" style="--w:4%"></i></div></div>
-      <label class="dm-check"><i class="dm-box"><b data-in="3">${icon('check')}</b></i>整理竞品报价</label>
+      <div class="dm-pomo" data-point="2"><b><i data-out="2">25:00</i><i data-in="2">24:13</i></b><span>专注 25 分钟</span><div class="dm-ring"><i data-fill="2" style="--w:4%"></i></div></div>
+      <label class="dm-check" data-point="3"><i class="dm-box"><b data-in="3">${icon('check')}</b></i>整理竞品报价</label>
       <label class="dm-check"><i class="dm-box"></i>提交方案初稿</label></div>`},
   'rules':{steps:['默认规则：成员新建项目需要审批','管理员把它改成「直接创建」','成员那边的按钮立刻从「申请项目」变成「新建项目」'],html:`
     <div class="dm-split">
       <div class="dm-pane"><h6>规则组 · 默认规则</h6>
-        <div class="dm-seg"><span>新项目</span><b data-out="1">需要审批</b><b class="is-ok" data-in="1">直接创建</b></div>
+        <div class="dm-seg" data-point="1"><span>新项目</span><b data-out="1">需要审批</b><b class="is-ok" data-in="1">直接创建</b></div>
         <div class="dm-seg"><span>临时任务</span><b class="is-ok">直接创建</b></div>
-        <div class="dm-seg"><span>AI 助手</span><b>查询与规划</b></div><i class="dm-tap is-left" data-in="1" data-out="2"></i></div>
+        <div class="dm-seg"><span>AI 助手</span><b>查询与规划</b></div></div>
       <div class="dm-pane"><h6>成员的顶栏</h6><span class="dm-swap is-block"><span class="dm-btn" data-out="2">${icon('arrow-up-right')}申请项目</span><span class="dm-btn is-primary" data-in="2">${icon('plus')}新建项目</span></span></div>
     </div>`},
 };
@@ -3324,6 +3395,32 @@ function demoStep(fig,step){
   for(let i=1;i<=8;i++)fig.classList.toggle(`s${i}`,i<=step);
   const caption=fig.querySelector('.demo-caption');if(caption)caption.textContent=steps[step]||'';
   fig.querySelectorAll('.demo-dot').forEach((d,i)=>{d.classList.toggle('is-on',i===step);d.setAttribute('aria-current',String(i===step))});
+  demoPoint(fig,step);
+}
+/* The pointer goes to whatever the person would press on this step
+   (data-point="n", several steps separated by spaces) and taps it. */
+function demoPoint(fig,step){
+  const stage=fig.querySelector?.('.demo-stage'),ptr=stage?.querySelector?.('.demo-pointer');
+  if(!ptr||typeof stage.getBoundingClientRect!=='function')return;
+  const target=stage.querySelector(`[data-point~="${step}"]`);
+  const revision=ptr._pointRevision=(ptr._pointRevision||0)+1;
+  clearTimeout(ptr._tap);ptr.classList.remove('is-tap');
+  if(!target){ptr.classList.remove('is-on');return}
+  const place=()=>{
+    if(ptr._pointRevision!==revision||fig.isConnected===false||(UI.view&&UI.view!=='guide'))return;
+    const s=stage.getBoundingClientRect(),r=target.getBoundingClientRect();
+    if(!r.width||!r.height||target.checkVisibility?.({opacityProperty:true,visibilityProperty:true})===false){ptr.classList.remove('is-on');return}
+    ptr.style.transform=`translate(${Math.round(r.left-s.left+Math.min(r.width*.6,r.width-6))}px,${Math.round(r.top-s.top+r.height*.6)}px)`;
+    ptr.classList.add('is-on');
+    ptr._tap=setTimeout(()=>{if(ptr._pointRevision===revision)ptr.classList.add('is-tap')},navReducedMotion()?0:650);
+  };
+  // Flush the step styles, then wait for the target and its ancestors to settle.
+  target.getBoundingClientRect();
+  const moving=[];
+  if(!navReducedMotion())for(let el=target;el;el=el===stage?null:el.parentElement){
+    moving.push(...(el.getAnimations?.()||[]).filter(a=>(a.pending||a.playState==='running')&&a.effect?.getComputedTiming?.()?.iterations!==Infinity));
+  }
+  if(moving.length){ptr.classList.remove('is-on');Promise.allSettled(moving.map(a=>a.finished)).then(place)}else place();
 }
 function bindGuideDemos(root){
   const figs=[...root.querySelectorAll?.('.guide-demo')||[]];if(!figs.length)return;
@@ -3336,13 +3433,20 @@ function bindGuideDemos(root){
       play.onclick=()=>{const paused=fig.dataset.paused==='1';fig.dataset.paused=paused?'':'1';play.textContent=paused?'暂停':'播放'}}
   });
   clearInterval(UI.demoTimer);
+  UI.demoResize?.disconnect?.();
+  if(typeof ResizeObserver==='function'){
+    UI.demoResize=new ResizeObserver(entries=>entries.forEach(e=>{
+      const fig=e.target.closest('.guide-demo');if(fig)demoPoint(fig,Number(fig.dataset.step)||0);
+    }));
+    figs.forEach(f=>{const stage=f.querySelector('.demo-stage');if(stage)UI.demoResize.observe(stage)});
+  }
   if(typeof IntersectionObserver==='function'){
     UI.demoSeen?.disconnect?.();
     UI.demoSeen=new IntersectionObserver(entries=>entries.forEach(e=>e.target.classList.toggle('is-visible',e.isIntersecting)),{threshold:.35});
     figs.forEach(f=>UI.demoSeen.observe(f));
   }else figs.forEach(f=>f.classList.add('is-visible'));
   UI.demoTimer=setInterval(()=>{
-    if(UI.view!=='guide'){clearInterval(UI.demoTimer);return}
+    if(UI.view!=='guide'){clearInterval(UI.demoTimer);UI.demoResize?.disconnect?.();return}
     figs.forEach(fig=>{
       if(fig.dataset.paused==='1'||!fig.classList.contains('is-visible'))return;
       const n=GUIDE_DEMOS[fig.dataset.demo]?.steps.length||1,held=Number(fig.dataset.held||0)+1;
@@ -3353,7 +3457,7 @@ function bindGuideDemos(root){
 }
 function guideDemoHTML(id){
   const d=GUIDE_DEMOS[id];if(!d)return '';
-  return `<figure class="guide-demo" data-demo="${id}" data-step="0"><div class="demo-stage" aria-hidden="true">${d.html}</div>`
+  return `<figure class="guide-demo" data-demo="${id}" data-step="0"><div class="demo-stage" aria-hidden="true">${d.html}<i class="demo-pointer"></i></div>`
     +`<figcaption><span class="demo-caption" aria-live="polite"></span><span class="demo-dots">${d.steps.map((s,i)=>`<button type="button" class="demo-dot" aria-label="第 ${i+1} 步：${escapeHTML(s)}"></button>`).join('')}</span>`
     +`<button type="button" class="text-btn demo-play">暂停</button></figcaption></figure>`;
 }
@@ -3362,59 +3466,75 @@ function guideDemoHTML(id){
    who can use it and the edge cases worth knowing. Kinds: steps (numbered),
    list, example, note, who. */
 const GUIDE=[
-  {id:'start',title:'开始使用',icon:'book-open',lead:'登录、三种角色和你自己的资料。',parts:[
+  {id:'start',title:'开始使用',icon:'book-open',demo:'login',lead:'登录、三种角色和你自己的资料。',parts:[
     ['登录',['打开工作台，输入账户名和密码，点「进入工作台」。','登录状态保留 7 天；在别的设备登录不会挤掉当前设备。','同一浏览器登录过的账户会列在左上角账户菜单中，切换时仍需验证该账户密码。']],
-    ['三种角色',['superadmin：系统所有者，能做所有事，包括调整规则组、权限组和删除账户。','管理员：管理全部项目与任务、审批申请、查看成果库、管理账户（不含规则组）。','普通成员：处理分给自己的任务，按所在规则组新建项目或任务，参与被加入的项目。'],'list'],
-    ['你的资料',['点左上角的头像打开账户菜单。','「个人资料」里可以改昵称、头像（选择图片 / 移除）和个性签名；中文名由管理员设置。','「修改密码」需要输入当前密码，新密码至少 6 位，改完后其他设备会退出登录。','「登录其他账户」切换到另一个账户；「退出登录」结束本设备的登录。']],
+    ['三种角色',['superadmin：系统所有者，负责系统配置、账户管理、审批与调度，不执行任务。','管理员：管理全部项目与任务、审批申请、查看成果库和账户列表，不执行任务。','普通成员：处理分给自己的任务，按所在规则组新建项目或任务，参与被加入的项目。'],'list'],
+    ["三种角色能做什么",[["操作", "superadmin", "管理员", "普通成员"], ["执行任务、记录完成", "不执行任务", "不执行任务", "仅分给自己的任务"], ["新建项目 / 任务", "直接创建", "直接创建", "按所在规则组"], ["审批申请", "可以", "可以", "项目 Owner 审批自己项目的申请"], ["查看成果库、账户列表", "可以", "可以", "看不到"], ["添加、停用账户或重置密码", "可以", "不可以", "不可以"], ["规则组、删除账户", "可以", "不可以", "看不到"]],"table"],
+    ['你的资料',['点左上角的头像打开账户菜单。','「个人资料」里可以改昵称、头像（选择图片 / 移除）和个性签名；中文名由 superadmin 设置。','「修改密码」需要输入当前密码，新密码至少 6 位，改完后其他设备会退出登录。','「登录其他账户」切换到另一个账户；「退出登录」结束本设备的登录。']],
     ['第一次进来',['第一次登录会自动开始约 2 分钟的导览，逐个点亮界面上的主要入口。','之后随时可以在「使用教程」页顶部点「开始导览」重看。'],'list'],
+    ["常见问题",[["忘记密码怎么办？", "请 superadmin 在「账户管理」里为你重置密码，登录后再到「修改密码」换成自己的。"], ["为什么我的中文名改不了？", "中文名用在日报、成员列表等正式场合，由 superadmin 统一设置；你可以改昵称。"], ["换了电脑要重新登录吗？", "要。每台设备单独登录，登录状态保留 7 天；改密码后所有设备都需要重新登录。"]],"faq"],
   ]},
-  {id:'layout',title:'界面与导航',icon:'layout-grid',lead:'左侧导航、顶栏和常用入口在哪里。',parts:[
+  {id:'layout',title:'界面与导航',icon:'layout-grid',demo:'layout',lead:'左侧导航、顶栏和常用入口在哪里。',parts:[
     ['左侧主导航',['今日任务、周视图、档案室、项目空间、项目时间轴、收件箱、使用教程对所有人开放；成果库、账户管理、系统设置只对管理员显示。','导航右侧的数字是待处理数量，红点表示有新分到你的工作。','点导航顶部的箭头收成只显示图标；拖动导航右边缘调宽窄，双击边缘恢复默认宽度。'],'list'],
     ['快捷筛选',['点「P0 重要任务」「进行中」「已递延」会跳到今日任务，只列出对应的任务。','在今日任务里点「全部」回到完整列表。']],
     ['今日安排',['左下角显示你今天所有任务的预计总时长，进度条随完成情况增长。'],'list'],
+    ["导航宽窄",[["宽度", "显示什么"], ["默认", "图标、名称、待处理数量和快捷筛选"], ["调窄", "名称和数量，分组标题和底部的今日安排收起"], ["收起", "只剩图标"]],"table"],
     ['顶栏',['搜索：找任务和项目，快捷键 /。','通知铃铛：打开收件箱，红点表示有未读。','桌面小组件：悬浮的今日待办和番茄钟。','AI 助手：打开右侧的助手面板。','新建项目 / 新建任务：按你所在规则组显示为「新建」或「申请」，不允许时不显示。','沟通区：顶栏左侧的对话图标，有未读消息时出现红点。'],'list'],
   ]},
   {id:'today',title:'今日任务',icon:'calendar-check',demo:'task-life',lead:'一天要做的事，按项目分组；任务从待开始到完成都在这里推进。',parts:[
     ['看今天',['页面顶部是日期卡和「今天做什么？」，右侧箭头可以前后翻一天。','「今日进度」显示已完成 / 全部和百分比。','「全部 / 待处理 / 已完成」切换下面列表的范围。']],
     ['任务卡上有什么',['序号和优先级：P0 最高，P1、P2 依次降低。','名称、负责人、时间与时长、日期和状态（待开始、进行中、已完成、已递延…）。','「固定」标记：由固定任务规则生成。','「由某日递延 · 第 N 次」：前一天没做完自动挪过来的。','「N 期」：几期没做完的固定任务合成了一张卡。'],'list'],
+    ["任务状态",[["状态", "什么时候出现", "接下来"], ["待开始", "刚创建，还没到安排的时间", "到点自动开始，或在详情里点「开始任务」"], ["进行中", "到了安排的时间，或手动开始", "做完点「记录完成」"], ["已完成", "记录了完成", "可以「修改完成记录」；Owner 觉得不够可以打回"], ["待审批", "按规则组需要审批的新任务", "同意后变为待开始，驳回后变为已驳回"], ["已驳回", "申请没有通过", "只作记录，驳回原因写在任务里"], ["已递延", "过了零点还没做完", "第二天有一张新卡接着做，这张保留作记录"], ["已跳过", "所属项目已结束时还没做完", "不再处理，也不再递延"]],"table"],
     ['例子',['林默的「整理竞品报价」排在今天 14:00。13:59 它还是「待开始」，14:00 自动变成「进行中」；15:15 他点「记录完成」，写下「已整理 6 家报价，见文件」，实际耗时 75 分钟，今日进度从 0/2 走到 1/2。'],'example'],
+    ["常见问题",[["到了时间任务没有变成「进行中」？", "系统每半分钟检查一次，最多晚半分钟；待审批的任务不会自动开始。"], ["今天的任务做不完怎么办？", "不用处理，过了零点会自动递延到第二天；也可以在详情里主动递延，写明卡点、剩余工作和要挪到哪天。"], ["点「全部」和「待处理」有什么区别？", "「待处理」只列还没完成的，「已完成」只列做完的，「全部」两者都列。"]],"faq"],
   ]},
   {id:'calendar',title:'周视图',icon:'layout-grid',demo:'defer',lead:'按周查看安排；没做完的任务会自己挪到下一天。',parts:[
     ['翻周',['页面显示一周七天，左右箭头切到上一周或下一周，「本周」回到当前周。','每周从哪天开始由管理员在「系统设置 → 日程」里设定。']],
     ['看某一天',['点某一天进入「日期详情」，列出这天所有任务；点「返回周视图」回来。','管理员可以在顶部切换只看某位成员。']],
     ['自动递延',['当天没做完的任务，过了零点会在第二天生成一张新卡，原来那张标为「已递延」保留作记录。','新卡写明「由某日递延 · 第 N 次」，任务详情底部能看到整条递延链。','跨多天的任务只有过了结束日期才会递延；所属项目已结束的任务不再递延，标为已跳过。'],'list'],
+    ["例子",["周四 16:00 的「提交方案初稿」到晚上还没交。零点一过，周四那张变成「已递延」；周五多了一张同名卡片，写着「由周四递延 · 第 1 次」。周五仍没做完，周六那张就是「第 2 次」，详情底部能看到周四、周五、周六这条完整的链。"],"example"],
     ['注意',['服务器停机几天后重新启动，会一次补上这些天的递延，不会漏。'],'note'],
   ]},
   {id:'tasks',title:'任务',icon:'check',demo:'new-task',lead:'新建、执行、完成，以及修改、指派和打回。',parts:[
     ['新建任务',['点顶栏「新建任务」（快捷键 N），或在项目页点「新建任务」。','选类型：项目任务（属于某个项目）、临时任务（不属于任何项目）、固定任务（按周期重复，见下一章）。','填写所属项目、任务名称、任务描述、指派给、安排日期、结束日期（跨多天时填写）、时间、预计时长和优先级。','规则组允许直接创建时按钮是「创建任务」，任务立即出现在对方日程里并通知对方；需要审批时按钮是「提交申请」，审批通过后才生效。']],
+    ["新建任务的每一项",[["字段", "说明"], ["类型", "项目任务、临时任务或固定任务"], ["所属项目", "项目任务必选，只列出你参与的项目"], ["任务名称", "必填，最多 120 字"], ["任务描述", "要交付什么、参考资料在哪里（可留空）"], ["指派给", "谁来做这项任务，对方会收到通知"], ["安排日期 / 结束日期", "哪天做；跨多天时填结束日期，过了结束日期才会递延"], ["时间 / 预计时长", "几点开始、预计多少分钟；到点自动开始"], ["优先级", "P0 最高，P1、P2 依次降低；P0 会出现在「P0 重要任务」筛选里"]],"table"],
     ['执行与完成',['到了安排的时间，任务自动从「待开始」变成「进行中」，也可以在详情里点「开始任务」。','做完后点「记录完成」，填写完成总结、实际耗时（分钟）和工作感受（顺利 / 一般 / 困难 / 阻塞）。','任务完成后直接结束，不需要审批；之后可以点「修改完成记录」更正。','合并了多期的固定任务，一次完成即可结清全部期次。']],
     ['修改与指派',['管理员或有管理权限的任务安排人、项目 Owner 可以「直接调整任务」；执行人需要改时点「申请修改任务」，写明理由并等待审批。','有管理权限时，「调整任务指派」可以把任务换给别人，原负责人和新负责人都会收到通知。','项目 Owner 可以在项目任务列表里直接点「调整指派」。','「删除此任务」会把任务从日历移除，需要确认。']],
     ['例子',['陈曦想把「官网首屏改版」的截止从周五改到下周一。她是执行人，于是点「申请修改任务」，写上「设计稿要等品牌确认」。审批人在收件箱里看到这条修改申请，点「同意修改」后，日期自动更新，陈曦收到通知。'],'example'],
-    ['谁能用',['所有人都能处理分给自己的任务。','新建与修改是否需要审批，由「系统设置 → 成员与权限」里的规则组决定。'],'who'],
+    ['谁能用',['普通成员处理分给自己的任务；管理员和 superadmin 负责管理、审批与调度，不执行任务。','新建与修改是否需要审批，由「系统设置 → 成员与权限」里的规则组决定。'],'who'],
+    ["常见问题",[["为什么我看不到「新建任务」？", "你所在规则组的临时任务和项目任务都设为「不允许」。项目 Owner 在自己的项目里始终可以新建。"], ["完成记录写错了能改吗？", "能。打开任务详情点「修改完成记录」，总结、耗时和感受都可以改。"], ["任务被指派给了别人，我还能看到吗？", "不在你的今日任务里了；如果你是项目 Owner，仍能在项目的任务标签里看到。"]],"faq"],
   ]},
   {id:'approval',title:'审批与打回',icon:'inbox',demo:'approval',lead:'需要审批的申请怎么走，完成后的工作怎么退回补充。',parts:[
     ['需要审批的事',['所在规则组设为「需要审批」时，新建项目、临时任务或项目任务都会先成为申请。','执行人修改任务（日期、内容等）需要审批人同意。','Owner 提交的结项需要管理员同意。','任务完成不需要审批。'],'list'],
+    ["三种创建方式",[["规则组设为", "点按钮后"], ["直接创建", "立刻生效，相关的人收到通知"], ["需要审批", "先成为申请，审批人同意后才生效"], ["不允许", "不显示对应的新建按钮"]],"table"],
     ['审批人怎么处理',['申请出现在审批人的收件箱，卡片上直接有「同意」「驳回」。','驳回时必须写原因，申请人会收到。','同意后，任务或项目立即生效，申请人收到结果通知。']],
     ['打回',['Owner 对已完成的任务不满意时，在任务详情点「打回」，写明哪里还需要补充。','任务回到负责人的待办并排到今天，原因写在卡上，负责人收到通知。'],'steps'],
+    ["常见问题",[["申请被驳回了怎么办？", "在收件箱里看驳回原因，按要求调整后重新提交一条新申请。"], ["谁可以打回？", "项目任务由项目 Owner 或管理员打回；临时任务由派出它的人或管理员打回。"], ["什么时候不能打回？", "项目已经结束或过了截止日期时不能打回；只有「已完成」的任务可以打回。"], ["没设置规则组时按什么来？", "按「默认规则」：项目需要审批，临时任务直接创建，项目任务只有 Owner 能建。"]],"faq"],
     ['注意',['审批和打回都会写进任务记录，任务详情底部可以看到谁在什么时候做了什么。'],'note'],
   ],extraDemo:'rework'},
   {id:'repeats',title:'固定任务',icon:'repeat',demo:'repeat',lead:'每天、每周或每月都要做的事，定一次规则自动生成。',parts:[
     ['制定规则',['在项目空间点「制定固定任务」，或新建任务时选「固定任务」。','所属项目可选，选「不挂项目」就是个人或团队的例行事项。','「安排给」可以多选，每人各生成一份。','周期可选：每天、工作日、每周（可设每 1–4 周一次和每周几执行）、每月（设执行日，月份天数不够时取最后一天）、指定日期。','再填时间、预计时长、优先级和可选的结束日期，点「保存固定任务」。']],
+    ["周期怎么选",[["周期", "适合", "要再填"], ["每天", "每日站会、日检", "无"], ["工作日", "只在周一到周五做的事", "无"], ["每周", "周会、周报", "每 1–4 周一次，以及每周几"], ["每月", "月报、对账", "每月几号；当月没有这一天时取最后一天"], ["指定日期", "不规律的几次", "日期列表，用逗号分隔"]],"table"],
     ['之后',['系统按规则预生成未来半年的任务，调度器每天继续补齐；可排期上限随今天滚动到两年后。','某一次不需要做时，在规则里点「挖空本次」跳过那一天。','停用规则后不再生成新的任务，已经生成的保留。'],'list'],
     ['递延合并',['「系统设置 → 日程 → 固定任务递延合并」开启时，同一条规则连续几期没做完会合成一张卡，标着「N 期」。','点一次「完成全部 N 期」即可全部结清；原始记录都保留。'],'list'],
     ['例子',['团队晨会定为每周一、三、五 09:30、15 分钟，安排给林默和周一。保存后两人的日程里都排上了之后半年的晨会；国庆那周的周三不开，就在规则里挖空那一天。'],'example'],
+    ["常见问题",[["「持续天数」是什么？", "每一次任务跨几天，1 到 30。比如每月 1 号开始、持续 3 天的对账。"], ["挂在项目下有什么不同？", "只能安排给项目成员，结束日期不会晚于项目截止日期。"], ["停用以后已有的任务会消失吗？", "不会。停用只是不再生成新的任务。"]],"faq"],
   ],extraDemo:'stack'},
   {id:'projects',title:'项目空间',icon:'folder',demo:'tree',lead:'左边是目录，中间是项目，项目里是任务、会议和文件。',parts:[
     ['目录',['「全部项目」列出你能看到的所有项目。','管理员可以点目录标题旁的 + 新建文件夹，点文件夹右侧的铅笔重命名或删除；删除文件夹不会删除里面的项目。','有权限的人可以拖动文件夹和项目调整顺序，把项目拖到文件夹上就放进去。','点项目左侧的箭头展开，能直接看到它的会议和文件；点会议打开会议，点文件下载。','选中的行有一块底色，换选时这块底色会滑到新的位置。目录调窄时只列文件夹和项目，收起时只剩图标。'],'list'],
     ['全部项目与文件夹页',['每个项目一张卡：状态、简介、任务完成进度、成员头像、截止日期和你在这个项目里的待办数。','右上角「排序」可以按目录顺序、名称、截止日期、完成度或最近创建排列。','点卡片进入项目。'],'list'],
     ['项目页',['顶部路径「全部项目 / 文件夹」可以点回上一层。','标题右侧是「新建任务」；「更多」里有项目设置、完成项目、退出项目和删除项目。','标题下面一行是状态、Owner、起止日期和完成进度。'],'list'],
     ['五个标签',['任务：项目的全部任务（协作者只看到分给自己的）；右上角选排序，选「手动」时 Owner 可以拖动调整顺序；下面单独列出固定任务规则。','会议：左边是会议列表，右边是打开的会议（见「会议」一章）。','文件：上传、下载、删除（见下）。','成员：Owner 和协作者各一行；Owner 可以填写每人的分工，离开输入框即保存；右侧是项目周期内每人进行中、已完成的任务数和工时；Owner 和管理员可以「添加协作者」或移出成员。','概况：立项、执行、结项三个阶段和日期，时间进度与任务进度，「放在文件夹」，以及项目背景。'],'list'],
+    ["在项目里谁能做什么",[["操作", "Owner", "协作者", "管理员"], ["看任务", "全部", "只看分给自己的", "全部"], ["新建任务", "可以", "按所在规则组", "可以"], ["新增会议", "可以", "只能查看", "可以"], ["上传文件", "可以", "可以", "可以"], ["删除文件", "可以", "只能删自己上传的", "可以"], ["添加或移出协作者", "可以", "不可以", "可以"], ["完成项目", "提交结项报告", "不可以", "直接完成或审批"]],"table"],
     ['注意',['切到另一个项目时，停留在同一个标签：看完一个项目的文件，点下一个项目就直接是它的文件。'],'note'],
+    ["常见问题",[["为什么项目列表里少了一个项目？", "已结项、已归档或过了截止日期的项目不在列表里；结项的项目在成果库和「归档文件」里。"], ["拖不动文件夹和项目？", "只有管理员和有管理权限的人能调整目录顺序。"]],"faq"],
   ]},
   {id:'files',title:'项目文件',icon:'file',demo:'upload',lead:'把项目资料放在项目里，所有成员都能取用。',parts:[
     ['上传',['在项目的「文件」标签点「新增文件 → 上传文件」，或直接把文件从电脑拖到列表上。','单个文件不超过 20MB，可以一次选多个。']],
+    ["预览",["图片、PDF、文本、CSV、JSON 和日志文件旁边有「预览」，在新标签页里直接打开，不用下载。", "Markdown（.md）文件点开就是排版好的样子；上传者、项目 Owner 和管理员可以切到「编辑」修改后保存。"],"list"],
     ['下载与删除',['点文件名即可下载。','上传者、项目 Owner 和管理员可点文件行右侧的「删除」；打开 Markdown 文件后，也可点窗口底部的「删除文件」。确认后删除，无法恢复。'],'list'],
     ['项目结束以后',['项目结项后，文件和会议仍能在项目目录的「归档文件」里只读查看和下载。'],'list'],
+    ["常见问题",[["文件太大传不上去？", "单个文件上限 20MB，可以压缩或拆分后再传。"], ["误删了文件能找回吗？", "不能，删除前请确认。"]],"faq"],
   ]},
   {id:'project-life',title:'项目的一生',icon:'gantt',demo:'project-life',lead:'从申请、审批、协作到结项和归档。',parts:[
     ['新建或申请',['点「新建项目」或「申请项目」，填写项目名称、项目描述、开始日期、截止日期（长期项目可留空）、Owner 和协作者。','规则组允许直接创建时项目立即生效；需要审批时提交给管理员，审批通过后才出现在项目空间。','添加协作者后会直接加入项目并收到通知，无需接受邀请。']],
@@ -3426,49 +3546,58 @@ const GUIDE=[
     ['新增会议',['在项目页的「会议」标签点「新增会议」，或在「文件」标签的「新增文件」里选「新增会议」。','填写会议名称、安排时间、参会人（用逗号或顿号分隔）和议程。']],
     ['记录原稿',['点「开始实时录入」用麦克风边说边转成文字，再点一次停止；浏览器不支持时可以直接粘贴转录原稿。','原稿会自动保存，离开前有未保存的修改会提醒你。']],
     ['生成纪要',['原稿有内容后点「根据模板生成」，AI 按「系统设置 → 会议纪要提示词」整理出会议结论、待办和风险。','生成的纪要显示在原稿下方，随会议一起保存，之后可以重新生成。']],
+    ["纪要编辑器",["纪要支持 Markdown：标题、加粗、斜体、列表、待办、引用、代码和链接，工具栏一键插入。", "「编辑」和「预览」两个标签来回切换，保存会议时一起保存。项目背景也用同一个编辑器。"],"list"],
     ['删除会议',['会议创建者、项目 Owner 和管理员可点会议行右侧的「删除」，或打开会议后点底部的「删除会议」。','确认后原始转录和纪要一起删除；项目结项或归档后只读。'],'list'],
     ['谁能用',['只有项目 Owner 和管理员可以新增会议；项目成员都能查看。','生成纪要需要管理员先在「系统设置 → AI 接入与模型」配置模型。'],'who'],
+    ["常见问题",[["点了「开始实时录入」没反应？", "浏览器需要允许使用麦克风；不支持时可以把别处的转录原稿直接粘贴进来。"], ["生成的纪要不满意？", "可以直接在编辑器里改，或修改原稿后重新生成；整体格式由「会议纪要提示词」决定。"]],"faq"],
   ]},
-  {id:'timeline',title:'项目时间轴',icon:'gantt',lead:'所有项目在时间上的排布。',parts:[
+  {id:'timeline',title:'项目时间轴',icon:'gantt',demo:'timeline',lead:'所有项目在时间上的排布。',parts:[
     ['怎么看',['每个项目一条横条，从开始日期到截止日期；没有截止日期的显示为长期。','左右箭头翻看前后时段，「今天」回到当前。','日期有问题的项目会标出「日期待修正」，提醒 Owner 修改起止日期。','右上角可以直接新建项目。'],'list'],
+    ["横条的样子",[["样子", "意思"], ["实心横条", "有开始和截止日期的项目"], ["右端渐隐、画到边缘", "没有截止日期的长期项目"], ["虚线框加「日期待修正」", "起止日期有问题，需要 Owner 修改"], ["竖线", "今天"]],"table"],
   ]},
   {id:'inbox',title:'收件箱',icon:'inbox',demo:'inbox',lead:'所有通知和待你处理的申请。',parts:[
     ['会收到什么',['任务指派、任务自动开始、任务申请、修改申请、项目申请、协作者加入通知、项目完成审批、沟通区里 @ 到你的消息等。','需要你处理的申请上直接有按钮：同意创建 / 驳回申请、同意修改、同意完成、去沟通区。','驳回时要写原因，对方会收到。'],'list'],
     ['整理',['点「全部标为已读」清掉未读。','点「管理」进入选择模式，勾选后「删除所选」。']],
+    ["常见问题",[["同意或驳回之后还能改吗？", "不能，处理结果会通知对方；如需更改，请对方重新申请。"], ["删掉通知会影响任务吗？", "不会，只是从收件箱里移除这条提醒。"]],"faq"],
     ['注意',['已读的普通通知只保留最近 200 条在页面里；未读和待处理的申请不受影响。'],'note'],
   ]},
   {id:'chat',title:'沟通区',icon:'chat',demo:'chat',lead:'团队和各项目的聊天频道。',parts:[
     ['频道',['左侧列出你能进入的频道：「沟通」「闲聊」两个团队频道，以及你参与的每个项目。','有未读消息的频道显示未读数；顶栏的沟通区图标出现红点。'],'list'],
     ['发消息',['在底部输入后点「发送」，单条不超过 1000 字。','输入 @ 选择成员，对方会收到通知；@所有人 会通知频道里的全体成员。']],
     ['成员与在线',['右侧显示频道成员，以及谁在线、最后活跃时间。'],'list'],
+    ["历史消息",["频道先显示最近的消息，滚到最上面点「加载更早的消息」继续往前翻。"],"list"],
     ['注意',['项目结项后，它的频道变为只读，沟通记录在成果库里查看；项目被删除时频道消息一并删除。'],'note'],
   ]},
   {id:'archive',title:'档案室',icon:'archive',demo:'archive',lead:'每天的个人档案，以及团队日报和周报。',parts:[
     ['我的档案',['普通成员点档案室右上角的今日按钮，打开今天的档案。','档案分四栏：今日完成、未完成与阻塞、明日计划和随记；系统会先把当天的工作日志整理进去，你补充后点「保存」。','档案只有你自己和管理员能看到。','按月份翻看以前的档案，已记录的日子有标记。']],
-    ['团队日报与周报',['系统每天自动汇总团队日报：完成任务数、完成工时、各项目进展（Owner 汇报或系统汇总）和成员总结。','管理员可以打开任意一天的日报修改，修改过的会标「已改」。','周报结合本周完成项目的描述和结项说明呈现成果，并按未完成项目列出剩余工作；可切换周次并打开每日记录。']],
+    ['团队日报与周报',['系统每天自动汇总团队日报：完成任务数、完成工时、各项目进展（Owner 汇报或系统汇总）和成员总结。','管理员可以打开任意一天的日报修改，修改过的会标「已改」。','周报同时记录本周完成的项目和任务，任务带完成总结与反馈；项目未结项、没有所属项目的任务也会纳入。未完成部分按项目整理，临时待办单列。']],
     ['自动补报',['开启「系统设置 → 日报与补报 → 自动补报」后，到点时前一天没交项目日报的项目会自动汇总成一份补报，交给 Owner 确认。']],
+    ["常见问题",[["档案没有保存会丢吗？", "系统整理的部分会保留；你补充的内容需要点「保存」。"], ["周报从哪天算到哪天？", "按「系统设置 → 日程」里设的每周开始日计算。"]],"faq"],
   ]},
-  {id:'achievements',title:'成果库',icon:'award',lead:'已结项项目的完整档案，仅管理员可见。',parts:[
+  {id:'achievements',title:'成果库',icon:'award',demo:'achievements',lead:'已结项项目的完整档案，仅管理员可见。',parts:[
     ['内容',['顶部统计已完成项目数和累计完成的子任务数。','每个项目一张卡：Owner、结项时间、任务完成情况、生命周期（创建、审批启动、提交结项、完成）和结项报告。','可以从卡片进入项目文件、沟通记录和项目详情。'],'list'],
+    ["常见问题",[["项目怎样进入成果库？", "Owner 提交结项报告并经管理员同意，或管理员直接完成项目。"], ["成果库里的项目还能改吗？", "项目、文件和沟通记录都只读，用于查阅和复盘。"]],"faq"],
   ]},
   {id:'assistant',title:'AI 助手',icon:'sparkles',demo:'assistant',lead:'用自然语言查询、规划和安排工作。',parts:[
     ['打开与提问',['点顶栏「AI 助手」打开右侧面板，直接输入问题，比如「今天有哪些任务要交」「团队这周的负载怎么样」。','点麦克风可以语音输入，再点一次结束并转成文字。','「对话记录」可以回到以前的对话；生成中可以点「停止」。']],
     ['规划模式',['点输入框旁的规划按钮，用一句话说要安排的事，比如「下周把季度复盘做完：整理数据、出初稿、找人评审」。','助手会起草创建、修改或删除的卡片；你逐张检查、修改，接受或拒绝，确认前不会改动任何数据。']],
     ['能做到哪一步',['每个人的助手权限由规则组决定：关闭、查询与规划，或可代为操作。','可代为操作时，助手会一步步执行并在每步后核对结果；遇到需要你确认的操作会停下来等「确认执行」。','面板顶部显示当前模型；管理员配置了多个可选模型时可以切换。还没配置时，管理员可以去「系统设置 → AI 接入与模型」配置。'],'list'],
     ['注意',['助手只能看到你本来就能看到的项目和任务；起草的卡片若缺少信息，会标出需要你补充的地方，不会擅自编造负责人。'],'note'],
+    ["常见问题",[["为什么助手说没有权限？", "你所在规则组的助手权限是「关闭」或「查询与规划」，它不能替你改数据。"], ["规划的卡片会直接生效吗？", "不会。每张卡片都要你点接受，拒绝的不会留下任何改动。"]],"faq"],
   ]},
   {id:'widget',title:'桌面小组件',icon:'clock',demo:'widget',lead:'悬浮在桌面上的今日待办和番茄钟。',parts:[
     ['打开',['点顶栏的小组件图标，会弹出一个始终在最前的小窗口（需要较新版本的 Chrome 或 Edge）。']],
     ['使用',['上半部分是番茄钟：专注 25 分钟、休息 5 分钟，可以开始 / 暂停、重置、切换；一轮结束会提醒你。','下半部分是今天的任务，勾选即记为完成。','小窗口每分钟自动同步一次。'],'list'],
   ]},
-  {id:'search',title:'搜索与快捷键',icon:'search',lead:'不用鼠标也能快速到达。',parts:[
+  {id:'search',title:'搜索与快捷键',icon:'search',demo:'search',lead:'不用鼠标也能快速到达。',parts:[
     ['搜索',['按 / 或点顶栏放大镜，输入关键词即可找到任务和项目。','在系统设置页按 / 是搜索设置项。'],'list'],
     ['快捷键',['? 打开快捷键列表；H 使用教程；N 新建任务；T 今日任务；W 周视图；P 项目空间；I 收件箱；Esc 关闭弹窗或面板。','在输入框里打字时快捷键不会触发。'],'list'],
   ]},
-  {id:'accounts',title:'账户管理',icon:'users',lead:'添加和维护团队账户，仅管理员可见。',parts:[
-    ['添加账户',['点「添加账户」，填写账户名、中文名（可留空）、初始密码和权限组。']],
-    ['维护',['每个账户可以停用 / 启用、重置密码、设置中文名，或调整权限组（superadmin、管理员、普通用户）。','点「管理」可以多选账户批量操作。'],'list'],
-    ['注意',['删除账户不可撤销，需要输入账户名确认；仍负责进行中项目或有未完成任务的账户不能删除，要先转交。'],'note'],
+  {id:'accounts',title:'账户管理',icon:'users',demo:'accounts',lead:'管理员可查看账户列表；添加和维护账户仅限 superadmin。',parts:[
+    ['添加账户',['superadmin 点「添加账户」，填写账户名、中文名（可留空）、初始密码和权限组。']],
+    ['维护',['superadmin 可以停用 / 启用账户、重置密码、设置中文名，或调整权限组（superadmin、管理员、普通用户）。','superadmin 点「管理」可以多选账户批量操作；管理员可查看账户列表，但不能维护账户。'],'list'],
+    ["三种权限组",[["权限组", "适合"], ["superadmin", "系统所有者，通常只有一位"], ["管理员", "负责审批和项目管理，可查看账户列表"], ["普通用户", "团队成员，按规则组新建项目和任务"]],"table"],
+    ['注意',['删除账户仅限 superadmin，且不可撤销，需要输入账户名确认；仍负责进行中项目或有未完成任务的账户不能删除，要先转交。'],'note'],
   ]},
   {id:'settings',title:'系统设置',icon:'settings',demo:'rules',lead:'对全体成员生效的规则，仅管理员可见。',parts:[
     ['查找设置',['左侧按类别跳转，顶部搜索框可以直接搜设置项。','改过默认值的设置左侧有一条竖线，点「恢复默认」改回。'],'list'],
@@ -3478,9 +3607,10 @@ const GUIDE=[
     ['会议纪要提示词',['会议生成纪要时交给 AI 的系统提示词，对所有项目生效。','可以用 {{title}}、{{agenda}}、{{transcript}} 引用会议标题、议程和原稿。'],'list'],
     ['AI 接入与模型',['来源：添加对话模型来源或语音转写来源，填服务商、名称、API 地址和密钥，「保存并测试」会验证并取回可用模型；可测试、编辑、删除。','使用场景：对话助手、规划任务、会议纪要、语音转写分别选来源和模型；规划任务和会议纪要可以跟随对话助手。','单次对话容量：每轮发送给助手的总输入容量，包括指令、历史、工具和查询结果；模型窗口小时选「精简」。'],'list'],
   ]},
-  {id:'automation',title:'系统自动完成的事',icon:'clock',lead:'不需要操作，但值得知道的后台规则。',parts:[
+  {id:'automation',title:'系统自动完成的事',icon:'clock',demo:'automation',lead:'不需要操作，但值得知道的后台规则。',parts:[
     ['每半分钟',['到点的任务自动开始，并通知项目 Owner。','按固定任务规则补齐之后的任务。'],'list'],
     ['每天',['没做完的任务递延到下一天，保留递延链。','23:30 为每位成员整理当天档案；到补报时间生成团队日报，开启自动补报时为没交日报的项目生成补报。'],'list'],
+    ["时间表",[["时间", "系统做的事"], ["每半分钟", "到点的任务开始；固定任务补齐"], ["23:30", "整理每位成员的当天档案"], ["零点过后", "没做完的任务递延到第二天"], ["补报时间", "汇总团队日报；开启自动补报时生成补报"]],"table"],
     ['停机之后',['服务器停了几天再启动，会一次补上这些天的递延、档案和日报，不会重复也不会漏。'],'note'],
   ]},
 ];
@@ -3488,6 +3618,11 @@ const GUIDE_KIND={example:'例子',note:'注意',who:'谁能用'};
 function guidePart([h,items,kind='steps']){
   if(GUIDE_KIND[kind])return `<aside class="guide-callout is-${kind}"><b>${escapeHTML(h===GUIDE_KIND[kind]?h:`${GUIDE_KIND[kind]} · ${h}`)}</b>`
     +items.map(s=>`<p>${escapeHTML(s)}</p>`).join('')+`</aside>`;
+  if(kind==='table'){const [head,...rows]=items;return `<section><h3>${escapeHTML(h)}</h3><div class="guide-table"><table>`
+    +`<thead><tr>${head.map(c=>`<th>${escapeHTML(c)}</th>`).join('')}</tr></thead>`
+    +`<tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${escapeHTML(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div></section>`}
+  if(kind==='faq')return `<section class="guide-faq"><h3>${escapeHTML(h)}</h3>`
+    +items.map(([q,a])=>`<details><summary>${escapeHTML(q)}</summary><p>${escapeHTML(a)}</p></details>`).join('')+`</section>`;
   const tag=kind==='list'?'ul':'ol';
   return `<section><h3>${escapeHTML(h)}</h3><${tag}>${items.map(s=>`<li>${escapeHTML(s)}</li>`).join('')}</${tag}></section>`;
 }
@@ -4199,13 +4334,27 @@ function openTodayArchive(){
 }
 /* Weekly outcomes are computed from task events by the server. */
 function weekReportDocument(week){
-  const work=week.work||{},done=work.completedProjects||[],pending=work.unfinishedProjects||[],other=work.unfinishedOther||[],esc=escapeHTML;
+  const work=week.work||{},done=work.completedProjects||[],doneTasks=work.completedTasks||[],pending=work.unfinishedProjects||[],other=work.unfinishedOther||[],esc=escapeHTML;
   const text=(label,value)=>value?`<p><span class="muted">${label}</span>${esc(String(value))}</p>`:'';
   const people=p=>`Owner · ${esc(p.ownerName||'未指派')}${p.members?.length?' · 参与人：'+esc(p.members.join('、')):''}`;
   const task=t=>`<li><div class="week-work-head"><strong>${esc(t.name)}</strong><span>${esc(t.assigneeName||'未指派')}</span></div>`
     +`${text('剩余事项：',t.remaining)}${text('原因：',t.reason)}${text('后续安排：',t.scheduledOn>week.end?fmt(t.scheduledOn):'尚未安排到下周')}${text('截止日期：',t.deadline?fmt(t.deadline):'')}</li>`;
+  const completedTask=t=>`<li><div class="week-work-head"><strong>${esc(t.name)}${t.stackCount>1?` · ${esc(t.stackCount)} 期`:''}</strong><time>${esc(fmt(t.completedOn))}</time></div>`
+    +`<small>${esc(t.assigneeName||'未指派')}${Number(t.actual)>0?` · ${esc(t.actual)} 分钟`:''}</small>`
+    +`${text('任务内容：',t.description)}${text('完成情况：',t.summary||'未填写完成总结')}${text('反馈：',[t.feeling,t.followup].filter(Boolean).join(' · '))}</li>`;
+  const completedList=tasks=>tasks.length?`<ul class="week-remaining-list">${tasks.map(completedTask).join('')}</ul>`:'';
+  const completedProjectIds=new Set(done.map(p=>p.projectId).filter(Boolean)),taskGroups=new Map();
+  for(const t of doneTasks){
+    if(t.projectId&&completedProjectIds.has(t.projectId))continue;
+    const key=t.projectId?`project:${t.projectId}`:t.fixed?'fixed':'temporary';
+    if(!taskGroups.has(key))taskGroups.set(key,{name:t.projectId?(t.projectName||'项目资料缺失'):t.fixed?'固定任务':'临时任务',description:t.projectDescription||'',tasks:[]});
+    taskGroups.get(key).tasks.push(t);
+  }
   const completed=done.map(p=>`<li><div class="week-work-head"><strong>${esc(p.name)}</strong><time>${esc(fmt(p.completedOn))}</time></div>`
-    +`<small>${people(p)}</small><p class="week-project-summary">${esc(p.summary||[p.description,p.completionReport].filter(Boolean).join('\n'))}</p></li>`).join('');
+    +`<small>${people(p)}</small><p class="week-project-summary">${esc(p.summary||[p.description,p.completionReport].filter(Boolean).join('\n'))}</p>`
+    +`${completedList(doneTasks.filter(t=>t.projectId&&t.projectId===p.projectId))}</li>`).join('')
+    +[...taskGroups.values()].map(g=>`<li><div class="week-work-head"><strong>${esc(g.name)}</strong><span>本周完成任务</span></div>`
+      +`${text('项目内容：',g.description)}${completedList(g.tasks)}</li>`).join('');
   const unfinished=pending.map(p=>`<li><div class="week-work-head"><strong>${esc(p.name)}</strong><span>${p.status==='pending_completion'?'待结项审批':'进行中'}</span></div>`
     +`<small>${people(p)}</small>${text('项目内容：',p.description)}`
     +`${p.status==='pending_completion'?'<p>已提交结项，等待审批</p>':''}`
@@ -4216,9 +4365,9 @@ function weekReportDocument(week){
     +`<button type="button" class="icon-btn" data-week="1" ${week.end>=S.today?'disabled':''} aria-label="下一周">${icon('chevron-right')}</button></div></div>`
     +`<h2>${esc(fmt(week.start))} — ${esc(fmt(week.end))}</h2><p class="muted">截至 ${esc(fmt(work.asOf||week.end))}</p>`
     +`<div class="brief-stats"><div><b data-count="${done.length}">${done.length}</b><span>本周完成项目</span></div>`
-    +`<div><b data-count="${pending.length}">${pending.length}</b><span>待完成项目</span></div>`
+    +`<div><b data-count="${doneTasks.length}">${doneTasks.length}</b><span>本周完成任务</span></div>`
     +`<div><b data-count="${remainingCount}">${remainingCount}</b><span>剩余任务</span></div></div></header>`
-    +`<section class="brief-section"><h3>这周做了什么</h3>${completed?`<ul class="week-work-list">${completed}</ul>`:'<p class="muted">本周暂无已结项项目</p>'}</section>`
+    +`<section class="brief-section"><h3>这周做了什么</h3>${completed?`<ul class="week-work-list">${completed}</ul>`:'<p class="muted">本周暂无已完成项目或任务</p>'}</section>`
     +`<section class="brief-section"><h3>还有什么没做</h3>${unfinished?`<ul class="week-work-list">${unfinished}</ul>`:'<p class="muted">暂无待完成项目</p>'}`
     +`${other.length?`<h4>其他待续事项</h4><ul class="week-work-list">${other.map(task).join('')}</ul>`:''}</section>`
     +`<footer class="week-daily-links">${(week.briefs||[]).filter(b=>b.filed!==false).map(b=>`<button type="button" class="text-btn week-cell" data-date="${esc(b.date)}">${esc(fmt(b.date))} 日报</button>`).join('')}</footer></article>`;
