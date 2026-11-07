@@ -580,6 +580,16 @@ class Store:
         self._meeting_project(user, project_id, readonly=True)
         return [m for m in self.all('meetings') if m.get('projectId') == project_id]
 
+    def meeting_delete(self, user, data):
+        meeting = self.get('meetings', required(data, 'id'))
+        project = self._meeting_project(user, meeting['projectId'])
+        if not (user['admin'] or project['owner'] == user['id'] or meeting.get('createdBy') == user['id']):
+            raise Problem(403, '只有会议创建者、项目 Owner 或管理员可以删除会议')
+        if 'expectedRevision' in data and data['expectedRevision'] != meeting.get('revision', 0):
+            raise Problem(409, '会议已被修改，请重新打开后再删除')
+        self.db.execute('DELETE FROM meetings WHERE id=?', (meeting['id'],))
+        return {'id': meeting['id'], 'projectId': project['id'], 'deleted': True}
+
     def meeting_create(self, user, data):
         project_id = required(data, 'projectId')
         p = self._meeting_project(user, project_id)
@@ -3252,6 +3262,7 @@ class Store:
         if action=='meeting.prompt.update': return self.set_meeting_prompt(user, d)
         if action=='meeting.list': return self.meeting_list(user, d)
         if action=='meeting.get': return self.meeting_get(user, d)
+        if action=='meeting.delete': return self.meeting_delete(user, d)
         if action=='file.text.update': return self.update_text_file(user, d)
         if action=='meeting.create': return self.meeting_create(user, d)
         if action=='meeting.transcript.update': return self.meeting_update_transcript(user, d)

@@ -2551,7 +2551,8 @@ test('meeting creation is guarded while a request is pending',async()=>{
   assert.equal(calls.length,1);
 });
 test('meeting edits made during save remain dirty and keep their newer input',async()=>{
-  const h=meetingApp(),pane={dataset:{dirty:'true'}};h.nodes['#meetingEditor']=pane;
+  const h=meetingApp(),pane={dataset:{dirty:'false'}};h.nodes['#meetingEditor']=pane;
+  h.a.run("UI.space='p1';UI.spaceArea='meetings';openMeetingEditor({id:'p1',name:'project'})");h.nodes['#meetingTitle'].value='周会';
   let release,submitted;h.a.context.fetch=async(path,options)=>{submitted=JSON.parse(options.body);await new Promise(r=>release=r);return {ok:true,text:async()=>JSON.stringify({id:'m1',revision:1,...submitted.data})}};
   h.nodes['#meetingTranscript'].value='提交版本';const save=h.nodes['#saveMeeting'].onclick();await settle();
   h.nodes['#meetingTitle'].value='保存期间的新标题';h.nodes['#meetingTranscript'].value='继续编辑的原稿';release();await save;
@@ -3027,7 +3028,7 @@ test('markdown formatting preserves link targets and still formats link labels',
 });
 function markdownFileApp(){
   const a=app(),opened=[],nodes={};a.context.capture=html=>opened.push(html);
-  const node={value:'',isConnected:true,classList:{add(){}},addEventListener(){}};
+  const node={value:'',isConnected:true,dataset:{},classList:{add(){}},addEventListener(){}};
   a.context.document={querySelector:s=>nodes[s]||node};
   a.run("S.user={id:'owner',admin:true};S.files=[{id:'f',projectId:'p',name:'private.md'}];S.fileArchives=[];S.projects=[];UI.view='projects';UI.space='p';openModal=capture;bindMdEditor=()=>{};closeModal=()=>{};toast=()=>{}");
   return {a,opened,nodes};
@@ -3169,6 +3170,76 @@ test('fresh work follows added and replaced task/project lists while notices cha
   a.run("S.projects=[{id:'p'},{id:'replacement'}];S.tasks=[{id:'t'},{id:'other'}]");assert.deepEqual(a.json('[...freshRefs()]'),[]);
 });
 
+function contentDeleteApp(){
+  const a=app(),calls=[],messages=[],nodes={};let closes=0,stops=0,refreshes=0,confirmed=true;
+  a.context.document={querySelector:s=>nodes[s]||null};a.context.confirm=()=>confirmed;a.context.messages=messages;
+  a.context.fetch=async(url,options)=>{calls.push(JSON.parse(options.body));return {ok:true,text:async()=>'{"deleted":true}'}};
+  a.context.onRefresh=async()=>{refreshes++};a.context.onClose=()=>closes++;a.context.onStop=async()=>{stops++;a.run("meetingLive.revisions.set('owner:m',4)")};
+  a.run("S.user={id:'owner',admin:false};S.today='2026-11-06';S.fileArchives=[];S.meetings=[{id:'m',projectId:'p',title:'会议',createdBy:'owner',revision:3},{id:'other',projectId:'p',title:'其他会议'}];S.files=[{id:'f',projectId:'p',name:'note.md',uploader:'owner'}];UI.view='projects';UI.space='p';toast=x=>messages.push(x);renderProjects=()=>{};renderProjectNav=()=>{};refresh=onRefresh;closeModal=onClose;meetingStopLive=onStop;var project={id:'p',owner:'owner',status:'active'}");
+  return {a,calls,messages,nodes,setConfirm:v=>confirmed=v,closes:()=>closes,stops:()=>stops,refreshes:()=>refreshes};
+}
+test('meeting and file rows expose deletion only to authorized active-project users',()=>{
+  const a=app();a.run("S.today='2026-11-06';S.fileArchives=[];S.user={id:'owner',admin:false};S.files=[{id:'f',projectId:'p',name:'note.md',uploader:'uploader'}];S.meetings=[{id:'m',projectId:'p',title:'周会',createdBy:'creator'}];var p={id:'p',owner:'owner',status:'active'}");
+  assert.match(a.run('projectMeetingList(p)'),/data-delete-meeting="m"[^>]*>删除<\/button>/);
+  assert.match(a.run('projectFiles(p)'),/aria-label="删除文件 note.md">删除<\/button>/);
+  assert.doesNotMatch(a.run('projectMeetingList(p)'),/<button[^>]*class="meeting-row"[^]*?<button[^]*?<\/button><\/button>/);
+  a.run("S.user={id:'member'}");assert.doesNotMatch(a.run('projectMeetingList(p)'),/data-delete-meeting/);assert.doesNotMatch(a.run('projectFiles(p)'),/class="text-btn file-delete"/);
+  a.run("S.user={id:'creator'}");assert.match(a.run('projectMeetingList(p)'),/data-delete-meeting/);
+  a.run("S.user={id:'uploader'}");assert.match(a.run('projectFiles(p)'),/class="text-btn file-delete"/);
+  a.run("S.user={id:'admin',admin:true};S.fileArchives=[{id:'p'}]");assert.doesNotMatch(a.run('projectMeetingList(p)'),/data-delete-meeting/);assert.doesNotMatch(a.run('projectFiles(p,true)'),/class="text-btn file-delete"/);
+});
+test('cancelling content deletion sends no requests and does not stop recording',async()=>{
+  const h=contentDeleteApp();h.setConfirm(false);h.a.run("meetingLive.meetingId='m'");
+  assert.equal(await h.a.run("deleteProjectMeeting(project,'m')"),false);assert.equal(await h.a.run("deleteProjectFile(project,'f')"),false);
+  assert.equal(h.calls.length,0);assert.equal(h.stops(),0);assert.equal(h.a.run('S.meetings.length'),2);assert.equal(h.a.run('S.files.length'),1);
+});
+test('deleting a recording flushes its final revision and clears only its own editor',async()=>{
+  const h=contentDeleteApp();h.nodes['#meetingEditor']={dataset:{meetingId:'m',dirty:'true'},innerHTML:'current editor'};h.a.run("meetingLive.meetingId='m'");
+  assert.equal(await h.a.run("deleteProjectMeeting(project,'m')"),true);assert.equal(h.stops(),1);assert.equal(h.calls[0].data.expectedRevision,4);
+  assert.equal(h.nodes['#meetingEditor'].dataset.dirty,'false');assert.deepEqual(h.a.json('S.meetings.map(x=>x.id)'),['other']);
+  const other=contentDeleteApp();other.nodes['#meetingEditor']={dataset:{meetingId:'other',dirty:'true'},innerHTML:'unsubmitted draft'};
+  await other.a.run("deleteProjectMeeting(project,'m')");assert.equal(other.nodes['#meetingEditor'].innerHTML,'unsubmitted draft');assert.equal(other.nodes['#meetingEditor'].dataset.dirty,'true');
+});
+test('failed deletion keeps the content and draft and can be retried',async()=>{
+  const h=contentDeleteApp();h.nodes['#meetingEditor']={dataset:{meetingId:'m',dirty:'true'},innerHTML:'draft'};h.a.context.button={disabled:false};
+  h.a.context.fetch=async()=>({ok:false,text:async()=>'{"error":"会议已变化"}'});
+  assert.equal(await h.a.run("deleteProjectMeeting(project,'m',button)"),false);assert.equal(h.a.run('S.meetings.length'),2);assert.equal(h.nodes['#meetingEditor'].innerHTML,'draft');assert.equal(h.a.context.button.disabled,false);assert.equal(h.messages.at(-1),'会议已变化');assert.equal(h.refreshes(),1);
+  h.a.context.fetch=async()=>({ok:true,text:async()=>'{"deleted":true}'});assert.equal(await h.a.run("deleteProjectMeeting(project,'m',button)"),true);
+});
+test('repeated delete clicks share one pending action and late results leave a switched account alone',async()=>{
+  const h=contentDeleteApp();let finish;h.a.context.fetch=async(url,options)=>{h.calls.push(JSON.parse(options.body));return new Promise(r=>finish=r)};
+  const pending=h.a.run("deleteProjectMeeting(project,'m')");assert.equal(await h.a.run("deleteProjectMeeting(project,'m')"),false);assert.equal(h.calls.length,1);
+  h.a.run("S.user={id:'new-account'};S.meetings=[{id:'new-account-meeting'}]");finish({ok:true,text:async()=>'{"deleted":true}'});await pending;
+  assert.deepEqual(h.a.json('S.meetings.map(x=>x.id)'),['new-account-meeting']);assert.equal(h.closes(),0);
+});
+test('file deletion closes its own viewer once and keeps another open draft',async()=>{
+  const h=contentDeleteApp();h.nodes['#mdFileEditor']={dataset:{fileId:'f'}};h.a.run('UI.docDirty=true');
+  assert.equal(await h.a.run("deleteProjectFile(project,'f')"),true);assert.equal(h.closes(),1);assert.equal(h.a.run('UI.docDirty'),false);assert.equal(h.a.run('S.files.length'),0);
+  const other=contentDeleteApp();other.nodes['#mdFileEditor']={dataset:{fileId:'another-file'}};other.a.run('UI.docDirty=true');
+  await other.a.run("deleteProjectFile(project,'f')");assert.equal(other.closes(),0);assert.equal(other.a.run('UI.docDirty'),true);
+});
+test('a Markdown response cannot reopen a file removed while its read was pending',async()=>{
+  const {a,opened}=markdownFileApp();let finish;a.context.fetch=()=>new Promise(r=>finish=r);
+  const pending=a.run("openMarkdownFile({id:'p',name:'project',owner:'owner'},'f')");a.run('S.files=[]');
+  finish({ok:true,text:async()=> 'DELETED FILE'});await pending;assert.equal(opened.length,0);
+});
+test('the first meeting save reveals deletion without reopening the editor',async()=>{
+  const {a,nodes}=meetingApp();let hidden;
+  nodes['#deleteMeeting']={classList:{toggle:(name,on)=>{if(name==='hidden')hidden=on}}};
+  a.run("S.user={id:'owner'};openMeetingEditor({id:'p1',name:'项目',owner:'owner',status:'active'})");nodes['#meetingTitle'].value='新会议';
+  assert.equal(hidden,true);await nodes['#saveMeeting'].onclick();assert.equal(hidden,false);assert.equal(nodes['#saveMeeting'].textContent,'保存会议');
+});
+
+test('a recording flush failure prevents deletion and preserves the meeting',async()=>{
+  const h=contentDeleteApp();h.a.run("meetingLive.meetingId='m';meetingStopLive=async()=>{throw Error('原稿保存失败')}");
+  assert.equal(await h.a.run("deleteProjectMeeting(project,'m')"),false);assert.equal(h.calls.length,0);assert.equal(h.a.run('S.meetings.length'),2);assert.equal(h.messages.at(-1),'原稿保存失败');
+});
+test('a denied file deletion preserves the open unsaved file',async()=>{
+  const h=contentDeleteApp();h.nodes['#mdFileEditor']={dataset:{fileId:'f'}};h.a.run('UI.docDirty=true');h.a.context.button={disabled:false};
+  h.a.context.fetch=async()=>({ok:false,text:async()=>'{"error":"无权删除"}'});
+  assert.equal(await h.a.run("deleteProjectFile(project,'f',button)"),false);assert.equal(h.a.run('S.files.length'),1);assert.equal(h.closes(),0);assert.equal(h.a.run('UI.docDirty'),true);assert.equal(h.a.context.button.disabled,false);
+});
+
 test('weekly report includes completed standalone tasks without requiring a completed project',()=>{
   const a=app();a.run("S.today='2026-11-06'");const html=a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{completedTasks:[{taskId:'temp',name:'整理六家报价',projectId:null,description:'核对价格口径',completedOn:'2026-11-03',assigneeName:'小王',summary:'已完成报价对齐',actual:45,feeling:'困难',followup:'需要复核'}]}})`);
   const done=html.split('这周做了什么')[1].split('还有什么没做')[0];
@@ -3186,4 +3257,27 @@ test('weekly completed tasks can belong to an unfinished project without closing
 test('weekly task summaries and feedback are escaped and missing records are honest',()=>{
   const a=app();const html=a.run(`weekReportDocument({start:'2026-10-31',end:'2026-11-06',work:{completedTasks:[{projectId:'p',projectName:'<img>',name:'<script>任务</script>',description:'<svg>',completedOn:'2026-11-03',summary:'<iframe>',feeling:'<b>',followup:'<u>'},{projectId:null,name:'无总结任务',completedOn:'2026-11-04'}]}})`);
   assert.doesNotMatch(html,/<img>|<script>|<svg>|<iframe>|<u>/);assert.match(html,/&lt;script&gt;任务&lt;\/script&gt;/);assert.match(html,/&lt;iframe&gt;/);assert.match(html,/&lt;u&gt;/);assert.match(html,/未填写完成总结/);
+});
+
+
+test('Markdown modal close ignores a duplicate cancel button in a hidden meeting pane',async()=>{
+  const {a,nodes}=markdownFileApp();let closed=0;const background=()=>{};
+  nodes['#cancelAction']={onclick:background};nodes['#modalContent #cancelAction']={};
+  a.context.fetch=async()=>({ok:true,text:async()=> 'markdown'});a.context.onClosed=()=>closed++;a.run('closeModal=onClosed');
+  await a.run("openMarkdownFile({id:'p',name:'project',owner:'owner'},'f')");
+  assert.equal(nodes['#cancelAction'].onclick,background);assert.equal(typeof nodes['#modalContent #cancelAction'].onclick,'function');
+  nodes['#modalContent #cancelAction'].onclick();assert.equal(closed,1);
+});
+test('meeting modal binds save and deletion to its own controls instead of a hidden pane',async()=>{
+  const {a,nodes,calls}=meetingApp(),modal={};
+  for(const id of ['meetingTitle','meetingScheduledAt','meetingParticipants','meetingAgenda','meetingTranscript','saveMeeting','generateMeetingMinutes','meetingLiveBtn','meetingLiveState','cancelAction','meetingMinutes'])modal['#'+id]={value:'',isConnected:true,addEventListener(){},dataset:{}};
+  const oldDelete=()=>{},oldClose=nodes['#cancelAction'].onclick;
+  nodes['#deleteMeeting']={onclick:oldDelete};modal['#deleteMeeting']={classList:{toggle(){}}};
+  nodes['#meetingEditor']={id:'meetingEditor',dataset:{meetingId:'background',dirty:'false'},innerHTML:'background'};
+  nodes['#modalContent']={id:'modalContent',dataset:{},querySelector:s=>modal[s]};
+  a.run("S.user={id:'owner'};UI.space='p1';UI.spaceArea='files';S.meetings=[{id:'m',projectId:'p1',createdBy:'owner',rawTranscript:'',minutes:''}];openMeetingEditor({id:'p1',name:'project',owner:'owner',status:'active'},'m')");
+  assert.equal(nodes['#deleteMeeting'].onclick,oldDelete);assert.equal(nodes['#cancelAction'].onclick,oldClose);
+  assert.equal(typeof modal['#deleteMeeting'].onclick,'function');assert.equal(typeof modal['#cancelAction'].onclick,'function');
+  modal['#meetingTitle'].value='modal title';await modal['#saveMeeting'].onclick();
+  assert.equal(calls.at(-1).data.title,'modal title');assert.equal(nodes['#meetingEditor'].innerHTML,'background');
 });
