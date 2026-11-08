@@ -2947,6 +2947,32 @@ test('tour Tab and Shift-Tab wrap within its buttons',()=>{
   for(const [index,shiftKey] of [[1,false],[0,true]]){h.a.context.document.activeElement=h.buttons[index];h.a.context.event={key:'Tab',shiftKey,target:{},preventDefault(){},stopPropagation(){}};h.a.run('tourKey(event)')}
   assert.deepEqual(focused,[0,1]);
 });
+test('tour steps reference real demos, try steps name a target, and keys render escaped',()=>{
+  const a=app();
+  assert.deepEqual(a.json("TOUR.filter(s=>s.demo&&!GUIDE_DEMOS[s.demo]).map(s=>s.title)"),[]);
+  assert.deepEqual(a.json("TOUR.filter(s=>s.try&&!s.target).map(s=>s.title)"),[]);
+  assert.equal(a.run("tourText('按 [[N]] 或 <b>')"),'按 <kbd>N</kbd> 或 &lt;b&gt;');
+});
+test('a 试一试 step advances only when the lit control itself is clicked',()=>{
+  const a=app(),timers=[];a.context.setTimeout=fn=>{timers.push(fn);return timers.length};a.context.matchMedia=()=>({matches:false});a.context.document={querySelector:()=>null,querySelectorAll:()=>[],removeEventListener(){}};a.context.window={removeEventListener(){}};
+  const moves=[];a.context.moves=moves;const inside={},outside={};
+  a.context.target={contains:el=>el===inside};a.context.inside=inside;a.context.outside=outside;
+  a.run("tour={i:2,try:true,tried:false,target};tourShow=(i,dir)=>moves.push([i,dir])");
+  a.run('tourTried({target:outside})');assert.equal(timers.length,0);
+  a.run('tourTried({target:inside})');a.run('tourTried({target:inside})');assert.equal(timers.length,1);
+  timers[0]();assert.deepEqual(JSON.parse(JSON.stringify(moves)),[[3,1]]);
+  a.run("tour={i:4,try:false,tried:false,target}");a.run('tourTried({target:inside})');assert.equal(timers.length,1);
+});
+test('leaving a step runs its cleanup once, and finishing the tour returns to where it began',()=>{
+  const a=app(),calls=[];a.context.calls=calls;a.context.document={querySelector:()=>null,querySelectorAll:()=>[],removeEventListener(){}};a.context.window={removeEventListener(){}};
+  a.run("tour={i:0,entered:true,steps:[{leave:()=>calls.push('leave')}]};tourLeave();tourLeave()");
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)),['leave']);
+  const views=[];a.context.views=views;a.context.localStorage={setItem(){}};
+  a.run("S.user={id:'u'};switchView=v=>views.push(v);toast=()=>{};UI.filter='doing';UI.selectedWeek=2");
+  a.run("tour={i:0,steps:[{}],owner:'u',from:{view:'archive',filter:'all',week:0},background:[]};endTour()");
+  assert.deepEqual(JSON.parse(JSON.stringify(views)),['archive']);assert.equal(a.run('UI.filter'),'all');assert.equal(a.run('UI.selectedWeek'),0);
+});
+
 test('project rail resize is available on tablet and reserves content space down to the phone breakpoint',()=>{
   const a=app();a.context.window={innerWidth:1000};assert.equal(a.run("navigationResizeEnabled('project')"),true);
   a.context.window.innerWidth=760;assert.equal(a.run("navigationResizeEnabled('project')"),false);

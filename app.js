@@ -3471,7 +3471,7 @@ const GUIDE=[
     ['三种角色',['superadmin：系统所有者，负责系统配置、账户管理、审批与调度，不执行任务。','管理员：管理全部项目与任务、审批申请、查看成果库和账户列表，不执行任务。','普通成员：处理分给自己的任务，按所在规则组新建项目或任务，参与被加入的项目。'],'list'],
     ["三种角色能做什么",[["操作", "superadmin", "管理员", "普通成员"], ["执行任务、记录完成", "不执行任务", "不执行任务", "仅分给自己的任务"], ["新建项目 / 任务", "直接创建", "直接创建", "按所在规则组"], ["审批申请", "可以", "可以", "项目 Owner 审批自己项目的申请"], ["查看成果库、账户列表", "可以", "可以", "看不到"], ["添加、停用账户或重置密码", "可以", "不可以", "不可以"], ["规则组、删除账户", "可以", "不可以", "看不到"]],"table"],
     ['你的资料',['点左上角的头像打开账户菜单。','「个人资料」里可以改昵称、头像（选择图片 / 移除）和个性签名；中文名由 superadmin 设置。','「修改密码」需要输入当前密码，新密码至少 6 位，改完后其他设备会退出登录。','「登录其他账户」切换到另一个账户；「退出登录」结束本设备的登录。']],
-    ['第一次进来',['第一次登录会自动开始约 2 分钟的导览，逐个点亮界面上的主要入口。','之后随时可以在「使用教程」页顶部点「开始导览」重看。'],'list'],
+    ['第一次进来',['第一次登录会自动开始约 3 分钟的导览，逐个点亮界面上的主要入口；标着「试一试」的步骤可以直接点一下看效果。','之后随时可以在「使用教程」页顶部点「开始导览」重看。'],'list'],
     ["常见问题",[["忘记密码怎么办？", "请 superadmin 在「账户管理」里为你重置密码，登录后再到「修改密码」换成自己的。"], ["为什么我的中文名改不了？", "中文名用在日报、成员列表等正式场合，由 superadmin 统一设置；你可以改昵称。"], ["换了电脑要重新登录吗？", "要。每台设备单独登录，登录状态保留 7 天；改密码后所有设备都需要重新登录。"]],"faq"],
   ]},
   {id:'layout',title:'界面与导航',icon:'layout-grid',demo:'layout',lead:'左侧导航、顶栏和常用入口在哪里。',parts:[
@@ -3640,28 +3640,36 @@ function renderGuide(){
   bindGuideDemos(box);
 }
 /* 导览: a guided walk through the real interface. Each step opens its page,
-   lights up one control and explains it beside it; the light glides from
-   control to control. Esc leaves, ← → turn the page. It runs once per account
-   on first visit and any time from 使用教程. */
+   lights up one control and explains it beside it, with a short animation of
+   what that control does. Steps marked `try` let the person click the lit
+   control for real; the tour moves on once they have. Esc leaves, ← → turn the
+   page, and the chapter names jump. It runs once per account on first visit and
+   any time from 使用教程; it ends where it began. */
+const myOpenTask=()=>S.tasks.find(t=>t.assignee===S.user?.id&&['todo','doing'].includes(t.status)&&!isSuperseded(t))
+  ||S.tasks.find(t=>t.assignee===S.user?.id&&!isSuperseded(t));
 const TOUR=[
-  {ch:'开始',title:'欢迎来到战略小组台账',body:'两分钟走一遍主线：安排任务 → 跟进项目 → 处理收件箱 → 写档案。随时按 Esc 或点「跳过」退出，← → 键也能翻页。'},
-  {ch:'今天',view:'today',target:'#addTaskBtn',title:'新建任务',body:'按 N 或点这里。选项目任务、临时任务或固定任务，再定负责人、日期、时间和时长。所在规则组需要审批时，这里会显示「申请任务」。'},
-  {ch:'今天',view:'today',target:'.daily-progress',title:'今天做到哪了',body:'今日进度按已完成的任务计算。右上角的箭头可以前后翻一天。'},
-  {ch:'今天',view:'today',target:'.quick-tabs',title:'全部 · 待处理 · 已完成',body:'切换下面列表的范围。点任何一张任务卡打开详情：开始、记录完成、申请修改、递延都在那里。没做完的任务第二天会自动递延。'},
-  {ch:'今天',target:'.sidebar-section',title:'快捷筛选',body:'P0 重要任务、进行中、已递延：点一下就跳到今日任务，只列出这一类。'},
-  {ch:'周视图',view:'calendar',target:'#weekCarousel',title:'一周的安排',body:'七天一列，左右箭头翻周，点某一天看当天全部任务。'},
-  {ch:'项目',view:'projects',prep:()=>openProjectSpace(''),target:'#projectNav',title:'项目目录',body:'文件夹 → 项目 → 会议和文件。点项目左边的箭头展开它的会议和文件；有权限的人可以拖动排序、把项目拖进文件夹。拖右边缘调宽窄，点顶部箭头收起。'},
-  {ch:'项目',view:'projects',target:'#projectGrid',title:'全部项目',body:'每个项目一张卡：进度、成员、截止日期和你在其中的待办。点卡片进入项目。'},
-  {ch:'项目',view:'projects',prep:()=>{const p=visibleProjects()[0];if(p&&UI.space!==p.id)openProjectSpace(p.id)},target:'#projectSpace .space-tabs',title:'一个项目里',body:'任务、会议、文件、成员、概况五个标签。在目录里点会议或文件，会直接切到对应的标签。'},
-  {ch:'项目',view:'projects',target:'#projectActions',title:'项目的操作',body:'主按钮是新建任务；项目设置、完成项目、退出项目和删除项目都收在「更多」里。'},
-  {ch:'收件箱',view:'inbox',target:'#inboxList',title:'收件箱',body:'指派、审批、邀请、@ 你的消息都在这里。需要你处理的通知上直接有同意、驳回、接受等按钮。'},
-  {ch:'沟通',target:'#chatEntryBtn',title:'沟通区',body:'团队频道和每个项目各自的频道。输入 @ 提到成员，@所有人 会通知整个频道。'},
-  {ch:'档案',view:'archive',target:'#archiveView .page-intro',title:'档案室',body:'每天的档案：今日完成、未完成与阻塞、明日计划和随记。管理员在这里看团队日报和周报。'},
-  {ch:'助手',target:'#agentBtn',title:'AI 助手',body:'用一句话查询或安排工作。规划模式会起草任务和项目卡片，你逐张确认后才会生效。'},
-  {ch:'助手',target:'#pipBtn',title:'桌面小组件',body:'悬浮在桌面上的今日待办和番茄钟，勾选就记为完成。'},
-  {ch:'助手',target:'.topbar [aria-label="搜索"]',title:'搜索与快捷键',body:'按 / 搜任务和项目，按 ? 查看全部快捷键。'},
-  {ch:'设置',view:'settings',admin:true,target:'#settingsNav',title:'系统设置',body:'规则组、日程、补报、会议纪要提示词和 AI 模型都在这里，修改对全员生效。'},
-  {ch:'完成',target:'.nav-item[data-view="guide"]',title:'就这些',body:'每个功能的详细说明都在「使用教程」里，按 H 打开；也可以在那里重新开始这段导览。'},
+  {ch:'开始',title:'欢迎来到战略小组台账',body:'三分钟走一遍主线：安排任务 → 跟进项目 → 处理收件箱 → 写档案。标着「试一试」的步骤可以直接点亮起来的地方，看它真的怎么动。随时按 [[Esc]] 退出，[[←]] [[→]] 翻页。'},
+  {ch:'今天',view:'today',target:'#addTaskBtn',demo:'new-task',title:'新建任务',body:'按 [[N]] 或点这里。填好名称、负责人、日期和时长，任务立刻出现在对方的今日任务里，对方收到通知。所在规则组需要审批时，按钮会变成「申请任务」。'},
+  {ch:'今天',view:'today',target:'.quick-tabs',try:'点「待处理」，列表只留下还没做完的',title:'全部 · 待处理 · 已完成',body:'这三个标签切换下面列表的范围，上面的今日进度按已完成的任务计算。'},
+  {ch:'今天',view:'today',prep:()=>{const t=myOpenTask();if(t&&$('#taskDrawer').classList.contains('hidden'))openDrawer(t.id)},leave:()=>closeDrawer(),
+    target:'#taskDrawer .drawer-actions',demo:'task-life',title:'任务详情',
+    body:()=>`点任何一张任务卡都会打开这样的详情，这是你的「${myOpenTask()?.name||'任务'}」。到点自动开始；做完点「记录完成」，写一句总结和实际耗时。完成不需要审批。`},
+  {ch:'今天',target:'.sidebar-section',try:'点「进行中」，只看正在做的任务',title:'快捷筛选',body:'P0 重要任务、进行中、已递延：点一下跳到今日任务，只列出这一类；再点一次回到全部。'},
+  {ch:'周视图',view:'calendar',target:'#weekCarousel',demo:'defer',title:'一周的安排',body:'七天一列，点某一天看当天的全部任务。当天没做完的，过了零点自动递延到第二天，卡片上写着「由某日递延 · 第 N 次」。'},
+  {ch:'周视图',view:'calendar',target:'.week-nav',try:'点右边的箭头，翻到下一周',title:'翻周',body:'左右箭头前后翻一周，「本周」回到今天所在的这一周。'},
+  {ch:'项目',view:'projects',prep:()=>{if(UI.space)openProjectSpace('')},target:'#projectNav',demo:'tree',try:'点一个项目，它会在右边打开',title:'项目目录',body:'文件夹装着项目，项目下面是会议和文件。选中的那一行有块底色，换选时它会滑过去。拖右边缘调宽窄，点顶部的箭头收起。'},
+  {ch:'项目',view:'projects',prep:()=>{const p=visibleProjects()[0];if(p&&!UI.space)openProjectSpace(p.id)},target:'#projectSpace .space-tabs',try:'点「文件」标签',title:'一个项目里',body:'任务、会议、文件、成员、概况五个标签。换到另一个项目时，停留在同一个标签上。'},
+  {ch:'项目',view:'projects',target:'#projectActions',demo:'project-life',title:'项目从开始到结项',body:'主按钮是新建任务；项目设置、完成项目、退出项目和删除项目都收在「更多」里。Owner 提交结项报告，管理员同意后项目进入成果库。'},
+  {ch:'收件箱',view:'inbox',target:'#inboxList .inbox-item, #inboxList',demo:'approval',title:'收件箱',body:'指派、审批、@ 你的消息都在这里。需要你处理的申请上直接有「同意」「驳回」，驳回时要写原因。'},
+  {ch:'沟通',view:'chat',target:'#chatForm',demo:'chat',title:'沟通区',body:'团队频道和每个项目各自的频道。输入 @ 选成员，对方会收到通知；@所有人 通知整个频道。'},
+  {ch:'档案',view:'archive',target:'#archiveView .page-intro',demo:'archive',title:'档案室',body:'系统每晚把你当天的完成和未完成整理进档案，你补上明日计划和随记；管理员在这里看团队日报和周报。'},
+  {ch:'助手',target:'#agentBtn',try:'点一下，打开助手',title:'AI 助手',body:'用一句话查询或安排工作，比如「今天有哪些任务要交」。'},
+  {ch:'助手',prep:()=>{if($('#agentPanel')?.classList.contains('hidden'))$('#agentBtn')?.click()},leave:()=>{if(!$('#agentPanel')?.classList.contains('hidden'))$('#agentCloseBtn')?.click()},
+    target:'#agentPlanBtn, #agentForm',demo:'assistant',title:'规划模式',body:'说一句要安排的事，助手起草几张任务卡片：谁、哪天、多久。你逐张检查后接受，确认前不会改动任何数据。'},
+  {ch:'助手',target:'#pipBtn',demo:'widget',title:'桌面小组件',body:'悬浮在桌面最前面的今日待办和番茄钟，勾选就记为完成。'},
+  {ch:'助手',target:'.topbar [aria-label="搜索"]',demo:'search',title:'搜索与快捷键',body:'按 [[/]] 搜任务和项目，[[N]] 新建任务，[[?]] 查看全部快捷键。'},
+  {ch:'设置',view:'settings',admin:true,target:'#settingsNav',demo:'rules',title:'系统设置',body:'规则组决定谁能直接创建、谁要审批；还有日程、补报、会议纪要提示词和 AI 模型，修改对全员生效。'},
+  {ch:'完成',target:'.nav-item[data-view="guide"]',title:'就这些',body:'每个功能的详细说明和演示都在「使用教程」里，按 [[H]] 打开；也可以在那里重新开始这段导览。'},
 ];
 const TOUR_KEY='wc-tour-done';
 let tour=null,tourOfferTimer=0;
@@ -3685,30 +3693,44 @@ function startTour(){
   if(tour||!S.user||document.body.classList.contains('auth-locked')||tourBusy())return;
   cancelTourOffer();
   const steps=TOUR.filter(s=>!s.admin||S.user?.admin);
-  tour={i:0,steps,owner:S.user.id,returnFocus:document.activeElement,
+  tour={i:0,steps,owner:S.user.id,returnFocus:document.activeElement,from:{view:UI.view,filter:UI.filter,week:UI.selectedWeek},
     background:[...document.body.children].map(el=>({el,inert:el.inert}))};
-  tour.background.forEach(({el})=>el.inert=true);
+  tourInert(true);
   const veil=document.createElement('div');veil.id='tourVeil';veil.className='tour-veil';
   veil.setAttribute('role','dialog');veil.setAttribute('aria-modal','true');veil.setAttribute('aria-labelledby','tourTitle');
-  veil.innerHTML='<div class="tour-spot"></div><div class="tour-card" tabindex="-1"></div>';
+  veil.innerHTML='<div class="tour-spot"></div>'+['top','right','bottom','left','hole'].map(s=>`<div class="tour-block" data-side="${s}"></div>`).join('')
+    +'<div class="tour-card" tabindex="-1"></div>';
   document.body.appendChild(veil);
-  document.addEventListener('keydown',tourKey,true);document.addEventListener('focusin',tourFocus,true);
+  document.addEventListener('keydown',tourKey,true);document.addEventListener('focusin',tourFocus,true);document.addEventListener('click',tourTried,true);
   window.addEventListener('resize',tourPlace);window.addEventListener('scroll',tourPlace,true);
   tourShow(0,1);
 }
+/* Outside a 试一试 step the page is inert; during one it is live, and the
+   blocks around the light keep every click but the lit control's. */
+function tourInert(on){tour?.background.forEach(({el,inert})=>el.inert=on||inert)}
+function tourLeave(){const step=tour?.steps[tour.i];if(tour?.demoTimer)clearInterval(tour.demoTimer);if(tour?.entered){tour.entered=false;step?.leave?.()}}
 function endTour(markDone=true){
-  if(!tour)return;const ended=tour;tour=null;
-  $('#tourVeil')?.remove();document.removeEventListener('keydown',tourKey,true);document.removeEventListener('focusin',tourFocus,true);
+  if(!tour)return;tourLeave();const ended=tour;tour=null;
+  $('#tourVeil')?.remove();document.removeEventListener('keydown',tourKey,true);document.removeEventListener('focusin',tourFocus,true);document.removeEventListener('click',tourTried,true);
   window.removeEventListener('resize',tourPlace);window.removeEventListener('scroll',tourPlace,true);
   ended.background.forEach(({el,inert})=>el.inert=inert);
-  if(markDone)try{localStorage.setItem(`${TOUR_KEY}:${ended.owner}`,'1')}catch(_){}
+  if(markDone){
+    try{localStorage.setItem(`${TOUR_KEY}:${ended.owner}`,'1')}catch(_){}
+    if(S.user?.id===ended.owner){UI.filter=ended.from.filter;UI.selectedWeek=ended.from.week;switchView(ended.from.view);toast('导览结束，随时可以在「使用教程」里重看')}
+  }
   const focus=ended.returnFocus;
   if(focus?.isConnected&&focus.getClientRects().length&&!focus.closest('[inert]'))focus.focus({preventScroll:true});
   else $('.nav-item.active')?.focus({preventScroll:true});
 }
-function tourFocus(e){if(tour&&!e.target.closest('#tourVeil'))$('#tourVeil .tour-next')?.focus({preventScroll:true})}
+function tourFocus(e){if(tour&&!e.target.closest('#tourVeil')&&!(tour.try&&tour.target?.contains(e.target)))$('#tourVeil .tour-next')?.focus({preventScroll:true})}
+function tourTried(e){
+  if(!tour?.try||tour.tried||!tour.target?.contains(e.target))return;
+  tour.tried=true;const i=tour.i;$('#tourVeil .tour-try')?.classList.add('is-done');
+  setTimeout(()=>{if(tour&&tour.i===i)tourShow(i+1,1)},navReducedMotion()?150:650);
+}
 function tourKey(e){
   if(!tour)return;
+  if(tour.try&&tour.target?.contains(e.target))return;
   e.stopPropagation();
   if(e.key==='Escape'){e.preventDefault();endTour();return}
   if(e.key==='Tab'){
@@ -3721,39 +3743,78 @@ function tourKey(e){
   if(go){e.preventDefault();tourShow(tour.i+go,go)}
 }
 const tourVisible=el=>Boolean(el&&el.getClientRects().length&&getComputedStyle(el).visibility!=='hidden');
+const tourTarget=step=>step?.target?step.target.split(',').map(s=>$(s.trim())).find(tourVisible)||null:null;
+const tourText=s=>escapeHTML(s).replace(/\[\[(.+?)\]\]/g,'<kbd>$1</kbd>');
 function tourShow(i,dir){
   if(!tour)return;
   if(i>=tour.steps.length){endTour();return}
   if(i<0)i=0;
+  if(i!==tour.i||tour.entered)tourLeave();
   const step=tour.steps[i];
   if(step.view&&UI.view!==step.view)switchView(step.view);
-  step.prep?.();
-  const target=step.target?$(step.target):null;
-  if(step.target&&!tourVisible(target)){if(i+dir>=0&&i+dir<tour.steps.length)tourShow(i+dir,dir);else if(dir>0)endTour();return}
-  tour.i=i;tour.target=target;
-  target?.scrollIntoView?.({block:'center',inline:'nearest'});
+  step.prep?.();tour.entered=true;tour.i=i;
+  const target=tourTarget(step);
+  if(step.target&&!target){tourLeave();if(i+dir>=0&&i+dir<tour.steps.length)tourShow(i+dir,dir);else if(dir>0)endTour();return}
+  tour.target=target;tour.try=Boolean(step.try&&target);tour.tried=false;
+  tourInert(!tour.try);
+  tourReveal(target);
   const chapters=[...new Set(tour.steps.map(s=>s.ch))],last=i===tour.steps.length-1;
-  const card=$('#tourVeil .tour-card');if(!card)return;
-  card.innerHTML=`<div class="tour-crumbs">${chapters.map(c=>`<span${c===step.ch?' class="is-on"':''}>${escapeHTML(c)}</span>`).join('<i>·</i>')}</div>`
-    +`<h3 id="tourTitle">${escapeHTML(step.title)}</h3><p>${escapeHTML(step.body)}</p>`
+  const veil=$('#tourVeil'),card=veil?.querySelector('.tour-card');if(!card)return;
+  veil.classList.toggle('is-try',tour.try);
+  card.classList.toggle('has-demo',Boolean(step.demo));
+  card.innerHTML=`<div class="tour-chapters">${chapters.map(c=>`<button type="button" data-tour-ch="${escapeHTML(c)}"${c===step.ch?' class="is-on" aria-current="step"':''}>${escapeHTML(c)}</button>`).join('')}</div>`
+    +`<div class="tour-progress" aria-hidden="true"><i style="width:${((i+1)/tour.steps.length*100).toFixed(1)}%"></i></div>`
+    +`<h3 id="tourTitle">${escapeHTML(step.title)}</h3><p>${tourText(typeof step.body==='function'?step.body():step.body)}</p>`
+    +(tour.try?`<div class="tour-try">${icon('check')}<span><b>试一试</b>${escapeHTML(step.try)}</span></div>`:'')
+    +(step.demo?guideDemoHTML(step.demo).replace('<button type="button" class="text-btn demo-play">暂停</button>',''):'')
     +`<div class="tour-foot"><span class="tour-count">${i+1} / ${tour.steps.length}</span>`
     +`${last?'':'<button type="button" class="text-btn tour-skip">跳过</button>'}<span class="tour-gap"></span>`
     +`${i?'<button type="button" class="secondary-btn tour-prev">上一步</button>':''}`
     +`<button type="button" class="primary-btn tour-next">${i===0?'开始':last?'完成':'下一步'}</button></div>`;
   card.querySelector('.tour-next').onclick=()=>tourShow(tour.i+1,1);
   const prev=card.querySelector('.tour-prev');if(prev)prev.onclick=()=>tourShow(tour.i-1,-1);
-  const skip=card.querySelector('.tour-skip');if(skip)skip.onclick=endTour;
-  requestAnimationFrame(()=>{tourPlace();card.querySelector('.tour-next')?.focus({preventScroll:true})});
+  const skip=card.querySelector('.tour-skip');if(skip)skip.onclick=()=>endTour();
+  card.querySelectorAll('[data-tour-ch]').forEach(b=>b.onclick=()=>{const to=tour.steps.findIndex(s=>s.ch===b.dataset.tourCh);if(to>=0)tourShow(to,to<tour.i?-1:1)});
+  tourDemo(card);tourPlace();
+  setTimeout(()=>{if(tour?.i===i)tourPlace()},300);
+  requestAnimationFrame(()=>{tourPlace();const on=card.querySelector('.tour-chapters .is-on');on?.scrollIntoView?.({block:'nearest',inline:'center'});card.querySelector('.tour-next')?.focus({preventScroll:true})});
+}
+/* Bring the control into view by scrolling the panel it lives in, never the
+   page itself: the shell is fixed, so a scrolled document hides the app. */
+function tourReveal(el){
+  if(!el?.getBoundingClientRect)return;
+  for(let box=el.parentElement;box&&box!==document.body;box=box.parentElement){
+    const style=getComputedStyle(box);if(!/(auto|scroll)/.test(style.overflowY)||box.scrollHeight<=box.clientHeight)continue;
+    const r=el.getBoundingClientRect(),b=box.getBoundingClientRect();
+    if(r.top<b.top||r.bottom>b.bottom)box.scrollTop+=r.height>b.height?r.top-b.top-12:r.top-b.top-(b.height-r.height)/2;
+    break;
+  }
+  const page=document.scrollingElement;if(page&&page.scrollTop)page.scrollTop=0;
+}
+/* The card's demo plays on its own clock; with reduced motion it waits for the dots. */
+function tourDemo(card){
+  const fig=card.querySelector('.guide-demo');if(!fig)return;
+  const n=GUIDE_DEMOS[fig.dataset.demo]?.steps.length||1;
+  fig.querySelectorAll('.demo-dot').forEach((d,k)=>d.onclick=()=>{if(tour?.demoTimer)clearInterval(tour.demoTimer);demoStep(fig,k)});
+  demoStep(fig,0);if(navReducedMotion())return;
+  let held=0;
+  tour.demoTimer=setInterval(()=>{const s=Number(fig.dataset.step);if(s===n-1&&held++<1)return;held=0;demoStep(fig,(s+1)%n)},DEMO_STEP_MS);
 }
 /* The light sits 6px around the control; the card goes below it, above it or
-   beside it, whichever fits, and never leaves the window. */
+   beside it, whichever fits, and never leaves the window. The blocks cover
+   everything but the light. */
 function tourPlace(){
   const veil=$('#tourVeil');if(!tour||!veil)return;
   const spot=veil.querySelector('.tour-spot'),card=veil.querySelector('.tour-card');
+  /* A page that re-renders replaces the lit control; find it again. */
+  if(tour.target&&!tour.target.isConnected)tour.target=tourTarget(tour.steps[tour.i]);
   const vw=window.innerWidth,vh=window.innerHeight,gap=14,margin=16;
   const r=tour.target?.getBoundingClientRect?.();
-  const box=r?{x:r.left-6,y:r.top-6,w:r.width+12,h:r.height+12}:{x:vw/2,y:vh/2,w:0,h:0};
+  let box={x:vw/2,y:vh/2,w:0,h:0};
+  if(r){const x=Math.max(4,r.left-6),y=Math.max(4,r.top-6);box={x,y,w:Math.min(vw-4,r.right+6)-x,h:Math.min(vh-4,r.bottom+6)-y}}
   Object.assign(spot.style,{left:`${box.x}px`,top:`${box.y}px`,width:`${box.w}px`,height:`${box.h}px`});
+  const px=n=>`${Math.max(0,n)}px`,blocks={top:[0,0,vw,box.y],bottom:[0,box.y+box.h,vw,vh-box.y-box.h],left:[0,box.y,box.x,box.h],right:[box.x+box.w,box.y,vw-box.x-box.w,box.h],hole:[box.x,box.y,box.w,box.h]};
+  veil.querySelectorAll('.tour-block').forEach(b=>{const [x,y,w,h]=blocks[b.dataset.side];Object.assign(b.style,{left:px(x),top:px(y),width:px(w),height:px(h)})});
   veil.classList.toggle('is-centered',!r);
   const cw=card.offsetWidth,ch=card.offsetHeight;let x,y;
   if(!r){x=(vw-cw)/2;y=(vh-ch)/2}
