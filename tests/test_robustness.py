@@ -29,14 +29,14 @@ class RobustnessTests(unittest.TestCase):
 
     def test_an_open_task_with_a_pending_approval_that_cannot_carry_closes_it(self):
         yesterday = (self.today - timedelta(days=1)).isoformat()
-        project = self.store.put('projects', {'name': '已到期', 'owner': 'test001', 'creator': 'test001', 'status': 'active',
+        project = self.store.put('projects', {'name': '已暂停', 'owner': 'test001', 'creator': 'test001', 'status': 'paused',
                                               'members': {'test001': 'accepted'}, 'start': yesterday, 'end': yesterday})
         self.store.put('tasks', {'id': 'wait', 'name': '待批的任务', 'desc': '', 'projectId': project['id'], 'assignee': 'test001',
                                  'status': 'todo', 'date': yesterday, 'approval': {'status': 'pending', 'approver': 'superadmin'}})
         self.run_scheduler()
         task = self.store.get('tasks', 'wait')
         self.assertEqual(task['status'], 'skipped')
-        self.assertEqual(task['approval']['status'], 'expired', '项目结束、无法递延时审批随之关闭')
+        self.assertEqual(task['approval']['status'], 'expired', '项目暂停、无法递延时审批随之关闭')
         self.assertTrue(any(n['to'] == 'superadmin' and n['title'] == '任务审批已关闭' for n in self.store.all('notifications')))
 
     def test_an_overdue_task_whose_project_is_gone_does_not_stop_the_scheduler(self):

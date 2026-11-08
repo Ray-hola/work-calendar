@@ -183,14 +183,17 @@ test('long projects extend the shared axis; open projects retain no actual end',
   assert.equal(model.rows[1].offset+model.rows[1].span, model.days);
 });
 
-test('finished, archived, and expired projects are removed from timeline rows', () => {
+test('finished and archived projects leave the timeline; an overdue one stays until it is closed', () => {
   const a = app();
+  a.run("S.today='2026-09-12'");
   const model = a.json(`timelineModel([
     {id:'done',name:'已完成',status:'done',start:'2026-08-01',end:'2026-08-20'},
     {id:'archived',name:'已归档',status:'archived',start:'2026-07-01',end:'2026-07-05'},
     {id:'expired',name:'已过期',status:'active',start:'2026-08-01',end:'2026-08-05'}
   ],'2026-09-12')`);
-  assert.deepEqual(model.rows, []);
+  assert.deepEqual(model.rows.map(r=>r.project?.id||r.id), ['expired']);
+  assert.equal(a.run(`projectStatus({status:'active',end:'2026-09-06'})`), '已逾期 6 天');
+  assert.equal(a.run(`projectStatus({status:'active',end:'2026-09-12'})`), '进行中', '截止当天还不算逾期');
 });
 
 test('bad/reversed/missing dates have no misleading bar; empty state has a valid horizon', () => {

@@ -75,7 +75,8 @@ class ContentDeletionTests(unittest.TestCase):
         self.assertEqual(denied.exception.status, 403)
 
     def test_done_archived_or_expired_project_content_stays_readonly(self):
-        for change in ({'status': 'done'}, {'status': 'archived'}, {'end': (now().date() - timedelta(days=1)).isoformat()}):
+        # A project past its end date is still running (overdue), so only closed ones are frozen.
+        for change in ({'status': 'done'}, {'status': 'archived'}):
             self.store.put('projects', {**self.project, **change}); self.store.db.commit()
             for user in ('owner01', 'member1', 'superadmin'):
                 for action, record in (('meeting.delete', self.meeting), ('file.delete', self.file)):

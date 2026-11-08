@@ -3379,6 +3379,22 @@ select {
   padding: 4px 6px;
 }
 
+.project-status.is-overdue {
+  color: var(--danger);
+  background: rgba(190, 79, 62, .1);
+}
+
+.beyond-chip {
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--danger);
+  background: rgba(190, 79, 62, .1);
+  white-space: nowrap;
+}
+
 .project-card p {
   font-size: 12px;
   color: var(--muted);

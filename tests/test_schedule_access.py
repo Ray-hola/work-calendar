@@ -304,7 +304,7 @@ class ScheduleAccessTests(unittest.TestCase):
             self.store.action(self.admin, 'account.toggle', {'id': 'missing', 'active': False})
         self.assertEqual(error.exception.status, 404)
 
-    def test_ended_projects_and_their_tasks_are_hidden_from_every_account(self):
+    def test_overdue_projects_stay_in_view_and_closed_ones_are_hidden(self):
         project = self.store.action(self.admin, 'project.create', {
             'name': 'expired', 'owner': 'test001', 'start': '2026-09-01',
             'end': '2026-09-05', 'cycle': 'range',
@@ -314,9 +314,10 @@ class ScheduleAccessTests(unittest.TestCase):
                                  'duration': 30, 'priority': 'P1', 'status': 'todo',
                                  'fixed': False, 'type': '通用'})
         self.store.db.commit()
+        # Past its end date the project is overdue, not closed: it stays in view.
         for actor in (self.admin, self.store.user('test001')):
-            self.assertNotIn(project['id'], [p['id'] for p in self.store.snapshot(actor)['projects']])
-            self.assertFalse(any(t.get('projectId') == project['id'] for t in self.store.snapshot(actor)['tasks']))
+            self.assertIn(project['id'], [p['id'] for p in self.store.snapshot(actor)['projects']])
+            self.assertTrue(any(t.get('projectId') == project['id'] for t in self.store.snapshot(actor)['tasks']))
         done = self.store.action(self.admin, 'project.create', {'name': 'done', 'owner': 'test001'})
         self.store.action(self.admin, 'project.update', {'id': done['id'], 'status': 'done'})
         self.assertNotIn(done['id'], [p['id'] for p in self.store.snapshot(self.admin)['projects']])
@@ -1632,17 +1633,14 @@ class ProjectSpaceTests(unittest.TestCase):
         self.assertEqual(state['fileArchives'], [])
         self.assertIn(project['id'], {p['id'] for p in state['projects']})
 
-    def test_expired_and_archived_projects_keep_their_attachments(self):
+    def test_closed_projects_keep_their_attachments(self):
         owner, outsider = self.store.user('test001'), self.store.user('test003')
-        for state in ('expired', 'archived'):
+        for state in ('archived', 'done'):
             project = self.store.action(self.admin, 'project.create', {
                 'name': state, 'owner': 'test001', 'members': [], 'start': self.day,
             })
             file = self.store.upload_file(owner, project['id'], '记录.txt', 'text/plain', b'record')
-            if state == 'expired':
-                project['end'] = (date.fromisoformat(self.day) - timedelta(days=1)).isoformat()
-            else:
-                project['status'] = 'archived'
+            project['status'] = state
             self.store.put('projects', project)
             self.store.db.commit()
             self.assertEqual(self.store.read_file(owner, file['id'])[1], b'record')

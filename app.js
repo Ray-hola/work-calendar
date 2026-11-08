@@ -919,7 +919,7 @@ function projectSummaryHTML(p){
   return `<article class="project-card project-summary${fresh?' is-new':''}" data-project="${escapeHTML(p.id)}"`
     +` data-fresh="${fresh?escapeHTML(p.id):''}"><div class="summary-head"><h3><button type="button" class="project-title-link"`
     +` data-open-project="${escapeHTML(p.id)}">${escapeHTML(p.name)}</button></h3>${fresh?'<span class="new-chip">新</span>':''}`
-    +`<span class="project-status">${projectStatus(p)}</span></div>`
+    +`<span class="project-status${projectOverdue(p)?' is-overdue':''}">${projectStatus(p)}</span></div>`
     +`<p class="summary-desc">${escapeHTML(p.desc||'暂无描述')}</p>`
     +`<div class="summary-progress"><div class="progress"><i style="width:${pct}%"></i></div>`
     +`<span>${tasks.length?`${personal?'我的任务':'项目'} ${done}/${tasks.length} 完成`:'暂无任务'}</span></div>`
@@ -1648,7 +1648,7 @@ function renderProjectSpace(id){
   const pct=work.length?Math.round(done/work.length*100):0;
   const panel=(key,html)=>keys.includes(key)?`<div class="space-panel" role="tabpanel" id="spacePanel-${key}" aria-labelledby="spaceTab-${key}"`
     +`${key===tab?'':' hidden'}>${html}</div>`:'';
-  const factsHTML=`<span class="project-status">${projectStatus(p)}</span>`
+  const factsHTML=`<span class="project-status${projectOverdue(p)?' is-overdue':''}">${projectStatus(p)}</span>`
     +`<span class="space-owner">${avatarHTML(p.owner)}${escapeHTML(nameOf(p.owner))}</span>`
     +(archive?'':`<span>${p.start?escapeHTML(fmt(p.start)):'未定'} – ${p.end?escapeHTML(fmt(p.end)):'长期'}</span>`
     +`<span class="space-progress"><span class="progress"><i style="width:${pct}%"></i></span>`
@@ -1975,10 +1975,11 @@ function bindProjectSpace(p){
 }
 /* One task line under a project or the 临时任务 card. `who` is ready HTML. */
 function projectChildRow(t,who,{title='',drag='',tail=''}={}){
+  const end=S.projects.find(p=>p.id===t.projectId)?.end,beyond=Boolean(end&&t.date>end);
   return `<div class="project-child-row${isFreshTask(t)?' is-new':''}"${drag}>`
     +`${drag?'<span class="drag-handle" aria-hidden="true">⋮⋮</span>':''}<button class="project-task-open" data-id="`
     +`${escapeHTML(t.id)}"><span class="priority ${escapeHTML(t.priority)}">${escapeHTML(t.priority)}</span><strong>`
-    +`${escapeHTML(t.name)}</strong><span class="child-assignee"${title?` title="${escapeHTML(title)}"`:''}>${who}`
+    +`${escapeHTML(t.name)}${beyond?'<small class="beyond-chip">超出项目周期</small>':''}</strong><span class="child-assignee"${title?` title="${escapeHTML(title)}"`:''}>${who}`
     +`</span><span class="child-date">${escapeHTML(fmt(t.date))}</span><span>${status(t)[1]}</span>`
     +`<span aria-hidden="true">${icon('chevron-right')}</span></button>${tail}</div>`;
 }
@@ -3925,8 +3926,10 @@ function renderScheduleScope(){
   $('#scheduleScopeHint').textContent=`${UI.view==='calendar'?'当前周':'当日'} ${tasks.length} 项任务 · ${new Set(tasks.map(t=>t.assignee)).size} 人有安排`;
   select.onchange=()=>{UI.member=select.value;renderStats();switchView(UI.view)};
 }
-const projectStatus=p=>({active:'进行中',pending:'待审批',pending_completion:'完成待审批',rejected:'已驳回',paused:'已暂停',done:'已完成',archived:'已归档'}[p.status]||'未设置');
-const isProjectHidden=(p,today=S.today)=>Boolean(p&&(p.status==='done'||p.status==='archived'||(p.end&&today&&p.end<today)));
+const projectStatus=p=>projectOverdue(p)?`已逾期 ${projectOverdue(p)} 天`:({active:'进行中',pending:'待审批',pending_completion:'完成待审批',rejected:'已驳回',paused:'已暂停',done:'已完成',archived:'已归档'}[p.status]||'未设置');
+/* Passing the end date does not close a project; it shows as overdue until it is completed or moved. */
+const isProjectHidden=p=>Boolean(p&&(p.status==='done'||p.status==='archived'));
+const projectOverdue=p=>p?.status==='active'&&p.end&&S.today&&p.end<S.today?daysCount(p.end,S.today):0;
 const visibleProjects=()=>S.projects.filter(p=>!isProjectHidden(p));
 // Finished projects are removed from the normal `projects` snapshot so they
 // no longer appear in calendars/timelines.  Superadmin's成果库 is backed by
