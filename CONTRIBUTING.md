@@ -57,4 +57,4 @@ unfinished one stayed on its own day. It now carries like any other task.
 
 ## 许可证
 
-提交贡献即表示你同意以本项目的 [MIT License](LICENSE) 授权你的改动。
+提交贡献即表示你同意以本项目的 [Apache License 2.0](LICENSE) 授权你的改动。请保留已有的版权与第三方许可声明；此前已发布版本的 MIT 许可文本保留在 [LICENSES/MIT.txt](LICENSES/MIT.txt)。

@@ -3,7 +3,7 @@
 **A self-hosted task and project workbench for small teams.** One Python file and one SQLite database, no runtime dependencies, and your data stays on your own machine. The interface is in Chinese; its built-in name is 战略小组台账.
 
 [![Tests](https://github.com/Ray-hola/work-calendar/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Ray-hola/work-calendar/actions/workflows/tests.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](#requirements)
 [![No dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](#requirements)
 
@@ -175,7 +175,7 @@ A typical change:
 
 ## Contributing and license
 
-Issues and pull requests are welcome; read [`CONTRIBUTING.md`](CONTRIBUTING.md) first. Work Calendar is released under the [MIT License](LICENSE).
+Issues and pull requests are welcome; read [`CONTRIBUTING.md`](CONTRIBUTING.md) first. Work Calendar is released under the [Apache License 2.0](LICENSE); see [NOTICE](NOTICE) for attribution. The original MIT license for earlier releases is retained in [LICENSES/MIT.txt](LICENSES/MIT.txt); this change does not alter the license granted for those releases.
 
 Project spaces have Tasks, Meetings, Files, People and Context tabs. Expand a project in the sidebar to open meetings or download attachments. Meeting transcription uses the configured ASR service with complete audio clips approximately every four seconds; text is appended and saved while recording continues. Latency depends on the provider. Stop/navigation waits for the final clip. Failed clips can be retried on the same page; a three-clip backlog pauses recording. Unprocessed audio is in memory only and is lost on reload. Browser speech recognition remains the fallback when ASR is unconfigured. Transcript revision checks protect concurrent edits; archived meetings remain read-only. Refreshes carry summaries; opening a meeting fetches its authorized full record. Late responses cannot reopen an old meeting after switching meetings, pages or accounts.
 Reasoning effort can be selected per chat, planning, or meeting-minutes scene in AI settings. Following the chat scene also inherits its effort. Default leaves the provider setting unchanged; explicit levels require a model/gateway supporting `reasoning_effort` and omit temperature for compatibility. Higher effort can increase latency and token usage. Speech transcription is unaffected.

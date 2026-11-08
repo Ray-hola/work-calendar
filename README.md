@@ -3,7 +3,7 @@
 **战略小组台账**：自托管的团队任务与项目协作工作台。一个 Python 文件、一个 SQLite 数据库，零运行时依赖，数据只在你自己的机器上。
 
 [![Tests](https://github.com/Ray-hola/work-calendar/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Ray-hola/work-calendar/actions/workflows/tests.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](#环境要求)
 [![No dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](#环境要求)
 
@@ -181,4 +181,4 @@ data/                运行时数据（数据库、账户文件），不进版�
 
 ## 贡献与许可证
 
-欢迎 Issue 和 Pull Request，先读 [`CONTRIBUTING.md`](CONTRIBUTING.md)。本项目基于 [MIT License](LICENSE) 开源。
+欢迎 Issue 和 Pull Request，先读 [`CONTRIBUTING.md`](CONTRIBUTING.md)。本项目基于 [Apache License 2.0](LICENSE) 开源；版权声明见 [NOTICE](NOTICE)。此前已发布版本的 MIT 许可保留于 [LICENSES/MIT.txt](LICENSES/MIT.txt)，此次调整不改变那些版本已有的授权。
