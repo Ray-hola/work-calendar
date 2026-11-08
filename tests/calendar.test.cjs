@@ -2908,6 +2908,7 @@ function tourHarness(){
   a.context.window={innerWidth:1280,addEventListener(){},removeEventListener(){}};
   a.context.localStorage={getItem:()=>null,setItem:(k,v)=>writes.push([k,v])};
   a.context.setTimeout=fn=>{timers.push(fn);return timers.length};a.context.clearTimeout=()=>{};
+  a.context.getComputedStyle=()=>({visibility:'visible'});
   a.context.document={activeElement:focus,body:{children:background,classList:{contains:()=>locked},appendChild:el=>elements['#tourVeil']=el},
     createElement:()=>veil,addEventListener(){},removeEventListener(){},querySelector:s=>s==='#modalBackdrop'?{classList:{contains:()=>!modal}}:elements[s]||null,
     querySelectorAll:()=>buttons};
@@ -2943,7 +2944,7 @@ test('tour Enter preserves focused button activation while navigation keys and b
   h.a.context.event={key:'ArrowRight',target:{closest:()=>null},preventDefault(){prevented++},stopPropagation(){}};h.a.run('tourKey(event)');assert.deepEqual(JSON.parse(JSON.stringify(moves)),[[1,1]]);assert.equal(prevented,1);
 });
 test('tour Tab and Shift-Tab wrap within its buttons',()=>{
-  const h=tourHarness(),focused=[];h.buttons.push({focus:()=>focused.push(0)},{focus:()=>focused.push(1)});h.a.run('startTour()');
+  const h=tourHarness(),focused=[];h.buttons.push({getClientRects:()=>[{}],focus:()=>focused.push(0)},{getClientRects:()=>[{}],focus:()=>focused.push(1)});h.a.run('startTour()');
   for(const [index,shiftKey] of [[1,false],[0,true]]){h.a.context.document.activeElement=h.buttons[index];h.a.context.event={key:'Tab',shiftKey,target:{},preventDefault(){},stopPropagation(){}};h.a.run('tourKey(event)')}
   assert.deepEqual(focused,[0,1]);
 });
@@ -2951,26 +2952,84 @@ test('tour steps reference real demos, try steps name a target, and keys render 
   const a=app();
   assert.deepEqual(a.json("TOUR.filter(s=>s.demo&&!GUIDE_DEMOS[s.demo]).map(s=>s.title)"),[]);
   assert.deepEqual(a.json("TOUR.filter(s=>s.try&&!s.target).map(s=>s.title)"),[]);
+  assert.deepEqual(a.json("TOUR.filter(s=>s.try&&typeof s.done!=='function').map(s=>s.title)"),[]);
   assert.equal(a.run("tourText('按 [[N]] 或 <b>')"),'按 <kbd>N</kbd> 或 &lt;b&gt;');
 });
-test('a 试一试 step advances only when the lit control itself is clicked',()=>{
+test('a trial blocks other controls and advances only after the intended action succeeds',()=>{
   const a=app(),timers=[];a.context.setTimeout=fn=>{timers.push(fn);return timers.length};a.context.matchMedia=()=>({matches:false});a.context.document={querySelector:()=>null,querySelectorAll:()=>[],removeEventListener(){}};a.context.window={removeEventListener(){}};
-  const moves=[];a.context.moves=moves;const inside={},outside={};
+  const moves=[];a.context.moves=moves;const inside={closest:()=>null},outside={closest:()=>null};
   a.context.target={contains:el=>el===inside};a.context.inside=inside;a.context.outside=outside;
-  a.run("tour={i:2,try:true,tried:false,target};tourShow=(i,dir)=>moves.push([i,dir])");
-  a.run('tourTried({target:outside})');assert.equal(timers.length,0);
+  a.run("let ready=false;tour={i:0,steps:[{done:()=>ready}],try:true,tried:false,target};tourShow=(i,dir)=>moves.push([i,dir])");
+  let prevented=0,stopped=0;a.context.event={target:outside,preventDefault(){prevented++},stopImmediatePropagation(){stopped++}};
+  a.run('tourTried(event)');assert.equal(timers.length,0);assert.equal(prevented,1);assert.equal(stopped,1);
   a.run('tourTried({target:inside})');a.run('tourTried({target:inside})');assert.equal(timers.length,1);
-  timers[0]();assert.deepEqual(JSON.parse(JSON.stringify(moves)),[[3,1]]);
-  a.run("tour={i:4,try:false,tried:false,target}");a.run('tourTried({target:inside})');assert.equal(timers.length,1);
+  timers.shift()();assert.equal(moves.length,0);assert.equal(a.run('tour.tried'),false);
+  a.run('ready=true;tourTried({target:inside})');timers.shift()();assert.equal(moves.length,0);timers.shift()();
+  assert.deepEqual(JSON.parse(JSON.stringify(moves)),[[1,1]]);
+  a.run('tour.try=false;tourTried({target:inside})');assert.equal(timers.length,0);
+});
+test('trial completion callbacks cannot advance a restarted tour at the same step',()=>{
+  const a=app(),timers=[],moves=[];a.context.setTimeout=fn=>timers.push(fn);a.context.matchMedia=()=>({matches:false});a.context.moves=moves;
+  a.context.document={querySelector:()=>null};a.context.inside={closest:()=>null};
+  a.run('tour={i:0,try:true,target:{contains:()=>true},steps:[{done:()=>true}]};tourShow=i=>moves.push(i);tourTried({target:inside})');
+  timers.shift()();a.run('tour={i:0}');timers.shift()();assert.deepEqual(moves,[]);
+});
+test('exiting directly after opening the assistant closes it before the next step starts',()=>{
+  const h=tourHarness();h.a.run('startTour()');let closed=0;
+  const original=h.a.context.document.querySelector;
+  h.a.context.document.querySelector=s=>s==='#agentPanel'?{classList:{contains:()=>false}}:s==='#agentCloseBtn'?{click(){closed++}}:original(s);
+  h.a.run('endTour(false)');assert.equal(closed,1);assert.equal(h.a.run('tour'),null);
+});
+test('trial target keyboard activation works while Escape and unrelated shortcuts stay isolated',()=>{
+  const h=tourHarness();h.a.context.control={};h.a.run('let exits=0;startTour();tour.try=true;tour.target={contains:el=>el===control};endTour=()=>exits++');
+  const seen=[];
+  for(const key of ['Enter',' ','n','Escape']){
+    let prevented=false,stopped=false;h.a.context.event={key,target:h.a.context.control,preventDefault(){prevented=true},stopPropagation(){stopped=true}};
+    h.a.run('tourKey(event)');seen.push([key,prevented,stopped]);
+  }
+  assert.deepEqual(seen,[['Enter',false,true],[' ',false,true],['n',true,true],['Escape',true,true]]);assert.equal(h.a.run('exits'),1);
+});
+test('trial keyboard traversal includes the real control and excludes hidden demo buttons',()=>{
+  const h=tourHarness(),focused=[],control={focus:()=>focused.push('control')};
+  const first={getClientRects:()=>[{}],focus:()=>focused.push('card')},hidden={getClientRects:()=>[],focus:()=>focused.push('hidden')};h.buttons.push(first,hidden);h.a.context.control=control;
+  h.a.run('startTour();tour.try=true;tour.target=control');
+  for(const [active,shiftKey] of [[first,false],[control,false],[control,true]]){
+    h.a.context.document.activeElement=active;h.a.context.event={key:'Tab',shiftKey,target:active,preventDefault(){},stopPropagation(){}};h.a.run('tourKey(event)');
+  }
+  assert.deepEqual(focused,['control','card','card']);
+});
+test('tour chooses a visible project even when the first project is inside a closed folder',()=>{
+  const a=app(),hidden={getClientRects:()=>[]},visible={getClientRects:()=>[{}]};
+  a.context.document={querySelectorAll:()=>[hidden,visible]};a.context.getComputedStyle=()=>({visibility:'visible'});a.context.visible=visible;
+  assert.equal(a.run("tourTarget(TOUR.find(s=>s.title==='项目目录'))===visible"),true);
+});
+test('tour card placement avoids a trial target after viewport clamping and compacting',()=>{
+  const a=app();
+  const box={x:32,y:236.5,w:345,h:44};a.context.box=box;
+  assert.equal(a.run('tourCardPosition(box,358,570.5,390,844).clear'),false);
+  for(const [w,h,cw,ch,target] of [[390,844,358,240,box],[1280,720,440,570,{x:258,y:240,w:200,h:44}],[390,568,358,240,{x:20,y:480,w:350,h:40}]]){
+    a.context.geometry={w,h,cw,ch,target};const p=a.json('tourCardPosition(geometry.target,geometry.cw,geometry.ch,geometry.w,geometry.h)');
+    assert.equal(p.clear,true);assert.ok(p.x>=16&&p.y>=16&&p.x+cw<=w-16&&p.y+ch<=h-16);
+    assert.ok(p.x+cw<=target.x||p.x>=target.x+target.w||p.y+ch<=target.y||p.y>=target.y+target.h);
+  }
 });
 test('leaving a step runs its cleanup once, and finishing the tour returns to where it began',()=>{
   const a=app(),calls=[];a.context.calls=calls;a.context.document={querySelector:()=>null,querySelectorAll:()=>[],removeEventListener(){}};a.context.window={removeEventListener(){}};
-  a.run("tour={i:0,entered:true,steps:[{leave:()=>calls.push('leave')}]};tourLeave();tourLeave()");
-  assert.deepEqual(JSON.parse(JSON.stringify(calls)),['leave']);
+  a.run("tour={i:0,entered:true,layoutObserver:{disconnect:()=>calls.push('disconnect')},steps:[{leave:()=>calls.push('leave')}]};tourLeave();tourLeave()");
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)),['disconnect','leave']);
   const views=[];a.context.views=views;a.context.localStorage={setItem(){}};
-  a.run("S.user={id:'u'};switchView=v=>views.push(v);toast=()=>{};UI.filter='doing';UI.selectedWeek=2");
+  a.run("S.user={id:'u'};switchView=v=>{UI.view=v;views.push(v)};toast=()=>{};UI.filter='doing';UI.selectedWeek=2");
   a.run("tour={i:0,steps:[{}],owner:'u',from:{view:'archive',filter:'all',week:0},background:[]};endTour()");
   assert.deepEqual(JSON.parse(JSON.stringify(views)),['archive']);assert.equal(a.run('UI.filter'),'all');assert.equal(a.run('UI.selectedWeek'),0);
+});
+test('ending a tour restores the saved calendar week after the real route resets it',()=>{
+  const a=app(),weeks=[];a.context.weeks=weeks;
+  a.context.window={removeEventListener(){},scrollTo(){}};
+  a.context.document={querySelector:s=>['#tourVeil','#agentPanel'].includes(s)?null:({classList:{toggle(){}},textContent:'',focus(){}}),querySelectorAll:()=>[],removeEventListener(){}};
+  a.context.localStorage={setItem(){}};
+  a.run("S.user={id:'u'};UI.view='today';UI.selectedWeek=0;cancelMeetingOpen=()=>{};renderScheduleScope=()=>{};syncFilterLinks=()=>{};renderCalendar=()=>weeks.push(UI.selectedWeek);stopChatPolling=()=>{};toast=()=>{}");
+  a.run("tour={i:0,steps:[{}],owner:'u',from:{view:'calendar',filter:'all',week:2},background:[]};endTour()");
+  assert.equal(a.run('UI.view'),'calendar');assert.equal(a.run('UI.selectedWeek'),2);assert.equal(weeks.at(-1),2);
 });
 
 test('project rail resize is available on tablet and reserves content space down to the phone breakpoint',()=>{

@@ -12832,6 +12832,9 @@ body.is-resizing-agent { user-select: none; }
 .tour-card {
   position: fixed;
   width: min(420px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  scrollbar-width: none;
   padding: 16px 18px 14px;
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -12840,6 +12843,9 @@ body.is-resizing-agent { user-select: none; }
   outline: none;
   transition: left .36s cubic-bezier(.2, .8, .2, 1), top .36s cubic-bezier(.2, .8, .2, 1);
 }
+
+.tour-card::-webkit-scrollbar { display: none; }
+.tour-card.is-compact .guide-demo { display: none; }
 
 .tour-chapters {
   display: flex;

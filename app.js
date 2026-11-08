@@ -3650,20 +3650,20 @@ const myOpenTask=()=>S.tasks.find(t=>t.assignee===S.user?.id&&['todo','doing'].i
 const TOUR=[
   {ch:'开始',title:'欢迎来到战略小组台账',body:'三分钟走一遍主线：安排任务 → 跟进项目 → 处理收件箱 → 写档案。标着「试一试」的步骤可以直接点亮起来的地方，看它真的怎么动。随时按 [[Esc]] 退出，[[←]] [[→]] 翻页。'},
   {ch:'今天',view:'today',target:'#addTaskBtn',demo:'new-task',title:'新建任务',body:'按 [[N]] 或点这里。填好名称、负责人、日期和时长，任务立刻出现在对方的今日任务里，对方收到通知。所在规则组需要审批时，按钮会变成「申请任务」。'},
-  {ch:'今天',view:'today',target:'.quick-tabs',try:'点「待处理」，列表只留下还没做完的',title:'全部 · 待处理 · 已完成',body:'这三个标签切换下面列表的范围，上面的今日进度按已完成的任务计算。'},
+  {ch:'今天',view:'today',target:'.quick-tabs [data-filter="open"]',done:()=>UI.filter==='open',try:'点「待处理」，列表只留下还没做完的',title:'全部 · 待处理 · 已完成',body:'这三个标签切换下面列表的范围，上面的今日进度按已完成的任务计算。'},
   {ch:'今天',view:'today',prep:()=>{const t=myOpenTask();if(t&&$('#taskDrawer').classList.contains('hidden'))openDrawer(t.id)},leave:()=>closeDrawer(),
     target:'#taskDrawer .drawer-actions',demo:'task-life',title:'任务详情',
     body:()=>`点任何一张任务卡都会打开这样的详情，这是你的「${myOpenTask()?.name||'任务'}」。到点自动开始；做完点「记录完成」，写一句总结和实际耗时。完成不需要审批。`},
-  {ch:'今天',target:'.sidebar-section',try:'点「进行中」，只看正在做的任务',title:'快捷筛选',body:'P0 重要任务、进行中、已递延：点一下跳到今日任务，只列出这一类；再点一次回到全部。'},
+  {ch:'今天',target:'.sidebar-section [data-filter="inprogress"]',done:()=>UI.filter==='inprogress',try:'点「进行中」，只看正在做的任务',title:'快捷筛选',body:'P0 重要任务、进行中、已递延：点一下跳到今日任务，只列出这一类；再点一次回到全部。'},
   {ch:'周视图',view:'calendar',target:'#weekCarousel',demo:'defer',title:'一周的安排',body:'七天一列，点某一天看当天的全部任务。当天没做完的，过了零点自动递延到第二天，卡片上写着「由某日递延 · 第 N 次」。'},
-  {ch:'周视图',view:'calendar',target:'.week-nav',try:'点右边的箭头，翻到下一周',title:'翻周',body:'左右箭头前后翻一周，「本周」回到今天所在的这一周。'},
-  {ch:'项目',view:'projects',prep:()=>{if(UI.space)openProjectSpace('')},target:'#projectNav',demo:'tree',try:'点一个项目，它会在右边打开',title:'项目目录',body:'文件夹装着项目，项目下面是会议和文件。选中的那一行有块底色，换选时它会滑过去。拖右边缘调宽窄，点顶部的箭头收起。'},
-  {ch:'项目',view:'projects',prep:()=>{const p=visibleProjects()[0];if(p&&!UI.space)openProjectSpace(p.id)},target:'#projectSpace .space-tabs',try:'点「文件」标签',title:'一个项目里',body:'任务、会议、文件、成员、概况五个标签。换到另一个项目时，停留在同一个标签上。'},
+  {ch:'周视图',view:'calendar',target:'#nextWeekBtn',done:()=>UI.selectedWeek===tour.trialWeek+1,try:'点右边的箭头，翻到下一周',title:'翻周',body:'左右箭头前后翻一周，「本周」回到今天所在的这一周。'},
+  {ch:'项目',view:'projects',prep:()=>{if(UI.space)openProjectSpace('')},target:'#projectNav [data-space]:not([data-space=""])',done:el=>UI.space===el.dataset.space,demo:'tree',try:'点亮起的项目，它会在右边打开',title:'项目目录',body:'文件夹装着项目，项目下面是会议和文件。选中的那一行有块底色，换选时它会滑过去。拖右边缘调宽窄，点顶部的箭头收起。'},
+  {ch:'项目',view:'projects',prep:()=>{const p=visibleProjects()[0];if(p&&!UI.space)openProjectSpace(p.id)},target:'#projectSpace [data-space-tab="files"]',done:()=>UI.spaceTab==='files',try:'点「文件」标签',title:'一个项目里',body:'任务、会议、文件、成员、概况五个标签。换到另一个项目时，停留在同一个标签上。'},
   {ch:'项目',view:'projects',target:'#projectActions',demo:'project-life',title:'项目从开始到结项',body:'主按钮是新建任务；项目设置、完成项目、退出项目和删除项目都收在「更多」里。Owner 提交结项报告，管理员同意后项目进入成果库。'},
   {ch:'收件箱',view:'inbox',target:'#inboxList .inbox-item, #inboxList',demo:'approval',title:'收件箱',body:'指派、审批、@ 你的消息都在这里。需要你处理的申请上直接有「同意」「驳回」，驳回时要写原因。'},
   {ch:'沟通',view:'chat',target:'#chatForm',demo:'chat',title:'沟通区',body:'团队频道和每个项目各自的频道。输入 @ 选成员，对方会收到通知；@所有人 通知整个频道。'},
   {ch:'档案',view:'archive',target:'#archiveView .page-intro',demo:'archive',title:'档案室',body:'系统每晚把你当天的完成和未完成整理进档案，你补上明日计划和随记；管理员在这里看团队日报和周报。'},
-  {ch:'助手',target:'#agentBtn',try:'点一下，打开助手',title:'AI 助手',body:'用一句话查询或安排工作，比如「今天有哪些任务要交」。'},
+  {ch:'助手',target:'#agentBtn',done:()=>!$('#agentPanel')?.classList.contains('hidden'),try:'点一下，打开助手',title:'AI 助手',body:'用一句话查询或安排工作，比如「今天有哪些任务要交」。'},
   {ch:'助手',prep:()=>{if($('#agentPanel')?.classList.contains('hidden'))$('#agentBtn')?.click()},leave:()=>{if(!$('#agentPanel')?.classList.contains('hidden'))$('#agentCloseBtn')?.click()},
     target:'#agentPlanBtn, #agentForm',demo:'assistant',title:'规划模式',body:'说一句要安排的事，助手起草几张任务卡片：谁、哪天、多久。你逐张检查后接受，确认前不会改动任何数据。'},
   {ch:'助手',target:'#pipBtn',demo:'widget',title:'桌面小组件',body:'悬浮在桌面最前面的今日待办和番茄钟，勾选就记为完成。'},
@@ -3708,15 +3708,24 @@ function startTour(){
 /* Outside a 试一试 step the page is inert; during one it is live, and the
    blocks around the light keep every click but the lit control's. */
 function tourInert(on){tour?.background.forEach(({el,inert})=>el.inert=on||inert)}
-function tourLeave(){const step=tour?.steps[tour.i];if(tour?.demoTimer)clearInterval(tour.demoTimer);if(tour?.entered){tour.entered=false;step?.leave?.()}}
+function tourLeave(){
+  const step=tour?.steps[tour.i];if(tour?.demoTimer)clearInterval(tour.demoTimer);
+  tour?.layoutObserver?.disconnect();if(tour)tour.layoutObserver=null;
+  if(tour?.entered){tour.entered=false;step?.leave?.()}
+}
 function endTour(markDone=true){
   if(!tour)return;tourLeave();const ended=tour;tour=null;
+  const assistant=$('#agentPanel');if(assistant&&!assistant.classList.contains('hidden'))$('#agentCloseBtn')?.click();
   $('#tourVeil')?.remove();document.removeEventListener('keydown',tourKey,true);document.removeEventListener('focusin',tourFocus,true);document.removeEventListener('click',tourTried,true);
   window.removeEventListener('resize',tourPlace);window.removeEventListener('scroll',tourPlace,true);
   ended.background.forEach(({el,inert})=>el.inert=inert);
   if(markDone){
     try{localStorage.setItem(`${TOUR_KEY}:${ended.owner}`,'1')}catch(_){}
-    if(S.user?.id===ended.owner){UI.filter=ended.from.filter;UI.selectedWeek=ended.from.week;switchView(ended.from.view);toast('导览结束，随时可以在「使用教程」里重看')}
+    if(S.user?.id===ended.owner){
+      UI.filter=ended.from.filter;switchView(ended.from.view);
+      if(UI.selectedWeek!==ended.from.week){UI.selectedWeek=ended.from.week;if(UI.view==='calendar')renderCalendar()}
+      toast('导览结束，随时可以在「使用教程」里重看');
+    }
   }
   const focus=ended.returnFocus;
   if(focus?.isConnected&&focus.getClientRects().length&&!focus.closest('[inert]'))focus.focus({preventScroll:true});
@@ -3724,18 +3733,31 @@ function endTour(markDone=true){
 }
 function tourFocus(e){if(tour&&!e.target.closest('#tourVeil')&&!(tour.try&&tour.target?.contains(e.target)))$('#tourVeil .tour-next')?.focus({preventScroll:true})}
 function tourTried(e){
-  if(!tour?.try||tour.tried||!tour.target?.contains(e.target))return;
-  tour.tried=true;const i=tour.i;$('#tourVeil .tour-try')?.classList.add('is-done');
-  setTimeout(()=>{if(tour&&tour.i===i)tourShow(i+1,1)},navReducedMotion()?150:650);
+  if(!tour?.try||e.target.closest('#tourVeil'))return;
+  if(!tour.target?.contains(e.target)){e.preventDefault();e.stopImmediatePropagation();return}
+  if(tour.tried)return;
+  const active=tour,i=tour.i,step=tour.steps[i],control=tour.target;tour.tried=true;
+  /* Wait until the real click handler has run, then verify its result. */
+  setTimeout(()=>{
+    if(tour!==active||tour.i!==i)return;
+    if(!step.done?.(control)){tour.tried=false;return}
+    $('#tourVeil .tour-try')?.classList.add('is-done');
+    setTimeout(()=>{if(tour===active&&tour.i===i)tourShow(i+1,1)},navReducedMotion()?150:650);
+  },0);
 }
 function tourKey(e){
   if(!tour)return;
-  if(tour.try&&tour.target?.contains(e.target))return;
   e.stopPropagation();
   if(e.key==='Escape'){e.preventDefault();endTour();return}
   if(e.key==='Tab'){
-    const buttons=[...$$('#tourVeil button')],i=buttons.indexOf(document.activeElement);
-    if(i<0||e.shiftKey&&i===0||!e.shiftKey&&i===buttons.length-1){e.preventDefault();buttons[e.shiftKey?buttons.length-1:0]?.focus()}
+    const buttons=[...(tour.try&&tour.target&&!tour.target.disabled?[tour.target]:[]),...$$('#tourVeil button').filter(tourVisible)],i=buttons.indexOf(document.activeElement);
+    if(tour.try||i<0||e.shiftKey&&i===0||!e.shiftKey&&i===buttons.length-1){
+      e.preventDefault();buttons[i<0?(e.shiftKey?buttons.length-1:0):(i+(e.shiftKey?-1:1)+buttons.length)%buttons.length]?.focus();
+    }
+    return;
+  }
+  if(tour.try&&tour.target?.contains(e.target)){
+    if(e.key!=='Enter'&&e.key!==' ')e.preventDefault();
     return;
   }
   if(e.key==='Enter'&&e.target.closest('#tourVeil button'))return;
@@ -3743,7 +3765,7 @@ function tourKey(e){
   if(go){e.preventDefault();tourShow(tour.i+go,go)}
 }
 const tourVisible=el=>Boolean(el&&el.getClientRects().length&&getComputedStyle(el).visibility!=='hidden');
-const tourTarget=step=>step?.target?step.target.split(',').map(s=>$(s.trim())).find(tourVisible)||null:null;
+const tourTarget=step=>step?.target?step.target.split(',').flatMap(s=>$$(s.trim())).find(tourVisible)||null:null;
 const tourText=s=>escapeHTML(s).replace(/\[\[(.+?)\]\]/g,'<kbd>$1</kbd>');
 function tourShow(i,dir){
   if(!tour)return;
@@ -3755,9 +3777,14 @@ function tourShow(i,dir){
   step.prep?.();tour.entered=true;tour.i=i;
   const target=tourTarget(step);
   if(step.target&&!target){tourLeave();if(i+dir>=0&&i+dir<tour.steps.length)tourShow(i+dir,dir);else if(dir>0)endTour();return}
-  tour.target=target;tour.try=Boolean(step.try&&target);tour.tried=false;
+  tour.target=target;tour.try=Boolean(step.try&&target);tour.tried=false;tour.trialWeek=UI.selectedWeek;
   tourInert(!tour.try);
   tourReveal(target);
+  /* Navigation and demo layout can settle after the window's resize event. */
+  if(target&&typeof ResizeObserver==='function'){
+    const active=tour;tour.layoutObserver=new ResizeObserver(()=>{if(tour===active)tourPlace()});
+    for(let el=target;el&&el!==document.body;el=el.parentElement)tour.layoutObserver.observe(el);
+  }
   const chapters=[...new Set(tour.steps.map(s=>s.ch))],last=i===tour.steps.length-1;
   const veil=$('#tourVeil'),card=veil?.querySelector('.tour-card');if(!card)return;
   veil.classList.toggle('is-try',tour.try);
@@ -3803,12 +3830,20 @@ function tourDemo(card){
 /* The light sits 6px around the control; the card goes below it, above it or
    beside it, whichever fits, and never leaves the window. The blocks cover
    everything but the light. */
+function tourCardPosition(box,cw,ch,vw,vh){
+  const gap=14,margin=16,clamp=(x,y)=>({x:Math.max(margin,Math.min(x,vw-cw-margin)),y:Math.max(margin,Math.min(y,vh-ch-margin))});
+  if(!box)return {...clamp((vw-cw)/2,(vh-ch)/2),clear:true};
+  const choices=[clamp(box.x,box.y+box.h+gap),clamp(box.x,box.y-gap-ch),clamp(box.x+box.w+gap,box.y),clamp(box.x-gap-cw,box.y)];
+  const clear=p=>p.x+cw+gap<=box.x||p.x>=box.x+box.w+gap||p.y+ch+gap<=box.y||p.y>=box.y+box.h+gap;
+  const place=choices.find(clear)||choices[0];
+  return {...place,clear:clear(place)};
+}
 function tourPlace(){
   const veil=$('#tourVeil');if(!tour||!veil)return;
   const spot=veil.querySelector('.tour-spot'),card=veil.querySelector('.tour-card');
   /* A page that re-renders replaces the lit control; find it again. */
   if(tour.target&&!tour.target.isConnected)tour.target=tourTarget(tour.steps[tour.i]);
-  const vw=window.innerWidth,vh=window.innerHeight,gap=14,margin=16;
+  const vw=window.innerWidth,vh=window.innerHeight;
   const r=tour.target?.getBoundingClientRect?.();
   let box={x:vw/2,y:vh/2,w:0,h:0};
   if(r){const x=Math.max(4,r.left-6),y=Math.max(4,r.top-6);box={x,y,w:Math.min(vw-4,r.right+6)-x,h:Math.min(vh-4,r.bottom+6)-y}}
@@ -3816,14 +3851,14 @@ function tourPlace(){
   const px=n=>`${Math.max(0,n)}px`,blocks={top:[0,0,vw,box.y],bottom:[0,box.y+box.h,vw,vh-box.y-box.h],left:[0,box.y,box.x,box.h],right:[box.x+box.w,box.y,vw-box.x-box.w,box.h],hole:[box.x,box.y,box.w,box.h]};
   veil.querySelectorAll('.tour-block').forEach(b=>{const [x,y,w,h]=blocks[b.dataset.side];Object.assign(b.style,{left:px(x),top:px(y),width:px(w),height:px(h)})});
   veil.classList.toggle('is-centered',!r);
-  const cw=card.offsetWidth,ch=card.offsetHeight;let x,y;
-  if(!r){x=(vw-cw)/2;y=(vh-ch)/2}
-  else if(box.y+box.h+gap+ch<=vh-margin){y=box.y+box.h+gap;x=box.x}
-  else if(box.y-gap-ch>=margin){y=box.y-gap-ch;x=box.x}
-  else if(box.x+box.w+gap+cw<=vw-margin){x=box.x+box.w+gap;y=box.y}
-  else{x=box.x-gap-cw;y=box.y}
-  card.style.left=`${Math.max(margin,Math.min(x,vw-cw-margin))}px`;
-  card.style.top=`${Math.max(margin,Math.min(y,vh-ch-margin))}px`;
+  card.classList.remove('is-compact');card.style.maxHeight='';
+  const place=()=>tourCardPosition(r?box:null,card.offsetWidth,card.offsetHeight,vw,vh);
+  let position=place();
+  if(tour.try&&!position.clear){card.classList.add('is-compact');position=place()}
+  if(tour.try&&!position.clear){
+    card.style.maxHeight=`${Math.max(0,Math.max(box.y-30,vh-box.y-box.h-30))}px`;position=place();
+  }
+  card.style.left=`${position.x}px`;card.style.top=`${position.y}px`;
 }
 function renderAll(){
   if(typeof ensureAccountCreateButton==='function')ensureAccountCreateButton();
