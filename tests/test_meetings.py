@@ -196,7 +196,7 @@ class MeetingTests(unittest.TestCase):
 
     def test_archived_meeting_only_projects_remain_readable_but_not_editable(self):
         meeting = self.store.action(self.admin, 'meeting.create', {'projectId': self.project['id'], 'title': '周会', 'rawTranscript': '保留的原稿'})
-        for status, end in (('archived', None), ('done', None), ('active', '2000-01-01')):
+        for status, end in (('archived', None), ('done', None)):
             with self.subTest(status=status, end=end):
                 with self.store.lock, self.store.db:
                     p=self.store.get('projects',self.project['id']);p['status']=status;p['end']=end;self.store.put('projects',p)

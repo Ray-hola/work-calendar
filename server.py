@@ -347,6 +347,7 @@ class Store:
             self.db.commit()
         self.scrub_assistant_records()
         self.forget_delivered_diaries()
+        self.restore_overdue_skips()
         self.db.commit()
         self.initial_passwords = {}
         if seed and not self.users():
@@ -2054,9 +2055,9 @@ class Store:
         self.put('audit', {'actor':actor, 'action':action, 'details':scrub(details), 'createdAt':timestamp()})
 
     def can_view_project(self, user, p):
+        # Passing the end date does not close a project: it stays in view,
+        # overdue, until it is completed or its end date is moved.
         if p.get('status') in ('done','archived'):
-            return False
-        if p.get('end') and p['end'] < now().date().isoformat():
             return False
         return self.can_read_project_files(user, p)
 
@@ -2269,6 +2270,54 @@ class Store:
         leaves=self._lineage_leaves(tasks)
         return bool(leaves) and all(t.get('status')=='done' for t in leaves)
 
+    def restore_overdue_skips(self):
+        """Work that used to be dropped when a running project passed its end
+        date goes back on the list, once per database; the scheduler then carries
+        it to today like any other unfinished task."""
+        job = 'migrate:overdue-carry'
+        if self.db.execute('SELECT 1 FROM jobs WHERE id=?', (job,)).fetchone():
+            return
+        projects = {p['id']: p for p in self.all('projects')}
+        for t in self.all('tasks'):
+            if t.get('status') != 'skipped' or t.get('skipReason') != '项目已结束，无法继续递延' or t.get('supersededBy'):
+                continue
+            if projects.get(t.get('projectId'), {}).get('status') != 'active':
+                continue
+            t['status'] = 'todo'; t.pop('skipReason', None)
+            self.put('tasks', t)
+            # The failed attempt left its carry marked done; clear it so the
+            # scheduler carries the task again.
+            self.db.execute('DELETE FROM jobs WHERE id LIKE ?', (f'carry:{t["id"]}:%',))
+        self.db.execute('INSERT INTO jobs VALUES (?,?)', (job, timestamp()))
+
+    def remind_overdue_projects(self, at):
+        """Each day a running project is past its end date, its Owner hears how
+        late it is and what is still open, until it is completed or moved."""
+        today = at.date()
+        active = {u['id'] for u in self.users() if u['active']}
+        for p in self.all('projects'):
+            if p.get('status') != 'active' or not p.get('end'):
+                continue
+            try:
+                late = (today - date.fromisoformat(p['end'])).days
+            except (TypeError, ValueError):
+                continue
+            key = f'overdue:{p["id"]}:{today.isoformat()}'
+            if late <= 0 or self.db.execute('SELECT 1 FROM jobs WHERE id=?', (key,)).fetchone():
+                continue
+            to = p.get('owner') if p.get('owner') in active else 'superadmin'
+            # Yesterday's reminder is replaced by today's rather than piling up.
+            for n in self.all('notifications'):
+                if n['to'] == to and n.get('reference') == p['id'] and n.get('title') == '项目已逾期' and not n.get('read'):
+                    n['read'] = True; self.put('notifications', n)
+            left = self.open_project_tasks(p['id'])
+            names = '、'.join(f'「{t["name"]}」' for t in left[:5]) + (' 等' if len(left) > 5 else '')
+            body = (f'「{p["name"]}」截止于 {p["end"]}，已逾期 {late} 天。'
+                    + (f'还有 {len(left)} 项任务没完成：{names}。' if left else '任务都已完成。')
+                    + '请延长截止日期或完成项目。')
+            self.notify(to, '项目已逾期', body, 'project', p['id'])
+            self.db.execute('INSERT INTO jobs VALUES (?,?)', (key, at.isoformat()))
+
     def open_project_tasks(self, project_id):
         """The live (not superseded) one-off tasks of a project still to do."""
         tasks=[t for t in self.all('tasks') if t.get('projectId')==project_id and not t.get('repeatId')]
@@ -2304,7 +2353,7 @@ class Store:
             p = self.get('projects', t['projectId'])
         except Problem:
             return False
-        if p.get('status') in ('done','archived') or (p.get('end') and p['end'] < now().date().isoformat()):
+        if p.get('status') in ('done','archived'):
             return False
         return bool(user['admin'] or (p['status'] not in ('pending','rejected') and (p['owner']==user['id'] or (t['assignee']==user['id'] and p['members'].get(user['id'])=='accepted'))))
 
@@ -2396,7 +2445,7 @@ class Store:
                 project = self.get('projects', task['projectId'])
             except Problem:
                 return None  # its project is gone; nothing to carry it into
-            if project.get('status') != 'active' or (project.get('end') and target_day > project['end']):
+            if project.get('status') != 'active':
                 return None
         existing = next((x for x in self.all('tasks') if x.get('originId') == (task.get('originId') or task['id']) and x.get('date') == target_day), None)
         if existing:
@@ -2439,7 +2488,8 @@ class Store:
                 project=self.get('projects',t['projectId'])
                 if project.get('status')!='active':raise Problem(409,'只能递延进行中项目的任务')
                 if project.get('start') and target<project['start']:raise Problem(400,'递延日期不能早于项目开始日期')
-                if project.get('end') and target>project['end']:raise Problem(400,'递延日期不能晚于项目截止日期')
+                if project.get('end') and target>project['end'] and now().date().isoformat()<project['end']:
+                    raise Problem(400,'递延日期不能晚于项目截止日期')
             carried_deadline=t.get('deadline')
             if carried_deadline and carried_deadline<target:
                 carried_deadline=target
@@ -2731,7 +2781,7 @@ class Store:
                 continue
             if task.get('projectId'):
                 project = projects.get(task['projectId'])
-                if not project or project.get('status') != 'active' or (project.get('end') and project['end'] < at.date().isoformat()):
+                if not project or project.get('status') != 'active':
                     continue
             task['status'] = 'doing'
             self.put('tasks', task)
@@ -4593,7 +4643,8 @@ class Store:
                             'summary':digest['content'],'source':'diary' if diary else 'auto'})
         projects=[]
         for p in self.all('projects'):
-            if p.get('status') in ('pending','rejected') or (p.get('start') or '')>day or (p.get('end') and p['end']<day):continue
+            if p.get('status') in ('pending','rejected') or (p.get('start') or '')>day:continue
+            if p.get('end') and p['end']<day and p.get('status')!='active':continue
             owner_report=next((r for r in reports if r.get('projectId')==p['id'] and r.get('kind')=='owner'),None)
             day_tasks=[t for t in self._report_tasks() if t.get('projectId')==p['id'] and t.get('date')==day and not t.get('repeatId')]
             if not owner_report and not day_tasks and not any(r.get('projectId')==p['id'] for r in reports):continue
@@ -4730,6 +4781,8 @@ class Store:
                     if not copy:
                         awaiting=current.get('status')=='pending_approval' or current.get('approval',{}).get('status')=='pending'
                         current['status']='skipped';current['skipReason']='项目已结束，无法继续递延'
+                        self.put('logs',{'taskId':current['id'],'actor':'system','kind':'skip','reason':current['skipReason'],
+                                         'date':today,'createdAt':timestamp()})
                         if awaiting:
                             current.setdefault('approval',{})['status']='expired'
                             approver=current.get('approval',{}).get('approver')
@@ -4744,6 +4797,7 @@ class Store:
                         current['status']='deferred';self.put('tasks',current)
                     current=copy
             self.advance_due_tasks(at)
+            self.remind_overdue_projects(at)
             # Summaries only read tasks, so each table is parsed once for the pass.
             self._reads.cache={}
             try:
