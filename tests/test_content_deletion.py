@@ -93,6 +93,16 @@ class ContentDeletionTests(unittest.TestCase):
         self.assertEqual(self.store.get('meetings', self.meeting['id'])['rawTranscript'], '其他成员新增内容')
         self.delete_meeting(expectedRevision=saved['revision'])
 
+    def test_overdue_project_keeps_file_and_meeting_management_open(self):
+        self.store.put('projects', {**self.project, 'end': (now().date() - timedelta(days=2)).isoformat()})
+        self.store.db.commit()
+        updated = self.store.action(self.store.user('member1'), 'file.text.update', {'id': self.file['id'], 'text': 'updated after deadline'})
+        self.assertEqual(updated['id'], self.file['id'])
+        self.store.action(self.store.user('member1'), 'file.delete', {'id': self.file['id']})
+        self.delete_meeting(expectedRevision=0)
+        self.assertIsNone(self.store.db.execute('SELECT 1 FROM files WHERE id=?', (self.file['id'],)).fetchone())
+        self.assertEqual([m['id'] for m in self.store.action(self.owner, 'meeting.list', {'projectId': self.project['id']})], [self.other_meeting['id']])
+
     def test_file_uploader_owner_and_admin_remove_metadata_and_blob(self):
         for name in ('member1', 'owner01', 'superadmin', 'admin01'):
             f = self.store.upload_file(self.store.user('member1'), self.project['id'], name + '.md', 'text/markdown', b'content')
