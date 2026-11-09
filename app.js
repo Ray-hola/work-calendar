@@ -1080,6 +1080,7 @@ function renderProjectNav(){
     const p=[...S.projects,...(S.fileArchives||[])].find(p=>p.id===b.dataset.project);if(!p)return;
     if(UI.space!==p.id)await openProjectSpace(p.id);if(UI.space!==p.id)return;await projectArea(p,b.dataset.projectArea);
     if(b.dataset.meeting&&UI.spaceArea==='meetings')openMeetingEditor(p,b.dataset.meeting);
+    if(b.dataset.file&&UI.spaceArea==='files')openProjectFile(p,b.dataset.file);
   });
   $$('#projectNav [data-folder]').forEach(b=>b.onclick=()=>{if(!navClickBlocked())toggleFolder(b.dataset.folder)});
   $$('#projectNav [data-open-folder]').forEach(b=>b.onclick=()=>{if(!navClickBlocked())openFolderView(b.dataset.openFolder)});
@@ -1097,7 +1098,7 @@ function projectNavContents(p){
     +`${icon(area==='meetings'?'chat':'folder')}<span>${label}</span><b>${items.length}</b></button>`
     +`${items.length?`<div class="nav-branch">${items.join('')}</div>`:''}</div>`;
   const meeting=m=>`<div class="nav-node"><button type="button" class="project-nav-resource" data-project="${escapeHTML(p.id)}" data-project-area="meetings" data-meeting="${escapeHTML(m.id)}" title="${escapeHTML(m.title)}">${icon('chat')}<span>${escapeHTML(m.title)}</span></button></div>`;
-  const file=f=>`<div class="nav-node"><a class="project-nav-resource" href="/api/files/${encodeURIComponent(f.id)}" download="${escapeHTML(f.name)}" title="${escapeHTML(f.name)}">${icon('file')}<span>${escapeHTML(f.name)}</span></a></div>`;
+  const file=f=>`<div class="nav-node"><button type="button" class="project-nav-resource" data-project="${escapeHTML(p.id)}" data-project-area="files" data-file="${escapeHTML(f.id)}" title="${escapeHTML(f.name)}">${icon('file')}<span>${escapeHTML(f.name)}</span></button></div>`;
   return `<div class="nav-branch project-nav-resources">${group('meetings','会议',meetings.map(meeting))}${group('files','文件',files.map(file))}</div>`;
 }
 /* The selection is one marker that travels to the chosen row: its leading edge
@@ -1335,7 +1336,7 @@ function projectMeetingList(p){
   return meetings.map(m=>`<div class="meeting-list-row"><button type="button" class="meeting-row" data-meeting="${escapeHTML(m.id)}"><span class="meeting-icon">${icon('chat')}</span><span class="meeting-copy"><strong>${escapeHTML(m.title)}</strong><small>${escapeHTML(whenText(m.scheduledAt))} · ${m.minutes||m.hasMinutes?'已整理':'待整理'}</small></span>${icon('chevron-right')}</button>${canDeleteMeeting(p,m)?`<button type="button" class="text-btn content-row-delete" data-delete-meeting="${escapeHTML(m.id)}" aria-label="删除会议 ${escapeHTML(m.title)}">删除</button>`:''}</div>`).join('')||'<p class="muted space-empty">还没有会议</p>';
 }
 function projectContentWritable(p){
-  return Boolean(p&&!['done','archived'].includes(p.status)&&(!p.end||p.end>=S.today)
+  return Boolean(p&&!['done','archived'].includes(p.status)
     &&!(S.fileArchives||[]).some(x=>x.id===p.id));
 }
 function canDeleteMeeting(p,m){
@@ -1372,7 +1373,7 @@ async function deleteProjectFile(p,id,button){
     await api('/api/action',{action:'file.delete',data:{id}});
     if(owner!==S.user?.id)return true;
     S.files=(S.files||[]).filter(x=>x.id!==id);
-    if($('#mdFileEditor')?.dataset.fileId===id){UI.docDirty=false;closeModal()}
+    if($('#mdFileEditor')?.dataset.fileId===id||$('#projectFileDetails')?.dataset.fileId===id){UI.docDirty=false;closeModal()}
     if(UI.view==='projects')renderProjects();renderProjectNav();toast('文件已删除');refresh().catch(()=>{});return true;
   }catch(e){if(owner===S.user?.id){toast(e.message);refresh().catch(()=>{})}return false}
   finally{contentDeletes.delete(key);if(button)button.disabled=false}
@@ -1865,12 +1866,11 @@ function mdSet(root,value){
 const filePreviewable=name=>/\.(png|jpe?g|gif|webp|pdf|txt|md|csv|log|json)$/i.test(String(name||''));
 function projectFiles(p,readonly=false,includeMeetings=true){
   const canDrop=f=>!readonly&&canDeleteFile(p,f);
-  const file=f=>`<div class="file-row"><span class="file-ext">${escapeHTML(fileExt(f.name))}</span><a class="file-name" href="/api/files/`
-    +`${encodeURIComponent(f.id)}" download="${escapeHTML(f.name)}">${escapeHTML(f.name)}</a><small>${escapeHTML(fileSize(f.size))} · `
-    +`${escapeHTML(nameOf(f.uploader))} · <span title="${escapeHTML(f.createdAt)}">${escapeHTML(relTime(f.createdAt))}</span>`
-    +`${/\.md$/i.test(f.name)?` · <button type="button" class="text-btn file-preview" data-md-file="${escapeHTML(f.id)}">打开</button>`
-      :filePreviewable(f.name)?` · <a class="file-preview" href="/api/files/${encodeURIComponent(f.id)}?preview=1" target="_blank" rel="noopener">预览</a>`:''}</small>`
-    +`${canDrop(f)?`<button type="button" class="text-btn file-delete" data-file="${escapeHTML(f.id)}" aria-label="删除文件 ${escapeHTML(f.name)}">删除</button>`:'<span></span>'}</div>`;
+  const file=f=>`<div class="file-row"><span class="file-ext">${escapeHTML(fileExt(f.name))}</span><button type="button" class="file-name" data-open-file="${escapeHTML(f.id)}" title="${escapeHTML(f.name)}">${escapeHTML(f.name)}</button>`
+    +`<small>${escapeHTML(fileSize(f.size))} · ${escapeHTML(nameOf(f.uploader))} · <span title="${escapeHTML(f.createdAt)}">${escapeHTML(relTime(f.createdAt))}</span></small>`
+    +`<div class="file-actions"><button type="button" class="text-btn" data-open-file="${escapeHTML(f.id)}" aria-label="打开文件 ${escapeHTML(f.name)}">打开</button>`
+    +`<a class="text-btn" href="/api/files/${encodeURIComponent(f.id)}" download="${escapeHTML(f.name)}" aria-label="下载文件 ${escapeHTML(f.name)}">下载</a>`
+    +`${canDrop(f)?`<button type="button" class="text-btn file-delete" data-file="${escapeHTML(f.id)}" aria-label="删除文件 ${escapeHTML(f.name)}">删除</button>`:''}</div></div>`;
   const meeting=m=>`<button type="button" class="file-row meeting-row" data-meeting="${escapeHTML(m.id)}"><span class="file-ext is-meeting">会议</span>`
     +`<span class="file-name">${escapeHTML(m.title)}</span><small>${escapeHTML(whenText(m.scheduledAt))} · ${m.minutes||m.hasMinutes?'纪要已整理':'待整理'}`
     +`${meetingChars(m)?` · 原稿 ${meetingChars(m)} 字`:''}</small><span class="meeting-arrow">${icon('chevron-right')}</span></button>`;
@@ -1882,6 +1882,22 @@ function projectFiles(p,readonly=false,includeMeetings=true){
     +`${rows.length?`<div class="file-list">${rows.map(r=>r.html).join('')}</div>`:'<p class="space-empty">还没有文件</p>'}`
     +`</section>`;
 
+}
+/* Every directory/file-name entry opens the same management surface; download
+   remains an explicit action, including for files the browser cannot preview. */
+function openProjectFile(p,id){
+  const f=(S.files||[]).find(x=>x.id===id&&x.projectId===p.id);if(!f)return;
+  if(/\.md$/i.test(f.name))return openMarkdownFile(p,id);
+  openModal(`<div class="eyebrow">${escapeHTML(p.name)} · 文件</div><h2>${escapeHTML(f.name)}</h2>`
+    +`<dl class="project-file-details" id="projectFileDetails" data-file-id="${escapeHTML(id)}"><div><dt>类型</dt><dd>${escapeHTML(fileExt(f.name))}</dd></div>`
+    +`<div><dt>大小</dt><dd>${escapeHTML(fileSize(f.size))}</dd></div><div><dt>上传者</dt><dd>${escapeHTML(nameOf(f.uploader))}</dd></div>`
+    +`<div><dt>上传时间</dt><dd>${escapeHTML(whenText(f.createdAt))}</dd></div></dl>`
+    +`<div class="modal-footer">${canDeleteFile(p,f)?'<button type="button" class="secondary-btn content-delete" id="deleteProjectFileBtn">删除文件</button>':''}`
+    +`${filePreviewable(f.name)?`<a class="secondary-btn" href="/api/files/${encodeURIComponent(id)}?preview=1" target="_blank" rel="noopener">预览</a>`:''}`
+    +`<a class="primary-btn" href="/api/files/${encodeURIComponent(id)}" download="${escapeHTML(f.name)}">下载文件</a><button type="button" class="secondary-btn" id="closeProjectFile">关闭</button></div>`);
+  $('#closeProjectFile').onclick=closeModal;
+  $('#closeProjectFile').focus?.();
+  const drop=$('#deleteProjectFileBtn');if(drop)drop.onclick=()=>deleteProjectFile(p,id,drop);
 }
 /* A Markdown file opens rendered; its uploader, the project Owner and admins
    can switch to 编辑 and save it in place. */
@@ -1896,7 +1912,7 @@ async function openMarkdownFile(p,id){
   try{const r=await fetch(`/api/files/${encodeURIComponent(id)}?preview=1`,{credentials:'same-origin'});if(!r.ok)throw new Error('读不到文件');text=await r.text()}
   catch(e){if(current())toast(e.message);return}
   if(!current())return;
-  const archived=(S.fileArchives||[]).some(x=>x.id===p.id),editable=!archived&&(S.user?.admin||p.owner===S.user?.id||f.uploader===S.user?.id);
+  const editable=canDeleteFile(p,f);
   openModal(`<div class="eyebrow">${escapeHTML(p.name)} · 文件</div><h2>${escapeHTML(f.name)}</h2>`
     +mdEditorHTML({id:'mdFileEditor',inputId:'mdFileInput',viewId:'mdFileView',value:text,rows:18,readonly:!editable,empty:'文件是空的'})
     +`<div class="modal-footer">${editable?'<button type="button" class="secondary-btn content-delete" id="deleteMdFile">删除文件</button>':''}<a class="secondary-btn" href="/api/files/${encodeURIComponent(id)}" download="${escapeHTML(f.name)}">下载</a>`
@@ -1966,7 +1982,7 @@ function bindProjectSpace(p){
   if(menu)menu.onkeydown=e=>{if(e.key==='Escape'){menu.open=false;menu.querySelector('summary').focus()}};
   const addMeeting=$('#createMeetingFromFiles');if(addMeeting)addMeeting.onclick=async()=>{menu.open=false;await projectArea(p,'meetings');if(UI.spaceArea==='meetings')openMeetingEditor(p)};
   $$('#projectSpace .meeting-row').forEach(b=>b.onclick=()=>openMeetingEditor(p,b.dataset.meeting));
-  $$('#projectSpace [data-md-file]').forEach(b=>b.onclick=()=>openMarkdownFile(p,b.dataset.mdFile));
+  $$('#projectSpace [data-open-file]').forEach(b=>b.onclick=()=>openProjectFile(p,b.dataset.openFile));
   $$('#projectSpace .file-delete').forEach(b=>b.onclick=()=>deleteProjectFile(p,b.dataset.file,b));
   const zone=$('#spaceFiles');if(!zone)return;
   zone.ondragover=e=>{if(![...e.dataTransfer.types].includes('Files'))return;e.preventDefault();zone.classList.add('is-over')};
@@ -3533,7 +3549,7 @@ const GUIDE=[
   {id:'files',title:'项目文件',icon:'file',demo:'upload',lead:'把项目资料放在项目里，所有成员都能取用。',parts:[
     ['上传',['在项目的「文件」标签点「新增文件 → 上传文件」，或直接把文件从电脑拖到列表上。','单个文件不超过 20MB，可以一次选多个。']],
     ["预览",["图片、PDF、文本、CSV、JSON 和日志文件旁边有「预览」，在新标签页里直接打开，不用下载。", "Markdown（.md）文件点开就是排版好的样子；上传者、项目 Owner 和管理员可以切到「编辑」修改后保存。"],"list"],
-    ['下载与删除',['点文件名即可下载。','上传者、项目 Owner 和管理员可点文件行右侧的「删除」；打开 Markdown 文件后，也可点窗口底部的「删除文件」。确认后删除，无法恢复。'],'list'],
+    ['打开、下载与删除',['点文件名或左侧目录打开文件详情，Markdown 文件进入编辑器；点「下载」保存文件。','上传者、项目 Owner 和管理员可在列表右侧或详情底部删除文件；逾期项目仍可管理，结项和归档项目只读。删除前需确认，无法恢复。'],'list'],
     ['项目结束以后',['项目结项后，文件和会议仍能在项目目录的「归档文件」里只读查看和下载。'],'list'],
     ["常见问题",[["文件太大传不上去？", "单个文件上限 20MB，可以压缩或拆分后再传。"], ["误删了文件能找回吗？", "不能，删除前请确认。"]],"faq"],
   ]},

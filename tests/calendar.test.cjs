@@ -2650,10 +2650,10 @@ test('account cancellation releases the mic and discards late transcription with
   h.audio[0].reply('旧账户音频');await settle();
   assert.equal(h.nodes['#meetingTranscript'].value,'');assert.equal(h.calls.length,before);assert.ok(h.stops>0);
 });
-test('project resources are grouped by project and escaped, with direct download links',()=>{
+test('project resources open file management in their project instead of downloading on selection',()=>{
   const a=app();a.run(`S.files=[{id:'f/x',projectId:'p',name:'<file>.pdf'},{id:'hidden',projectId:'q',name:'private'}];
     S.meetings=[{id:'m',projectId:'p',title:'<会议>'}];`);
-  const html=a.run("projectNavContents({id:'p'})");assert.match(html,/\/api\/files\/f%2Fx/);assert.match(html,/&lt;file&gt;.pdf/);
+  const html=a.run("projectNavContents({id:'p'})");assert.match(html,/data-project="p" data-project-area="files" data-file="f\/x"/);assert.match(html,/&lt;file&gt;.pdf/);assert.doesNotMatch(html,/download=|href="\/api\/files/);
   assert.match(html,/data-meeting="m"/);assert.match(html,/&lt;会议&gt;/);assert.doesNotMatch(html,/private|\/api\/files\/hidden/);
 });
 test('meeting workspace separates files and respects creation and archive permissions',()=>{
@@ -3275,6 +3275,43 @@ test('meeting and file rows expose deletion only to authorized active-project us
   a.run("S.user={id:'creator'}");assert.match(a.run('projectMeetingList(p)'),/data-delete-meeting/);
   a.run("S.user={id:'uploader'}");assert.match(a.run('projectFiles(p)'),/class="text-btn file-delete"/);
   a.run("S.user={id:'admin',admin:true};S.fileArchives=[{id:'p'}]");assert.doesNotMatch(a.run('projectMeetingList(p)'),/data-delete-meeting/);assert.doesNotMatch(a.run('projectFiles(p,true)'),/class="text-btn file-delete"/);
+});
+test('overdue project content stays writable while completed and archived content stays read-only',()=>{
+  const a=app();a.run("S.today='2026-11-09';S.fileArchives=[];S.user={id:'owner'};var p={id:'p',owner:'owner',status:'active',end:'2026-11-01'};S.meetings=[{id:'m',projectId:'p',title:'逾期项目会议'}];S.files=[{id:'f',projectId:'p',name:'计划.md',uploader:'other'}]");
+  assert.equal(a.run('projectContentWritable(p)'),true);assert.match(a.run('projectMeetingList(p)'),/data-delete-meeting="m"/);assert.match(a.run('projectFiles(p)'),/aria-label="删除文件 计划.md"/);
+  for(const status of ['done','archived']){
+    a.context.nextStatus=status;a.run('p.status=nextStatus');assert.equal(a.run('canDeleteFile(p,S.files[0])'),false);assert.equal(a.run('canDeleteMeeting(p,S.meetings[0])'),false);
+  }
+  a.run("p.status='active';S.fileArchives=[{id:'p'}]");assert.equal(a.run('canDeleteFile(p,S.files[0])'),false);
+});
+test('every file row has explicit open and download actions, with permission checked deletion',()=>{
+  const a=app();a.run("S.today='2026-11-09';S.user={id:'owner'};S.users=[];S.fileArchives=[];S.files=[{id:'f/x',projectId:'p',name:'<计划>.zip',size:1024,uploader:'other'}];S.meetings=[];var p={id:'p',owner:'owner',status:'active'}");
+  const html=a.run('projectFiles(p)');assert.match(html,/data-open-file="f\/x"/);assert.match(html,/aria-label="打开文件 &lt;计划&gt;.zip"/);assert.match(html,/href="\/api\/files\/f%2Fx" download="&lt;计划&gt;.zip"/);assert.match(html,/aria-label="删除文件 &lt;计划&gt;.zip"/);assert.doesNotMatch(html,/<计划>/);
+  a.run("S.user={id:'member'}");const member=a.run('projectFiles(p)');assert.match(member,/打开文件/);assert.match(member,/下载文件/);assert.doesNotMatch(member,/删除文件/);
+});
+test('non-Markdown file details expose download, preview and deletion consistently without fetching content',()=>{
+  const a=app(),nodes={},views=[];a.context.document={querySelector:s=>nodes[s]||(nodes[s]={})};a.context.views=views;
+  a.run("S.user={id:'owner'};S.users=[];S.fileArchives=[];S.files=[{id:'f/x',projectId:'p',name:'<report>.pdf',size:2048,uploader:'owner',createdAt:'2026-11-09T10:00:00+08:00'}];var p={id:'p',name:'项目',owner:'owner',status:'active'};openModal=html=>views.push(html);closeModal=()=>{};fetch=()=>{throw Error('Details must not fetch the file')};openProjectFile(p,'f/x')");
+  assert.match(views[0],/id="projectFileDetails" data-file-id="f\/x"/);assert.match(views[0],/id="deleteProjectFileBtn"/);assert.match(views[0],/\/api\/files\/f%2Fx\?preview=1/);assert.match(views[0],/download="&lt;report&gt;.pdf"/);assert.doesNotMatch(views[0],/<report>/);
+  a.run("S.user={id:'member'};openProjectFile(p,'f/x')");assert.doesNotMatch(views[1],/deleteProjectFileBtn/);assert.match(views[1],/下载文件/);
+  a.run("S.files[0].name='package.zip';openProjectFile(p,'f/x')");assert.doesNotMatch(views[2],/preview=1/);
+  a.run("openProjectFile(p,'not-in-project')");assert.equal(views.length,3);
+  a.run("S.files[0].name='note.md';openMarkdownFile=(project,id)=>views.push(id);openProjectFile(p,'f/x')");assert.equal(views[3],'f/x');
+});
+test('file deletion closes only the matching management surface',async()=>{
+  const h=contentDeleteApp();h.nodes['#projectFileDetails']={dataset:{fileId:'f'}};
+  assert.equal(await h.a.run("deleteProjectFile(project,'f')"),true);assert.equal(h.closes(),1);
+  const other=contentDeleteApp();other.nodes['#projectFileDetails']={dataset:{fileId:'unrelated'}};
+  assert.equal(await other.a.run("deleteProjectFile(project,'f')"),true);assert.equal(other.closes(),0);
+});
+test('Markdown management follows active overdue and closed project permissions',async()=>{
+  for(const status of ['active','done','archived']){
+    const {a,opened}=markdownFileApp();a.context.fetch=async()=>({ok:true,text:async()=> '# saved content'});a.context.nextStatus=status;
+    a.run("S.today='2026-11-09';var p={id:'p',name:'project',owner:'owner',status:nextStatus,end:'2026-11-01'}");
+    await a.run("openProjectFile(p,'f')");assert.equal(opened.length,1);assert.match(opened[0],/saved content/);
+    if(status==='active'){assert.match(opened[0],/deleteMdFile/);assert.match(opened[0],/saveMdFile/)}
+    else assert.doesNotMatch(opened[0],/deleteMdFile|saveMdFile/);
+  }
 });
 test('cancelling content deletion sends no requests and does not stop recording',async()=>{
   const h=contentDeleteApp();h.setConfirm(false);h.a.run("meetingLive.meetingId='m'");
