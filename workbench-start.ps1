@@ -1,5 +1,5 @@
 ﻿<#
-  workbench-start.ps1 - Work Calendar 一键启动入口。
+  workbench-start.ps1 - Hola-Calendar 一键启动入口。
 
   依次确保：本地服务（127.0.0.1:4173）在跑、Cloudflare Tunnel 在跑、
   健康检查通过，然后打开浏览器。已运行的部分不会重复启动。
@@ -166,7 +166,7 @@ if (-not $NoTunnel) {
 
 $domain = Get-TunnelDomain
 Write-Host ''
-Write-Host 'Work Calendar 就绪'
+Write-Host 'Hola-Calendar 就绪'
 Write-Host "  本机：$localUrl"
 if ($domain) { Write-Host "  公网：$domain" }
 if ($tunnelState -like '未找到*') { Write-Host '  提示：Tunnel 未启动，公网地址暂时不可用。' }

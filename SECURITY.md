@@ -11,7 +11,7 @@
 
 ## 部署注意事项
 
-Work Calendar 默认面向本机或受信任的小型团队使用，请在生产部署时注意：
+Hola-Calendar 默认面向本机或受信任的小型团队使用，请在生产部署时注意：
 
 - 服务只应监听 `127.0.0.1`，由 Cloudflare Tunnel 或反向代理对外发布，不要直接暴露应用端口。
 - 通过 HTTPS 访问时必须设置 `WORK_CALENDAR_ORIGINS` 为实际域名，并启用 `WORK_CALENDAR_SECURE_COOKIE=1`。

@@ -1,4 +1,4 @@
-# Work Calendar 部署指南
+# Hola-Calendar 部署指南
 
 本目录提供 Docker Compose、Cloudflare Tunnel、Caddy、systemd 与备份的模板。生产环境建议让服务只监听本机回环地址，再由 Tunnel 或反向代理转发，不直接暴露应用端口。
 
@@ -72,7 +72,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\install-windows.ps1
 ```
 
-脚本会复制到 `%LOCALAPPDATA%\WorkCalendar`、通过 winget 安装 Python 3.12（如尚未安装）、注册并启动“Work Calendar”登录启动任务。默认本机地址为 `http://127.0.0.1:4173/`，不依赖 cloudflared。
+脚本会复制到 `%LOCALAPPDATA%\WorkCalendar`、通过 winget 安装 Python 3.12（如尚未安装）、注册并启动“Hola-Calendar”登录启动任务。默认本机地址为 `http://127.0.0.1:4173/`，不依赖 cloudflared。
 
 ### 搭配 Cloudflare Tunnel
 
@@ -85,7 +85,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\deploy\install-windows-tasks.ps1
 ```
 
-脚本会注册两个登录启动任务：`Work Calendar` 和 `Work Calendar Cloudflare Tunnel`。应用通过 `run-windows.ps1` 读取 `WORK_CALENDAR_ORIGINS` 并启用 Secure Cookie，默认值为占位域名，请替换为你的实际域名（也可在环境中预先设置该变量）。
+脚本会注册两个登录启动任务：`Hola-Calendar` 和 `Hola-Calendar Cloudflare Tunnel`。应用通过 `run-windows.ps1` 读取 `WORK_CALENDAR_ORIGINS` 并启用 Secure Cookie，默认值为占位域名，请替换为你的实际域名（也可在环境中预先设置该变量）。
 
 4. 确认本机 `http://127.0.0.1:4173/api/health` 返回 `200`，再访问你的域名验证首页、登录和状态 API。
 

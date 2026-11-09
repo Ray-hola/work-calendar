@@ -1,8 +1,8 @@
-# Work Calendar
+# Hola-Calendar
 
-**战略小组台账**：自托管的团队任务与项目协作工作台。一个 Python 文件、一个 SQLite 数据库，零运行时依赖，数据只在你自己的机器上。
+**哗啦！（哗啦待办）**：自托管的团队任务与项目协作工作台。一个 Python 文件、一个 SQLite 数据库，零运行时依赖，数据只在你自己的机器上。
 
-[![Tests](https://github.com/Ray-hola/work-calendar/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Ray-hola/work-calendar/actions/workflows/tests.yml)
+[![Tests](https://github.com/Ray-hola/Hola-Calendar/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Ray-hola/Hola-Calendar/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](#环境要求)
 [![No dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](#环境要求)
@@ -13,7 +13,7 @@
 
 ## 为什么做这个项目
 
-多数协作工具要求把任务、日报和成员数据放到第三方云上。Work Calendar 把完整的任务闭环（排期 → 执行 → 完成 → 归档）和协作规则放在一个可审计的本地服务里：`server.py` 加一个 SQLite 文件，页面通过本机端口访问，需要对外时用 Cloudflare Tunnel 或反向代理发布。
+多数协作工具要求把任务、日报和成员数据放到第三方云上。Hola-Calendar 把完整的任务闭环（排期 → 执行 → 完成 → 归档）和协作规则放在一个可审计的本地服务里：`server.py` 加一个 SQLite 文件，页面通过本机端口访问，需要对外时用 Cloudflare Tunnel 或反向代理发布。
 
 ## 功能
 
@@ -101,6 +101,8 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\run-windows.ps1          # 在当前目录前台运行
 .\install-windows.ps1      # 或安装到 %LOCALAPPDATA%\WorkCalendar 并登录自启
 ```
+
+已有部署升级无需迁移数据；`WORK_CALENDAR_*` 环境变量、`data/work-calendar.sqlite3` 和部署服务标识继续兼容。
 
 打开 `http://127.0.0.1:4173/`。首次启动会创建 `data/work-calendar.sqlite3` 和 `data/initial-accounts.txt`，后者记录预置账户 `superadmin`、`test001`（项目 Owner）、`test002` / `test003`（协作者）的随机密码，首次登录后请修改。
 

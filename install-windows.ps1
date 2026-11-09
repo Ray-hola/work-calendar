@@ -37,6 +37,6 @@ $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interac
 Register-ScheduledTask -TaskName 'Work Calendar' -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
 Start-ScheduledTask -TaskName 'Work Calendar'
 
-Write-Host "Work Calendar 已安装到 $InstallDir"
+Write-Host "Hola-Calendar 已安装到 $InstallDir"
 Write-Host '已注册并启动开机登录任务：Work Calendar'
 Write-Host '本机地址：http://127.0.0.1:4173/'

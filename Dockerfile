@@ -1,4 +1,4 @@
-# Work Calendar in one small image: the standard-library server and the three
+# Hola-Calendar in one small image: the standard-library server and the three
 # front-end files. Everything it writes lives in /app/data; mount it as a volume.
 FROM python:3.12-slim
 
