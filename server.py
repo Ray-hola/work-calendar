@@ -1,4 +1,4 @@
-"""Work Calendar: local authenticated application, SQLite storage and scheduler."""
+"""Hola-Calendar: local authenticated application, SQLite storage and scheduler."""
 from __future__ import annotations
 import argparse
 import calendar
@@ -1276,21 +1276,21 @@ class Store:
         planning = data.get('planning') is True
         operator = caps['mode'] == 'operator' and not planning
         if planning:
-            policy = ('你是「战略小组台账」的规划助手。只起草项目和任务卡片，不能执行操作，也不要输出 <action>。'
+            policy = ('你是「哗啦待办」的规划助手。只起草项目和任务卡片，不能执行操作，也不要输出 <action>。'
                       '即使信息不全，也必须返回 <plan>{"projects":[],"tasks":[{"name":"","assignee":"","date":"",'
                       '"desc":"用户要安排的事"}]}</plan> 格式的草稿；可以拆成多个项目和任务。'
                       '已知信息填入对应字段，缺少名称或无法确定的负责人留空，放入 missing 数组提醒用户补充；'
                       '不要编造账户或项目，不要因缺少信息只回复无法生成。'
                       '采用调用方提供的计划字段格式和当前账户创建规则；卡片由用户修改并确认后按自身权限提交。')
         elif user.get('admin'):
-            policy = ('你是「战略小组台账」助手。当前账户是 superadmin，可协助查询并提出管理操作；'
+            policy = ('你是「哗啦待办」助手。当前账户是 superadmin，可协助查询并提出管理操作；'
                       '任何创建、指派、调整或审批都必须先向用户展示拟执行内容并等待明确确认。')
         elif operator:
-            policy = ('你是「战略小组台账」助手。当前账户是普通成员，superadmin 已允许助手代这位成员操作：'
+            policy = ('你是「哗啦待办」助手。当前账户是普通成员，superadmin 已允许助手代这位成员操作：'
                       '只能做这位成员自己有权限做的创建、调整和提交申请，不能替别人审批，也不能改账户或权限；'
                       '任何改动都必须先向用户展示拟执行内容并等待明确确认。')
         else:
-            policy = ('你是「战略小组台账」查询助手。当前账户是普通成员，只能回答该成员有权看到的信息，'
+            policy = ('你是「哗啦待办」查询助手。当前账户是普通成员，只能回答该成员有权看到的信息，'
                       '不能创建、删除、指派、调整或审批任何数据。'
                       '用户想安排事情时，告诉他点输入框上方的「管理任务 / 项目」，助手会起草好卡片由他确认。')
         allowed = sorted(a for a, t in AGENT_ACTION_TO_TOOL.items() if t in caps['tools'] and a not in WORK_CARD_ACTIONS) if operator else []
@@ -2727,7 +2727,7 @@ class Store:
                 self.initial_passwords[id]=password
                 self.create_user(id,password,id=='superadmin')
             today=now().date(); day=today.isoformat()
-            p=self.put('projects',{'name':'Work Calendar MVP','desc':'完成日程、任务和协作闭环','owner':'test001','creator':'superadmin','members':{'test001':'accepted','test002':'accepted','test003':'accepted'},'status':'active','priority':'P0','priorityLocked':False,'cycle':'range','start':day,'end':(today+timedelta(days=14)).isoformat(),'createdAt':timestamp()})
+            p=self.put('projects',{'name':'Hola-Calendar MVP','desc':'完成日程、任务和协作闭环','owner':'test001','creator':'superadmin','members':{'test001':'accepted','test002':'accepted','test003':'accepted'},'status':'active','priority':'P0','priorityLocked':False,'cycle':'range','start':day,'end':(today+timedelta(days=14)).isoformat(),'createdAt':timestamp()})
             admin=self.user('superadmin')
             for name,assignee,priority,mins,kind in [('核验周轴与悬停','test001','P0',90,'设计'),('测试任务完成与递延','test002','P1',45,'测试'),('检查收件箱隔离','test003','P1',40,'测试'),('整理项目日报','test001','P2',30,'文档')]:
                 self.make_task(admin,{'name':name,'desc':'内置测试任务，可以实际完成、递延或调整负责人。','assignee':assignee,'priority':priority,'duration':mins,'type':kind,'projectId':p['id'],'date':day})
@@ -4902,7 +4902,7 @@ def main():
         path=Path(args.db).parent/'initial-accounts.txt'
         fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
         with os.fdopen(fd,'w',encoding='utf-8') as f:
-            f.write('战略小组台账 本地核验账户（请勿上传或公开分享）\n')
+            f.write('哗啦待办 本地核验账户（请勿上传或公开分享）\n')
             for id,pw in store.initial_passwords.items():f.write(f'{id}\t{pw}\n')
         print(f'账户密码已保存：{path}',flush=True)
     class Handler(BaseHTTPRequestHandler):
@@ -5017,7 +5017,7 @@ def main():
             stop.wait(30)
     thread=threading.Thread(target=scheduler,daemon=True);thread.start()
     server=ThreadingHTTPServer((args.host,args.port),Handler)
-    print(f'战略小组台账 正在运行：http://{args.host}:{args.port}',flush=True)
+    print(f'哗啦待办 正在运行：http://{args.host}:{args.port}',flush=True)
     try:server.serve_forever()
     except KeyboardInterrupt:pass
     finally:stop.set();thread.join(timeout=5);server.server_close();store.close()

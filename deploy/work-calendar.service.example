@@ -1,5 +1,5 @@
 [Unit]
-Description=Work Calendar MVP
+Description=Hola-Calendar MVP
 After=network.target
 
 [Service]

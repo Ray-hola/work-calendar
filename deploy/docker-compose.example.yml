@@ -1,4 +1,4 @@
-# Run Work Calendar with Docker Compose. From the repository root:
+# Run Hola-Calendar with Docker Compose. From the repository root:
 #
 #   docker compose -f deploy/docker-compose.example.yml up -d --build
 #

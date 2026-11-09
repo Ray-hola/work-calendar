@@ -345,7 +345,7 @@ const status=t=>{
 };
 const projectName=t=>(S.projects.find(p=>p.id===t.projectId)||{}).name||'个人';
 function toast(msg){const e=$('#toast');e.textContent=msg;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200)}
-function showAuth(){cancelTourOffer();endTour(false);meetingCancelCapture();meetingStopLive().catch(()=>{});if(typeof agentCancelVoice==='function')agentCancelVoice();document.body.classList.add('auth-locked');let e=$('#authScreen');if(!e){e=document.createElement('section');e.id='authScreen';document.body.prepend(e)}const local=location.protocol==='file:';e.innerHTML=`<div class="auth-card"><div class="brand"><span class="brand-mark">战</span><span>战略小组<br><strong>台账</strong></span></div><h1>登录工作台</h1><form id="loginForm"><label>账户<input id="loginUser" autocomplete="username" value="superadmin" required></label><label>密码<input id="loginPass" type="password" autocomplete="current-password" required></label><button class="primary-btn" type="submit" ${local?'disabled':''}>${local?'请先启动本地服务':'进入工作台'}</button><div id="loginError" class="login-error">${local?'请在工作区运行 ./run.sh，然后访问 http://127.0.0.1:4173/':''}</div></form></div>`;$('#loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/login',{username:$('#loginUser').value,password:$('#loginPass').value});document.body.classList.remove('auth-locked');e.target.closest('#authScreen').remove();await refresh();switchView('calendar')}catch(err){$('#loginError').textContent=err.message}}}
+function showAuth(){cancelTourOffer();endTour(false);meetingCancelCapture();meetingStopLive().catch(()=>{});if(typeof agentCancelVoice==='function')agentCancelVoice();document.body.classList.add('auth-locked');let e=$('#authScreen');if(!e){e=document.createElement('section');e.id='authScreen';document.body.prepend(e)}const local=location.protocol==='file:';e.innerHTML=`<div class="auth-card"><div class="brand"><span class="brand-mark">哗</span><span>哗啦！<br><strong>哗啦待办</strong></span></div><h1>登录工作台</h1><form id="loginForm"><label>账户<input id="loginUser" autocomplete="username" value="superadmin" required></label><label>密码<input id="loginPass" type="password" autocomplete="current-password" required></label><button class="primary-btn" type="submit" ${local?'disabled':''}>${local?'请先启动本地服务':'进入工作台'}</button><div id="loginError" class="login-error">${local?'请在工作区运行 ./run.sh，然后访问 http://127.0.0.1:4173/':''}</div></form></div>`;$('#loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/login',{username:$('#loginUser').value,password:$('#loginPass').value});document.body.classList.remove('auth-locked');e.target.closest('#authScreen').remove();await refresh();switchView('calendar')}catch(err){$('#loginError').textContent=err.message}}}
 /* Accounts that have signed in on this browser, newest first. The switcher
    offers only these, so it never lists the whole team to everyone. */
 const KNOWN_ACCOUNTS_KEY='wc-accounts';
@@ -3649,7 +3649,7 @@ function renderGuide(){
 const myOpenTask=()=>S.tasks.find(t=>t.assignee===S.user?.id&&['todo','doing'].includes(t.status)&&!isSuperseded(t))
   ||S.tasks.find(t=>t.assignee===S.user?.id&&!isSuperseded(t));
 const TOUR=[
-  {ch:'开始',title:'欢迎来到战略小组台账',body:'三分钟走一遍主线：安排任务 → 跟进项目 → 处理收件箱 → 写档案。标着「试一试」的步骤可以直接点亮起来的地方，看它真的怎么动。随时按 [[Esc]] 退出，[[←]] [[→]] 翻页。'},
+  {ch:'开始',title:'欢迎来到哗啦！',body:'三分钟走一遍主线：安排任务 → 跟进项目 → 处理收件箱 → 写档案。标着「试一试」的步骤可以直接点亮起来的地方，看它真的怎么动。随时按 [[Esc]] 退出，[[←]] [[→]] 翻页。'},
   {ch:'今天',view:'today',target:'#addTaskBtn',demo:'new-task',title:'新建任务',body:'按 [[N]] 或点这里。填好名称、负责人、日期和时长，任务立刻出现在对方的今日任务里，对方收到通知。所在规则组需要审批时，按钮会变成「申请任务」。'},
   {ch:'今天',view:'today',target:'.quick-tabs [data-filter="open"]',done:()=>UI.filter==='open',try:'点「待处理」，列表只留下还没做完的',title:'全部 · 待处理 · 已完成',body:'这三个标签切换下面列表的范围，上面的今日进度按已完成的任务计算。'},
   {ch:'今天',view:'today',prep:()=>{const t=myOpenTask();if(t&&$('#taskDrawer').classList.contains('hidden'))openDrawer(t.id)},leave:()=>closeDrawer(),
@@ -5292,12 +5292,12 @@ function agentSystemPrompt(context,planning){
     const r=context.rules,labels={direct:'直接创建',approval:'需审批',none:'不允许'};
     const own=r?`当前账户 ${context.self} 的创建规则：新项目${labels[r.project]}，给自己的临时任务${labels[r.tempTask]}，在参与的项目里建任务`
       +`${labels[r.projectTask]}（自己做 Owner 的项目总能直接建）；临时任务可以给自己，也可以指派给任何成员；新项目由当前账户做 Owner。规则为「不允许」的那类卡片不要起草。`:'';
-    return `你是「战略小组台账」的安排助手。当前账户角色：${context.role}。${own}${AGENT_PLAN_RULE}`;
+    return `你是「哗啦待办」的安排助手。当前账户角色：${context.role}。${own}${AGENT_PLAN_RULE}`;
   }
   const rule=context.mode==='operator'
     ?'任务和项目的创建/修改/删除必须调用 work_cards 起草卡片，等待用户检查后手动确认。其他管理操作才输出一个 <action>{"action":"…","data":{…}}</action> 动作块，一次只输出一个动作，然后停下来等待系统回执。系统会把结果以【系统回执】或【系统回执·失败】的形式发给你。收到成功回执后，先看回执里的「数据核对」，确认这一步确实产生了预期的变化，再输出下一个动作；核对结果与预期不符就先修正它。如果用户的目标还没完成就继续输出下一个动作，完成了就用一句话总结并明确结束。收到失败回执时先读懂原因：如果是缺了前置步骤（例如负责人还没加入项目、项目还没审批），就输出补救动作把它补上再继续；如果确实做不到，用一句话说明原因并结束。绝对不要在收到回执之前声称操作已经完成，也不要重复提交同一个已经失败的动作。'
     :'你是只读助手，可用 work_cards 起草任务/项目管理卡片交给用户确认，不能代为执行修改或审批。';
-  return `你是「战略小组台账」工作助手。当前账户角色：${context.role}，权限模式：${context.mode}。遵守服务端权限边界：${rule}`;
+  return `你是「哗啦待办」工作助手。当前账户角色：${context.role}，权限模式：${context.mode}。遵守服务端权限边界：${rule}`;
 }
 function agentRecentMessages(){
   /* Last line of defence: the proxy refuses an empty message, and a blank turn
