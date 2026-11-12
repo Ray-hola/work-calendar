@@ -6,6 +6,7 @@ act on. These cover the retry, the diagnostic, and the context trimming that
 made the payload twice as large as it needed to be.
 """
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -14,6 +15,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from server import Store, Problem, MAX_MESSAGE_CHARS, MAX_TRANSCRIPT_CHARS
+
+
+def setUpModule():
+    # The stub provider listens on 127.0.0.1; an HTTP(S)_PROXY in the
+    # environment would otherwise send its requests to that proxy and hang.
+    loopback = patch.dict(os.environ, {'no_proxy': '127.0.0.1,localhost', 'NO_PROXY': '127.0.0.1,localhost'})
+    loopback.start()
+    unittest.addModuleCleanup(loopback.stop)
 
 
 class _Stub(BaseHTTPRequestHandler):
