@@ -1,3 +1,6 @@
+// Clock times are read in local time and the team works in Asia/Shanghai, as
+// CI does; pin it here so a plain local `node --test` agrees with CI anywhere.
+process.env.TZ = 'Asia/Shanghai';
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
