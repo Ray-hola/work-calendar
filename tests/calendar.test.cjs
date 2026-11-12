@@ -1584,6 +1584,32 @@ test('archived attachments have a read-only navigation and achievements entry wi
   assert.ok(elements['#achievementGrid'].innerHTML.includes('achievement-files'),'管理员可从成果库进入归档附件');
 });
 
+test('work-log and 成果库 detail opens the live task, the live project, or an archived summary',()=>{
+  const a=app(),elements={};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={dataset:{},classList:{toggle(){}}}),querySelectorAll:()=>[]};
+  a.run(`var opened=[],modal='',toasts=[];openDrawer=id=>opened.push('task:'+id);openProjectSpace=id=>opened.push('space:'+id);
+    openModal=h=>{modal=h};toast=m=>toasts.push(m);
+    S.user={id:'superadmin',admin:1};S.users=[{id:'chenxi',displayName:'陈曦'},{id:'wang00',displayName:'王零'}];
+    S.tasks=[{id:'t1',name:'进行中任务',projectId:'live',status:'doing'}];
+    S.projects=[{id:'live',name:'进行中项目',owner:'chenxi',status:'active'}];
+    S.achievements=[{id:'old',name:'已交付项目',owner:'chenxi',status:'done',completedAt:'2026-11-01T10:00:00+08:00',completionReport:'按期交付',
+      tasks:[{id:'t9',name:'收尾',assignee:'wang00',status:'done',priority:'P1'}]}];
+    openWorkLogDetail('t1','live','task');openWorkLogDetail('','live','project');openWorkLogDetail('t9','old','task');openWorkLogDetail('','gone','project');`);
+  assert.deepEqual(a.json('opened'),['task:t1','space:live']);
+  const modal=a.run('modal');
+  for(const text of ['已交付项目','陈曦','1/1','2026-11-01','按期交付','收尾','王零 · 已完成'])assert.ok(modal.includes(text),text);
+  assert.equal(a.json('toasts').length,1,'找不到的项目给出提示而不是报错');
+});
+
+test('project invites show the owner display name',()=>{
+  const a=app(),elements={};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={dataset:{},classList:{toggle(){}}}),querySelectorAll:()=>[]};
+  a.run(`var modal='';openModal=h=>{modal=h};fetch=()=>Promise.reject(new Error('offline'));
+    S.users=[{id:'chenxi',displayName:'陈曦'}];S.projects=[{id:'p',name:'新项目',owner:'chenxi',status:'active'}];
+    S.requests=[{id:'r',projectId:'p'}];openRequest('r')`);
+  assert.ok(a.run('modal').includes('<strong>陈曦</strong>'));
+});
+
 test('a folder lists its projects in a chosen order', () => {
   const a=app(); const elements={};
   const store={};a.context.localStorage={getItem:k=>store[k]??null,setItem:(k,v)=>{store[k]=String(v)}};
