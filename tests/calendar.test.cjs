@@ -1584,6 +1584,17 @@ test('archived attachments have a read-only navigation and achievements entry wi
   assert.ok(elements['#achievementGrid'].innerHTML.includes('achievement-files'),'管理员可从成果库进入归档附件');
 });
 
+test('achievement cards show the owner display name, not the account id',()=>{
+  const a=app(),elements={};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={dataset:{},classList:{toggle(){}}}),querySelectorAll:()=>[]};
+  a.run(`S.user={id:'superadmin',admin:1};S.users=[{id:'chenxi',displayName:'陈曦'}];
+    S.achievements=[{id:'a',name:'已交付项目',owner:'chenxi',status:'done',tasks:[]},{id:'b',name:'无主项目',status:'done',tasks:[]}];renderAchievements()`);
+  const html=elements['#achievementGrid'].innerHTML;
+  assert.ok(html.includes('Owner · <b>陈曦</b>'));
+  assert.ok(html.includes('Owner · <b>—</b>'));
+  assert.ok(!html.includes('<b>chenxi</b>'));
+});
+
 test('a folder lists its projects in a chosen order', () => {
   const a=app(); const elements={};
   const store={};a.context.localStorage={getItem:k=>store[k]??null,setItem:(k,v)=>{store[k]=String(v)}};
