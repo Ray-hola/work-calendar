@@ -1,3 +1,6 @@
+// Clock times are read in local time and the team works in Asia/Shanghai, as
+// CI does; pin it here so a plain local `node --test` agrees with CI anywhere.
+process.env.TZ = 'Asia/Shanghai';
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -1582,6 +1585,44 @@ test('archived attachments have a read-only navigation and achievements entry wi
   assert.equal(a.run('visibleProjects().length'),0,'归档项目不回到进行中列表');
   a.run("S.user={id:'superadmin',admin:1};S.achievements=[{id:'old',name:'已交付项目',status:'done',tasks:[]}];renderAchievements()");
   assert.ok(elements['#achievementGrid'].innerHTML.includes('achievement-files'),'管理员可从成果库进入归档附件');
+});
+
+test('work-log and 成果库 detail opens the live task, the live project, or an archived summary',()=>{
+  const a=app(),elements={};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={dataset:{},classList:{toggle(){}}}),querySelectorAll:()=>[]};
+  a.run(`var opened=[],modal='',toasts=[];openDrawer=id=>opened.push('task:'+id);openProjectSpace=id=>opened.push('space:'+id);
+    openModal=h=>{modal=h};toast=m=>toasts.push(m);
+    S.user={id:'superadmin',admin:1};S.users=[{id:'chenxi',displayName:'陈曦'},{id:'wang00',displayName:'王零'}];
+    S.tasks=[{id:'t1',name:'进行中任务',projectId:'live',status:'doing'}];
+    S.projects=[{id:'live',name:'进行中项目',owner:'chenxi',status:'active'}];
+    S.fileArchives=[{id:'old',name:'已交付项目'},{id:'files-only',name:'只读资料'}];
+    S.achievements=[{id:'old',name:'已交付项目',owner:'chenxi',status:'done',completedAt:'2026-11-01T10:00:00+08:00',completionReport:'按期交付',
+      tasks:[{id:'t9',name:'收尾',assignee:'wang00',status:'done',priority:'P1'}]}];
+    openWorkLogDetail('t1','live','task');openWorkLogDetail('','live','project');openWorkLogDetail('t9','old','task');openWorkLogDetail('','files-only','project');openWorkLogDetail('','gone','project');`);
+  assert.deepEqual(a.json('opened'),['task:t1','space:live','space:files-only']);
+  const modal=a.run('modal');
+  for(const text of ['已交付项目','陈曦','1/1','2026-11-01','按期交付','收尾','王零 · 已完成'])assert.ok(modal.includes(text),text);
+  assert.equal(a.json('toasts').length,1,'找不到的项目给出提示而不是报错');
+});
+
+test('project invites show the owner display name',()=>{
+  const a=app(),elements={};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={dataset:{},classList:{toggle(){}}}),querySelectorAll:()=>[]};
+  a.run(`var modal='';openModal=h=>{modal=h};fetch=()=>Promise.reject(new Error('offline'));
+    S.users=[{id:'chenxi',displayName:'陈曦'}];S.projects=[{id:'p',name:'新项目',owner:'chenxi',status:'active'}];
+    S.requests=[{id:'r',projectId:'p'}];openRequest('r')`);
+  assert.ok(a.run('modal').includes('<strong>陈曦</strong>'));
+});
+
+test('achievement cards show the owner display name, not the account id',()=>{
+  const a=app(),elements={};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={dataset:{},classList:{toggle(){}}}),querySelectorAll:()=>[]};
+  a.run(`S.user={id:'superadmin',admin:1};S.users=[{id:'chenxi',displayName:'陈曦'}];
+    S.achievements=[{id:'a',name:'已交付项目',owner:'chenxi',status:'done',tasks:[]},{id:'b',name:'无主项目',status:'done',tasks:[]}];renderAchievements()`);
+  const html=elements['#achievementGrid'].innerHTML;
+  assert.ok(html.includes('Owner · <b>陈曦</b>'));
+  assert.ok(html.includes('Owner · <b>—</b>'));
+  assert.ok(!html.includes('<b>chenxi</b>'));
 });
 
 test('a folder lists its projects in a chosen order', () => {

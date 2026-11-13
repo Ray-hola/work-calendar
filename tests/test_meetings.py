@@ -1,5 +1,6 @@
 """Project meetings: raw transcript continuity and template based minutes."""
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -11,6 +12,14 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from server import Store, Problem
+
+
+def setUpModule():
+    # The stub provider listens on 127.0.0.1; an HTTP(S)_PROXY in the
+    # environment would otherwise send its requests to that proxy and hang.
+    loopback = patch.dict(os.environ, {'no_proxy': '127.0.0.1,localhost', 'NO_PROXY': '127.0.0.1,localhost'})
+    loopback.start()
+    unittest.addModuleCleanup(loopback.stop)
 
 
 class _MinutesStub(BaseHTTPRequestHandler):
