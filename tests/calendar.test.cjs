@@ -3406,3 +3406,83 @@ test('meeting modal binds save and deletion to its own controls instead of a hid
   modal['#meetingTitle'].value='modal title';await modal['#saveMeeting'].onclick();
   assert.equal(calls.at(-1).data.title,'modal title');assert.equal(nodes['#meetingEditor'].innerHTML,'background');
 });
+
+function draftHarness() {
+  const a = app(), calls = [], toasts = [];
+  const fields = [{id: 'taskName', value: ''}, {id: 'taskDesc', value: ''}];
+  const state = {listener: null, banner: '', timer: null};
+  const root = {querySelectorAll: () => fields, addEventListener: (_, f) => { state.listener = f; },
+    insertAdjacentHTML: (_, html) => { state.banner = html; }};
+  a.context.document = {querySelector: s => s === '#modalContent' ? root : null, querySelectorAll: () => []};
+  a.context.setTimeout = f => { state.timer = f; return 1; };
+  a.context.clearTimeout = () => { state.timer = null; };
+  a.context.fetch = (path, options) => {
+    calls.push(JSON.parse(options.body));
+    return Promise.resolve({ok: true, status: 200, text: async () => '{}'});
+  };
+  a.context.toasts = toasts;
+  a.run('toast=m=>toasts.push(m);S.formDrafts=[];UI.formDraft=null;');
+  const open = () => a.run("draftForm('task.new',{title:'新任务',reopen:['newTask',null],submit:['task.create']})");
+  const type = (i, text) => { fields[i].value = text; state.listener({target: fields[i]}); state.timer(); };
+  return {a, calls, toasts, fields, state, open, type};
+}
+
+test('what is typed into a form is kept as a draft and filled back in when it reopens', () => {
+  const h = draftHarness();
+  h.open();
+  h.type(1, '先列提纲');
+  const saved = h.calls.find(c => c.action === 'formdraft.save');
+  assert.deepEqual(saved.data.fields, {taskName: '', taskDesc: '先列提纲'});
+  assert.deepEqual(saved.data.reopen, {fn: 'newTask', args: [null]});
+  assert.equal(h.a.run('S.formDrafts.length'), 1);
+  // Closing says it was kept; the same form opens with it again.
+  h.a.run('flushFormDraft(true)');
+  assert.ok(h.toasts.some(m => m.includes('草稿箱')));
+  h.fields.forEach(f => { f.value = ''; });
+  h.open();
+  assert.equal(h.fields[1].value, '先列提纲');
+  assert.ok(h.state.banner.includes('已恢复草稿'));
+});
+
+test('a submitted form leaves no draft, and typing back to the start removes it', async () => {
+  const h = draftHarness();
+  h.open();
+  h.type(0, '周报');
+  await h.a.run("draftSubmitted('/api/action',{action:'task.create'})");
+  assert.ok(h.calls.some(c => c.action === 'formdraft.delete' && c.data.key === 'task.new'));
+  assert.equal(h.a.run('S.formDrafts.length'), 0);
+  assert.equal(h.a.run('UI.formDraft'), null);
+  h.fields.forEach(f => { f.value = ''; });
+  h.open();
+  h.type(0, '周报');
+  h.type(0, '');
+  assert.equal(h.a.run('S.formDrafts.length'), 0, '和打开时一样就不算草稿');
+  // An unrelated action leaves the draft where it is.
+  h.type(1, '补充');
+  await h.a.run("draftSubmitted('/api/action',{action:'chat.send'})");
+  assert.equal(h.a.run('S.formDrafts.length'), 1);
+});
+
+test('a draft also keeps the choices around the text, such as which kind of task', () => {
+  const h = draftHarness();
+  h.a.run("var kind='adhoc',restored=null");
+  const open = () => h.a.run("draftForm('task.new',{title:'新任务',reopen:['newTask',null],submit:['task.create'],"
+    + "extra:()=>({_kind:kind}),restore:f=>{restored=f._kind}})");
+  open();
+  h.type(0, '临时的事');
+  assert.equal(h.calls.find(c => c.action === 'formdraft.save').data.fields._kind, 'adhoc');
+  h.a.run("kind='project'");
+  h.fields.forEach(f => { f.value = ''; });
+  open();
+  assert.equal(h.a.run('restored'), 'adhoc');
+});
+
+test('a rule group can keep its members temp tasks to themselves', () => {
+  const a = app();
+  a.run("S.user={id:'test001',admin:0};S.creationRules={project:'approval',tempTask:'direct',projectTask:'none',agent:'read',tempAssign:'self'}");
+  assert.equal(a.run('tempSelfOnly()'), true);
+  a.run("S.creationRules.tempAssign='anyone'");
+  assert.equal(a.run('tempSelfOnly()'), false);
+  a.run("S.user={id:'superadmin',admin:1};S.creationRules.tempAssign='self'");
+  assert.equal(a.run('tempSelfOnly()'), false, '管理员不受这条限制');
+});
