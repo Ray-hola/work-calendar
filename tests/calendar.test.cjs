@@ -3500,16 +3500,27 @@ test('English labels built from pieces keep their spaces and button labels read 
   const a = appIn('en');
   assert.equal(a.run("tr('{0}完成 · {1}',tr('任务'),'整理竞品报价')"), 'Task completed · 整理竞品报价');
   assert.equal(a.run("tr('{0}递延至 {1}{2}','',fmt('2026-11-10'),'')"), 'Deferred to Nov 10');
-  assert.equal(a.run("tr('{0}递延至 {1}{2}',tr('合并 ')+3+tr(' 期'),fmt('2026-11-10'),'')"), 'Merged 3 periods, deferred to Nov 10');
+  assert.equal(a.run("tr('{0}递延至 {1}{2}',tr('合并 {0} 期',3),fmt('2026-11-10'),'')"),
+    '3 periods merged, deferred to Nov 10');
   for (const [key, label] of [['{0}开始任务','Start'],['{0}记录完成','Record completion'],['{0}未完成，递延','Not done, defer'],
                               ['{0}修改完成记录','Edit completion record'],['{0}打回','Send back'],['{0}同意修改','Approve change']])
-    assert.equal(a.run(`tr(${JSON.stringify(key)},'<i></i>')`), '<i></i>' + label);
+    assert.equal(a.run(`tr(${JSON.stringify(key)},'<i></i>')`), `<i></i>${label}`);
   const css = fs.readFileSync(path.join(__dirname, '../styles.css'), 'utf8');
-  const en = css.match(/html:lang\(en\) \.task-card \{([^}]*)\}/)[1];
-  const px = name => Number((en.match(new RegExp(`--${name}: (\\d+)px`)) || [])[1]);
-  assert.ok(px('task-status-col') > 76, 'English status labels get a wider column than Chinese');
-  assert.ok(px('task-when-col') < 178 && px('task-when-col-narrow') < 156, 'which the shorter English dates pay for');
-  assert.equal((css.match(/var\(--task-status-col\) 16px/g) || []).length, 3, 'every task-row layout uses the shared status width');
+  const block = selector => {
+    const found = css.match(new RegExp(`${selector} \\{([^}]*)\\}`));
+    assert.ok(found, `styles.css 缺少 ${selector}`);
+    return found[1];
+  };
+  const zh = block('(?:^|\\n)\\.task-card'), en = block('html:lang\\(en\\) \\.task-card');
+  const px = (rules, name) => Number(rules.match(new RegExp(`--${name}: (\\d+)px`))?.[1]);
+  assert.ok(px(en, 'task-status-col') > px(zh, 'task-status-col'),
+    'English status labels get a wider column than Chinese');
+  assert.ok(px(en, 'task-when-col') < px(zh, 'task-when-col'), 'which the shorter English dates pay for');
+  // A task row is the grid with the 72px priority column and the 16px arrow.
+  const layouts = css.match(/grid-template-columns:[^;]* 72px [^;]* 16px;/g) ?? [];
+  assert.ok(layouts.length > 1);
+  assert.ok(layouts.every(l => l.includes('var(--task-status-col) 16px')),
+    'every task-row layout uses the shared status width');
   assert.match(css, /html:lang\(en\) \.task-card \.task-status \{\s*white-space: normal;/, 'Pending approval wraps instead of clipping');
   assert.match(css, /@container \(max-width: 800px\)[\s\S]*?html:lang\(en\) \.task-card \.fixed-badge \.badge-label \{[^}]*clip-path/, 'narrow English rows keep only the recurring icon');
   assert.match(source, /class="fixed-badge"\$\{LANG==='en'\?` title="\$\{tr\('固定'\)\}"`:''\}>/, 'and its title still says recurring');
@@ -3527,14 +3538,21 @@ test('the account menu offers both languages and marks the current one', () => {
   assert.match(html, /data-lang="zh"[^>]*>简体中文</);
   assert.match(html, /class="language-option is-active" data-lang="en"[^>]*aria-pressed="true">English</);
   assert.match(html, /aria-label="Language"/);
-  assert.match(source, /menu\.innerHTML=head\+mine\+languageChooserHTML\('account-menu-group'\)/);
+  assert.match(source, /menu\.innerHTML=`\$\{head\}\$\{mine\}\$\{languageChooserHTML\('account-menu-group'\)\}/);
 });
 
 test('the account’s saved language wins over the browser unless ?lang= is set', () => {
   const a = appIn('zh');
-  let reloaded = 0;const writes = [];
-  a.context.location.reload = () => { reloaded++; };
-  a.context.localStorage.setItem = (k, v) => writes.push([k, v]);
+  let reloaded = 0;
+  const writes = [], kept = {};
+  a.context.location.reload = () => {
+    reloaded++;
+  };
+  a.context.localStorage.setItem = (k, v) => {
+    writes.push([k, v]);
+    kept[k] = v;
+  };
+  a.context.localStorage.getItem = k => kept[k] ?? null;
   assert.equal(a.run("syncAccountLanguage({lang:''})"), false, 'no saved choice keeps the browser’s');
   assert.equal(a.run("syncAccountLanguage({lang:'zh'})"), false);
   assert.equal(a.run("syncAccountLanguage({lang:'en'})"), true);
@@ -3543,6 +3561,20 @@ test('the account’s saved language wins over the browser unless ?lang= is set'
   const pinned = appIn('zh', '?lang=zh');
   pinned.context.location.reload = () => { throw new Error('should not reload'); };
   assert.equal(pinned.run("syncAccountLanguage({lang:'en'})"), false);
+  // A browser that keeps nothing moves to ?lang= once instead of reloading for ever.
+  const forgetful = appIn('zh');
+  const moves = [];
+  forgetful.context.location.href = 'https://work.example/';
+  forgetful.context.URL = URL;
+  forgetful.context.location.reload = () => {
+    throw new Error('should not reload');
+  };
+  forgetful.context.location.replace = href => moves.push(href);
+  forgetful.context.localStorage.setItem = () => {
+    throw new Error('blocked');
+  };
+  assert.equal(forgetful.run("syncAccountLanguage({lang:'en'})"), true);
+  assert.deepEqual(moves, ['https://work.example/?lang=en']);
 });
 
 test('server messages follow the language while keeping the names they carry', () => {
@@ -3560,7 +3592,7 @@ test('server messages follow the language while keeping the names they carry', (
 test('every string app.js and index.html translate has an English entry with the same placeholders', () => {
   const a = appIn('en'), dict = a.run('I18N_EN');
   const keys = new Set();
-  for (const m of source.matchAll(/\btr\((['"])((?:\\.|(?!\1).)*)\1/g)) keys.add(vm.runInNewContext(m[1] + m[2] + m[1]));
+  for (const m of source.matchAll(/\btr\((['"])((?:\\.|(?!\1).)*)\1/g)) keys.add(vm.runInNewContext(`${m[1]}${m[2]}${m[1]}`));
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8').replace(/<script[\s\S]*?<\/script>/g, '');
   for (const m of html.matchAll(/>([^<>]*[一-鿿][^<>]*)</g)) keys.add(m[1].trim());
   for (const m of html.matchAll(/\s(?:title|aria-label|placeholder|data-keywords|data-nav)="([^"]*[一-鿿][^"]*)"/g)) keys.add(m[1].trim());
@@ -3879,4 +3911,62 @@ test('a submit that fails keeps the draft and lets the form submit again', async
   assert.equal(h.a.run('S.formDrafts.length'), 1);
   assert.equal(h.a.run('UI.formDraft.submitting'), false);
   assert.ok(!h.calls.some(c => c.action === 'formdraft.delete'));
+});
+
+test('a refused request keeps its status and the server’s own words under the translation', async () => {
+  const a = appIn('en');
+  a.context.fetch = async () => ({ok: false, status: 409,
+    text: async () => JSON.stringify({error: '草稿已在其他页面更新，请重新打开后继续'})});
+  const e = await a.run("api('/api/action',{action:'agent.draft.save',data:{}}).catch(e=>e)");
+  assert.equal(e.status, 409);
+  assert.equal(e.raw, '草稿已在其他页面更新，请重新打开后继续');
+  assert.equal(e.message, 'The draft was updated on another page. Reopen it to continue');
+  assert.match(source, /board\.conflict=\/其他页面\|已删除\/\.test\(raw\)/,
+    'the plan board checks the words, not the message');
+});
+
+test('a language the account could not save is not switched to', async () => {
+  const a = appIn('zh');
+  const writes = [];
+  a.context.localStorage.setItem = (k, v) => writes.push([k, v]);
+  a.context.location.reload = () => {
+    throw new Error('should not reload');
+  };
+  a.context.toasts = [];
+  a.run("S.user={id:'u'};toast=m=>toasts.push(m);api=async()=>{throw new Error('offline')}");
+  await a.run("setLanguage('en')");
+  assert.deepEqual(writes, []);
+  assert.deepEqual([...a.context.toasts], ['offline']);
+});
+
+test('a count of one reads singular without touching the names put into a sentence', () => {
+  const a = appIn('en');
+  assert.equal(a.run("tr('{0} 个项目',1)"), '1 project');
+  assert.equal(a.run("tr('已退出「{0}」','Top 1 tasks')"), 'Left “Top 1 tasks”');
+});
+
+test('what the interface fills in is sent in Chinese and read in the viewer’s language', () => {
+  assert.match(source, /summary:\$\('#doneText'\)\.value\|\|'完成任务'/);
+  assert.match(source, /remaining:\$\('#remainText'\)\.value\|\|'继续完成原任务'/);
+  assert.match(source, /reason:\$\('#projectRejectReason'\)\.value\|\|'申请信息需要补充'/);
+  assert.match(source, /summary:'完成任务',[\s\S]{0,120}feeling:'顺利'/);
+  assert.match(source, /DEFER_REASONS\.map\(r=>`<option value="\$\{r\}">\$\{tr\(r\)\}<\/option>`\)/);
+  const a = appIn('en');
+  assert.deepEqual(JSON.parse(a.run('JSON.stringify(DEFER_REASONS)')), ['时间不足', '等待他人', '需求变化', '遇到阻塞', '其他']);
+  assert.equal(a.run("tr(DEFER_REASONS[0])"), a.run("I18N_EN['时间不足']"));
+  assert.ok(a.run("logLine({kind:'complete',summary:'完成任务'})").endsWith(a.run("I18N_EN['完成任务']")));
+});
+
+test('a plan typed with either language’s marker is still a plan', () => {
+  assert.match(source, /const AGENT_PLAN_ALIASES=\[AGENT_PLAN_MARK,'\/plan','\[规划\]','\[Plan\]'\];/);
+});
+
+test('every fixed message the server sends has an English entry', () => {
+  const a = appIn('en');
+  const dict = a.run('I18N_EN'), patterns = a.run('I18N_EN_PATTERNS');
+  const server = fs.readFileSync(path.join(__dirname, '../server.py'), 'utf8');
+  const sent = [...server.matchAll(/Problem\(\d+,\s*'([^'{]*[\u4e00-\u9fff][^'{]*)'\)/g)].map(m => m[1]);
+  assert.ok(sent.length > 100);
+  const known = k => Object.prototype.hasOwnProperty.call(dict, k) || patterns.some(([re]) => re.test(k));
+  assert.deepEqual(sent.filter(k => !known(k)), []);
 });

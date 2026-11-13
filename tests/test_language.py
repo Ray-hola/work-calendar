@@ -20,22 +20,22 @@ class LanguageTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_language_is_unset_until_the_holder_picks_one(self):
-        self.assertEqual(self.store.user('test001')['lang'], '')
-        self.assertEqual(self.store.snapshot(self.member)['user']['lang'], '')
+        self.assertEqual(self.store.user('test001').get('lang'), '')
+        self.assertEqual(self.store.snapshot(self.member)['user'].get('lang'), '')
 
     def test_each_account_keeps_its_own_choice(self):
         self.assertEqual(self.store.action(self.member, 'profile.language', {'lang': 'en'}), {'id': 'test001', 'lang': 'en'})
-        self.assertEqual(self.store.snapshot(self.store.user('test001'))['user']['lang'], 'en')
-        self.assertEqual(self.store.user('test002')['lang'], '', 'nobody else changes')
+        self.assertEqual(self.store.snapshot(self.store.user('test001'))['user'].get('lang'), 'en')
+        self.assertEqual(self.store.user('test002').get('lang'), '', 'nobody else changes')
         self.store.action(self.store.user('test001'), 'profile.language', {'lang': 'zh'})
-        self.assertEqual(self.store.user('test001')['lang'], 'zh')
+        self.assertEqual(self.store.user('test001').get('lang'), 'zh')
 
     def test_unknown_languages_are_refused(self):
         for value in ('fr', '', None, 1):
             with self.assertRaises(Problem) as caught:
                 self.store.action(self.member, 'profile.language', {'lang': value})
             self.assertEqual(caught.exception.status, 400)
-        self.assertEqual(self.store.user('test001')['lang'], '')
+        self.assertEqual(self.store.user('test001').get('lang'), '')
 
     def test_the_dictionary_ships_with_the_other_front_end_files(self):
         dockerfile = (ROOT / 'Dockerfile').read_text(encoding='utf-8')

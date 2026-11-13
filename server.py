@@ -450,7 +450,8 @@ class Store:
             item['avatar'] = item.pop('avatar') or ''
             item['signature'] = item.pop('signature') or ''
             # Empty until the holder picks one; the browser's choice applies then.
-            item['lang'] = item['lang'] if item['lang'] in LANGS else ''
+            lang = item.get('lang')
+            item['lang'] = lang if lang in LANGS else ''
             result.append(item)
         return result
 
@@ -3596,9 +3597,10 @@ class Store:
             # Anyone may pick the language their own interface is shown in.
             lang=d.get('lang')
             if lang not in LANGS:raise Problem(400,'不支持的语言')
+            owner=user.get('id')
             with self.lock,self.db:
-                self.db.execute('UPDATE users SET lang=? WHERE id=?',(lang,user['id']))
-            return {'id':user['id'],'lang':lang}
+                self.db.execute('UPDATE users SET lang=? WHERE id=?',(lang,owner))
+            return {'id':owner,'lang':lang}
         if action=='account.create':
             # Only the superadmin group manages accounts and roles.
             self.superadmin(user)

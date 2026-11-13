@@ -9,7 +9,9 @@ const escapeHTML=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<
    English up in i18n.js (HOLA_I18N_EN), where an entry may be a function for
    word order or month names. Changing language reloads the page, because
    many labels are built once into module-level tables. User data (task,
-   project and people names) never goes through tr(). */
+   project and people names) never goes through tr(); what the interface
+   fills in for a person (默认总结、递延原因、工作感受) is stored in Chinese
+   and looked up when shown. */
 const LANG_KEY='hola-lang', LANGS={zh:'简体中文',en:'English'};
 function urlLang(){try{const q=new URLSearchParams(location.search).get('lang');return LANGS[q]?q:null}catch(_){return null}}
 function readLang(){
@@ -17,15 +19,21 @@ function readLang(){
   try{const v=localStorage.getItem(LANG_KEY);if(LANGS[v])return v}catch(_){}
   return 'zh';
 }
-let LANG=readLang();
+/* global HOLA_I18N_EN, HOLA_I18N_EN_PATTERNS */
+const LANG=readLang();
 const I18N_EN=(typeof HOLA_I18N_EN==='object'&&HOLA_I18N_EN)||{};
 const I18N_SINGULAR=/\b1 (task|day|week|project|period|member|file|meeting|account|item|message|request|card|notification|entry|time|step|source|model|deletion|minute|hour|collaborator|attachment|schedule|record)s\b/g;
 function tr(text,...args){
   const hit=LANG==='en'&&Object.prototype.hasOwnProperty.call(I18N_EN,text)?I18N_EN[text]:text;
   if(typeof hit==='function')return hit(...args);
   if(!args.length)return hit;
-  const out=hit.replace(/\{(\d+)\}/g,(m,i)=>i<args.length?String(args[i]):m);
-  return LANG==='en'?out.replace(I18N_SINGULAR,'1 $1').replace(/\b1 people\b/g,'1 person'):out;
+  if(LANG!=='en')return hit.replace(/\{(\d+)\}/g,(m,i)=>i<args.length?String(args[i]):m);
+  // “1 tasks” is fixed where the 1 is a count filled in here, never inside a name that was filled in.
+  const SLOT='\u0000';
+  const slot=(m,i)=>i>=args.length?m:typeof args[i]==='number'?String(args[i]):`${SLOT}${i}${SLOT}`;
+  const counted=hit.replace(/\{(\d+)\}/g,slot)
+    .replace(I18N_SINGULAR,'1 $1').replace(/\b1 people\b/g,'1 person');
+  return counted.replace(/\u0000(\d+)\u0000/g,(_,i)=>String(args[i]));
 }
 /* Text the server wrote (errors, notices, system messages) arrives in
    Chinese; whole sentences are looked up as-is, templated ones through the
@@ -54,8 +62,8 @@ function translateStatic(root){
    reloads so every table and label is rebuilt in the new language. */
 async function setLanguage(lang){
   if(!LANGS[lang])return;
+  if(S.user){try{await api('/api/action',{action:'profile.language',data:{lang}})}catch(e){toast(e.message);return}}
   try{localStorage.setItem(LANG_KEY,lang)}catch(_){}
-  if(S.user){try{await api('/api/action',{action:'profile.language',data:{lang}})}catch(e){toast(e.message)}}
   if(lang!==LANG){
     const url=new URL(location.href);url.searchParams.delete('lang');
     if(url.href!==location.href)location.replace(url.href);else location.reload();
@@ -65,8 +73,13 @@ async function setLanguage(lang){
 function syncAccountLanguage(user){
   const lang=user?.lang;
   if(!LANGS[lang]||urlLang())return false;
-  try{localStorage.setItem(LANG_KEY,lang)}catch(_){}
+  let stored=null;
+  try{localStorage.setItem(LANG_KEY,lang);stored=localStorage.getItem(LANG_KEY)}catch(_){}
   if(lang===LANG)return false;
+  // Storage that does not keep the choice would bring the old language back on every reload.
+  if(stored!==lang){
+    const url=new URL(location.href);url.searchParams.set('lang',lang);location.replace(url.href);return true;
+  }
   location.reload();return true;
 }
 /* One stroked 24px icon set. Everything the UI used to draw with text glyphs
@@ -202,7 +215,7 @@ function applyNavigationLayout(){
     });
     $$(`[data-nav-resize="${kind}"]`).forEach(handle=>{
       handle.setAttribute('aria-valuemin',bounds.min);handle.setAttribute('aria-valuemax',bounds.max);
-      handle.setAttribute('aria-valuenow',width);handle.setAttribute('aria-valuetext',collapsed?tr('仅图标'):width+tr(' 像素'));
+      handle.setAttribute('aria-valuenow',width);handle.setAttribute('aria-valuetext',collapsed?tr('仅图标'):tr('{0} 像素',width));
     });
   }
   positionAccountMenu();
@@ -742,13 +755,15 @@ function renderDayContent(){
 /* Log kinds are storage keys; the drawer reads them back in people's words. */
 const LOG_LABELS={start:tr('开始任务'),auto_start:tr('到点自动开始'),complete:tr('完成任务'),complete_pending:tr('提交完成审批'),defer:tr('未完成，递延'),skip:tr('跳过本次'),edit_request:tr('申请修改任务'),task_approval_superseded:tr('审批由后续任务接续'),complete_edit:tr('修改完成记录'),reopen:tr('被打回')};
 function logLine(x){
-  if(x.stackCount>1&&x.kind==='reopen')return tr('打回合并 {0} 期{1}',x.stackCount,x.reason?' · '+x.reason:'');
-  if(x.stackCount>1&&x.kind==='complete_edit')return tr('修改合并 {0} 期完成记录{1}{2}',x.stackCount,x.summary?' · '+x.summary:'',x.actual?tr(' · 实际 ')+x.actual+tr(' 分钟'):'');
-  if(x.stackCount>1&&x.kind==='complete')return tr('完成合并 {0} 期{1}{2}',x.stackCount,x.summary?' · '+x.summary:'',x.actual?tr(' · 实际 ')+x.actual+tr(' 分钟'):'');
-  if(x.kind==='defer'&&x.target)return tr('{0}递延至 {1}{2}',x.stackCount>1?tr('合并 ')+x.stackCount+tr(' 期'):'',fmt(x.target),x.reason?' · '+x.reason:'');
+  const note=v=>v?` · ${tr(v)}`:'',actual=x.actual?tr(' · 实际 {0} 分钟',x.actual):'';
+  if(x.stackCount>1&&x.kind==='reopen')return tr('打回合并 {0} 期{1}',x.stackCount,note(x.reason));
+  if(x.stackCount>1&&x.kind==='complete_edit')return tr('修改合并 {0} 期完成记录{1}{2}',x.stackCount,note(x.summary),actual);
+  if(x.stackCount>1&&x.kind==='complete')return tr('完成合并 {0} 期{1}{2}',x.stackCount,note(x.summary),actual);
+  const merged=x.stackCount>1?tr('合并 {0} 期',x.stackCount):'';
+  if(x.kind==='defer'&&x.target)return tr('{0}递延至 {1}{2}',merged,fmt(x.target),note(x.reason));
   if(x.kind==='adjust')return tr('指派调整：{0} → {1}',nameOf(x.before?.assignee),nameOf(x.after?.assignee));
   if(x.kind==='approval'||x.kind==='edit_approval'){const verdict=x.decision==='approved'?tr('通过'):x.decision==='rejected'?tr('驳回'):'';return `${x.kind==='approval'?tr('完成审批'):tr('修改审批')}${verdict}${x.reason?` · ${x.reason}`:''}`}
-  const detail=x.summary||x.reason||x.remaining||'';
+  const detail=tr(x.summary||x.reason||x.remaining||'');
   return `${LOG_LABELS[x.kind]||x.kind}${detail?` · ${detail}`:''}`;
 }
 function taskHistoryHTML(task,ids=taskLineageIds(task)){
@@ -960,7 +975,7 @@ function diaryContent(author,day){
   const r=diaryReport(author,day);if(r)return typeof r.content==='string'?{done:r.content,risks:'',next:'',
     note:''}:r.content||{};
   const on=d=>S.tasks.filter(t=>t.assignee===author&&taskActiveOn(t,d)&&t.status!=='skipped'&&!isSuperseded(t)),tasks=on(day);
-  return {done:tasks.filter(t=>t.status==='done').map(t=>'✓ '+t.name).join('\n'),risks:tasks.filter(t=>t.status!=='done').map(t=>t.name+tr('（未完成）')).join('\n'),next:on(add(day,1)).filter(t=>t.status!=='done').map(t=>t.name).join('\n')};
+  return {done:tasks.filter(t=>t.status==='done').map(t=>'✓ '+t.name).join('\n'),risks:tasks.filter(t=>t.status!=='done').map(t=>tr('{0}（未完成）',t.name)).join('\n'),next:on(add(day,1)).filter(t=>t.status!=='done').map(t=>t.name).join('\n')};
 }
 /* What was actually finished on a day, newest first; for one person or the team. */
 function workLogEntries(day,who=null){
@@ -1005,7 +1020,11 @@ const tempTaskMode=()=>S.user?.admin?'direct':creationRules().tempTask;
 function taskProjects(){return S.projects.filter(p=>p.status==='active'&&!isProjectHidden(p)).map(p=>({p,mode:canManageProject(p)?'direct':p.members?.[S.user?.id]==='accepted'?creationRules().projectTask:'none'})).filter(x=>x.mode!=='none')}
 function taskEntryMode(){const modes=[tempTaskMode(),...taskProjects().map(x=>x.mode)];return modes.includes('direct')?'direct':modes.includes('approval')?'approval':'none'}
 const ENTRY_LABELS={task:{approval:'申请任务',direct:'新任务'},project:{approval:'申请项目',direct:'新项目'}};
-const entryLabel=(mode,kind)=>mode==='approval'?icon('arrow-up-right')+tr(ENTRY_LABELS[kind].approval):icon('plus')+tr(ENTRY_LABELS[kind].direct);
+function entryLabel(mode,kind){
+  const labels=ENTRY_LABELS[kind];
+  if(!labels)return '';
+  return mode==='approval'?`${icon('arrow-up-right')}${tr(labels.approval)}`:`${icon('plus')}${tr(labels.direct)}`;
+}
 /* 完成项目 closes a running project, ahead of its end date if need be. An admin
    closes it at once; an Owner sends it to an admin with a closing report.
    Whatever is still open is named here and closes with the project. */
@@ -1037,8 +1056,8 @@ function requestProjectCompletion(id){
   $('#confirmProjectCompletion').onclick=async()=>{
     const report=$('#projectCompletionReport').value.trim();
     if(!admin&&!report){toast(tr('请填写结项报告'));return}
-    try{await act(admin?'project.complete':'project.complete_request',{id,report});closeModal();toast(admin?`「`
-      +tr('{0}」已完成',p.name):tr('结项申请已提交，等待审批'))}catch(e){}
+    try{await act(admin?'project.complete':'project.complete_request',{id,report});closeModal();
+      toast(admin?tr('「{0}」已完成',p.name):tr('结项申请已提交，等待审批'))}catch(e){}
   };
 }
 /* 项目任务排序. The mode is a per-browser view preference; the manual order
@@ -1952,7 +1971,7 @@ function projectStaffing(p,manage){
       +`<span class="staff-load">${manage||id===S.user?.id?tr('进行中 {0} · 已完成 {1}{2}',open,done,mins?` ${tr('· {0} 小时',hours(mins))}`:''):''}</span></div>`;
   };
   return `<section class="space-section"><div class="space-head"><h2>${tr('分工与负荷')} <small class="space-window">${escapeHTML(loadWindowLabel(p))}</small></h2>`
-    +`${manage&&p.status==='active'?'<button class="secondary-btn" id="spaceInvite">'+icon('plus')+tr('添加协作者</button>'):''}</div>`
+    +`${manage&&p.status==='active'?`<button class="secondary-btn" id="spaceInvite">${icon('plus')}${tr('添加协作者</button>')}`:''}</div>`
     +`<div class="staff-list">${people.map(row).join('')}</div></section>`;
 }
 const fileExt=name=>(String(name).match(/\.([a-z0-9]{1,5})$/i)?.[1]||'FILE').toUpperCase();
@@ -2313,7 +2332,7 @@ function leaveProject(projectId){
     try{
       await act('project.member.remove',{id:projectId,member:S.user.id});
       if(chatChannel===projectId)chatChannel='general';
-      closeModal();toast(tr('已退出「')+p.name+'」');
+      closeModal();toast(tr('已退出「{0}」',p.name));
     }catch(e){}
   };
 }
@@ -2346,7 +2365,7 @@ function inviteCollaborators(projectId){
     const who=b.dataset.member;
     try{
       await act('project.member.remove',{id:projectId,member:who});
-      closeModal();toast(tr('已移出 ')+nameOf(who)+tr('，他的沟通区里不再有这个工作区'));
+      closeModal();toast(tr('已移出 {0}，他的沟通区里不再有这个工作区',nameOf(who)));
     }catch(e){}
   });
   const [loadStart,loadEnd]=loadWindow(p);
@@ -2734,7 +2753,7 @@ function renderAiSettingsPage(){
     const used=sceneInfo.filter(i=>(scenes[i.id]||{}).source===s.id).map(i=>i.name);
     return `<article class="ai-source" data-source="${escapeHTML(s.id)}"><div class="ai-source-main"><div class="ai-source-title"><strong>${escapeHTML(s.name)}</strong>`
       +`${s.kind==='speech'||s.name!==kind?`<span class="ai-chip${s.kind==='speech'?' is-speech':''}">${escapeHTML(kind)}</span>`:''}</div>`
-      +`<div class="ai-source-meta"><span>${escapeHTML(aiHost(s.baseUrl))}</span><span>${s.apiKeySet?tr('密钥 ')+escapeHTML(s.apiKeyMasked):tr('未设置密钥')}</span>`
+      +`<div class="ai-source-meta"><span>${escapeHTML(aiHost(s.baseUrl))}</span><span>${s.apiKeySet?tr('密钥 {0}',escapeHTML(s.apiKeyMasked)):tr('未设置密钥')}</span>`
       +`<span>${s.models?.length?tr('{0} 个模型',s.models.length):tr('还没有模型列表')}</span></div>`
       +`<p class="ai-source-usage">${used.length?tr('用于 {0}',escapeHTML(used.join('、'))):tr('暂未使用')}</p>`
       +`${t.text?`<p class="ai-source-status is-${t.state}" role="status">${escapeHTML(t.text)}</p>`:''}</div>`
@@ -3070,7 +3089,9 @@ function renderWeekStartSetting(){
    on a card (editRuleGroup). */
 /* The built-in group is stored as 默认规则; it is shown in the interface
    language but saved back unchanged unless someone renames it. */
-const ruleGroupName=g=>g?.id==='default'&&g.name==='默认规则'?tr('默认规则'):g?.name||'';
+function ruleGroupName(g){
+  return g?.id==='default'&&g.name==='默认规则'?tr('默认规则'):g?.name??'';
+}
 function renderCreationPolicy(){
   const box=$('#creationPolicy');if(!box)return;
   const policy=S.creationPolicy,show=Boolean(S.user?.role==='superadmin'&&policy);
@@ -3276,7 +3297,7 @@ function renderAccountMenu(){
   const mine=`<div class="account-menu-group">${row('profile',tr('我的资料'),tr('昵称 / 头像 / 签名'))}${row('password',tr('修改密码'))}${S.user?.admin?row('accounts',tr('账户管理'))+row('settings',tr('系统设置')):''}</div>`;
   const switchGroup=`<div class="account-menu-group"><span class="account-menu-label">${tr('切换账户')}</span>${others.map(u=>`<button class="account-menu-item switch" data-user="${escapeHTML(u.id)}" role="menuitem">${avatarHTML(u.id)}<span>${escapeHTML(u.displayName||u.id)}${u.nickname?`<small>${escapeHTML(u.nickname)}</small>`:''}</span></button>`).join('')}<button class="account-menu-item switch" data-user="" role="menuitem">${tr('登录其他账户')}</button></div>`;
   const foot=`<div class="account-menu-group"><button class="account-menu-item danger" data-action="logout" role="menuitem">${tr('退出登录')}</button></div>`;
-  menu.innerHTML=head+mine+languageChooserHTML('account-menu-group')+switchGroup+foot;
+  menu.innerHTML=`${head}${mine}${languageChooserHTML('account-menu-group')}${switchGroup}${foot}`;
   bindLanguageChooser(menu);
   menu.querySelectorAll('.account-menu-item[data-action]').forEach(b=>b.onclick=()=>accountMenuAction(b.dataset.action));
   menu.querySelectorAll('.account-menu-item.switch').forEach(b=>b.onclick=()=>signOutTo(b.dataset.user));
@@ -3288,7 +3309,7 @@ function languageChooserHTML(cls){
   return `<div class="${cls} language-chooser" role="group" aria-label="${tr('界面语言')}"><span class="account-menu-label">${tr('界面语言')}</span>`
     +`<div class="language-options">${Object.entries(LANGS).map(([id,label])=>`<button type="button" class="language-option${id===LANG?' is-active':''}" data-lang="${id}" lang="${id==='en'?'en':'zh-CN'}" aria-pressed="${id===LANG}">${label}</button>`).join('')}</div></div>`;
 }
-function bindLanguageChooser(root){root.querySelectorAll('.language-option').forEach(b=>b.onclick=()=>setLanguage(b.dataset.lang))}
+function bindLanguageChooser(root){root.querySelectorAll('.language-option').forEach(b=>b.onclick=()=>setLanguage(b?.dataset?.lang))}
 function positionAccountMenu(){
   const menu=$('#accountMenu'),anchor=$('#workspaceSwitcher');
   if(!menu||menu.classList.contains('hidden')||!anchor?.getBoundingClientRect||typeof window==='undefined')return;
@@ -4966,7 +4987,7 @@ async function pipComplete(box){
   const t=S.tasks.find(x=>x.id===box.dataset.id);if(!t)return;
   box.disabled=true;
   try{
-    await api('/api/action',{action:'task.complete',data:{id:t.id,summary:tr('完成任务'),...(t.stackCount>1?{stackPeriods:t.stackPeriods}:{}),actual:Number(t.duration)||30,feeling:tr('顺利')}});
+    await api('/api/action',{action:'task.complete',data:{id:t.id,summary:'完成任务',...(t.stackCount>1?{stackPeriods:t.stackPeriods}:{}),actual:Number(t.duration)||30,feeling:'顺利'}});
     await refresh();pipNote(tr('「{0}」已完成',t.name));
   }catch(e){box.checked=false;box.disabled=false;pipNote(e.message)}
 }
@@ -5317,12 +5338,12 @@ function openTodayArchive(){
 function weekReportDocument(week){
   const work=week.work||{},done=work.completedProjects||[],doneTasks=work.completedTasks||[],pending=work.unfinishedProjects||[],other=work.unfinishedOther||[],esc=escapeHTML;
   const text=(label,value)=>value?`<p><span class="muted">${label}</span>${esc(String(value))}</p>`:'';
-  const people=p=>`Owner · ${esc(p.ownerName||tr('未指派'))}${p.members?.length?tr(' · 参与人：')+esc(p.members.join('、')):''}`;
+  const people=p=>`Owner · ${esc(p.ownerName||tr('未指派'))}${p.members?.length?tr(' · 参与人：{0}',esc(p.members.join('、'))):''}`;
   const task=t=>`<li><div class="week-work-head"><strong>${esc(t.name)}</strong><span>${esc(t.assigneeName||tr('未指派'))}</span></div>`
-    +`${text(tr('剩余事项：'),t.remaining)}${text(tr('原因：'),t.reason)}${text(tr('后续安排：'),t.scheduledOn>week.end?fmt(t.scheduledOn):tr('尚未安排到下周'))}${text(tr('截止日期：'),t.deadline?fmt(t.deadline):'')}</li>`;
+    +`${text(tr('剩余事项：'),tr(t.remaining??''))}${text(tr('原因：'),tr(t.reason??''))}${text(tr('后续安排：'),t.scheduledOn>week.end?fmt(t.scheduledOn):tr('尚未安排到下周'))}${text(tr('截止日期：'),t.deadline?fmt(t.deadline):'')}</li>`;
   const completedTask=t=>`<li><div class="week-work-head"><strong>${esc(t.name)}${t.stackCount>1?` ${tr('· {0} 期',esc(t.stackCount))}`:''}</strong><time>${esc(fmt(t.completedOn))}</time></div>`
     +`<small>${esc(t.assigneeName||tr('未指派'))}${Number(t.actual)>0?` ${tr('· {0} 分钟',esc(t.actual))}`:''}</small>`
-    +`${text(tr('任务内容：'),t.description)}${text(tr('完成情况：'),t.summary||tr('未填写完成总结'))}${text(tr('反馈：'),[t.feeling&&tr(t.feeling),t.followup].filter(Boolean).join(' · '))}</li>`;
+    +`${text(tr('任务内容：'),t.description)}${text(tr('完成情况：'),tr(t.summary||'未填写完成总结'))}${text(tr('反馈：'),[t.feeling&&tr(t.feeling),t.followup].filter(Boolean).join(' · '))}</li>`;
   const completedList=tasks=>tasks.length?`<ul class="week-remaining-list">${tasks.map(completedTask).join('')}</ul>`:'';
   const completedProjectIds=new Set(done.map(p=>p.projectId).filter(Boolean)),taskGroups=new Map();
   for(const t of doneTasks){
@@ -5583,7 +5604,7 @@ function renderAgentModelChip(){
   el.setAttribute('aria-expanded',String(!$('#agentModelMenu')?.classList.contains('hidden')));
   el.textContent=ready?(cfg.model||tr('已接入')):tr('未接入');
   el.title=ready
-    ?(tr('当前模型：')+(cfg.model||tr('（服务端已配置）'))+(cfg.provider?' · '+cfg.provider:''))
+    ?tr('当前模型：{0}{1}',(cfg.model||tr('（服务端已配置）')).trim(),cfg.provider?` · ${cfg.provider}`:'')
     :(S.user?.role==='superadmin'?tr('还没有配置模型，打开 AI 接入配置'):tr('还没有配置模型，请联系管理员'));
   if(switchable)el.title+=tr('（点一下切换）');
 }
@@ -5639,7 +5660,7 @@ function agentToolSummary(node,tools){
   if(!reads.length)return;
   const label=document.createElement('small');label.className='agent-query-summary';
   const errors=reads.filter(t=>!t.ok).length;
-  label.textContent=tr('查询资料 · {0} 次{1}',reads.length,errors?' · '+errors+tr(' 次未成功'):'');
+  label.textContent=tr('查询资料 · {0} 次{1}',reads.length,errors?tr(' · {0} 次未成功',errors):'');
   label.title=tr('查询范围遵循当前账户权限');node.appendChild(label);
 }
 function agentMessageTools(node,message,index){
@@ -5765,10 +5786,10 @@ function agentMessageNode(m,index=-1){
   /* A stored draft reads as a one-line summary and can be opened again as cards. */
   if(m.role==='assistant'&&/<plan>/i.test(m.content||'')){
     const draft=agentSplitPlan(m.content);
-    text.textContent=(draft.clean?draft.clean+' ':'')+tr('（草稿：{0}{1} 个任务）',draft.projects.length?draft.projects.length+tr(' 个项目、'):'',draft.tasks.length);
+    text.textContent=`${draft.clean?`${draft.clean} `:''}${tr('（草稿：{0}{1} 个任务）',draft.projects.length?tr('{0} 个项目、',draft.projects.length):'',draft.tasks.length)}`;
     if((draft.projects.length||draft.tasks.length)&&!agentState.viewing){const btn=document.createElement('button');btn.type='button';btn.className='ghost-btn plan-reopen-history';btn.textContent=draft.draftId?tr('恢复这份草稿'):tr('复制为新草稿');btn.onclick=()=>agentRestoreBoard(draft);node.appendChild(btn)}
   }
-  if(m.role==='assistant'&&/<action>/i.test(m.content||'')){const parsed=agentSplitActions(m.content);text.textContent=parsed.clean||parsed.actions.map(x=>tr('当时提议：')+(AGENT_ACTION_LABELS[x.action]||tr('业务操作'))).join('；')}
+  if(m.role==='assistant'&&/<action>/i.test(m.content||'')){const parsed=agentSplitActions(m.content);text.textContent=parsed.clean||parsed.actions.map(x=>tr('当时提议：{0}',AGENT_ACTION_LABELS[x.action]||tr('业务操作'))).join('；')}
   const stamp=document.createElement('small');stamp.className='agent-time';stamp.textContent=agentFormatTime(m.createdAt);node.appendChild(stamp);
   agentToolSummary(node,m.tools);agentMessageTools(node,m,index);
   return node;
@@ -6090,7 +6111,7 @@ function agentRenderModeOptions(){
    see and edit, the send path reads it back out, and the transcript still shows
    what was actually asked. Typing it by hand works the same way. */
 const AGENT_PLAN_MARK='\u2726';
-const AGENT_PLAN_ALIASES=[AGENT_PLAN_MARK,'/plan',tr('[规划]')];
+const AGENT_PLAN_ALIASES=[AGENT_PLAN_MARK,'/plan','[规划]','[Plan]'];
 function agentPlanIntent(text){
   const raw=String(text||'').replace(/^\s+/,'');
   for(const alias of AGENT_PLAN_ALIASES){
@@ -6237,10 +6258,10 @@ function agentVerify(before,after){
     const changed=Object.keys(a).filter(id=>id in b&&a[id]!==b[id]);
     if(!added.length&&!removed.length&&!changed.length)continue;
     const bits=[];
-    if(added.length)bits.push(tr('新增 ')+added.map(nameOf).join('、'));
-    if(removed.length)bits.push(tr('移除 ')+removed.join('、'));
-    if(changed.length)bits.push(tr('更新 ')+changed.map(nameOf).join('、'));
-    out.push(label+bits.join('，'));
+    if(added.length)bits.push(tr('新增 {0}',added.map(nameOf).join('、')));
+    if(removed.length)bits.push(tr('移除 {0}',removed.join('、')));
+    if(changed.length)bits.push(tr('更新 {0}',changed.map(nameOf).join('、')));
+    out.push(`${label}${bits.join(tr('，'))}`);
   }
   return out;
 }
@@ -6687,7 +6708,7 @@ async function planFlush(board){
   board.saving=(async()=>{
     try{const r=await api('/api/action',{action:'agent.draft.save',data:{draftId:board.draftId,conversationId:board.conversationId,version:board.persistVersion||0,writer:agentState.clientId,board:snapshot}});
       if(S.user?.id!==user)return;board.persistVersion=r.version;board.savedSnapshot=serialized;board.saveError='';planCache(board,planSnapshot(board));
-    }catch(e){board.saveError=e.message||tr('未同步，已保留本机草稿');board.conflict=/其他页面|已删除/.test(board.saveError);board.deleted=/已删除/.test(board.saveError);}
+    }catch(e){board.saveError=e.message||tr('未同步，已保留本机草稿');const raw=e.status===409?String(e.raw??''):'';board.conflict=/其他页面|已删除/.test(raw);board.deleted=/已删除/.test(raw);}
     finally{board.saving=null;const status=board.el?.querySelector?.('.plan-save-status');if(status)status.textContent=board.saveError||'';if(board.conflict)planRender(board);}
   })();
   await board.saving;
@@ -6805,7 +6826,7 @@ function planCardsHTML(board){
   const taskCard=t=>{
     if(planOperation(t)!=='create')return planMutationHTML(board,t,'task');
     const path=planTaskPath(board,t);
-    const open=taskProjects(),projects=[opt('',tr('临时任务（不挂项目）'),t.project),...board.projects.filter(p=>planPending(p)&&planOperation(p)==='create').map(p=>opt('ref:'+p.ref,tr('新项目 · ')+(p.name||tr('未命名')),t.project)),...open.map(x=>opt('id:'+x.p.id,x.p.name,t.project))];
+    const open=taskProjects(),projects=[opt('',tr('临时任务（不挂项目）'),t.project),...board.projects.filter(p=>planPending(p)&&planOperation(p)==='create').map(p=>opt(`ref:${p.ref}`,tr('新项目 · {0}',p.name||tr('未命名')),t.project)),...open.map(x=>opt('id:'+x.p.id,x.p.name,t.project))];
     if(t.project.startsWith('ref:')&&!board.projects.some(p=>'ref:'+p.ref===t.project&&planPending(p)))projects.push(opt(t.project,tr('原新项目已拒绝，请重新选择'),t.project));
     if(t.project.startsWith('missing:'))projects.push(opt(t.project,tr('请选择所属项目'),t.project));
     if(t.project.startsWith('id:')&&!open.some(x=>'id:'+x.p.id===t.project))projects.push(opt(t.project,S.projects.find(x=>'id:'+x.id===t.project)?.name||tr('已不存在的项目'),t.project));
@@ -6956,8 +6977,8 @@ async function planSubmit(board,items=null){
     try{await refresh()}catch(_){}
   }finally{board.busy=false;agentState.busy=false;agentUpdateBusy()}
   const parts=[results.create?tr('创建了 {0} 项',results.create):'',results.update?tr('修改了 {0} 项',results.update):'',results.delete?tr('删除了 {0} 项',results.delete):'',results.approval?tr('提交了 {0} 个申请',results.approval):'',results.failed?tr('{0} 张卡片未接受，原因留在卡片上',results.failed):''].filter(Boolean);
-  board.closedNote=parts.join('，');
-  planRender(board);agentAppend('assistant',(board.closedNote||tr('没有提交新的改动'))+'。');
+  board.closedNote=parts.join(tr('，'));
+  planRender(board);agentAppend('assistant',`${board.closedNote||tr('没有提交新的改动')}${tr('。')}`);
 }
 /* ---------------------------------------------------------------- 沟通区 --
    One shared room, plus a channel per project. Chat deliberately sits outside
@@ -7067,7 +7088,7 @@ function renderChatChannels(){
    like one picked from the menu. */
 function chatParseMentions(text){
   const found=[];
-  if(text.includes('@所有人')||text.includes('@'+tr('所有人')))found.push(CHAT_EVERYONE);
+  if(text.includes('@所有人')||text.includes(`@${tr('所有人')}`))found.push(CHAT_EVERYONE);
   (S.users||[]).forEach(u=>{
     const name=u.displayName||u.id;
     if(text.includes('@'+name)||text.includes('@'+u.id))if(!found.includes(u.id))found.push(u.id);
@@ -7712,7 +7733,7 @@ initNavigationLayout();
 function ensureAccountCreateButton(){
   const owner=Boolean(S.user?.role==='superadmin'),host=$('#accountsView .page-intro');if(!host)return;
   let b=$('#createAccountBtn');
-  if(!b){b=document.createElement('button');b.id='createAccountBtn';b.className='secondary-btn';b.innerHTML=icon('plus')+tr('添加账户');host.appendChild(b)}
+  if(!b){b=document.createElement('button');b.id='createAccountBtn';b.className='secondary-btn';b.innerHTML=`${icon('plus')}${tr('添加账户')}`;host.appendChild(b)}
   b.onclick=createAccountDialog;b.classList.toggle('hidden',!owner);
 }
 function createAccountDialog(){
@@ -7723,7 +7744,7 @@ function createAccountDialog(){
     const username=$('#newAccountName').value.trim(),password=$('#newAccountPassword').value,role=$('#newAccountRole').value,displayName=$('#newAccountDisplayName').value.trim();
     if(!username){toast(tr('请填写账户名'));return}
     if(password.length<6){toast(tr('密码至少 6 位'));return}
-    try{await api('/api/action',{action:'account.create',data:{username,password,role,displayName}});closeModal();await refresh();toast(role==='member'?tr('已创建普通账户 ')+username:tr('已创建管理账户 ')+username)}
+    try{await api('/api/action',{action:'account.create',data:{username,password,role,displayName}});closeModal();await refresh();toast(role==='member'?tr('已创建普通账户 {0}',username):tr('已创建管理账户 {0}',username))}
     catch(e){toast(e.message||tr('创建失败'))}
   };
 }
