@@ -5,6 +5,8 @@ const vm = require('node:vm');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../app.js'), 'utf8');
 const definitions = source.slice(0, source.indexOf("$$('.nav-item').forEach(b=>b.onclick="));
+/* Source fragments lifted out on their own still call tr(); in Chinese it only fills {0}… */
+const tr = (text, ...args) => text.replace(/\{(\d+)\}/g, (m, i) => i < args.length ? String(args[i]) : m);
 
 function app() {
   const context = vm.createContext({});
@@ -232,8 +234,8 @@ test('entry points follow the rule group: new, request, or not offered', () => {
   // Your own project is always direct; a project you only collaborate on follows the group.
   assert.deepEqual(a.json('taskProjects().map(x=>[x.p.id,x.mode])'),[['q','direct']]);
   assert.equal(a.run('taskEntryMode()'),'direct');
-  assert.ok(a.run("entryLabel('approval','项目')").endsWith('申请项目'));
-  assert.ok(a.run("entryLabel('direct','任务')").endsWith('新任务'));
+  assert.ok(a.run("entryLabel('approval','project')").endsWith('申请项目'));
+  assert.ok(a.run("entryLabel('direct','task')").endsWith('新任务'));
   a.run(`S.projects=S.projects.filter(p=>p.id!=='q');S.creationRules={project:'none',tempTask:'approval',projectTask:'approval'}`);
   assert.deepEqual(a.json('taskProjects().map(x=>[x.p.id,x.mode])'),[['p','approval']]);
   assert.equal(a.run('taskEntryMode()'),'approval');
@@ -326,7 +328,7 @@ test('project summaries label collaborator progress as personal instead of proje
 test('project content tabs keep the dedicated meetings workspace and keyboard navigation',()=>{
   const a=app();
   const sourceText=source;
-  assert.match(sourceText,/const SPACE_TABS=\{[^}]*meetings:'会议'/);
+  assert.match(sourceText,/const SPACE_TABS=\{[^}]*meetings:tr\('会议'\)/);
   assert.match(sourceText,/panel\('meetings',projectMeetings\(p/);
   assert.match(sourceText,/function bindProjectContentTabs\(\)/);
   assert.match(sourceText,/archive\?\['files','meetings'\]/,'归档项目只留文件和会议两个标签');
@@ -643,9 +645,9 @@ function agentHarness(queue, verdicts) {
   };
   const loop = new Function(
     'agentState', 'agentAppend', 'agentUpdateBusy', 'agentNext', 'agentRunOne',
-    'AGENT_MAX_STEPS', 'AGENT_MAX_FAILURES', 'AGENT_MAX_REPEATS', 'AGENT_ACTION_LABELS',
+    'AGENT_MAX_STEPS', 'AGENT_MAX_FAILURES', 'AGENT_MAX_REPEATS', 'AGENT_ACTION_LABELS', 'tr',
     AGENT_LOOP_SOURCE + '\nreturn agentLoop;'
-  )(state, append, busy, next, runOne, AGENT_MAX_STEPS, AGENT_MAX_FAILURES, AGENT_MAX_REPEATS, {});
+  )(state, append, busy, next, runOne, AGENT_MAX_STEPS, AGENT_MAX_FAILURES, AGENT_MAX_REPEATS, {}, tr);
   return {
     loop,
     ran: () => trace.filter(x => x[0] === 'ran').map(x => x[1]),
@@ -763,9 +765,9 @@ const CHAT_BODY_SOURCE = ['CHAT_URL_RE', 'chatMentionName', 'chatParseMentions',
 function chatRoom(users) {
   const a = app();
   a.run(`S.user={id:'superadmin',admin:1};S.users=${JSON.stringify(users)}`);
-  const built = new Function('escapeHTML', 'nameOf', 'S', 'CHAT_EVERYONE',
+  const built = new Function('escapeHTML', 'nameOf', 'S', 'CHAT_EVERYONE', 'tr',
     CHAT_BODY_SOURCE + '\nreturn {chatBodyHTML, chatParseMentions};')(
-      a.run('escapeHTML'), a.run('nameOf'), a.run('S'), CHAT_EVERYONE);
+      a.run('escapeHTML'), a.run('nameOf'), a.run('S'), CHAT_EVERYONE, tr);
   return {render: built.chatBodyHTML, mentions: built.chatParseMentions};
 }
 
@@ -1124,7 +1126,7 @@ function voiceApp() {
     $: selector => (selector === '#agentInput' ? input : selector === '#agentVoiceBar' ? bar : null),
     agentSyncPlanButton() {}, agentUpdateBusy() {}, toast() {}, agentServerAsr: null,
     TRANSCRIBE_ENDPOINT: '/api/transcribe', apiBlob: async () => ({text: ''}),
-    navigator: {languages: ['zh-CN']},
+    navigator: {languages: ['zh-CN']}, tr,
     Blob: class { constructor(parts, options) { this.parts = parts; this.type = options.type; } },
   });
   vm.runInContext(section, context);
@@ -1674,7 +1676,7 @@ test('the week starts on the day the team picked', () => {
 test('the assistant keeps conversations in a side list and its message tools are icons', () => {
   const tools = source.match(/function agentMessageTools\([\s\S]*?\n\}/)[0];
   for (const [name, label] of [['copy','复制'],['edit','修改重发'],['undo','回退到这里']])
-    assert.ok(tools.includes(`button('${name}','${label}'`), label);
+    assert.ok(tools.includes(`button('${name}',tr('${label}')`), label);
   assert.ok(!/agentShowHistory/.test(source), '不再弹出单独的工作记录卡片');
   assert.ok(/agentHistoryBtn'\)\?\.addEventListener\('click',\(\)=>agentToggleSessions\(\)\)/.test(source));
   const use = source.match(/function agentUseConversation\(id\)\{[\s\S]*?\n\}/)[0];
@@ -3405,4 +3407,115 @@ test('meeting modal binds save and deletion to its own controls instead of a hid
   assert.equal(typeof modal['#deleteMeeting'].onclick,'function');assert.equal(typeof modal['#cancelAction'].onclick,'function');
   modal['#meetingTitle'].value='modal title';await modal['#saveMeeting'].onclick();
   assert.equal(calls.at(-1).data.title,'modal title');assert.equal(nodes['#meetingEditor'].innerHTML,'background');
+});
+
+/* Interface language: 简体中文 stays the source text, English comes from i18n.js. */
+const i18nSource = fs.readFileSync(path.join(__dirname, '../i18n.js'), 'utf8');
+function appIn(lang, search = '') {
+  const context = vm.createContext({
+    localStorage: {getItem: key => (key === 'hola-lang' ? lang : null), setItem() {}},
+    location: {search}, URLSearchParams,
+  });
+  vm.runInContext(i18nSource, context);
+  vm.runInContext(definitions, context);
+  return {context, run: code => vm.runInContext(code, context)};
+}
+
+test('the interface language defaults to Chinese and follows the saved choice or ?lang=', () => {
+  assert.equal(app().run('LANG'), 'zh', 'no storage at all means Chinese');
+  assert.equal(appIn(null).run('LANG'), 'zh');
+  assert.equal(appIn('fr').run('LANG'), 'zh', 'an unknown value is ignored');
+  assert.equal(appIn('en').run('LANG'), 'en');
+  assert.equal(appIn('zh', '?lang=en').run('LANG'), 'en', 'the address overrides storage for one page');
+  assert.equal(appIn('en', '?lang=zh').run('LANG'), 'zh');
+});
+
+test('Chinese mode renders the source text unchanged, including placeholders', () => {
+  const a = appIn('zh');
+  assert.equal(a.run("tr('今日任务')"), '今日任务');
+  assert.equal(a.run("tr('{0} 分钟前',5)"), '5 分钟前');
+  assert.equal(a.run("fmt('2026-11-09')"), '11月9日');
+  assert.equal(a.run("wd('2026-11-09')"), '周一');
+  assert.equal(a.run("status({status:'doing'})[1]"), '进行中');
+});
+
+test('English mode translates labels, dates, weekdays and relative times', () => {
+  const a = appIn('en');
+  assert.equal(a.run("tr('今日任务')"), 'Today');
+  assert.equal(a.run("fmt('2026-11-09')"), 'Nov 9');
+  assert.equal(a.run("wd('2026-11-09')"), 'Mon');
+  assert.equal(a.run("monthLabel('2026-11')"), 'Nov 2026');
+  assert.equal(a.run("archiveDay('2026-11-09')"), 'Nov 9 · Mon');
+  assert.equal(a.run("tr('{0} 分钟前',5)"), '5 min ago');
+  assert.equal(a.run("status({status:'doing'})[1]"), 'In progress');
+  assert.equal(a.run("status({status:'done'})[1]"), 'Done');
+  assert.equal(a.run("tr('{0} 个项目',1)"), '1 project', 'a count of one reads singular');
+  assert.equal(a.run("tr('{0} 个项目',3)"), '3 projects');
+  assert.equal(a.run("tr('哗啦！')"), 'Hola!');
+  assert.equal(a.run("tr('没有这句')"), '没有这句', 'a missing entry falls back to Chinese');
+});
+
+test('user data is never looked up: names stay as typed inside translated sentences', () => {
+  const a = appIn('en');
+  assert.equal(a.run("tr('确认删除「{0}」？删除后将从日历移除。','周报')"), 'Delete “周报”? It will be removed from the calendar.');
+  assert.equal(a.run("tr('{0}','今日任务')"), '今日任务');
+});
+
+test('the account menu offers both languages and marks the current one', () => {
+  const html = appIn('en').run("languageChooserHTML('account-menu-group')");
+  assert.match(html, /data-lang="zh"[^>]*>简体中文</);
+  assert.match(html, /class="language-option is-active" data-lang="en"[^>]*aria-pressed="true">English</);
+  assert.match(html, /aria-label="Language"/);
+  assert.match(source, /menu\.innerHTML=head\+mine\+languageChooserHTML\('account-menu-group'\)/);
+});
+
+test('the account’s saved language wins over the browser unless ?lang= is set', () => {
+  const a = appIn('zh');
+  let reloaded = 0;const writes = [];
+  a.context.location.reload = () => { reloaded++; };
+  a.context.localStorage.setItem = (k, v) => writes.push([k, v]);
+  assert.equal(a.run("syncAccountLanguage({lang:''})"), false, 'no saved choice keeps the browser’s');
+  assert.equal(a.run("syncAccountLanguage({lang:'zh'})"), false);
+  assert.equal(a.run("syncAccountLanguage({lang:'en'})"), true);
+  assert.equal(reloaded, 1);
+  assert.deepEqual(writes.at(-1), ['hola-lang', 'en']);
+  const pinned = appIn('zh', '?lang=zh');
+  pinned.context.location.reload = () => { throw new Error('should not reload'); };
+  assert.equal(pinned.run("syncAccountLanguage({lang:'en'})"), false);
+});
+
+test('server messages follow the language while keeping the names they carry', () => {
+  const en = appIn('en'), zh = appIn('zh');
+  assert.equal(en.run("trServer('账户或密码错误')"), 'Wrong account or password');
+  assert.equal(en.run("trServer('收到任务指派')"), 'New task assigned');
+  assert.equal(en.run("trServer('林默 指派「整理竞品报价」，安排日期 2026-11-09。')"),
+    '林默 assigned “整理竞品报价”, scheduled for 2026-11-09.');
+  assert.equal(en.run("trServer('「官网改版」被 陈曦 打回，请继续处理。\\n原因：补上数据')"),
+    '陈曦 sent “官网改版” back for more work.\nReason: 补上数据');
+  assert.equal(en.run("trServer('一条没见过的消息')"), '一条没见过的消息');
+  assert.equal(zh.run("trServer('账户或密码错误')"), '账户或密码错误');
+});
+
+test('every string app.js and index.html translate has an English entry with the same placeholders', () => {
+  const a = appIn('en'), dict = a.run('I18N_EN');
+  const keys = new Set();
+  for (const m of source.matchAll(/\btr\((['"])((?:\\.|(?!\1).)*)\1/g)) keys.add(vm.runInNewContext(m[1] + m[2] + m[1]));
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8').replace(/<script[\s\S]*?<\/script>/g, '');
+  for (const m of html.matchAll(/>([^<>]*[一-鿿][^<>]*)</g)) keys.add(m[1].trim());
+  for (const m of html.matchAll(/\s(?:title|aria-label|placeholder|data-keywords|data-nav)="([^"]*[一-鿿][^"]*)"/g)) keys.add(m[1].trim());
+  const missing = [...keys].filter(k => /[一-鿿]/.test(k) && !Object.prototype.hasOwnProperty.call(dict, k));
+  assert.deepEqual(missing, []);
+  const holes = s => [...new Set(String(s).match(/\{\d+\}/g) || [])].sort().join();
+  const mismatched = Object.entries(dict).filter(([k, v]) => typeof v === 'string' && holes(k) !== holes(v)).map(([k]) => k);
+  assert.deepEqual(mismatched, []);
+  const quoted = Object.entries(dict).filter(([k, v]) => typeof v === 'string' && v.includes('"') && !k.includes('"')).map(([k]) => k);
+  assert.deepEqual(quoted, [], 'English must not add ASCII double quotes: translations sit inside HTML attributes');
+});
+
+test('the built-in rule group shows translated but saves back as stored', () => {
+  const a = appIn('en');
+  assert.equal(a.run("ruleGroupName({id:'default',name:'默认规则'})"), 'Default rules');
+  assert.equal(a.run("ruleGroupName({id:'default',name:'市场部'})"), '市场部');
+  assert.equal(a.run("ruleGroupName({id:'g2',name:'默认规则'})"), '默认规则');
+  assert.match(source, /name:label===ruleGroupName\(draft\)\?draft\.name:label/);
 });

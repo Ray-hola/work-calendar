@@ -142,6 +142,8 @@ MAX_AUDIO_BYTES = 8_000_000
 FILES_PATH = '/api/files'
 FILE_TEXT_PATH = FILES_PATH + '/text'
 MAX_FILE_BYTES = 20_000_000
+# Interface languages an account can choose; the UI text itself lives in i18n.js.
+LANGS = ('zh', 'en')
 TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'task_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages', 'messages', 'folders', 'files', 'agent_conversations', 'agent_drafts', 'agent_receipts', 'meetings')
 
 # Who may start what.  superadmin sorts members into rule groups (规则组, kept
@@ -322,6 +324,9 @@ class Store:
         # 个性签名: one short line the holder writes, shown under the avatar.
         if 'signature' not in columns:
             self.db.execute('ALTER TABLE users ADD COLUMN signature TEXT')
+        # Interface language, a per-account preference: 'zh' (the default) or 'en'.
+        if 'lang' not in columns:
+            self.db.execute('ALTER TABLE users ADD COLUMN lang TEXT')
         self.db.execute('CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires TEXT NOT NULL)')
         self.db.execute('CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, ran_at TEXT NOT NULL)')
         for table in TABLES:
@@ -421,7 +426,7 @@ class Store:
         return obj
 
     def users(self):
-        rows = self.db.execute('SELECT id,admin,active,role,display_name,nickname,avatar,signature FROM users ORDER BY admin DESC,id')
+        rows = self.db.execute('SELECT id,admin,active,role,display_name,nickname,avatar,signature,lang FROM users ORDER BY admin DESC,id')
         result = []
         for row in rows:
             item = dict(row)
@@ -429,6 +434,8 @@ class Store:
             item['nickname'] = item.pop('nickname') or ''
             item['avatar'] = item.pop('avatar') or ''
             item['signature'] = item.pop('signature') or ''
+            # Empty until the holder picks one; the browser's choice applies then.
+            item['lang'] = item['lang'] if item['lang'] in LANGS else ''
             result.append(item)
         return result
 
@@ -3457,6 +3464,13 @@ class Store:
                 self.db.execute('UPDATE users SET nickname=?,avatar=?,signature=? WHERE id=?',(nickname,avatar,signature,user['id']))
             self.audit(user['id'],'profile.self',{'nickname':nickname,'signature':signature})
             return {'id':user['id'],'nickname':nickname,'avatar':avatar,'signature':signature}
+        if action=='profile.language':
+            # Anyone may pick the language their own interface is shown in.
+            lang=d.get('lang')
+            if lang not in LANGS:raise Problem(400,'不支持的语言')
+            with self.lock,self.db:
+                self.db.execute('UPDATE users SET lang=? WHERE id=?',(lang,user['id']))
+            return {'id':user['id'],'lang':lang}
         if action=='account.create':
             # Only the superadmin group manages accounts and roles.
             self.superadmin(user)
@@ -4929,9 +4943,9 @@ def main():
                     if shown and shown!='application/pdf':self.send_header('Content-Security-Policy',"sandbox; default-src 'none'; img-src 'self'; style-src 'unsafe-inline'")
                     self.send_header('Cache-Control','private, no-store');self.send_header('X-Content-Type-Options','nosniff')
                     self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
-                filename={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/styles.css':'styles.css'}.get(self.path.split('?')[0])
+                filename={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/i18n.js':'i18n.js','/styles.css':'styles.css'}.get(self.path.split('?')[0])
                 if not filename:self.send(404,{'error':'页面不存在'});return
-                raw=(ROOT/filename).read_bytes();self.send_response(200);self.send_header('Content-Type',{'index.html':'text/html; charset=utf-8','app.js':'text/javascript; charset=utf-8','styles.css':'text/css; charset=utf-8'}[filename]);self.send_header('Cache-Control','no-cache');self.send_header('X-Content-Type-Options','nosniff');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
+                raw=(ROOT/filename).read_bytes();self.send_response(200);self.send_header('Content-Type',{'index.html':'text/html; charset=utf-8','app.js':'text/javascript; charset=utf-8','i18n.js':'text/javascript; charset=utf-8','styles.css':'text/css; charset=utf-8'}[filename]);self.send_header('Cache-Control','no-cache');self.send_header('X-Content-Type-Options','nosniff');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
             except Problem as e:self.send(e.status,{'error':e.message})
         def do_POST(self):
             try:

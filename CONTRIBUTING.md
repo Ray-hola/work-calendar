@@ -21,7 +21,7 @@
 # Windows: .\run-windows.ps1
 ```
 
-改哪里：界面结构在 `index.html`，交互与视图在 `app.js`，样式在 `styles.css`，接口、权限、数据库和定时任务在 `server.py`，助手的只读 SQL 工作区与工具定义在 `agent_workspace.py`，连接凭据绑定和记录脱敏在 `assistant_privacy.py`。
+改哪里：界面结构在 `index.html`，交互与视图在 `app.js`，英文界面词典在 `i18n.js`，样式在 `styles.css`，接口、权限、数据库和定时任务在 `server.py`，助手的只读 SQL 工作区与工具定义在 `agent_workspace.py`，连接凭据绑定和记录脱敏在 `assistant_privacy.py`。
 
 ## 提交前检查
 
@@ -34,7 +34,8 @@ node --test tests/calendar.test.cjs
 
 - 后端行为改动应在 `tests/` 中补充或更新用例。
 - 前端可见范围、日期边界或状态流转的改动应在 `tests/calendar.test.cjs` 中覆盖。
-- 改了 `app.js` 或 `styles.css`，同时更新 `index.html` 里两处 `?v=` 版本号，否则浏览器可能继续用旧缓存。
+- 改了 `app.js`、`i18n.js` 或 `styles.css`，同时更新 `index.html` 里的 `?v=` 版本号，否则浏览器可能继续用旧缓存。
+- 新增界面文字写成 `tr('中文原文')`，在 `i18n.js` 补上英文；`tests/calendar.test.cjs` 会检查每条都有英文。用户填写的名称不要经过 `tr()`。
 - 保持现有代码风格；本项目刻意保持单文件服务与零运行时依赖，请勿为此引入框架或构建链。
 
 ## 提交信息
