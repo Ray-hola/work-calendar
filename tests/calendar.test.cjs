@@ -4016,3 +4016,16 @@ test('a stash is weighed by when its text was typed, not when the server stamped
   assert.equal(first.writer, second.writer);
   assert.ok(second.seq > first.seq);
 });
+
+test('草稿箱 previews the typed text, not the project picked above it', async () => {
+  const h = draftHarness();
+  h.fields.unshift({id: 'taskProject', value: 'p-1234', tagName: 'SELECT'});
+  h.fields[1].tagName = 'INPUT';
+  h.fields[1].type = 'text';
+  h.fields[2].tagName = 'TEXTAREA';
+  h.open();
+  await h.type(2, '先列提纲');
+  const saved = h.calls.find(c => c.action === 'formdraft.save').data;
+  assert.deepEqual(Object.keys(saved.fields), ['taskName', 'taskDesc', 'taskProject']);
+  assert.equal(h.a.run('draftPreview(S.formDrafts[0])'), '先列提纲');
+});

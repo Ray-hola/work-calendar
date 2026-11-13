@@ -3689,7 +3689,9 @@ function saveFormDraft(options = {}) {
   clearTimeout(f.timer);
   f.timer = null;
   f.dirty = false;
-  const typed = Object.fromEntries(f.fields.map(el => [el.id, el.value]));
+  // Typed text goes first, so 草稿箱 previews it rather than a chosen project or date.
+  const ordered = [...f.fields].sort((a, b) => Number(!isTextField(a)) - Number(!isTextField(b)));
+  const typed = Object.fromEntries(ordered.map(el => [el.id, el.value]));
   const extra = f.extra?.() ?? {};
   const changed = Object.keys(typed).some(k => typed[k] !== f.initial[k])
     || Object.keys(extra).some(k => extra[k] !== f.initialExtra?.[k]);
@@ -3713,6 +3715,9 @@ function saveFormDraft(options = {}) {
     }
   });
   return saved;
+}
+function isTextField(el) {
+  return el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && (!el.type || el.type === 'text'));
 }
 function fitsKeepalive(body) {
   const text = JSON.stringify(body);
@@ -3763,7 +3768,8 @@ function sendStashedFormDraft() {
   dropStashedFormDraft(owner, row.key);
   const current = formDraftOf(row.key);
   // A copy the same page wrote later wins; from another page, the later typing does.
-  const newer = current && (current.writer === row.writer
+  const samePage = Boolean(current?.writer) && current.writer === row.writer;
+  const newer = current && (samePage
     ? (current.seq ?? 0) >= (row.seq ?? 0)
     : Boolean(current.typedAt && row.typedAt && current.typedAt >= row.typedAt));
   if (newer) {
