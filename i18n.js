@@ -2425,6 +2425,7 @@ var HOLA_I18N_EN={
   "丢弃":"Discard",
   "账户已切换，草稿尚未同步":"The account changed; the draft isn’t synced yet",
   "草稿未同步，请检查网络后重试":"The draft isn’t synced. Check your connection and try again",
+  "草稿未同步：{0}":"The draft isn’t synced: {0}",
   "已存为草稿，可在草稿箱继续":"Saved as a draft; pick it up in Drafts",
   "草稿未同步，可在本页草稿箱继续编辑":"The draft isn’t synced; keep editing it in Drafts on this page",
   "提交成功，草稿删除未同步":"Submitted; removing the draft didn’t sync",
