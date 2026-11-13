@@ -525,7 +525,9 @@ function switchView(view){
   if(UI.view==='projects'&&view!=='projects'&&(meetingLive.session||meetingLive.active))return meetingStopLive().then(()=>switchView(view)).catch(e=>toast(e.message));
   if(UI.view==='projects'&&view!=='projects'&&$('#meetingEditor')?.dataset?.dirty==='true'&&!confirm(tr('会议修改尚未保存，确定离开？')))return;
   if(view==='summary')view='archive';
-  if((view==='achievements'||view==='accounts'||view==='settings')&&!S.user?.admin){view='calendar'}
+  /* 成果库 lives in the project space now; an old link lands on its shelf. */
+  if(view==='achievements'){view='projects';UI.shelf='achievements';UI.space='';UI.folder=''}
+  if((view==='accounts'||view==='settings')&&!S.user?.admin){view='calendar'}
   const changed=UI.view!==view;
   if(changed)cancelMeetingOpen();
   UI.view=view;
@@ -550,7 +552,6 @@ function switchView(view){
   if(view!=='projects')UI.navMark=null;
   if(view==='projects')renderProjects();
   if(view==='timeline')renderTimeline();
-  if(view==='achievements')renderAchievements();
   if(view==='archive')renderArchive();
   if(view==='drafts')renderDrafts();
   if(view==='inbox'){renderInbox();refreshInboxState();}
@@ -818,7 +819,8 @@ function openDrawer(id){
     +`${tr('{0}开始任务',icon('play'))}</button>`:''}<button class="primary-btn complete-btn" id="completeTask">${tr('{0}记录完成',icon('check'))}`
     +`</button><button class="defer-btn" id="deferTask">${tr('{0}未完成，递延',icon('arrow-up-right'))}</button></div>`:'';
   const editSummary=editPending?renderEditRequestSummary(t):'';
-  const canDelete=S.user.admin&&!t.fixed&&!t.repeatId&&!pendingApproval&&!rejected;
+  /* superadmin removes any task; a project's Owner removes work in their running project. */
+  const canDelete=(S.user.admin||(p?.owner===S.user.id&&p.status==='active'))&&!t.fixed&&!t.repeatId&&!pendingApproval&&!rejected;
   const canDirectEdit=(S.user.admin||(perform&&ownTemp)||giver)&&!editPending&&(!p||p.status==='active')
     &&!['done','deferred','skipped','pending_approval','awaiting_approval','submitted','rejected'].includes(t.status);
   $('#drawerContent').innerHTML=`<div class="drawer-kicker">${escapeHTML(projectName(t))} · ${escapeHTML(t.priority)}`
@@ -839,7 +841,7 @@ function openDrawer(id){
     +`${canDelete?tr('<button class="secondary-btn danger-btn" id="deleteTask">删除此任务</button>'):''}<div class="history">`
     +`<h3>${tr('任务记录')}</h3>${taskHistoryHTML(t,lineageIds)}</div>${actionCopy}`
     +`${completionActions}${editReviewActions}`;
-  $('#taskDrawer').classList.remove('hidden');$('#startTask')?.addEventListener('click',()=>act('task.start',{id:t.id}).then(()=>closeDrawer()).catch(()=>{}));$('#completeTask')?.addEventListener('click',()=>complete(t));$('#deferTask')?.addEventListener('click',()=>defer(t));$('#requestTaskEdit')?.addEventListener('click',()=>editTaskRequest(id));$('#directTaskEdit')?.addEventListener('click',()=>editTaskRequest(id,true));$('#adjustTaskAssignment')?.addEventListener('click',()=>editTaskAssignment(id));$('#deleteTask')?.addEventListener('click',async()=>{if(!confirm(tr('确认删除「{0}」？删除后将从日历移除。',t.name)))return;try{await act('task.delete',{id:t.id});closeDrawer()}catch(e){}});$('#editCompletion')?.addEventListener('click',()=>editCompletion(t));$('#reopenTask')?.addEventListener('click',()=>reopenTask(t));$('#approveEditRequest')?.addEventListener('click',()=>reviewTaskEdit(t.id,true));$('#rejectEditRequest')?.addEventListener('click',()=>reviewTaskEdit(t.id,false));
+  $('#taskDrawer').classList.remove('hidden');$('#startTask')?.addEventListener('click',()=>act('task.start',{id:t.id}).then(()=>closeDrawer()).catch(()=>{}));$('#completeTask')?.addEventListener('click',()=>complete(t));$('#deferTask')?.addEventListener('click',()=>defer(t));$('#requestTaskEdit')?.addEventListener('click',()=>editTaskRequest(id));$('#directTaskEdit')?.addEventListener('click',()=>editTaskRequest(id,true));$('#adjustTaskAssignment')?.addEventListener('click',()=>editTaskAssignment(id));$('#deleteTask')?.addEventListener('click',async()=>{if(!confirm(tr('确认删除「{0}」？删除后将从日历移除，之前的递延记录一并删除。',t.name)))return;try{await act('task.delete',{id:t.id});closeDrawer()}catch(e){}});$('#editCompletion')?.addEventListener('click',()=>editCompletion(t));$('#reopenTask')?.addEventListener('click',()=>reopenTask(t));$('#approveEditRequest')?.addEventListener('click',()=>reviewTaskEdit(t.id,true));$('#rejectEditRequest')?.addEventListener('click',()=>reviewTaskEdit(t.id,false));
 }
 function taskEditRequest(t){
   if(!t)return null;
@@ -994,7 +996,7 @@ function renderArchiveLedger(day){
   const show=Boolean(S.user?.admin&&day);box.classList.toggle('hidden',!show);if(!show)return;
   const members=S.users.filter(u=>u.active&&!u.admin),logs=workLogEntries(day);
   const rows=members.map(u=>{const stats=diaryDayStats(u.id,day),pct=stats.total?Math.round(stats.completed/stats.total*100):0;return `<div class="diary-load-row"><strong title="${escapeHTML(u.id)}">${escapeHTML(nameOf(u.id))}</strong><span>${tr('{0}/{1} 项完成',stats.completed,stats.total)}</span><div class="progress"><i style="width:${pct}%"></i></div><b>${pct}%</b></div>`}).join('');
-  const projectRows=visibleProjects().filter(p=>p.status==='active').map(p=>{const ts=S.tasks.filter(t=>t.projectId===p.id&&t.status!=='skipped'&&!isSuperseded(t)),done=ts.filter(t=>t.status==='done').length,pct=ts.length?Math.round(done/ts.length*100):0;return `<div class="diary-project-progress"><strong>${escapeHTML(p.name)}</strong><span>${tr('{0}/{1} 完成 · {2}%',done,ts.length,pct)}</span></div>`}).join('');
+  const projectRows=visibleProjects().filter(p=>p.status==='active').map(p=>{const ts=S.tasks.filter(t=>t.projectId===p.id&&t.status!=='deferred'&&t.status!=='skipped'&&!isSuperseded(t)),done=ts.filter(t=>t.status==='done').length,pct=ts.length?Math.round(done/ts.length*100):0;return `<div class="diary-project-progress"><strong>${escapeHTML(p.name)}</strong><span>${tr('{0}/{1} 完成 · {2}%',done,ts.length,pct)}</span></div>`}).join('');
   box.innerHTML=`<div class="diary-admin-grid"><div class="diary-log-panel"><div class="panel-heading"><h2>${tr('工作日志 · {0}',fmt(day))}</h2></div><div class="diary-log-list">${logs.map(l=>`<button class="diary-log-item diary-log-button" data-task-id="${escapeHTML(l.taskId||'')}" data-project-id="${escapeHTML(l.projectId||'')}" data-log-kind="${escapeHTML(l.kind||'')}"><i></i><span>${escapeHTML(l.label)}${l.project?`<small class="diary-log-project">${escapeHTML(l.project)}</small>`:''}</span><small>${escapeHTML(l.user?nameOf(l.user):'')}　${icon('chevron-right')}</small></button>`).join('')||tr('<p class="muted">当日暂无已完成任务或项目。</p>')}</div><div class="diary-projects"><h3>${tr('项目当前进度')}</h3>${projectRows||tr('<p class="muted">暂无进行中的项目。</p>')}</div></div><div class="diary-load-panel"><div class="panel-heading"><h2>${tr('成员负载 · {0}',fmt(day))}</h2></div>${rows||tr('<p class="muted">暂无成员数据。</p>')}</div></div>`;
   box.querySelectorAll('.diary-log-button').forEach(b=>b.onclick=()=>openWorkLogDetail(b.dataset.taskId,b.dataset.projectId,b.dataset.logKind));
 }
@@ -1035,7 +1037,7 @@ function entryLabel(mode,kind){
    closes it at once; an Owner sends it to an admin with a closing report.
    Whatever is still open is named here and closes with the project. */
 function openProjectTasks(p){
-  const tasks=S.tasks.filter(t=>t.projectId===p.id&&!t.repeatId&&!isSuperseded(t));
+  const tasks=S.tasks.filter(t=>t.projectId===p.id&&t.status!=='deferred'&&!t.repeatId&&!isSuperseded(t));
   return tasks.filter(t=>['todo','doing'].includes(t.status));
 }
 function requestProjectCompletion(id){
@@ -1111,6 +1113,8 @@ function renderProjects(){
   /* 申请项目 / 新项目 already sits in the top bar; a second copy here only repeats it. */
   $('#addProjectBtn')?.classList?.toggle('hidden',true);$('#projectActions')?.classList?.toggle('hidden',true);
   if(UI.space){$('#projectGrid').innerHTML='';renderProjectSpace(UI.space);return}
+  const shelf=UI.shelf==='achievements';$('#projectOverview')?.classList?.toggle('is-shelf',shelf);
+  if(shelf){$('#projectGrid').innerHTML='';$('#projectToolbar').innerHTML='';renderAchievements();return}
   const admin=Boolean(S.user?.admin),folder=UI.folder&&(S.folders||[]).find(f=>f.id===UI.folder);
   if(!folder)UI.folder='';
 
@@ -1134,7 +1138,7 @@ const FOLDER_SORTS={nav:tr('目录顺序'),name:tr('按名称'),end:tr('按截�
 function folderSortMode(){let v;try{v=localStorage.getItem(FOLDER_SORT_KEY)}catch(_){}return FOLDER_SORTS[v]?v:'nav'}
 function setFolderSortMode(v){try{localStorage.setItem(FOLDER_SORT_KEY,v)}catch(_){}}
 function sortFolderProjects(list,mode){
-  const progress=p=>{const t=S.tasks.filter(x=>x.projectId===p.id&&!x.repeatId&&!isSuperseded(x)&&x.status!=='skipped');
+  const progress=p=>{const t=S.tasks.filter(x=>x.projectId===p.id&&x.status!=='deferred'&&!x.repeatId&&!isSuperseded(x)&&x.status!=='skipped');
     return t.length?t.filter(x=>x.status==='done').length/t.length:0};
   const by={name:(a,b)=>String(a.name).localeCompare(String(b.name),'zh-CN'),
     end:(a,b)=>String(a.end||'9999').localeCompare(String(b.end||'9999')),
@@ -1145,7 +1149,7 @@ function sortFolderProjects(list,mode){
    is on it. Its tasks, files and actions live on the project's own page. */
 function projectSummaryHTML(p){
   const personal=!S.user?.admin&&p.owner!==S.user?.id;
-  const tasks=S.tasks.filter(t=>t.projectId===p.id&&!t.repeatId&&!isSuperseded(t)&&t.status!=='skipped'
+  const tasks=S.tasks.filter(t=>t.projectId===p.id&&t.status!=='deferred'&&!t.repeatId&&!isSuperseded(t)&&t.status!=='skipped'
     &&(!personal||t.assignee===S.user?.id));
   const done=tasks.filter(t=>t.status==='done').length,pct=tasks.length?Math.round(done/tasks.length*100):0;
   const mine=tasks.filter(t=>t.assignee===S.user?.id&&['todo','doing'].includes(t.status)).length;
@@ -1184,7 +1188,7 @@ function projectActionsHTML(p){
 }
 /* A project's task list: the root of each line of work, in the chosen order. */
 function projectCardHTML(p){
-    const mode=projectSortMode(p),tasks=sortProjectTasks(p,S.tasks.filter(t=>t.projectId===p.id&&!t.repeatId&&!isSuperseded(t)),mode);
+    const mode=projectSortMode(p),tasks=sortProjectTasks(p,S.tasks.filter(t=>t.projectId===p.id&&t.status!=='deferred'&&!t.repeatId&&!isSuperseded(t)),mode);
     const fixed=(S.repeats||[]).filter(r=>r.projectId===p.id&&r.active!==false);
     const manage=canManageProject(p)&&p.status==='active';
     const drag=manage&&mode==='manual'&&tasks.length>1,byId=new Map(S.tasks.map(t=>[t.id,t]));
@@ -1204,7 +1208,7 @@ function projectCardHTML(p){
 /* The eyebrow above a folder or project names the levels above it; each opens. */
 const crumb=(label,folder)=>`<button type="button" class="space-crumb" data-crumb="${escapeHTML(folder)}">${escapeHTML(label)}</button>`;
 function bindCrumbs(){
-  $$('#projectsView .space-crumb').forEach(b=>b.onclick=()=>b.dataset.crumb?openFolderView(b.dataset.crumb):openProjectSpace(''));
+  $$('#projectsView .space-crumb').forEach(b=>b.onclick=()=>b.dataset.crumb==='@shelf'?openAchievements():b.dataset.crumb?openFolderView(b.dataset.crumb):openProjectSpace(''));
 }
 function bindProjectCards(){
   $$('.project-title-link').forEach(button=>button.onclick=()=>openProjectSpace(button.dataset.openProject));
@@ -1276,12 +1280,13 @@ const navClickBlocked=()=>Date.now()-(UI.navDropAt||0)<350;
 function renderProjectNav(){
   const nav=$('#projectNav');if(!nav||UI.navDrag)return;
   const tree=projectTree(),closed=closedFolders(),fresh=freshRefs(),admin=Boolean(S.user?.admin);
+  const inShelf=Boolean(UI.space&&(S.fileArchives||[]).some(p=>p.id===UI.space));
   const drag=(kind,item)=>canDragNav(kind,item)?' data-drag="1"':'';
-  const project=(n,level,parent='',archived=false)=>{
+  const project=(n,level,parent='')=>{
     const p=n.item,on=UI.space===p.id,open=UI.collapsedProjectNode!==p.id&&((UI.openProjectNodes||[]).includes(p.id)||on);
     return `<div class="nav-node"><div class="project-nav-project${on?' is-on':''}" data-node-level="${level}"><button type="button" class="project-node-caret" data-project-expand="${escapeHTML(p.id)}" aria-expanded="${open}" aria-label="${tr('{0}「{1}」的内容',open?tr('收起'):tr('展开'),escapeHTML(p.name))}">${icon('chevron-right')}</button>`
-      +`<button class="project-nav-item${archived?'':' nav-row'}${on?' is-on':''}" data-kind="project" data-id="${escapeHTML(p.id)}" `
-      +`data-level="${level}" data-parent="${escapeHTML(parent)}" data-space="${escapeHTML(p.id)}"${archived?'':drag('project',p)}`
+      +`<button class="project-nav-item nav-row${on?' is-on':''}" data-kind="project" data-id="${escapeHTML(p.id)}" `
+      +`data-level="${level}" data-parent="${escapeHTML(parent)}" data-space="${escapeHTML(p.id)}"${drag('project',p)}`
       +` title="${escapeHTML(p.name)}" aria-label="${escapeHTML(p.name)}"${on?' aria-current="page"':''}>${icon('gantt')}`
       +`<span class="nav-text">${escapeHTML(p.name)}</span>${fresh.has(p.id)?tr('<em class="new-chip">新</em>'):''}</button></div>`
       +(open?projectNavContents(p):'')+'</div>';
@@ -1300,12 +1305,15 @@ function renderProjectNav(){
   };
   nav.innerHTML=`<div class="project-nav-head"><span class="nav-text">${tr('项目目录')}</span>${admin?`<button class="project-nav-add" `
     +`${tr('id="addFolderBtn" title="新建文件夹" aria-label="新建文件夹">{0}',icon('plus'))}</button>`:''}${navigationControls('project')}</div>`
-    +`<button class="project-nav-item project-nav-all${UI.space||UI.folder?'':' is-on'}" data-space="" title="${tr('全部项目')}" aria-label="${tr('全部项目')}">${icon('layout-grid')}`
+    +`<button class="project-nav-item project-nav-all${UI.space||UI.folder||UI.shelf?'':' is-on'}" data-space="" title="${tr('全部项目')}" aria-label="${tr('全部项目')}">${icon('layout-grid')}`
     +`<span class="nav-text">${tr('全部项目')}</span><b>${visibleProjects().length}</b></button>`
     +`<div class="project-nav-tree" id="projectNavTree">${tree.map(n=>n.kind==='folder'?folder(n):project(n,0)).join('')}</div>`
-    +((S.fileArchives||[]).length?`<div class="project-nav-label">${tr('归档文件')}</div><div class="project-nav-tree">${S.fileArchives.map(p=>project({item:p},0,'',true)).join('')}</div>`:'')
+    /* Finished projects live in 成果库; it stays lit while one of them is open. */
+    +(admin||(S.fileArchives||[]).length?`<div class="project-nav-shelf"><button class="project-nav-item project-nav-all${(UI.shelf==='achievements'&&!UI.space)||inShelf?' is-on':''}" data-shelf="achievements" title="${tr('成果库')}" aria-label="${tr('成果库')}">${icon('award')}`
+    +`<span class="nav-text">${tr('成果库')}</span><b>${shelfProjects().length}</b></button></div>`:'')
     +navigationHandle('project');
   $$('#projectNav [data-space]').forEach(b=>b.onclick=()=>{if(!navClickBlocked())openProjectSpace(b.dataset.space)});
+  $$('#projectNav [data-shelf]').forEach(b=>b.onclick=()=>{if(!navClickBlocked())openAchievements()});
   $$('#projectNav [data-project-expand]').forEach(b=>b.onclick=()=>{
     const ids=new Set(UI.openProjectNodes||[]),id=b.dataset.projectExpand;
     if(ids.has(id))ids.delete(id);else ids.add(id);
@@ -1347,7 +1355,7 @@ function placeNavIndicator(){
   if(!mark){mark=document.createElement('i');mark.className='nav-indicator';mark.setAttribute('aria-hidden','true');nav.prepend(mark)}
   if(!on||typeof on.getBoundingClientRect!=='function'||!on.offsetHeight){mark.style.opacity='0';UI.navMark=null;return}
   watchNavWidth(nav);
-  const key=on.dataset?.id??on.querySelector?.('[data-id]')?.dataset?.id??'all';
+  const key=on.dataset?.shelf??on.dataset?.id??on.querySelector?.('[data-id]')?.dataset?.id??'all';
   const nb=nav.getBoundingClientRect(),b=on.getBoundingClientRect();
   const next={key,y1:b.top-nb.top+nav.scrollTop,y2:b.bottom-nb.top+nav.scrollTop,x:b.left-nb.left,w:b.width},prev=UI.navMark;
   const set=g=>{mark.style.setProperty('--nav-y1',`${g.y1}px`);mark.style.setProperty('--nav-y2',`${g.y2}px`);mark.style.left=`${g.x}px`;mark.style.width=`${g.w}px`};
@@ -1535,7 +1543,7 @@ function openFolderView(id){
   if(meetingLive.session||meetingLive.active)return meetingStopLive().then(()=>openFolderView(id)).catch(e=>toast(e.message));
   if($('#meetingEditor')?.dataset?.dirty==='true'&&!confirm(tr('会议修改尚未保存，确定离开？')))return;
   cancelMeetingOpen();
-  UI.folder=id;UI.space='';setFolderClosed(id,false);
+  UI.folder=id;UI.space='';UI.shelf='';setFolderClosed(id,false);
   if(UI.view!=='projects')switchView('projects');else renderProjects();
   $('.main-content')?.scrollTo?.({top:0,behavior:'smooth'});
 }
@@ -1543,7 +1551,7 @@ function openProjectSpace(id){
   if(meetingLive.session||meetingLive.active)return meetingStopLive().then(()=>openProjectSpace(id)).catch(e=>toast(e.message));
   if(UI.space!==id&&$('#meetingEditor')?.dataset?.dirty==='true'&&!confirm(tr('会议修改尚未保存，确定离开？')))return;
   if(UI.space!==id){cancelMeetingOpen();UI.collapsedProjectNode=null}
-  UI.space=id||'';if(!id)UI.folder='';if(id)clearFresh([id]);
+  UI.space=id||'';UI.shelf='';if(!id)UI.folder='';if(id)clearFresh([id]);
   if(UI.view!=='projects')switchView('projects');else renderProjects();
   $('.main-content')?.scrollTo?.({top:0,behavior:'smooth'});
 }
@@ -1872,12 +1880,12 @@ function renderProjectSpace(id){
   const keys=archive?['files','meetings']:Object.keys(SPACE_TABS);
   let tab=spaceTabNow();if(!keys.includes(tab)){tab=keys[0];setSpaceTab(tab)}
   const folder=(S.folders||[]).find(f=>f.id===p.folderId),eyebrow=$('#projectsView .eyebrow');
-  if(eyebrow){eyebrow.innerHTML=`${crumb(tr('全部项目'),'')}${folder?` / ${crumb(folder.name,folder.id)}`:''}${archive?tr(' / 归档'):''}`;bindCrumbs()}
+  if(eyebrow){eyebrow.innerHTML=`${crumb(tr('全部项目'),'')}${archive?` / ${crumb(tr('成果库'),'@shelf')}`:folder?` / ${crumb(folder.name,folder.id)}`:''}`;bindCrumbs()}
   $('#projectsView h1').textContent=p.name;
   const actions=$('#projectActions');
   if(actions){actions.innerHTML=archive?'':projectActionsHTML(p);actions.classList?.toggle('hidden',!actions.innerHTML)}
   const manage=canManageProject(p);
-  const tasks=S.tasks.filter(t=>t.projectId===p.id&&!t.repeatId&&!isSuperseded(t));
+  const tasks=S.tasks.filter(t=>t.projectId===p.id&&t.status!=='deferred'&&!t.repeatId&&!isSuperseded(t));
   const counts={tasks:tasks.length,files:(S.files||[]).filter(f=>f.projectId===p.id).length,
     meetings:(S.meetings||[]).filter(m=>m.projectId===p.id).length,
     people:Object.values(p.members||{}).filter(v=>v==='accepted').length};
@@ -1937,7 +1945,7 @@ function projectLifecycle(p,manage){
   const made=String(p.createdAt||'').slice(0,10),created=made&&p.start?(made<p.start?made:p.start):made||p.start,start=p.start||created,end=p.end;
 
   const personal=!S.user?.admin&&p.owner!==S.user?.id;
-  const tasks=S.tasks.filter(t=>t.projectId===p.id&&!t.repeatId&&!isSuperseded(t)&&t.status!=='skipped');
+  const tasks=S.tasks.filter(t=>t.projectId===p.id&&t.status!=='deferred'&&!t.repeatId&&!isSuperseded(t)&&t.status!=='skipped');
   const done=tasks.filter(t=>t.status==='done').length;
   const span=end?Math.max(1,daysCount(start,end)):0,passed=span?Math.min(span,Math.max(0,daysCount(start,S.today))):0;
   const stage=p.status==='pending'||p.status==='rejected'?0:p.status==='done'||p.status==='archived'?2:1;
@@ -1965,7 +1973,7 @@ function projectBackground(p,manage){
 function projectStaffing(p,manage){
   const people=Object.entries(p.members||{}).filter(([,v])=>v==='accepted').map(([id])=>id)
     .sort((a,b)=>(b===p.owner)-(a===p.owner));
-  const tasks=S.tasks.filter(t=>t.projectId===p.id&&!isSuperseded(t)&&t.status!=='skipped'),period=loadWindow(p);
+  const tasks=S.tasks.filter(t=>t.projectId===p.id&&t.status!=='deferred'&&!isSuperseded(t)&&t.status!=='skipped'),period=loadWindow(p);
   const inPeriod=t=>t.date<=period[1]&&taskEnd(t)>=period[0];
   const row=id=>{
     const mine=tasks.filter(t=>t.assignee===id),open=mine.filter(t=>['todo','doing'].includes(t.status)&&inPeriod(t)).length;
@@ -4367,13 +4375,13 @@ const GUIDE=[
   {id:'start',title:tr('开始使用'),icon:'book-open',demo:'login',lead:tr('登录、三种角色和你自己的资料。'),parts:[
     [tr('登录'),[tr('打开工作台，输入账户名和密码，点「进入工作台」。'),tr('登录状态保留 7 天；在别的设备登录不会挤掉当前设备。'),tr('同一浏览器登录过的账户会列在左上角账户菜单中，切换时仍需验证该账户密码。')]],
     [tr('三种角色'),[tr('superadmin：系统所有者，负责系统配置、账户管理、审批与调度，不执行任务。'),tr('管理员：管理全部项目与任务、审批申请、查看成果库和账户列表，不执行任务。'),tr('普通成员：处理分给自己的任务，按所在规则组新建项目或任务，参与被加入的项目。')],'list'],
-    [tr('三种角色能做什么'),[[tr('操作'), "superadmin", tr('管理员'), tr('普通成员')], [tr('执行任务、记录完成'), tr('不执行任务'), tr('不执行任务'), tr('仅分给自己的任务')], [tr('新建项目 / 任务'), tr('直接创建'), tr('直接创建'), tr('按所在规则组')], [tr('审批申请'), tr('可以'), tr('可以'), tr('项目 Owner 审批自己项目的申请')], [tr('查看成果库、账户列表'), tr('可以'), tr('可以'), tr('看不到')], [tr('添加、停用账户或重置密码'), tr('可以'), tr('不可以'), tr('不可以')], [tr('规则组、删除账户'), tr('可以'), tr('不可以'), tr('看不到')]],"table"],
+    [tr('三种角色能做什么'),[[tr('操作'), "superadmin", tr('管理员'), tr('普通成员')], [tr('执行任务、记录完成'), tr('不执行任务'), tr('不执行任务'), tr('仅分给自己的任务')], [tr('新建项目 / 任务'), tr('直接创建'), tr('直接创建'), tr('按所在规则组')], [tr('审批申请'), tr('可以'), tr('可以'), tr('项目 Owner 审批自己项目的申请')], [tr('查看全部已结项项目、账户列表'), tr('可以'), tr('可以'), tr('只看自己参与的已结项项目，看不到账户列表')], [tr('添加、停用账户或重置密码'), tr('可以'), tr('不可以'), tr('不可以')], [tr('规则组、删除账户'), tr('可以'), tr('不可以'), tr('看不到')]],"table"],
     [tr('你的资料'),[tr('点左上角的头像打开账户菜单。'),tr('「个人资料」里可以改昵称、头像（选择图片 / 移除）和个性签名；中文名由 superadmin 设置。'),tr('「修改密码」需要输入当前密码，新密码至少 6 位，改完后其他设备会退出登录。'),tr('「登录其他账户」切换到另一个账户；「退出登录」结束本设备的登录。')]],
     [tr('第一次进来'),[tr('第一次登录会自动开始约 3 分钟的导览，逐个点亮界面上的主要入口；标着「试一试」的步骤可以直接点一下看效果。'),tr('之后随时可以在「使用教程」页顶部点「开始导览」重看。')],'list'],
     [tr('常见问题'),[[tr('忘记密码怎么办？'), tr('请 superadmin 在「账户管理」里为你重置密码，登录后再到「修改密码」换成自己的。')], [tr('为什么我的中文名改不了？'), tr('中文名用在日报、成员列表等正式场合，由 superadmin 统一设置；你可以改昵称。')], [tr('换了电脑要重新登录吗？'), tr('要。每台设备单独登录，登录状态保留 7 天；改密码后所有设备都需要重新登录。')]],"faq"],
   ]},
   {id:'layout',title:tr('界面与导航'),icon:'layout-grid',demo:'layout',lead:tr('左侧导航、顶栏和常用入口在哪里。'),parts:[
-    [tr('左侧主导航'),[tr('今日任务、周视图、档案室、项目空间、项目时间轴、收件箱、使用教程对所有人开放；成果库、账户管理、系统设置只对管理员显示。'),tr('导航右侧的数字是待处理数量，红点表示有新分到你的工作。'),tr('点导航顶部的箭头收成只显示图标；拖动导航右边缘调宽窄，双击边缘恢复默认宽度。')],'list'],
+    [tr('左侧主导航'),[tr('今日任务、周视图、档案室、项目空间、项目时间轴、收件箱、使用教程对所有人开放；账户管理、系统设置只对管理员显示。成果库在项目空间的目录里。'),tr('导航右侧的数字是待处理数量，红点表示有新分到你的工作。'),tr('点导航顶部的箭头收成只显示图标；拖动导航右边缘调宽窄，双击边缘恢复默认宽度。')],'list'],
     [tr('快捷筛选'),[tr('点「P0 重要任务」「进行中」「已递延」会跳到今日任务，只列出对应的任务。'),tr('在今日任务里点「全部」回到完整列表。')]],
     [tr('今日安排'),[tr('左下角显示你今天所有任务的预计总时长，进度条随完成情况增长。')],'list'],
     [tr('导航宽窄'),[[tr('宽度'), tr('显示什么')], [tr('默认'), tr('图标、名称、待处理数量和快捷筛选')], [tr('调窄'), tr('名称和数量，分组标题和底部的今日安排收起')], [tr('收起'), tr('只剩图标')]],"table"],
@@ -4425,19 +4433,19 @@ const GUIDE=[
     [tr('五个标签'),[tr('任务：项目的全部任务（协作者只看到分给自己的）；右上角选排序，选「手动」时 Owner 可以拖动调整顺序；下面单独列出固定任务规则。'),tr('会议：左边是会议列表，右边是打开的会议（见「会议」一章）。'),tr('文件：上传、下载、删除（见下）。'),tr('成员：Owner 和协作者各一行；Owner 可以填写每人的分工，离开输入框即保存；右侧是项目周期内每人进行中、已完成的任务数和工时；Owner 和管理员可以「添加协作者」或移出成员。'),tr('概况：立项、执行、结项三个阶段和日期，时间进度与任务进度，「放在文件夹」，以及项目背景。')],'list'],
     [tr('在项目里谁能做什么'),[[tr('操作'), "Owner", tr('协作者'), tr('管理员')], [tr('看任务'), tr('全部'), tr('只看分给自己的'), tr('全部')], [tr('新建任务'), tr('可以'), tr('按所在规则组'), tr('可以')], [tr('新增会议'), tr('可以'), tr('只能查看'), tr('可以')], [tr('上传文件'), tr('可以'), tr('可以'), tr('可以')], [tr('删除文件'), tr('可以'), tr('只能删自己上传的'), tr('可以')], [tr('添加或移出协作者'), tr('可以'), tr('不可以'), tr('可以')], [tr('完成项目'), tr('提交结项报告'), tr('不可以'), tr('直接完成或审批')]],"table"],
     [tr('注意'),[tr('切到另一个项目时，停留在同一个标签：看完一个项目的文件，点下一个项目就直接是它的文件。')],'note'],
-    [tr('常见问题'),[[tr('为什么项目列表里少了一个项目？'), tr('已结项、已归档或过了截止日期的项目不在列表里；结项的项目在成果库和「归档文件」里。')], [tr('拖不动文件夹和项目？'), tr('只有管理员和有管理权限的人能调整目录顺序。')]],"faq"],
+    [tr('常见问题'),[[tr('为什么项目列表里少了一个项目？'), tr('已结项或已归档的项目不在列表里，它们在目录下方的「成果库」里。')], [tr('拖不动文件夹和项目？'), tr('只有管理员和有管理权限的人能调整目录顺序。')]],"faq"],
   ]},
   {id:'files',title:tr('项目文件'),icon:'file',demo:'upload',lead:tr('把项目资料放在项目里，所有成员都能取用。'),parts:[
     [tr('上传'),[tr('在项目的「文件」标签点「新增文件 → 上传文件」，或直接把文件从电脑拖到列表上。'),tr('单个文件不超过 20MB，可以一次选多个。')]],
     [tr('预览'),[tr('图片、PDF、文本、CSV、JSON 和日志文件旁边有「预览」，在新标签页里直接打开，不用下载。'), tr('Markdown（.md）文件点开就是排版好的样子；上传者、项目 Owner 和管理员可以切到「编辑」修改后保存。')],"list"],
     [tr('打开、下载与删除'),[tr('点文件名或左侧目录打开文件详情，Markdown 文件进入编辑器；点「下载」保存文件。'),tr('上传者、项目 Owner 和管理员可在列表右侧或详情底部删除文件；逾期项目仍可管理，结项和归档项目只读。删除前需确认，无法恢复。')],'list'],
-    [tr('项目结束以后'),[tr('项目结项后，文件和会议仍能在项目目录的「归档文件」里只读查看和下载。')],'list'],
+    [tr('项目结束以后'),[tr('项目结项后，文件和会议仍能在目录下方的「成果库」里只读查看和下载。')],'list'],
     [tr('常见问题'),[[tr('文件太大传不上去？'), tr('单个文件上限 20MB，可以压缩或拆分后再传。')], [tr('误删了文件能找回吗？'), tr('不能，删除前请确认。')]],"faq"],
   ]},
   {id:'project-life',title:tr('项目的一生'),icon:'gantt',demo:'project-life',lead:tr('从申请、审批、协作到结项和归档。'),parts:[
     [tr('新建或申请'),[tr('点「新建项目」或「申请项目」，填写项目名称、项目描述、开始日期、截止日期（长期项目可留空）、Owner 和协作者。'),tr('规则组允许直接创建时项目立即生效；需要审批时提交给管理员，审批通过后才出现在项目空间。'),tr('添加协作者后会直接加入项目并收到通知，无需接受邀请。')]],
     [tr('执行中'),[tr('Owner 负责分派任务、维护背景与分工；协作者处理自己的任务。'),tr('协作者可以在「更多 → 退出项目」离开，已有的任务和记录保留，重新加入后原样回来。'),tr('「项目设置」可以改名称、描述、起止日期和 Owner，并管理协作者。')],'list'],
-    [tr('结项'),[tr('Owner 在「更多 → 完成项目」提交结项报告，等待管理员审批；管理员也可直接完成项目。'),tr('管理员在收件箱同意后项目结项，从日程和项目列表中移出，进入成果库。'),tr('项目文件和会议在结项后仍能在项目目录的「归档文件」里只读查看。')]],
+    [tr('结项'),[tr('Owner 在「更多 → 完成项目」提交结项报告，等待管理员审批；管理员也可直接完成项目。'),tr('管理员在收件箱同意后项目结项，从日程和项目列表中移出，进入成果库。'),tr('项目文件和会议在结项后仍能在目录下方的「成果库」里只读查看。')]],
     [tr('删除'),[tr('「更多 → 删除项目」会删除项目及其全部任务、记录、文件、会议和项目频道的消息，需要输入完整项目名确认，不可恢复。')],'note'],
   ]},
   {id:'meetings',title:tr('会议'),icon:'chat',demo:'meeting',lead:tr('记录会议原稿，用模板整理成纪要。'),parts:[
@@ -4472,8 +4480,9 @@ const GUIDE=[
     [tr('自动补报'),[tr('开启「系统设置 → 日报与补报 → 自动补报」后，到点时前一天没交项目日报的项目会自动汇总成一份补报，交给 Owner 确认。')]],
     [tr('常见问题'),[[tr('档案没有保存会丢吗？'), tr('系统整理的部分会保留；你补充的内容需要点「保存」。')], [tr('周报从哪天算到哪天？'), tr('按「系统设置 → 日程」里设的每周开始日计算。')]],"faq"],
   ]},
-  {id:'achievements',title:tr('成果库'),icon:'award',demo:'achievements',lead:tr('已结项项目的完整档案，仅管理员可见。'),parts:[
-    [tr('内容'),[tr('顶部统计已完成项目数和累计完成的子任务数。'),tr('每个项目一张卡：Owner、结项时间、任务完成情况、生命周期（创建、审批启动、提交结项、完成）和结项报告。'),tr('可以从卡片进入项目文件、沟通记录和项目详情。')],'list'],
+  {id:'achievements',title:tr('成果库'),icon:'award',demo:'achievements',lead:tr('已结项的项目收在项目空间目录的「成果库」里。'),parts:[
+    [tr('在哪里'),[tr('项目空间左侧目录里，文件夹下方就是「成果库」。'),tr('点「成果库」，右边列出已结项项目的卡片；点卡片上的「项目文件」打开项目，文件和会议只读。'),tr('管理员看到全部已结项项目；成员看到自己参与过的，可以进入项目文件和沟通记录。')],'list'],
+    [tr('管理员看到的内容'),[tr('顶部统计已完成项目数和累计完成的子任务数。'),tr('每个项目一张卡：Owner、结项时间、任务完成情况、生命周期（创建、审批启动、提交结项、完成）和结项报告。'),tr('可以从卡片进入项目文件、沟通记录和项目详情。')],'list'],
     [tr('常见问题'),[[tr('项目怎样进入成果库？'), tr('Owner 提交结项报告并经管理员同意，或管理员直接完成项目。')], [tr('成果库里的项目还能改吗？'), tr('项目、文件和沟通记录都只读，用于查阅和复盘。')]],"faq"],
   ]},
   {id:'assistant',title:tr('AI 助手'),icon:'sparkles',demo:'assistant',lead:tr('用自然语言查询、规划和安排工作。'),parts:[
@@ -4847,20 +4856,43 @@ function achievementLifecycle(project,tasks=[]){
 function projectTasks(p) {
   return Array.isArray(p.tasks) ? p.tasks : S.tasks.filter(t => t.projectId === p.id);
 }
+/* 成果库 is a shelf in the project space: superadmin and 管理员 see every
+   finished project with its lifecycle and report; a member sees the finished
+   projects they worked on, whose files and meetings stay readable. */
+const shelfProjects=()=>S.user?.admin?completedProjects()
+  :(S.fileArchives||[]).slice().sort((a,b)=>String(b.completedAt||b.end||'').localeCompare(String(a.completedAt||a.end||'')));
+function openAchievements(){
+  if(meetingLive.session||meetingLive.active)return meetingStopLive().then(()=>openAchievements()).catch(e=>toast(e.message));
+  if($('#meetingEditor')?.dataset?.dirty==='true'&&!confirm(tr('会议修改尚未保存，确定离开？')))return;
+  cancelMeetingOpen();
+  UI.shelf='achievements';UI.space='';UI.folder='';
+  if(UI.view!=='projects')switchView('projects');else renderProjects();
+  $('.main-content')?.scrollTo?.({top:0,behavior:'smooth'});
+}
 function renderAchievements(){
   const admin=Boolean(S.user?.admin),grid=$('#achievementGrid'),empty=$('#achievementEmpty'),stats=$('#achievementStats');
-  if(!admin){if(grid)grid.innerHTML='';return}
-  const projects=completedProjects();
-  if(stats){const totalTasks=projects.reduce((n,p)=>n+projectTasks(p).length,0),doneTasks=projects.reduce((n,p)=>n+projectTasks(p).filter(t=>t.status==='done').length,0);stats.innerHTML=`<div class="achievement-stat"><span>${tr('已完成项目')}</span><strong>${projects.length}</strong></div><div class="achievement-stat"><span>${tr('累计完成子任务')}</span><strong>${doneTasks}</strong><small>${tr('共 {0} 项',totalTasks)}</small></div><div class="achievement-stat"><span>${tr('最近结项')}</span><strong>${projects[0]?escapeHTML(String(projects[0].completedAt||projects[0].end||'').slice(0,10)):'—'}</strong>${projects[0]?`<small>${escapeHTML(projects[0].name)}</small>`:''}</div>`}
+  const projects=shelfProjects(),eyebrow=$('#projectsView .eyebrow'),title=$('#projectsView h1');
+  if(eyebrow)eyebrow.innerHTML=`${crumb(tr('全部项目'),'')} · ${tr('{0} 个已结项',projects.length)}`;
+  if(title)title.textContent=tr('成果库');
+  bindCrumbs();
+  if(stats&&!admin)stats.innerHTML=`<div class="achievement-stat"><span>${tr('我参与的已结项项目')}</span><strong>${projects.length}</strong></div>`;
+  else if(stats){const totalTasks=projects.reduce((n,p)=>n+projectTasks(p).length,0),doneTasks=projects.reduce((n,p)=>n+projectTasks(p).filter(t=>t.status==='done').length,0);stats.innerHTML=`<div class="achievement-stat"><span>${tr('已完成项目')}</span><strong>${projects.length}</strong></div><div class="achievement-stat"><span>${tr('累计完成子任务')}</span><strong>${doneTasks}</strong><small>${tr('共 {0} 项',totalTasks)}</small></div><div class="achievement-stat"><span>${tr('最近结项')}</span><strong>${projects[0]?escapeHTML(String(projects[0].completedAt||projects[0].end||'').slice(0,10)):'—'}</strong>${projects[0]?`<small>${escapeHTML(projects[0].name)}</small>`:''}</div>`}
   if(empty)empty.classList.toggle('hidden',projects.length>0);
   if(!grid)return;
   grid.innerHTML=projects.map(p=>{
+    if(!admin)return memberShelfCard(p);
     const tasks=sortTasks(projectTasks(p)),done=tasks.filter(t=>t.status==='done').length,stages=achievementLifecycle(p,tasks);
     return `<article class="achievement-card" data-project="${escapeHTML(p.id)}"><div class="achievement-card-head"><div><span class="achievement-kicker">${tr('已归档成果')}</span><h2>${escapeHTML(p.name)}</h2><p>${escapeHTML(p.desc||tr('暂无项目描述'))}</p></div><span class="achievement-status">${projectStatus(p)}</span></div><div class="achievement-meta"><span>Owner · <b>${escapeHTML(p.owner?nameOf(p.owner):'—')}</b></span><span>${tr('任务完成 ·')} <b>${done}/${tasks.length}</b></span><span>${tr('完成于 ·')} <b>${escapeHTML(String(p.completedAt||p.end||'—').slice(0,10))}</b></span></div><div class="achievement-actions">${(S.fileArchives||[]).some(x=>x.id===p.id)?`<button class="ghost-btn achievement-files" data-project="${escapeHTML(p.id)}">${tr('项目文件')}</button>`:''}<button class="ghost-btn open-channel-archive" data-project="${escapeHTML(p.id)}" data-name="${escapeHTML(p.name)}">${tr('沟通记录')}</button></div><ol class="achievement-lifecycle">${stages.map((s,i)=>`<li class="${s.at?'is-complete':''}"><i></i><span><b>${escapeHTML(s.label)}</b><small>${escapeHTML(s.at||tr('未记录'))}${s.meta?` · ${escapeHTML(s.meta)}`:''}</small></span>${i<stages.length-1?'<em></em>':''}</li>`).join('')}</ol>${p.completionReport?`<div class="achievement-report"><span>${tr('结项报告')}</span><p>${escapeHTML(p.completionReport)}</p></div>`:''}<div class="achievement-actions"><button class="secondary-btn achievement-open" data-project="${escapeHTML(p.id)}">${tr('查看项目详情')}</button></div></article>`;
   }).join('');
   $$('#achievementGrid .achievement-open').forEach(b=>b.onclick=()=>openWorkLogDetail('',b.dataset.project,'project'));
   $$('#achievementGrid .achievement-files').forEach(b=>b.onclick=()=>openProjectSpace(b.dataset.project));
 }
+const memberShelfCard=p=>`<article class="achievement-card" data-project="${escapeHTML(p.id)}"><div class="achievement-card-head"><div>`
+  +`<span class="achievement-kicker">${tr('已归档成果')}</span><h2>${escapeHTML(p.name)}</h2></div><span class="achievement-status">${projectStatus(p)}</span></div>`
+  +`<div class="achievement-meta"><span>Owner · <b>${escapeHTML(p.owner?nameOf(p.owner):'—')}</b></span>`
+  +`<span>${tr('完成于')} · <b>${escapeHTML(String(p.completedAt||p.end||'—').slice(0,10))}</b></span></div>`
+  +`<div class="achievement-actions"><button class="ghost-btn achievement-files" data-project="${escapeHTML(p.id)}">${tr('项目文件')}</button>`
+  +`<button class="ghost-btn open-channel-archive" data-project="${escapeHTML(p.id)}" data-name="${escapeHTML(p.name)}">${tr('沟通记录')}</button></div></article>`;
 /* Work-log rows and 成果库 cards open the live task or project while it is still
    in the snapshot. A finished project only lives in the archive payload, so it
    opens as a read-only summary instead; one known only by its archived files

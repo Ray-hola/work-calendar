@@ -1580,13 +1580,44 @@ test('archived attachments have a read-only navigation and achievements entry wi
     S.fileArchives=[{id:'old',name:'已交付项目',owner:'test001',status:'done'}];
     S.files=[{id:'f',projectId:'old',name:'交付.pdf',size:20,uploader:'test001',createdAt:'2026-11-03T09:00:00+08:00'}];
     UI.space='old';renderProjects();`);
-  assert.ok(elements['#projectNav'].innerHTML.includes('归档文件'));
+  assert.ok(elements['#projectNav'].innerHTML.includes('data-shelf="achievements"'),'成果库在项目目录里');
   const html=elements['#projectSpace'].innerHTML;
   assert.ok(html.includes('/api/files/f')&&html.includes('data-space-tab="meetings"'));
   for(const action of ['spaceFileInput','file-delete','spaceBackground','spaceFolder','request-project-completion'])assert.ok(!html.includes(action),action);
   assert.equal(a.run('visibleProjects().length'),0,'归档项目不回到进行中列表');
   a.run("S.user={id:'superadmin',admin:1};S.achievements=[{id:'old',name:'已交付项目',status:'done',tasks:[]}];renderAchievements()");
-  assert.ok(elements['#achievementGrid'].innerHTML.includes('achievement-files'),'管理员可从成果库进入归档附件');
+  assert.ok(elements['#achievementGrid'].innerHTML.includes('achievement-files'),'管理员可从成果库进入已结项项目的文件');
+});
+
+test('成果库 is a shelf in the project directory for admins and for members with finished projects',()=>{
+  const a=app(),elements={};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={dataset:{},classList:{toggle(){}}}),querySelectorAll:()=>[]};
+  a.run(`S.today='2026-11-03';S.user={id:'test001',admin:0};UI.view='projects';S.projects=[];S.fileArchives=[];renderProjects()`);
+  assert.ok(!elements['#projectNav'].innerHTML.includes('data-shelf'),'没有已结项项目的成员不显示成果库');
+  a.run(`S.fileArchives=[{id:'old',name:'已交付项目',owner:'chenxi',status:'done',completedAt:'2026-11-01T10:00:00+08:00'}];
+    S.users=[{id:'chenxi',displayName:'陈曦'}];UI.shelf='achievements';renderProjects()`);
+  const nav=elements['#projectNav'].innerHTML;
+  assert.match(nav,/project-nav-all is-on" data-shelf="achievements"/);assert.doesNotMatch(nav,/project-nav-all is-on" data-space=""/);
+  const grid=elements['#achievementGrid'].innerHTML;
+  assert.match(grid,/已交付项目/);assert.match(grid,/陈曦/);assert.match(grid,/achievement-files/);assert.doesNotMatch(grid,/achievement-open/);
+  assert.equal(elements['#projectsView h1'].textContent,'成果库');
+  a.run("UI.shelf='';openProjectSpace('')");assert.equal(a.run('UI.shelf'),'');
+});
+test('the old 成果库 view opens the shelf in the project space',()=>{
+  const a=app(),elements={};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={dataset:{},style:{},classList:{toggle(){},add(){},remove(){},contains:()=>false},setAttribute(){},removeAttribute(){}}),querySelectorAll:()=>[]};
+  a.context.window={innerWidth:1280,scrollTo(){},addEventListener(){},removeEventListener(){}};
+  a.run("S.user={id:'test001',admin:0};renderProjects=()=>{};stopChatPolling=()=>{};switchView('achievements')");
+  assert.equal(a.run('UI.view'),'projects');assert.equal(a.run('UI.shelf'),'achievements');
+});
+test('a project task list shows a deferred task once, as its live occurrence',()=>{
+  const a=app();
+  a.run(`S.user={id:'owner',admin:0};S.users=[{id:'mate',displayName:'周一'}];
+    S.projects=[{id:'p',name:'P',owner:'owner',status:'active',members:{mate:'accepted'}}];
+    S.tasks=[{id:'a',projectId:'p',name:'周报',assignee:'mate',date:'2026-11-10',status:'deferred',priority:'P1'},
+             {id:'b',projectId:'p',name:'周报',assignee:'mate',date:'2026-11-11',status:'todo',originId:'a',priority:'P1'}]`);
+  const html=a.run("projectCardHTML(S.projects[0])");
+  assert.equal((html.match(/project-task-open/g)||[]).length,1);assert.match(html,/data-id="b"/);
 });
 
 test('work-log and 成果库 detail opens the live task, the live project, or an archived summary',()=>{
@@ -3278,7 +3309,7 @@ test('tutorial role guidance distinguishes task performers and superadmin accoun
   const a=app(),parts=a.json("GUIDE.find(c=>c.id==='start').parts"),table=parts.find(p=>p[2]==='table')[1];
   assert.deepEqual(table.find(r=>r[0]==='执行任务、记录完成').slice(1),['不执行任务','不执行任务','仅分给自己的任务']);
   assert.deepEqual(table.find(r=>r[0]==='添加、停用账户或重置密码').slice(1),['可以','不可以','不可以']);
-  assert.deepEqual(table.find(r=>r[0]==='查看成果库、账户列表').slice(1),['可以','可以','看不到']);
+  assert.deepEqual(table.find(r=>r[0]==='查看全部已结项项目、账户列表').slice(1),['可以','可以','只看自己参与的已结项项目，看不到账户列表']);
   assert.match(parts.find(p=>p[2]==='faq')[1][0][1],/请 superadmin/);
   const accounts=a.json("GUIDE.find(c=>c.id==='accounts')");assert.match(accounts.lead,/维护账户仅限 superadmin/);
   assert.match(JSON.stringify(accounts.parts),/管理员可查看账户列表，但不能维护账户/);

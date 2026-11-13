@@ -2230,6 +2230,24 @@ class Store:
         superseded=self._superseded_map(tasks,groups);meta=self._stack_metadata(tasks,groups)
         return [{**t,**meta.get(t['id'],{})} for t in tasks if t['id'] not in superseded]
 
+    def _task_chains(self, tasks):
+        """Group every record of one piece of work: its origin and rework links
+        and each record's pointer to the occurrence that replaced it, so a chain
+        holds together even when its first record is gone."""
+        by_id={t.get('id'):t for t in tasks if t.get('id')}
+        parent={}
+        def find(x):
+            while parent.get(x,x)!=x:x=parent[x]
+            return x
+        for task in tasks:
+            tid=task.get('id')
+            for link in (self._lineage_root(task,by_id),task.get('supersededBy')):
+                if link in by_id and find(link)!=find(tid):parent[find(tid)]=find(link)
+        groups={}
+        for task in tasks:
+            groups.setdefault(find(task.get('id')),[]).append(task)
+        return list(groups.values())
+
     def _superseded_map(self, tasks, stack_groups=None):
         """Map each superseded occurrence to the lineage leaf that replaced it.
 
@@ -2238,12 +2256,11 @@ class Store:
         rather than a stored flag so pre-existing data is handled too.
         """
         by_id={t.get('id'):t for t in tasks if t.get('id')}
-        groups={}
-        for task in tasks:
-            groups.setdefault(self._lineage_root(task,by_id),[]).append(task)
         superseded={}
-        for chain in groups.values():
-            leaf=max(chain,key=lambda t:(str(t.get('date','')),str(t.get('createdAt',''))))
+        for chain in self._task_chains(tasks):
+            # A record already replaced is history even if its date is later.
+            open_=[t for t in chain if t.get('supersededBy') not in by_id] or chain
+            leaf=max(open_,key=lambda t:(str(t.get('date','')),str(t.get('createdAt',''))))
             for task in chain:
                 if task.get('id')!=leaf.get('id'):
                     superseded[task['id']]=leaf.get('id')
@@ -4013,7 +4030,7 @@ class Store:
             return self.put('projects',p)
         if action=='file.delete':
             f=self.get('files',d.get('id'));p=self.get('projects',f['projectId'])
-            if not self.can_view_project(user,p):raise Problem(403,'归档文件仅供读取，或你已无权访问该项目')
+            if not self.can_view_project(user,p):raise Problem(403,'成果库中的项目仅供读取，或你已无权访问该项目')
             if not (user['admin'] or p['owner']==user['id'] or f.get('uploader')==user['id']):
                 raise Problem(403,'只有上传者、项目 Owner 或管理员可以删除文件')
             self.drop_file(f['id'])
@@ -4102,20 +4119,30 @@ class Store:
             self.audit(user['id'],'task.request_review',{'request':req['id'],'accept':bool(d.get('accept'))})
             return req
         if action=='task.delete':
-            self.admin(user)
             task=self.get('tasks',d.get('id'))
+            # superadmin removes any task; a project's Owner removes the work in
+            # their own running project.
+            if not user['admin']:
+                if not task.get('projectId'):raise Problem(403,'只有 superadmin 可以删除临时任务')
+                project=self.get('projects',task['projectId'])
+                self.project_owner(user,project)
+                if project.get('status')!='active':raise Problem(409,'项目不在进行中，不能删除任务')
             if task.get('repeatId') or task.get('fixed'):
                 raise Problem(409,'固定安排请使用“挖空本次”，不能删除固定规则')
             if task.get('status') in ('pending_approval','awaiting_approval','submitted'):
                 raise Problem(409,'待审批任务不能删除，请先完成审批')
             task_id=task['id']; assignee=task.get('assignee')
-            self.db.execute('DELETE FROM tasks WHERE id=?',(task_id,))
+            # The deferred records before it go too, or the latest of them would
+            # stand in for the removed task.
+            chain=next(c for c in self._task_chains(self.all('tasks')) if any(x['id']==task_id for x in c))
+            removed={x['id'] for x in chain}
+            self.db.executemany('DELETE FROM tasks WHERE id=?',[(i,) for i in removed])
             # Resolve any stale inbox cards that pointed at the removed task.
             for notice in self.all('notifications'):
-                if notice.get('reference')==task_id and not notice.get('read'):
+                if notice.get('reference') in removed and not notice.get('read'):
                     notice['read']=True;self.put('notifications',notice)
             if assignee and assignee!=user['id']:
-                self.notify(assignee,'任务已删除',f'superadmin 删除了「{task.get("name","")}」。','task',task_id)
+                self.notify(assignee,'任务已删除',f'{self.display_name(user["id"])} 删除了「{task.get("name","")}」。','task',task_id)
             return {'id':task_id,'deleted':True}
         if action=='task.edit_request':
             t=self.get('tasks', d.get('id'))
