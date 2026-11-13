@@ -4598,10 +4598,12 @@ function achievementLifecycle(project,tasks=[]){
     {key:'completed',label:'审批完成',at:String(project.completedAt||project.end||'').slice(0,10)}
   ];
 }
+/* A finished project carries its own task leaves in the archive payload. */
+const projectTasks = p => (Array.isArray(p.tasks) ? p.tasks : S.tasks.filter(t => t.projectId === p.id));
 function renderAchievements(){
   const admin=Boolean(S.user?.admin),grid=$('#achievementGrid'),empty=$('#achievementEmpty'),stats=$('#achievementStats');
   if(!admin){if(grid)grid.innerHTML='';return}
-  const projects=completedProjects(), projectTasks=p=>Array.isArray(p.tasks)?p.tasks:S.tasks.filter(t=>t.projectId===p.id);
+  const projects=completedProjects();
   if(stats){const totalTasks=projects.reduce((n,p)=>n+projectTasks(p).length,0),doneTasks=projects.reduce((n,p)=>n+projectTasks(p).filter(t=>t.status==='done').length,0);stats.innerHTML=`<div class="achievement-stat"><span>已完成项目</span><strong>${projects.length}</strong></div><div class="achievement-stat"><span>累计完成子任务</span><strong>${doneTasks}</strong><small>共 ${totalTasks} 项</small></div><div class="achievement-stat"><span>最近结项</span><strong>${projects[0]?escapeHTML(String(projects[0].completedAt||projects[0].end||'').slice(0,10)):'—'}</strong>${projects[0]?`<small>${escapeHTML(projects[0].name)}</small>`:''}</div>`}
   if(empty)empty.classList.toggle('hidden',projects.length>0);
   if(!grid)return;
@@ -4614,7 +4616,8 @@ function renderAchievements(){
 }
 /* Work-log rows and 成果库 cards open the live task or project while it is still
    in the snapshot. A finished project only lives in the archive payload, so it
-   opens as a read-only summary instead. */
+   opens as a read-only summary instead; one known only by its archived files
+   opens its read-only project space. */
 function openWorkLogDetail(taskId,projectId,kind){
   if(taskId&&kind!=='project'&&S.tasks.some(t=>t.id===taskId))return openDrawer(taskId);
   if(!projectId){toast('这条记录已不在当前数据中');return}
@@ -4622,7 +4625,7 @@ function openWorkLogDetail(taskId,projectId,kind){
   const p=completedProjects().find(x=>x.id===projectId);
   if(!p&&(S.fileArchives||[]).some(x=>x.id===projectId))return openProjectSpace(projectId);
   if(!p){toast('这个项目已不在当前数据中');return}
-  const tasks=sortTasks(Array.isArray(p.tasks)?p.tasks:S.tasks.filter(t=>t.projectId===p.id)),done=tasks.filter(t=>t.status==='done').length;
+  const tasks=sortTasks(projectTasks(p)),done=tasks.filter(t=>t.status==='done').length;
   openModal(`<div class="eyebrow">已归档成果</div><h2>${escapeHTML(p.name)}</h2>${p.desc?`<p>${escapeHTML(p.desc)}</p>`:''}`
     +`<div class="detail-grid"><div><span>项目 Owner</span><strong>${escapeHTML(p.owner?nameOf(p.owner):'—')}</strong></div>`
     +`<div><span>项目状态</span><strong>${projectStatus(p)}</strong></div><div><span>任务完成</span><strong>${done}/${tasks.length}</strong></div>`
