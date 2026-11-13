@@ -5,6 +5,9 @@ const escapeHTML=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<
    (◷ ▦ ✦ ◇ ＋ › ↻ ▶ …) now comes from here, so stroke weight, optical size and
    alignment stay consistent and nothing depends on the system symbol font. */
 const ICON_PATHS={
+  'maximize-2':'<path d="M15 3h6v6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/><path d="M9 21H3v-6"/>',
+  'minimize-2':'<path d="m14 10 7-7"/><path d="M20 10h-6V4"/><path d="m3 21 7-7"/><path d="M4 14h6v6"/>',
+  'file-pen':'<path d="M12.5 22H18a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v9.5"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M13.4 12.6a2 2 0 1 1 2.9 2.9L10.9 21H7v-3.8Z"/>',
   'calendar-check':'<path d="M8 2v4"/><path d="M16 2v4"/><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M3 10h18"/><path d="m9 15.4 2 2 4-4"/>',
   'calendar-days':'<path d="M8 2v4"/><path d="M16 2v4"/><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M3 10h18"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/>',
   'layout-grid':'<rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/>',
@@ -317,7 +320,11 @@ let S={user:null,users:[],tasks:[],projects:[],folders:[],files:[],fileArchives:
    Safari reports parsing that as "The string did not match the expected
    pattern", so anything that is not JSON becomes a readable message here. */
 const readJSON=async r=>{const text=await r.text();try{return text?JSON.parse(text):{}}catch(_){throw new Error([504,524].includes(r.status)?'服务响应超时，请稍后再试；给 AI 助手的需求可以拆短一点':`服务暂时不可用（HTTP ${r.status}），请稍后再试`)}};
-const api=(path,body,options={})=>fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Work-Calendar':'1'},credentials:'same-origin',body:JSON.stringify(body),...options}).then(async r=>{const x=await readJSON(r);if(!r.ok)throw new Error(x.error||'操作未完成');return x});
+const api=(path,body,options={})=>{
+  const draft=UI.formDraft;
+  return fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Work-Calendar':'1'},credentials:'same-origin',body:JSON.stringify(body),...options})
+    .then(async r=>{const x=await readJSON(r);if(!r.ok)throw new Error(x.error||'操作未完成');await draftSubmitted(path,body,draft);return x});
+};
 /* Raw-body sibling of api() for uploads: audio is sent as-is, not as JSON. */
 const apiBlob=(path,blob,options={})=>fetch(path,{...options,method:'POST',headers:{'Content-Type':blob.type||'application/octet-stream','X-Work-Calendar':'1'},credentials:'same-origin',body:blob}).then(async r=>{const x=await r.json().catch(()=>({}));if(!r.ok)throw new Error(x.error||'请求未完成');return x});
 const getState=()=>fetch('/api/state',{credentials:'same-origin'}).then(async r=>{const x=await readJSON(r);if(!r.ok){const e=new Error(x.error||'读取工作台失败');e.status=r.status;throw e}return x});
@@ -345,7 +352,7 @@ const status=t=>{
 };
 const projectName=t=>(S.projects.find(p=>p.id===t.projectId)||{}).name||'个人';
 function toast(msg){const e=$('#toast');e.textContent=msg;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200)}
-function showAuth(){cancelTourOffer();endTour(false);meetingCancelCapture();meetingStopLive().catch(()=>{});if(typeof agentCancelVoice==='function')agentCancelVoice();document.body.classList.add('auth-locked');let e=$('#authScreen');if(!e){e=document.createElement('section');e.id='authScreen';document.body.prepend(e)}const local=location.protocol==='file:';e.innerHTML=`<div class="auth-card"><div class="brand"><span class="brand-mark">哗</span><span>哗啦！<br><strong>哗啦待办</strong></span></div><h1>登录工作台</h1><form id="loginForm"><label>账户<input id="loginUser" autocomplete="username" value="superadmin" required></label><label>密码<input id="loginPass" type="password" autocomplete="current-password" required></label><button class="primary-btn" type="submit" ${local?'disabled':''}>${local?'请先启动本地服务':'进入工作台'}</button><div id="loginError" class="login-error">${local?'请在工作区运行 ./run.sh，然后访问 http://127.0.0.1:4173/':''}</div></form></div>`;$('#loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/login',{username:$('#loginUser').value,password:$('#loginPass').value});document.body.classList.remove('auth-locked');e.target.closest('#authScreen').remove();await refresh();switchView('calendar')}catch(err){$('#loginError').textContent=err.message}}}
+function showAuth(){resetFormDraft();cancelTourOffer();endTour(false);meetingCancelCapture();meetingStopLive().catch(()=>{});if(typeof agentCancelVoice==='function')agentCancelVoice();document.body.classList.add('auth-locked');let e=$('#authScreen');if(!e){e=document.createElement('section');e.id='authScreen';document.body.prepend(e)}const local=location.protocol==='file:';e.innerHTML=`<div class="auth-card"><div class="brand"><span class="brand-mark">哗</span><span>哗啦！<br><strong>哗啦待办</strong></span></div><h1>登录工作台</h1><form id="loginForm"><label>账户<input id="loginUser" autocomplete="username" value="superadmin" required></label><label>密码<input id="loginPass" type="password" autocomplete="current-password" required></label><button class="primary-btn" type="submit" ${local?'disabled':''}>${local?'请先启动本地服务':'进入工作台'}</button><div id="loginError" class="login-error">${local?'请在工作区运行 ./run.sh，然后访问 http://127.0.0.1:4173/':''}</div></form></div>`;$('#loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/login',{username:$('#loginUser').value,password:$('#loginPass').value});document.body.classList.remove('auth-locked');e.target.closest('#authScreen').remove();await refresh();switchView('calendar')}catch(err){$('#loginError').textContent=err.message}}}
 /* Accounts that have signed in on this browser, newest first. The switcher
    offers only these, so it never lists the whole team to everyone. */
 const KNOWN_ACCOUNTS_KEY='wc-accounts';
@@ -355,13 +362,14 @@ async function refresh(){
   let next;
   try{next=await getState()}catch(e){if(e.status===401){showAuth();return}throw e}
   if(S.user?.id!==next.user.id){
+    if(S.user)resetFormDraft();
     cancelTourOffer();endTour(false);meetingCancelCapture();
     if(S.user&&typeof agentResetUser==='function')agentResetUser();
     Object.assign(UI,{space:'',folder:'',view:'calendar',member:'all',filter:'all',selectedWeek:0,detailDate:null,timelineScroll:null,dayOffset:0});
   }
   /* updateChatDot is defined further down the file than the unit-test sandbox
      loads, so guard the call rather than assume it is in scope. */
-  S=next;if(S.dateHorizon)DATE_HORIZON=S.dateHorizon;rememberAccount(S.user.id);renderAll();if(typeof offerTour==='function')offerTour();renderPip();if(typeof loadSpeechStatus==='function')loadSpeechStatus();if(typeof updateChatDot==='function')updateChatDot();
+  S=next;restorePendingFormDrafts();if(S.dateHorizon)DATE_HORIZON=S.dateHorizon;rememberAccount(S.user.id);renderAll();if(typeof offerTour==='function')offerTour();renderPip();if(typeof loadSpeechStatus==='function')loadSpeechStatus();if(typeof updateChatDot==='function')updateChatDot();
 }
 let inboxRefreshPromise=null;
 async function refreshInboxState(){
@@ -397,7 +405,7 @@ function switchView(view){
   shown?.classList?.toggle('is-revisit',seen.has(view));seen.add(view);
   $$('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.view===view));
   if(view!=='today'&&typeof syncFilterLinks==='function')syncFilterLinks();
-  const labels={today:'今日任务',calendar:'周视图',projects:'项目空间',timeline:'项目时间轴',achievements:'成果库',archive:'档案室',inbox:'收件箱',accounts:'账户管理',settings:'系统设置',dayDetail:'日期详情',chat:'沟通区',guide:'使用教程'};
+  const labels={today:'今日任务',calendar:'周视图',projects:'项目空间',timeline:'项目时间轴',achievements:'成果库',archive:'档案室',drafts:'草稿箱',inbox:'收件箱',accounts:'账户管理',settings:'系统设置',dayDetail:'日期详情',chat:'沟通区',guide:'使用教程'};
   $('#crumbCurrent').textContent=`/ ${labels[view]||view}`;
   renderScheduleScope();
   if(view==='calendar')renderCalendar();
@@ -408,6 +416,7 @@ function switchView(view){
   if(view==='timeline')renderTimeline();
   if(view==='achievements')renderAchievements();
   if(view==='archive')renderArchive();
+  if(view==='drafts')renderDrafts();
   if(view==='inbox'){renderInbox();refreshInboxState();}
   if(view==='accounts')renderAccounts();
   if(view==='guide')renderGuide();
@@ -716,19 +725,21 @@ const FEELINGS=['顺利','一般','困难','阻塞'];
 function completionFields(summary='',actual=30,feeling='顺利'){return `<label class="form-field">完成总结<textarea id="doneText">${escapeHTML(summary)}</textarea></label><label class="form-field">实际耗时（分钟）<input id="actualMins" type="number" min="1" max="1440" value="${Number(actual)||30}"></label><label class="form-field">工作感受<select id="feeling">${FEELINGS.map(f=>`<option ${f===feeling?'selected':''}>${f}</option>`).join('')}</select></label>`}
 function editCompletion(t){
   openModal(`<div class="eyebrow">完成记录 · ${escapeHTML(t.name)}</div><h2>修改完成记录</h2>${completionFields(t.completionSummary||'',t.completionActual||t.duration,t.completionFeeling||'顺利')}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmCompletionEdit">保存修改</button></div>`);
+  draftForm(`task.completion:${t.id}`,{title:'修改完成记录',label:t.name,reopen:['editCompletion',t.id],submit:['task.completion.update']});
   $('#cancelAction').onclick=closeModal;
   $('#confirmCompletionEdit').onclick=async()=>{const summary=$('#doneText').value.trim();if(!summary){toast('请填写完成总结');return}try{await act('task.completion.update',{id:t.id,summary,actual:Number($('#actualMins').value),feeling:$('#feeling').value});closeModal();closeDrawer();toast('完成记录已更新')}catch(e){}};
 }
 function reopenTask(t){
   openModal(`<div class="eyebrow">${escapeHTML(projectName(t))} · 打回</div><h2>打回「${escapeHTML(t.name)}」</h2><p>任务回到 ${escapeHTML(nameOf(t.assignee))} 的待办${t.date<S.today?'，排到今天':''}，并通知对方。</p><label class="form-field">打回原因<textarea id="reopenReason" placeholder="哪里还需要补充"></textarea></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmReopen">打回并通知</button></div>`);
+  draftForm(`task.reopen:${t.id}`,{title:'打回任务',label:t.name,reopen:['reopenTask',t.id],submit:['task.reopen']});
   $('#cancelAction').onclick=closeModal;
   $('#confirmReopen').onclick=async()=>{const reason=$('#reopenReason').value.trim();if(!reason){toast('请填写打回原因');return}try{await act('task.reopen',{id:t.id,reason});closeModal();closeDrawer();toast('任务已打回')}catch(e){}};
 }
-function complete(t){openModal(`<div class="eyebrow">完成记录 · ${escapeHTML(t.name)}</div><h2>记录完成${stackBadge(t)}</h2><label class="form-field">完成总结<textarea id="doneText" ></textarea></label><label class="form-field">实际耗时（分钟）<input id="actualMins" type="number" value="${t.duration}"></label><label class="form-field">工作感受<select id="feeling"><option>顺利</option><option>一般</option><option>困难</option><option>阻塞</option></select></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmComplete">${t.stackCount>1?`完成全部 ${t.stackCount} 期`:'确认完成'}</button></div>`);$('#cancelAction').onclick=closeModal;$('#confirmComplete').onclick=async()=>{try{await api('/api/action',{action:'task.complete',data:{id:t.id,summary:$('#doneText').value||'完成任务',...(t.stackCount>1?{stackPeriods:t.stackPeriods}:{}),actual:Number($('#actualMins').value),feeling:$('#feeling').value}});closeModal();closeDrawer();await refresh();toast('任务已完成')}catch(e){toast(e.message)}}}
+function complete(t){openModal(`<div class="eyebrow">完成记录 · ${escapeHTML(t.name)}</div><h2>记录完成${stackBadge(t)}</h2><label class="form-field">完成总结<textarea id="doneText" ></textarea></label><label class="form-field">实际耗时（分钟）<input id="actualMins" type="number" value="${t.duration}"></label><label class="form-field">工作感受<select id="feeling"><option>顺利</option><option>一般</option><option>困难</option><option>阻塞</option></select></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmComplete">${t.stackCount>1?`完成全部 ${t.stackCount} 期`:'确认完成'}</button></div>`);draftForm(`task.complete:${t.id}`,{title:'记录完成',label:t.name,reopen:['complete',t.id],submit:['task.complete']});$('#cancelAction').onclick=closeModal;$('#confirmComplete').onclick=async()=>{try{await api('/api/action',{action:'task.complete',data:{id:t.id,summary:$('#doneText').value||'完成任务',...(t.stackCount>1?{stackPeriods:t.stackPeriods}:{}),actual:Number($('#actualMins').value),feeling:$('#feeling').value}});closeModal();closeDrawer();await refresh();toast('任务已完成')}catch(e){toast(e.message)}}}
 function editTaskRequest(id,direct=false){
   const t=S.tasks.find(x=>x.id===id),p=S.projects.find(x=>x.id===t?.projectId);if(!t)return;
   const pool=p?projectAssignees(p)
-    :S.user.admin||handedOut(t)?S.users.filter(u=>u.active&&!u.admin):S.users.filter(u=>u.id===S.user.id);
+    :S.user.admin||(handedOut(t)&&!tempSelfOnly())?S.users.filter(u=>u.active&&!u.admin):S.users.filter(u=>u.id===S.user.id);
   // Keep the current assignee selectable so saving other fields never silently reassigns the task.
   const users=pool.some(u=>u.id===t.assignee)?pool:[...S.users.filter(u=>u.id===t.assignee),...pool];
   const minDate=p?.start||S.today,maxDate=p?.end? (p.end<DATE_HORIZON?p.end:DATE_HORIZON):DATE_HORIZON;
@@ -750,15 +761,17 @@ function editTaskRequest(id,direct=false){
     +`<button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmTaskEdit">`
     +`${direct?'保存调整':'提交修改申请'}</button></div>`);
   if(direct)$('#editTaskReason')?.closest('label')?.remove();
+  draftForm(`task.edit:${id}${direct?':direct':''}`,{title:direct?'直接调整任务':'申请修改任务',label:t.name,
+    reopen:['editTaskRequest',id,direct],submit:['task.update','task.edit_request']});
   $('#cancelAction').onclick=closeModal;
   $('#confirmTaskEdit').onclick=async()=>{const reason=$('#editTaskReason')?.value.trim()||'',name=$('#editTaskName').value.trim(),date=$('#editTaskDate').value,deadline=$('#editTaskDeadline').value;if(!name){toast('请填写任务名称');return}if(!direct&&!reason){toast('请填写修改理由');return}if(deadline&&date&&deadline<date){toast('截止时间不能早于安排日期');return}const changes={name,desc:$('#editTaskDesc').value,date,deadline,duration:Number($('#editTaskDuration').value),priority:$('#editTaskPriority').value,assignee:$('#editTaskAssignee').value};try{if(direct){await act('task.update',{id,...changes});closeModal();closeDrawer();toast('任务已直接调整')}else{await act('task.edit_request',{id,changes,reason});closeModal();closeDrawer();toast('修改申请已发送，等待审批')}}catch(e){}};
 }
 function reviewTaskEdit(id,accept,notificationId){
   const r=(S.editRequests||[]).find(x=>x.id===id)||S.editRequests?.find(x=>x.taskId===id&&x.status==='pending'),t=S.tasks.find(x=>x.id===r?.taskId);if(!t||!r)return;
   if(accept){(async()=>{try{await act('task.edit_review',{id:r.id,accept:true});if(notificationId)await act('inbox.read',{id:notificationId});closeModal();closeDrawer();toast('任务修改已批准')}catch(e){}})();return}
-  openModal(`<div class="eyebrow">任务修改审批 · 驳回</div><h2>驳回修改申请</h2><p>申请理由：${escapeHTML(r.reason||'未填写')}</p><label class="form-field">驳回建议<textarea id="editRejectReason" placeholder="请说明需要如何调整"></textarea></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmEditReject">驳回并通知</button></div>`);$('#cancelAction').onclick=closeModal;$('#confirmEditReject').onclick=async()=>{const reason=$('#editRejectReason').value.trim();if(!reason){toast('请填写驳回建议');return}try{await act('task.edit_review',{id:r.id,accept:false,reason});if(notificationId)await act('inbox.read',{id:notificationId});closeModal();closeDrawer()}catch(e){}};
+  openModal(`<div class="eyebrow">任务修改审批 · 驳回</div><h2>驳回修改申请</h2><p>申请理由：${escapeHTML(r.reason||'未填写')}</p><label class="form-field">驳回建议<textarea id="editRejectReason" placeholder="请说明需要如何调整"></textarea></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmEditReject">驳回并通知</button></div>`);draftForm(`editreq.reject:${r.id}`,{title:'驳回修改申请',label:t.name,reopen:['reviewTaskEdit',r.id,notificationId],submit:['task.edit_review']});$('#cancelAction').onclick=closeModal;$('#confirmEditReject').onclick=async()=>{const reason=$('#editRejectReason').value.trim();if(!reason){toast('请填写驳回建议');return}try{await act('task.edit_review',{id:r.id,accept:false,reason});if(notificationId)await act('inbox.read',{id:notificationId});closeModal();closeDrawer()}catch(e){}};
 }
-function defer(t){openModal(`<div class="eyebrow">未完成 · 递延预览</div><h2>先说说卡在哪里</h2><label class="form-field">原因<select id="deferReason"><option>时间不足</option><option>等待他人</option><option>需求变化</option><option>遇到阻塞</option><option>其他</option></select></label><label class="form-field">剩余工作<textarea id="remainText"></textarea></label><label class="form-field">递延到<input id="deferDate" type="date" max="${DATE_HORIZON}" value="${add(t.date,1)}"></label><label class="form-field">剩余时长<input id="remainMins" type="number" value="${Math.max(15,Math.round(t.duration/2))}"></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">返回修改</button><button class="primary-btn" id="confirmDefer">确认递延</button></div>`);$('#cancelAction').onclick=closeModal;$('#confirmDefer').onclick=async()=>{try{await api('/api/action',{action:'task.defer',data:{id:t.id,...(t.stackCount>1?{stackPeriods:t.stackPeriods}:{}),reason:$('#deferReason').value,remaining:$('#remainText').value||'继续完成原任务',date:$('#deferDate').value,duration:Number($('#remainMins').value)}});closeModal();closeDrawer();await refresh();toast('任务已递延')}catch(e){toast(e.message)}}}
+function defer(t){openModal(`<div class="eyebrow">未完成 · 递延预览</div><h2>先说说卡在哪里</h2><label class="form-field">原因<select id="deferReason"><option>时间不足</option><option>等待他人</option><option>需求变化</option><option>遇到阻塞</option><option>其他</option></select></label><label class="form-field">剩余工作<textarea id="remainText"></textarea></label><label class="form-field">递延到<input id="deferDate" type="date" max="${DATE_HORIZON}" value="${add(t.date,1)}"></label><label class="form-field">剩余时长<input id="remainMins" type="number" value="${Math.max(15,Math.round(t.duration/2))}"></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">返回修改</button><button class="primary-btn" id="confirmDefer">确认递延</button></div>`);draftForm(`task.defer:${t.id}`,{title:'递延任务',label:t.name,reopen:['defer',t.id],submit:['task.defer']});$('#cancelAction').onclick=closeModal;$('#confirmDefer').onclick=async()=>{try{await api('/api/action',{action:'task.defer',data:{id:t.id,...(t.stackCount>1?{stackPeriods:t.stackPeriods}:{}),reason:$('#deferReason').value,remaining:$('#remainText').value||'继续完成原任务',date:$('#deferDate').value,duration:Number($('#remainMins').value)}});closeModal();closeDrawer();await refresh();toast('任务已递延')}catch(e){toast(e.message)}}}
 function diaryReport(author,day){
   return (S.diaries||[]).find(r=>r.author===author&&r.date===day)||(S.reports||[]).filter(r=>r.author===author&&r.date===day&&r.kind!=='brief').sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')))[0];
 }
@@ -798,7 +811,10 @@ function manageableProjects(){return S.projects.filter(p=>p.status==='active'&&c
    'approval' or 'none'. Admins, and an Owner inside their own project, always
    act directly. */
 const RULE_LABELS={direct:'直接创建',approval:'需要审批',none:'不允许'};
-const creationRules=()=>S.creationRules||(S.user?.admin?{project:'direct',tempTask:'direct',projectTask:'direct',agent:'operate'}:{project:'approval',tempTask:'direct',projectTask:'none',agent:'read'});
+const creationRules=()=>S.creationRules||(S.user?.admin?{project:'direct',tempTask:'direct',projectTask:'direct',agent:'operate',tempAssign:'anyone'}
+  :{project:'approval',tempTask:'direct',projectTask:'none',agent:'read',tempAssign:'anyone'});
+/* A rule group may keep its members' 临时任务 to themselves; then there is no one to pick. */
+const tempSelfOnly=()=>!S.user?.admin&&creationRules().tempAssign==='self';
 const projectMode=()=>S.user?.admin?'direct':creationRules().project;
 const tempTaskMode=()=>S.user?.admin?'direct':creationRules().tempTask;
 function taskProjects(){return S.projects.filter(p=>p.status==='active'&&!isProjectHidden(p)).map(p=>({p,mode:canManageProject(p)?'direct':p.members?.[S.user?.id]==='accepted'?creationRules().projectTask:'none'})).filter(x=>x.mode!=='none')}
@@ -822,6 +838,8 @@ function requestProjectCompletion(id){
     +`${admin?'（可留空）':''}<textarea id="projectCompletionReport" maxlength="10000"></textarea></label>`
     +`<div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button>`
     +`<button class="primary-btn" id="confirmProjectCompletion">${admin?'完成项目':'提交结项审批'}</button></div>`);
+  draftForm(`project.completion:${p.id}`,{title:early?'提前完成项目':'完成项目',label:p.name,reopen:['requestProjectCompletion',p.id],
+    submit:['project.complete','project.complete_request']});
   $('#cancelAction').onclick=closeModal;
   $('#confirmProjectCompletion').onclick=async()=>{
     const report=$('#projectCompletionReport').value.trim();
@@ -2060,6 +2078,7 @@ function projectSettings(projectId){
   $('#cancelAction').onclick=closeModal;
   $('#settingsStart').onchange=()=>$('#settingsEnd').min=$('#settingsStart').value;
   $('#settingsMembers').onclick=()=>inviteCollaborators(p.id);
+  draftForm(`project.settings:${p.id}`,{title:'项目设置',label:p.name,reopen:['projectSettings',p.id],submit:['project.update']});
   $('#confirmSettings').onclick=async()=>{
     const name=$('#settingsName').value.trim(),start=$('#settingsStart').value,end=$('#settingsEnd').value;
     if(!name||!start){toast('请填写项目名称和开始日期');return}
@@ -2208,6 +2227,7 @@ function openTaskRequest(id){
 async function reviewTaskRequest(id,accept){
   if(accept){try{closeModal();await act('task.request_review',{id,accept:true})}catch(e){}return}
   openModal(`<div class="eyebrow">任务申请</div><h2>驳回任务申请</h2><label class="form-field">驳回原因<textarea id="taskRequestReason"></textarea></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmTaskRequestReject">确认驳回</button></div>`);
+  draftForm(`taskreq.reject:${id}`,{title:'驳回任务申请',reopen:['reviewTaskRequest',id],submit:['task.request_review']});
   $('#cancelAction').onclick=closeModal;
   $('#confirmTaskRequestReject').onclick=async()=>{const reason=$('#taskRequestReason').value.trim();if(!reason){toast('请填写驳回原因');return}try{await act('task.request_review',{id,accept:false,reason});closeModal()}catch(e){}};
 }
@@ -2227,10 +2247,10 @@ function openNotification(id){
   $('#detailRejectEdit')?.addEventListener('click',()=>reviewTaskEdit(editReq.id,false,n.id));
   if(!n.read)api('/api/action',{action:'inbox.read',data:{id}}).then(refresh).catch(()=>{});
 }
-async function reviewProjectCompletion(id,accept,notificationId){if(accept){try{closeModal();await act('project.complete_review',{id,accept:true});if(notificationId)await act('inbox.read',{id:notificationId})}catch(e){}}else{openModal(`<div class="eyebrow">项目完成审批</div><h2>驳回项目完成申请</h2><label class="form-field">驳回原因<textarea id="projectCompletionRejectReason" ></textarea></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmProjectCompletionReject">确认驳回</button></div>`);$('#cancelAction').onclick=closeModal;$('#confirmProjectCompletionReject').onclick=async()=>{const reason=$('#projectCompletionRejectReason').value.trim();if(!reason){toast('请填写驳回原因');return}try{await act('project.complete_review',{id,accept:false,reason});if(notificationId)await act('inbox.read',{id:notificationId});closeModal()}catch(e){}}}}
+async function reviewProjectCompletion(id,accept,notificationId){if(accept){try{closeModal();await act('project.complete_review',{id,accept:true});if(notificationId)await act('inbox.read',{id:notificationId})}catch(e){}}else{openModal(`<div class="eyebrow">项目完成审批</div><h2>驳回项目完成申请</h2><label class="form-field">驳回原因<textarea id="projectCompletionRejectReason" ></textarea></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmProjectCompletionReject">确认驳回</button></div>`);draftForm(`project.completion.reject:${id}`,{title:'驳回项目完成申请',label:S.projects.find(x=>x.id===id)?.name||'',reopen:['reviewProjectCompletion',id,notificationId],submit:['project.complete_review']});$('#cancelAction').onclick=closeModal;$('#confirmProjectCompletionReject').onclick=async()=>{const reason=$('#projectCompletionRejectReason').value.trim();if(!reason){toast('请填写驳回原因');return}try{await act('project.complete_review',{id,accept:false,reason});if(notificationId)await act('inbox.read',{id:notificationId});closeModal()}catch(e){}}}}
 async function reviewProject(id,accept,notificationId){
   if(accept){try{closeModal();await act('project.review',{id,accept:true});if(notificationId)await act('inbox.read',{id:notificationId})}catch(e){}}
-  else{openModal(`<div class="eyebrow">项目审批</div><h2>驳回项目申请</h2><label class="form-field">驳回原因<textarea id="projectRejectReason" ></textarea></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmReject">确认驳回</button></div>`);$('#cancelAction').onclick=closeModal;$('#confirmReject').onclick=async()=>{try{await act('project.review',{id,accept:false,reason:$('#projectRejectReason').value||'申请信息需要补充'});if(notificationId)await act('inbox.read',{id:notificationId});closeModal()}catch(e){}}}
+  else{openModal(`<div class="eyebrow">项目审批</div><h2>驳回项目申请</h2><label class="form-field">驳回原因<textarea id="projectRejectReason" ></textarea></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmReject">确认驳回</button></div>`);draftForm(`project.reject:${id}`,{title:'驳回项目申请',label:S.projects.find(x=>x.id===id)?.name||'',reopen:['reviewProject',id,notificationId],submit:['project.review']});$('#cancelAction').onclick=closeModal;$('#confirmReject').onclick=async()=>{try{await act('project.review',{id,accept:false,reason:$('#projectRejectReason').value||'申请信息需要补充'});if(notificationId)await act('inbox.read',{id:notificationId});closeModal()}catch(e){}}}
 }
 const REPEAT_DAY_NAMES=['周一','周二','周三','周四','周五','周六','周日'];
 function repeatPattern(r){
@@ -2389,6 +2409,7 @@ function editProfile(id,initialMode){
    in 系统设置. */
 const CREATION_KINDS=['project','tempTask','projectTask'],KIND_LABELS={project:'新项目',tempTask:'临时任务',projectTask:'项目任务'};
 const AGENT_ACCESS_LABELS={off:'关闭',read:'查询与规划',operate:'可代为操作'};
+const TEMP_ASSIGN_LABELS={anyone:'可派给他人',self:'只给自己'};
 function groupOf(x){const policy=S.creationPolicy,gid=policy?.assign?.[x.id];return policy?.groups?.some(g=>g.id===gid)?gid:'default'}
 async function saveCreationPolicy(patch={}){const p=S.creationPolicy;await api('/api/action',{action:'creation.update',data:{groups:patch.groups||p.groups,assign:patch.assign||p.assign}});await refresh()}
 /* 系统设置 holds what used to sit under 账户管理: the rule groups (superadmin)
@@ -2829,7 +2850,8 @@ function renderCreationPolicy(){
   box.classList.toggle('hidden',!show);if(!show)return;
   const inGroup=gid=>S.users.filter(u=>roleOf(u)==='member'&&groupOf(u)===gid);
   const tag=(label,value,labels)=>`<span class="rule-tag is-${escapeHTML(value)}"><small>${label}</small>${labels[value]||''}</span>`;
-  const row=g=>{const list=inGroup(g.id);return `<div class="rule-row" data-group="${escapeHTML(g.id)}" role="button" tabindex="0" aria-label="编辑「${escapeHTML(g.name)}」"><div class="rule-row-name"><strong>${escapeHTML(g.name)}</strong></div><div class="rule-row-tags">${CREATION_KINDS.map(k=>tag(KIND_LABELS[k],g[k],RULE_LABELS)).join('')}${tag('AI 助手',g.agent||'read',AGENT_ACCESS_LABELS)}</div><div class="rule-row-people" title="${escapeHTML(list.map(u=>nameOf(u.id)).join('、'))}">${list.slice(0,4).map(u=>avatarHTML(u.id)).join('')}<span>${list.length} 人</span></div><span class="task-arrow">${icon('chevron-right')}</span></div>`};
+  const row=g=>{const list=inGroup(g.id);return `<div class="rule-row" data-group="${escapeHTML(g.id)}" role="button" tabindex="0" aria-label="编辑「${escapeHTML(g.name)}」"><div class="rule-row-name"><strong>${escapeHTML(g.name)}</strong></div><div class="rule-row-tags">${CREATION_KINDS.map(k=>tag(KIND_LABELS[k],g[k],RULE_LABELS)).join('')}`
+    +`${g.tempTask!=='none'?tag('临时任务指派',g.tempAssign||'anyone',TEMP_ASSIGN_LABELS):''}${tag('AI 助手',g.agent||'read',AGENT_ACCESS_LABELS)}</div><div class="rule-row-people" title="${escapeHTML(list.map(u=>nameOf(u.id)).join('、'))}">${list.slice(0,4).map(u=>avatarHTML(u.id)).join('')}<span>${list.length} 人</span></div><span class="task-arrow">${icon('chevron-right')}</span></div>`};
   box.innerHTML=`<div class="rule-list">${policy.groups.map(row).join('')}</div><button type="button" class="text-btn is-add rule-add" id="addCreationGroup">${icon('plus')}新建规则组</button>`;
   $$('#creationPolicy .rule-row').forEach(r=>{r.onclick=()=>editRuleGroup(r.dataset.group);r.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();editRuleGroup(r.dataset.group)}}});
   $('#addCreationGroup').onclick=()=>editRuleGroup(null);
@@ -2843,7 +2865,8 @@ function editRuleGroup(gid){
   const isNew=!gid,current=policy.groups.find(g=>g.id===gid),fallback=policy.groups.find(g=>g.id==='default')?.name||'默认规则';
   if(!isNew&&!current)return;
   const names=new Set(policy.groups.map(g=>g.name));let n=1,name='新规则组';while(names.has(name))name=`新规则组 ${++n}`;
-  const draft=isNew?{id:'g-'+Math.random().toString(36).slice(2,8),name,project:'approval',tempTask:'direct',projectTask:'none',agent:'read'}:{agent:'read',...current};
+  const draft=isNew?{id:'g-'+Math.random().toString(36).slice(2,8),name,project:'approval',tempTask:'direct',projectTask:'none',agent:'read',tempAssign:'anyone'}
+    :{agent:'read',tempAssign:'anyone',...current};
   const isDefault=draft.id==='default',members=S.users.filter(u=>roleOf(u)==='member');
   const picked=new Set(isNew?[]:members.filter(u=>groupOf(u)===draft.id).map(u=>u.id));
   const groupName=id=>policy.groups.find(x=>x.id===id)?.name||fallback;
@@ -2851,7 +2874,8 @@ function editRuleGroup(gid){
   const person=u=>{const cur=groupOf(u),from=!picked.has(u.id)&&cur!=='default'?`<small>${escapeHTML(groupName(cur))}</small>`:'';return `<button type="button" class="rule-person${picked.has(u.id)?' is-on':''}" data-user="${escapeHTML(u.id)}" aria-pressed="${picked.has(u.id)}"${isDefault?' disabled':''}>${avatarHTML(u.id)}<span>${escapeHTML(nameOf(u.id))}${from}</span></button>`};
   const tools=isDefault?''
     :'<span><button type="button" class="ghost-btn" id="rulePickAll">全选</button> <button type="button" class="ghost-btn" id="rulePickNone">全不选</button></span>';
-  openModal(`<div class="rule-card is-editing"><header class="rule-card-head"><label class="rule-name-wrap" title="点击修改名称"><input class="rule-name" id="ruleGroupName" value="${escapeHTML(draft.name)}" maxlength="20" aria-label="规则组名称">${icon('edit','rule-name-icon')}</label></header><div class="rule-lines">${CREATION_KINDS.map(k=>seg(k,RULE_LABELS,KIND_LABELS[k])).join('')}${seg('agent',AGENT_ACCESS_LABELS,'AI 助手')}</div><div class="rule-members"><div class="rule-members-head"><span>成员</span>${tools}</div><div class="rule-people">${members.map(person).join('')||'<span class="muted">还没有普通用户。</span>'}</div></div></div><div class="modal-footer">${isNew||isDefault?'':'<button class="ghost-btn rule-delete" id="deleteRuleGroup">删除</button>'}<button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="saveRuleGroup">${isNew?'创建':'保存'}</button></div>`);
+  openModal(`<div class="rule-card is-editing"><header class="rule-card-head"><label class="rule-name-wrap" title="点击修改名称"><input class="rule-name" id="ruleGroupName" value="${escapeHTML(draft.name)}" maxlength="20" aria-label="规则组名称">${icon('edit','rule-name-icon')}</label></header><div class="rule-lines">${CREATION_KINDS.map(k=>seg(k,RULE_LABELS,KIND_LABELS[k])).join('')}`
+    +`${seg('tempAssign',TEMP_ASSIGN_LABELS,'临时任务指派')}${seg('agent',AGENT_ACCESS_LABELS,'AI 助手')}</div><div class="rule-members"><div class="rule-members-head"><span>成员</span>${tools}</div><div class="rule-people">${members.map(person).join('')||'<span class="muted">还没有普通用户。</span>'}</div></div></div><div class="modal-footer">${isNew||isDefault?'':'<button class="ghost-btn rule-delete" id="deleteRuleGroup">删除</button>'}<button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="saveRuleGroup">${isNew?'创建':'保存'}</button></div>`);
   const sync=()=>$$('#modalContent .rule-person').forEach(b=>{const on=picked.has(b.dataset.user);b.classList.toggle('is-on',on);b.setAttribute('aria-pressed',String(on))});
   $$('#modalContent .rule-opt').forEach(b=>b.onclick=()=>{draft[b.dataset.key]=b.dataset.value;b.parentElement.querySelectorAll('.rule-opt').forEach(x=>{x.classList.toggle('is-on',x===b);x.setAttribute('aria-checked',String(x===b))})});
   if(!isDefault){
@@ -3038,6 +3062,11 @@ async function signOutTo(userId){
   if(typeof agentResetUser==='function')agentResetUser();
   await meetingStopLive();
   toggleAccountMenu(false);
+  if(UI.formDraft){
+    const saving=flushFormDraft();
+    $('#modalBackdrop').classList.add('hidden');
+    await saving;
+  }
   try{await api('/api/logout',{})}catch(_){}
   showAuth();
   $('#loginUser').value=userId||'';
@@ -3074,9 +3103,210 @@ async function act(action,data,{quiet=false}={}){try{await api('/api/action',{ac
 function restorePanelFocus(target){
   if(target?.isConnected&&!target.closest('.hidden'))target.focus?.({preventScroll:true});
 }
-function openModal(html){cancelMeetingOpen();meetingStopLive().catch(e=>toast(e.message));if($('#modalBackdrop').classList.contains('hidden'))UI.modalReturnFocus=document.activeElement;UI.docDirty=false;if(UI.briefSource){UI.briefSource.closest('.archive-file')?.classList.remove('is-out');UI.briefSource=null}UI.briefTyping?.finish();UI.briefTyping=null;document.querySelectorAll('.brief-folder').forEach(x=>x.remove());['#modalBackdrop','#modalBackdrop .modal','#modalContent'].forEach(s=>$(s)?.getAnimations?.().forEach(a=>a.cancel()));$('#modalContent').innerHTML=html;if($('#modalContent').dataset)delete $('#modalContent').dataset.meetingId;$('#modalBackdrop .modal')?.classList?.remove('is-wide','is-flown');$('#modalBackdrop').classList.remove('hidden')};function closeModal(){if(UI.docDirty&&!confirm('修改还没保存，确定关闭？'))return;cancelMeetingOpen();meetingStopLive().catch(e=>toast(e.message));UI.docDirty=false;if(typeof foldBrief==='function'&&foldBrief())return;$('#modalBackdrop').classList.add('hidden');restorePanelFocus(UI.modalReturnFocus)};function closeDrawer(){$('#taskDrawer').classList.add('hidden');restorePanelFocus(UI.drawerReturnFocus)}
+function openModal(html){flushFormDraft();cancelMeetingOpen();meetingStopLive().catch(e=>toast(e.message));if($('#modalBackdrop').classList.contains('hidden'))UI.modalReturnFocus=document.activeElement;UI.docDirty=false;if(UI.briefSource){UI.briefSource.closest('.archive-file')?.classList.remove('is-out');UI.briefSource=null}UI.briefTyping?.finish();UI.briefTyping=null;document.querySelectorAll('.brief-folder').forEach(x=>x.remove());['#modalBackdrop','#modalBackdrop .modal','#modalContent'].forEach(s=>$(s)?.getAnimations?.().forEach(a=>a.cancel()));$('#modalContent').innerHTML=html;if($('#modalContent').dataset)delete $('#modalContent').dataset.meetingId;$('#modalBackdrop .modal')?.classList?.remove('is-wide','is-flown');$('#modalBackdrop').classList.remove('hidden')};function closeModal(){if(UI.docDirty&&!confirm('修改还没保存，确定关闭？'))return;flushFormDraft(true);cancelMeetingOpen();meetingStopLive().catch(e=>toast(e.message));UI.docDirty=false;if(typeof foldBrief==='function'&&foldBrief())return;$('#modalBackdrop').classList.add('hidden');restorePanelFocus(UI.modalReturnFocus)};function closeDrawer(){$('#taskDrawer').classList.add('hidden');restorePanelFocus(UI.drawerReturnFocus)}
+/* Form text boxes grow with what is typed, and 展开 opens one up to most of
+   the screen for reading a long description through. */
+const FIELD_MAX_HEIGHT=320;
+function fitTextarea(el){
+  if(!el||el.closest?.('.voice-field')?.classList.contains('is-expanded'))return;
+  if(el.scrollHeight>el.clientHeight)el.style.height=`${Math.min(FIELD_MAX_HEIGHT,el.scrollHeight+2)}px`;
+}
+/* 草稿箱: what is typed into a form is kept on the server as it is typed, so
+   closing the form by accident (a click outside, Esc, 取消) loses nothing. The
+   same form opens with its draft filled back in, and 草稿箱 lists every one.
+   A form registers here with the actions that submit it; once one of them goes
+   through, its draft is gone. */
+const DRAFT_FIELDS='textarea[id]:not([readonly]):not([disabled]), select[id]:not([disabled]), input[id]:not([disabled]):not([readonly]):is(:not([type]),[type="text"],[type="date"],[type="time"],[type="number"])';
+const DRAFT_DELAY=700;
+const DRAFT_OPENERS={
+  newTask:(projectId,initialDate)=>newTask(projectId||undefined,initialDate||undefined),
+  newProject:()=>newProject(),
+  editTaskRequest:(id,direct)=>editTaskRequest(id,Boolean(direct)),
+  projectSettings:id=>projectSettings(id),
+  complete:id=>{const t=S.tasks.find(x=>x.id===id);if(t)complete(t)},
+  editCompletion:id=>{const t=S.tasks.find(x=>x.id===id);if(t)editCompletion(t)},
+  defer:id=>{const t=S.tasks.find(x=>x.id===id);if(t)defer(t)},
+  reopenTask:id=>{const t=S.tasks.find(x=>x.id===id);if(t)reopenTask(t)},
+  requestProjectCompletion:id=>requestProjectCompletion(id),
+  fixedTask:()=>fixedTask(),
+  reviewTaskEdit:(id,notice)=>reviewTaskEdit(id,false,notice||undefined),
+  reviewTaskRequest:id=>reviewTaskRequest(id,false),
+  reviewProjectCompletion:(id,notice)=>reviewProjectCompletion(id,false,notice||undefined),
+  reviewProject:(id,notice)=>reviewProject(id,false,notice||undefined),
+};
+// Keep failed or in-flight writes by account so a state refresh cannot erase
+// a draft that the server has not acknowledged yet.
+const pendingFormDrafts=new Map();
+const formDraftSlot=(owner,key)=>JSON.stringify([owner,key]);
+function restorePendingFormDrafts(){
+  for(const write of pendingFormDrafts.values()){
+    if(write.owner!==S.user?.id)continue;
+    if(write.row)keepFormDraftLocally(write.row);else dropFormDraftLocally(write.key);
+  }
+}
+function resetFormDraft(){
+  if(!UI.formDraft)return;
+  clearTimeout(UI.formDraft.timer);
+  UI.formDraft=null;
+  $('#modalBackdrop')?.classList.add('hidden');
+}
+const formDraftOf=key=>(S.formDrafts||[]).find(d=>d.key===key);
+function updateDraftList(){
+  renderDraftCount();
+  if(UI.view==='drafts')renderDrafts();
+}
+function keepFormDraftLocally(row){S.formDrafts=[row,...(S.formDrafts||[]).filter(d=>d.key!==row.key)];updateDraftList()}
+function dropFormDraftLocally(key){S.formDrafts=(S.formDrafts||[]).filter(d=>d.key!==key);updateDraftList()}
+/* A form can capture and restore choices outside its input fields. */
+function draftForm(key,{title,label='',reopen,submit,extra=null,restore=null}){
+  const root=$('#modalContent');if(!root?.querySelectorAll)return;
+  const fields=[...root.querySelectorAll(DRAFT_FIELDS)];if(!fields.length)return;
+  const initial=Object.fromEntries(fields.map(el=>[el.id,el.value]));
+  const [fn,...args]=reopen;
+  UI.formDraft={owner:S.user?.id,key,title,label,reopen:{fn,args:args.map(a=>a??null)},submit,fields,initial,extra,initialExtra:extra?.(),timer:null,saved:false};
+  if(!UI.formDraftBound){
+    UI.formDraftBound=true;
+    const schedule=e=>{
+      const f=UI.formDraft;
+      if(!f||!f.fields.includes(e.target))return;
+      clearTimeout(f.timer);
+      f.timer=setTimeout(saveFormDraft,DRAFT_DELAY);
+    };
+    root.addEventListener('input',schedule);
+    root.addEventListener('change',schedule);
+    root.addEventListener('click',e=>{if(e.target.closest('.task-kind-btn'))schedule({target:UI.formDraft?.fields[0]})});
+    if(typeof window!=='undefined')window.addEventListener('pagehide',()=>{if(UI.formDraft?.timer)saveFormDraft({keepalive:true})});
+  }
+  const old=formDraftOf(key);if(!old)return;
+  const values=old.fields||{};
+  restore?.(values);
+  fields.forEach(el=>{
+    const value=values[el.id];
+    if(typeof value!=='string'||value===el.value)return;
+    if(el.options&&![...el.options].some(o=>o.value===value))return;
+    el.value=value;
+    if(el.tagName==='TEXTAREA')fitTextarea(el);
+  });
+  UI.formDraft.saved=true;
+  root.insertAdjacentHTML('afterbegin',`<div class="draft-restored" id="draftRestored">${icon('file-pen')}<span>已恢复草稿 · `
+    +`${escapeHTML(relTime(old.updatedAt))}</span><button type="button" class="text-btn" id="discardDraft">丢弃</button></div>`);
+  const discard=$('#discardDraft');if(discard)discard.onclick=()=>{const f=UI.formDraft;if(!f)return;f.fields.forEach(el=>{el.value=f.initial[el.id]});
+    restore?.(f.initialExtra||{});
+    $('#draftRestored')?.remove();
+    discardFormDraft(f).catch(e=>toast(e.message));
+  };
+}
+function writeFormDraft(owner,key,row,options={}){
+  const slot=formDraftSlot(owner,key);
+  const previous=pendingFormDrafts.get(slot);
+  const write={owner,key,row};
+  pendingFormDrafts.set(slot,write);
+  const send=async()=>{
+    if(S.user?.id!==owner)throw new Error('账户已切换，草稿尚未同步');
+    const action=row?'formdraft.save':'formdraft.delete';
+    const data={...(row||{key}),owner};
+    const saved=await api('/api/action',{action,data},options);
+    if(pendingFormDrafts.get(slot)!==write)return;
+    pendingFormDrafts.delete(slot);
+    if(row&&S.user?.id===owner&&saved.key===key)keepFormDraftLocally(saved);
+  };
+  write.promise=previous?previous.promise.catch(()=>{}).then(send):send();
+  return write.promise;
+}
+function discardFormDraft(f){
+  clearTimeout(f.timer);
+  f.timer=null;
+  f.saved=false;
+  if(S.user?.id===f.owner)dropFormDraftLocally(f.key);
+  return writeFormDraft(f.owner,f.key,null);
+}
+function saveFormDraft(options={}){
+  const f=UI.formDraft;
+  if(!f||f.owner!==S.user?.id)return null;
+  clearTimeout(f.timer);
+  f.timer=null;
+  const typed=Object.fromEntries(f.fields.map(el=>[el.id,el.value]));
+  const extra=f.extra?.()||{};
+  const changed=Object.keys(typed).some(k=>typed[k]!==f.initial[k])
+    ||Object.keys(extra).some(k=>extra[k]!==f.initialExtra?.[k]);
+  if(!changed){
+    if(f.saved||formDraftOf(f.key))discardFormDraft(f).catch(e=>toast(e.message));
+    return null;
+  }
+  const row={key:f.key,title:f.title,label:f.label,fields:{...typed,...extra},reopen:f.reopen,updatedAt:new Date().toISOString()};
+  keepFormDraftLocally(row);
+  f.saved=true;
+  const saved=writeFormDraft(f.owner,f.key,row,options);
+  saved.catch(()=>{if(UI.formDraft===f)toast('草稿未同步，请检查网络后重试')});
+  return saved;
+}
+async function flushFormDraft(closing=false){
+  const f=UI.formDraft;
+  if(!f)return;
+  const saved=saveFormDraft();
+  UI.formDraft=null;
+  if(!saved)return;
+  try{
+    await saved;
+    if(closing&&S.user?.id===f.owner)toast('已存为草稿，可在草稿箱继续');
+  }catch(_){
+    if(S.user?.id===f.owner)toast('草稿未同步，可在本页草稿箱继续编辑');
+  }
+}
+async function draftSubmitted(path,body,f){
+  if(!f||UI.formDraft!==f||f.owner!==S.user?.id||path!=='/api/action'||!f.submit.includes(body?.action))return;
+  const target=f.reopen.fn==='newTask'?null:f.reopen.args[0];
+  if(target&&body.data?.id!==target)return;
+  if(f.key.includes('.reject:')&&body.data?.accept!==false)return;
+  UI.formDraft=null;
+  clearTimeout(f.timer);
+  if(f.saved||formDraftOf(f.key)){
+    try{await discardFormDraft(f)}catch(_){toast('提交成功，草稿删除未同步')}
+  }
+}
+function renderDraftCount(){
+  const n=(S.formDrafts||[]).length,badge=$('#draftCount');
+  if(badge){badge.textContent=n;badge.classList.toggle('hidden',!n)}
+}
+function openFormDraft(key){
+  const d=formDraftOf(key),open=DRAFT_OPENERS[d?.reopen?.fn];
+  if(!d||!open){toast('这份草稿打不开了');return}
+  open(...(d.reopen.args||[]));
+  if(UI.formDraft?.key!==key)toast('原来的任务或项目已不在，可以删除这份草稿');
+}
+function renderDrafts(){
+  const list=$('#draftList');if(!list)return;
+  const drafts=S.formDrafts||[];
+  $('#draftsView .eyebrow').textContent=`草稿箱 · ${drafts.length} 份`;
+  $('#draftEmpty')?.classList.toggle('hidden',drafts.length>0);
+  list.innerHTML=drafts.map(d=>{
+    const text=Object.entries(d.fields||{}).filter(([k])=>!k.startsWith('_')).map(([,v])=>v).find(v=>String(v).trim())||'';
+    return `<article class="draft-row" data-key="${escapeHTML(d.key)}"><div class="draft-main"><strong>${escapeHTML(d.title)}</strong>`
+      +`${d.label?`<small>${escapeHTML(d.label)}</small>`:''}<p>${escapeHTML(String(text).slice(0,160))}</p></div>`
+      +`<time title="${escapeHTML(d.updatedAt||'')}">${escapeHTML(relTime(d.updatedAt))}</time><div class="draft-actions">`
+      +`<button type="button" class="secondary-btn draft-open">继续编辑</button>`
+      +`<button type="button" class="ghost-btn draft-delete">删除</button></div></article>`;
+  }).join('');
+  list.querySelectorAll('.draft-row').forEach(row=>{
+    row.querySelector('.draft-open').onclick=()=>openFormDraft(row.dataset.key);
+    row.querySelector('.draft-delete').onclick=async()=>{
+      if(!confirm('删除这份草稿？'))return;
+      const owner=S.user?.id,key=row.dataset.key,button=row.querySelector('.draft-delete');
+      button.disabled=true;
+      try{
+        await writeFormDraft(owner,key,null);
+        if(S.user?.id===owner)dropFormDraftLocally(key);
+      }catch(e){
+        const slot=formDraftSlot(owner,key);
+        if(pendingFormDrafts.get(slot)?.row===null)pendingFormDrafts.delete(slot);
+        button.disabled=false;toast(e.message);
+      }
+    };
+  });
+}
 function newTask(projectId,initialDate){
   const admin=Boolean(S.user.admin),paths=taskProjects(),projects=paths.map(x=>x.p),temp=tempTaskMode(),locked=typeof projectId==='string';
+  if(locked&&!projects.some(p=>p.id===projectId)){toast('原项目已不可新建任务');return}
   if(!projects.length&&temp==='none'){toast('你所在的规则组不能新建任务');return}
   const initial=projects.find(p=>p.id===projectId)?.id||projects[0]?.id;
   /* 临时任务 belongs to no project. Like a small project, whoever writes it may
@@ -3085,10 +3315,11 @@ function newTask(projectId,initialDate){
      where it needs approval the dialog turns into a request. */
   let kind=projects.length?'project':'adhoc',serverMinutes=null,ask=0;
   const kinds=locked?'':`<div class="task-kind-switch">${projects.length?'<button type="button" class="task-kind-btn" data-kind="project">项目任务</button>':''}${temp!=='none'?'<button type="button" class="task-kind-btn" data-kind="adhoc">临时任务</button>':''}${admin?'<button type="button" class="task-kind-btn" id="kindFixedTask">固定任务</button>':''}</div>`;
-  openModal(`<h2 id="taskDialogTitle">新任务</h2>${kinds}<label class="form-field" id="taskProjectField">所属项目<select id="taskProject" ${locked?'disabled':''}>${projects.map(p=>`<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('')}</select></label><label class="form-field">任务名称<input id="taskName" maxlength="120"></label><label class="form-field">任务描述<textarea id="taskDesc"></textarea></label><label class="form-field">指派给<select id="taskAssignee"></select><div id="taskAssigneeLoad" class="assignee-load-hint"></div></label><div class="task-form-grid"><label class="form-field">安排日期<input id="taskDate" type="date" max="${DATE_HORIZON}" value="${initialDate||(UI.view==='dayDetail'?UI.detailDate:displayDay())}"></label><label class="form-field">结束日期<input id="taskDeadline" type="date" max="${DATE_HORIZON}"></label><label class="form-field">时间<input id="taskTime" type="time" value="09:00"></label><label class="form-field">预计时长<input id="taskDuration" type="number" min="1" max="1440" value="30"></label><label class="form-field">优先级<select id="taskPriority"><option>P0</option><option selected>P1</option><option>P2</option></select></label></div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmTask">创建任务</button></div>`);
+  openModal(`<h2 id="taskDialogTitle">新任务</h2>${kinds}<label class="form-field" id="taskProjectField">所属项目<select id="taskProject" ${locked?'disabled':''}>${projects.map(p=>`<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('')}</select></label><label class="form-field">任务名称<input id="taskName" maxlength="120"></label><label class="form-field">任务描述<textarea id="taskDesc"></textarea></label><label class="form-field" id="taskAssigneeField">指派给<select id="taskAssignee"></select><div id="taskAssigneeLoad" class="assignee-load-hint"></div></label><div class="task-form-grid"><label class="form-field">安排日期<input id="taskDate" type="date" max="${DATE_HORIZON}" value="${initialDate||(UI.view==='dayDetail'?UI.detailDate:displayDay())}"></label><label class="form-field">结束日期<input id="taskDeadline" type="date" max="${DATE_HORIZON}"></label><label class="form-field">时间<input id="taskTime" type="time" value="09:00"></label><label class="form-field">预计时长<input id="taskDuration" type="number" min="1" max="1440" value="30"></label><label class="form-field">优先级<select id="taskPriority"><option>P0</option><option selected>P1</option><option>P2</option></select></label></div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmTask">创建任务</button></div>`);
   const project=()=>kind==='project'?projects.find(p=>p.id===$('#taskProject').value):null;
   const mode=()=>kind==='project'?paths.find(x=>x.p.id===$('#taskProject').value)?.mode:temp;
-  const candidates=()=>kind==='adhoc'?S.users.filter(u=>u.active&&!u.admin).sort((a,
+  const candidates=()=>kind==='adhoc'&&tempSelfOnly()?S.users.filter(u=>u.id===S.user.id)
+    :kind==='adhoc'?S.users.filter(u=>u.active&&!u.admin).sort((a,
     b)=>(b.id===S.user.id)-(a.id===S.user.id)):projectAssignees(project());
   /* The load beside each name is what that person already has inside this
      task's own dates, across every project, not their whole backlog. */
@@ -3116,16 +3347,22 @@ function newTask(projectId,initialDate){
      the server; an admin already holds every task. */
   const recount=()=>{
     serverMinutes=null;render();const p=project();if(admin||!p||p.owner!==S.user.id)return;
-    const [start,end]=span(),mine=++ask;
-    api('/api/action',{action:'project.member_loads',data:{id:p.id,start,end}}).then(r=>{if(mine!==ask||$('#modalBackdrop').classList.contains('hidden'))return;serverMinutes=r.minutes||null;render()}).catch(()=>{});
+    const [start,end]=span(),mine=++ask,dialog=$('#taskDialogTitle');
+    api('/api/action',{action:'project.member_loads',data:{id:p.id,start,end}}).then(r=>{if(mine!==ask||dialog!==$('#taskDialogTitle')||$('#modalBackdrop').classList.contains('hidden'))return;serverMinutes=r.minutes||null;render()}).catch(()=>{});
   };
-  const setKind=k=>{kind=k;$$('.task-kind-btn[data-kind]').forEach(b=>b.classList.toggle('active',b.dataset.kind===k));$('#taskProjectField').classList.toggle('hidden',k!=='project');recount()};
+  const setKind=k=>{kind=k;$$('.task-kind-btn[data-kind]').forEach(b=>b.classList.toggle('active',b.dataset.kind===k));$('#taskProjectField').classList.toggle('hidden',k!=='project');
+    $('#taskAssigneeField').classList.toggle('hidden',k==='adhoc'&&tempSelfOnly());recount()};
   $$('.task-kind-btn[data-kind]').forEach(b=>b.onclick=()=>setKind(b.dataset.kind));
   $('#kindFixedTask')?.addEventListener('click',fixedTask);
   if(initial)$('#taskProject').value=initial;
   const _sd=$('#taskDate'),_dl=$('#taskDeadline');const _syncDl=()=>{_dl.min=_sd.value||S.today;if(_dl.value&&_dl.value<_dl.min)_dl.value=''};
   _sd.onchange=()=>{_syncDl();recount()};_dl.onchange=recount;$('#taskProject').onchange=recount;$('#taskAssignee').onchange=render;_syncDl();
   setKind(kind);$('#cancelAction').onclick=closeModal;
+  draftForm(`task.new${locked?':'+projectId:''}`,{title:'新任务',label:locked?projects.find(p=>p.id===projectId)?.name||'':'',
+    reopen:['newTask',locked?projectId:null,initialDate],submit:['task.create'],
+    extra:()=>({_kind:kind,_project:kind==='project'?$('#taskProject').value:''}),
+    restore:f=>{if(!locked&&projects.some(p=>p.id===f._project))$('#taskProject').value=f._project;
+      if(f._kind==='adhoc'&&temp!=='none'||f._kind==='project'&&projects.length)setKind(f._kind)}});
   $('#confirmTask').onclick=async()=>{if(!$('#taskName').value.trim()){toast('请填写任务名称');return}const _start=$('#taskDate').value,_end=$('#taskDeadline').value;if(_end&&_end<_start){toast('结束日期不能早于安排日期');return}const data={name:$('#taskName').value,desc:$('#taskDesc').value,projectId:kind==='project'?$('#taskProject').value:null,assignee:$('#taskAssignee').value,date:$('#taskDate').value,deadline:$('#taskDeadline').value||null,time:$('#taskTime').value,duration:Number($('#taskDuration').value),priority:$('#taskPriority').value};try{const r=await api('/api/action',{action:'task.create',data});await refresh();toast(r?.requested?'申请已提交，等待审批':'任务已创建');closeModal()}catch(e){toast(e.message)}};
 }
 function editTaskAssignment(id){
@@ -3146,6 +3383,7 @@ function newProject(){
     +`</legend>${pool.map(u=>`<label><input type="checkbox" name="projectMember" value="${escapeHTML(u.id)}"> <strong>`
     +`${escapeHTML(nameOf(u.id))}</strong></label>`).join('')}</fieldset>`:'';
   openModal(`<div class="eyebrow">项目空间 · ${admin?'superadmin 创建':asking?'成员申请':'成员创建'}</div><h2>${asking?'申请项目':'新项目'}</h2><label class="form-field">项目名称<input id="projectName" maxlength="120"></label><label class="form-field">项目描述<textarea id="projectDesc"></textarea></label>${owner}<div class="project-date-fields"><label class="form-field">开始日期<input id="projectStart" type="date" max="${DATE_HORIZON}" value="${S.today}"></label><label class="form-field">截止日期（可留空）<input id="projectEnd" type="date" min="${S.today}" max="${DATE_HORIZON}"></label></div>${collaborators}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmProject">${asking?'提交申请':'创建项目'}</button></div>`);
+  draftForm('project.new',{title:asking?'申请项目':'新项目',reopen:['newProject'],submit:['project.create']});
   $('#cancelAction').onclick=closeModal;$('#projectStart').onchange=()=>$('#projectEnd').min=$('#projectStart').value;
   /* The Owner is on the project by definition, so they are never offered as a collaborator. */
   const syncOwner=()=>{const owner=$('#projectOwner')?.value;$$('input[name="projectMember"]').forEach(x=>{const own=x.value===owner;if(own)x.checked=false;x.closest('label').classList.toggle('hidden',own)})};
@@ -3171,6 +3409,7 @@ function fixedTask(){
     <label class="form-field">每次时长<input id="repeatDuration" type="number" min="1" max="1440" value="30"></label>
     <label class="form-field">本次挖空日期（可留空）<input id="repeatSkipDates" placeholder="2026-10-01, 2026-10-02"></label>
     <div class="modal-footer"><button class="secondary-btn" id="cancelAction">取消</button><button class="primary-btn" id="confirmRepeat">保存固定任务</button></div>`);
+  draftForm('repeat.new',{title:'发布固定安排',reopen:['fixedTask'],submit:['repeat.create']});
   const sync=()=>{
     const freq=$('#repeatFreq').value;
     $('#repeatEveryField').classList.toggle('hidden',freq!=='weekly');
@@ -3905,7 +4144,7 @@ function renderAll(){
   $('#agentBtn')?.classList.toggle('hidden',agentOff);
   if(agentOff)$('#agentPanel')?.classList.add('hidden');
   $('.focus-card > span').textContent=S.user.admin?'成员今日安排':'今日安排';
-  renderStats();renderInbox();renderAccounts();renderSettings();switchView(UI.view);
+  renderStats();renderInbox();renderDraftCount();renderAccounts();renderSettings();switchView(UI.view);
   // Keep single periods too: their first merge from one to two is growth.
   rememberStackSizes();
 }
@@ -5329,7 +5568,8 @@ function agentSystemPrompt(context,planning){
   if(planning){
     const r=context.rules,labels={direct:'直接创建',approval:'需审批',none:'不允许'};
     const own=r?`当前账户 ${context.self} 的创建规则：新项目${labels[r.project]}，给自己的临时任务${labels[r.tempTask]}，在参与的项目里建任务`
-      +`${labels[r.projectTask]}（自己做 Owner 的项目总能直接建）；临时任务可以给自己，也可以指派给任何成员；新项目由当前账户做 Owner。规则为「不允许」的那类卡片不要起草。`:'';
+      +`${labels[r.projectTask]}（自己做 Owner 的项目总能直接建）；`
+      +`${r.tempAssign==='self'?'临时任务只能给自己，不要起草指派给别人的临时任务':'临时任务可以给自己，也可以指派给任何成员'}；新项目由当前账户做 Owner。规则为「不允许」的那类卡片不要起草。`:'';
     return `你是「哗啦待办」的安排助手。当前账户角色：${context.role}。${own}${AGENT_PLAN_RULE}`;
   }
   const rule=context.mode==='operator'
@@ -6813,12 +7053,22 @@ function scanVoiceFields(){
     input.before(wrapper);wrapper.append(input);
     const button=document.createElement('button');button.type='button';button.className='field-voice-btn';
     button.innerHTML=icon('mic');button.onclick=()=>toggleFieldVoice(input);wrapper.append(button);
+    if(input.closest('.form-field'))addFieldExpand(wrapper,input);
   });
   if(voice.target&&(voice.active||voice.starting||voice.transcribing))voiceInput();
   updateFieldVoiceButtons();
 }
+function addFieldExpand(wrapper,input){
+  const button=document.createElement('button');button.type='button';button.className='field-expand-btn';
+  const sync=()=>{const open=wrapper.classList.contains('is-expanded');button.innerHTML=icon(open?'minimize-2':'maximize-2');
+    button.setAttribute('aria-label',open?'收起':'展开');button.title=open?'收起':'展开';button.setAttribute('aria-pressed',String(open))};
+  button.onclick=()=>{wrapper.classList.toggle('is-expanded');sync();if(!wrapper.classList.contains('is-expanded'))fitTextarea(input);input.focus()};
+  sync();wrapper.append(button);
+  requestAnimationFrame(()=>fitTextarea(input));
+}
 function initSharedVoice(){
   scanVoiceFields();
+  document.addEventListener('input',event=>{if(event.target.matches?.('.form-field textarea'))fitTextarea(event.target)});
   document.addEventListener('input',event=>{if(event.target===voice.target)agentVoiceFollowEdit()});
   document.addEventListener('submit',event=>{if(voice.target&&event.target.contains(voice.target))agentCancelVoice()},true);
   // Forms and assistant proposal cards are mounted dynamically. Observe only
