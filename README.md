@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo/icon-bang.svg" alt="哗啦！标志：感叹号的点是一个打了勾的待办" width="96"></p>
+
 # Hola-Calendar
 
 **哗啦！（哗啦待办）**：自托管的团队任务与项目协作工作台。一个 Python 文件、一个 SQLite 数据库，零运行时依赖，数据只在你自己的机器上。
