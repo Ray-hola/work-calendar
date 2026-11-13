@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#F0EEE6" />
   <title>哗啦！ · 哗啦待办</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23D97757'/%3E%3Cpath d='M17 20h30v8H17zm0 14h21v8H17z' fill='%23FFFDF9'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="styles.css?v=20261113-drafts" />
+  <link rel="stylesheet" href="styles.css?v=20261113-project-shelf" />
 </head>
 <body>
   <div class="app-shell">
@@ -22,7 +22,6 @@
         <button class="nav-item" data-view="projects"><span class="icon-slot" data-icon="folder"></span><span class="nav-text">项目空间</span><i
           class="nav-new-dot hidden" id="projectsNewDot" aria-hidden="true"></i></button>
         <button class="nav-item" data-view="timeline"><span class="icon-slot" data-icon="gantt"></span><span class="nav-text">项目时间轴</span></button>
-        <button class="nav-item admin-only-nav hidden" data-view="achievements"><span class="icon-slot" data-icon="award"></span><span class="nav-text">成果库</span></button>
         <button class="nav-item" data-view="inbox"><span class="icon-slot" data-icon="inbox"></span><span class="nav-text">收件箱</span><b id="inboxCount">3</b></button>
         <button class="nav-item admin-only-nav hidden" data-view="accounts"><span class="icon-slot" data-icon="users"></span><span class="nav-text">账户管理</span></button>
         <button class="nav-item admin-only-nav hidden" data-view="settings"><span class="icon-slot" data-icon="settings"></span><span class="nav-text">系统设置</span></button><button class="nav-item" data-view="guide"><span class="icon-slot" data-icon="book-open"></span><span class="nav-text">使用教程</span></button>
@@ -44,7 +43,6 @@
         <div id="timelineEmpty" class="empty-state hidden"><div class="empty-icon"><span class="icon-slot" data-icon="folder"></span></div><h3>还没有项目</h3></div>
         
       </section>
-      <section id="achievementsView" class="view achievements-view admin-only-view"><div class="page-intro"><div><div class="eyebrow">SUPERADMIN · PROJECT ARCHIVE</div><h1>成果库</h1></div></div><div class="achievement-stats" id="achievementStats"></div><div id="achievementGrid" class="achievement-grid"></div><div id="achievementEmpty" class="empty-state hidden"><div class="empty-icon"><span class="icon-slot" data-icon="award"></span></div><h3>还没有已完成项目</h3></div></section>
       <section id="todayView" class="view">
         <div class="page-intro"><div class="day-tab" id="dayTab" aria-hidden="true"><span id="dayTabMonth">十月</span><strong id="dayTabDay">28</strong><small id="dayTabWeek">周三</small></div><div><div class="eyebrow" id="todayLabel">星期四 · 9月11日</div><h1>今天做什么？</h1></div><div class="date-chip"><button id="prevDay" aria-label="前一天"><span class="icon-slot" data-icon="chevron-left"></span></button><span id="dateChip">9月11日</span><button id="nextDay" aria-label="后一天"><span class="icon-slot" data-icon="chevron-right"></span></button></div></div>
         <div class="daily-progress"><div><span>今日进度</span><strong id="progressText">0 / 0 已完成</strong></div><div class="progress wide"><i id="dayProgress"></i></div><span class="progress-percent" id="progressPercent">0%</span></div>
@@ -53,7 +51,7 @@
         <div class="empty-state hidden" id="todayEmpty"><div class="empty-icon"><span class="icon-slot" data-icon="check"></span></div><h3 id="todayEmptyTitle">今天没有待处理任务</h3><p id="todayEmptyHint" hidden></p><button class="secondary-btn" id="emptyAddBtn">新建任务</button></div>
       </section>
       <section id="calendarView" class="view active-view"><div class="page-intro"><div><div class="eyebrow" id="weekRangeLabel">本周</div><h1>周视图</h1></div><div class="week-nav"><button class="secondary-btn" id="prevWeekBtn" aria-label="上一周"><span class="icon-slot" data-icon="chevron-left"></span></button><button class="secondary-btn" id="backTodayBtn">本周</button><button class="secondary-btn" id="nextWeekBtn" aria-label="下一周"><span class="icon-slot" data-icon="chevron-right"></span></button></div></div><div id="weekCarousel" class="week-board" aria-label="周日程"></div></section>
-      <section id="projectsView" class="view projects-view"><div class="project-nav-rail"><aside class="project-nav" id="projectNav" aria-label="项目目录"></aside></div><div class="projects-page"><div class="page-intro"><div><div class="eyebrow">项目空间 · 3 个进行中</div><h1>项目进度</h1></div><button class="primary-btn" id="addProjectBtn"><span class="icon-slot" data-icon="plus"></span>新建项目</button><div class="page-actions space-actions hidden" id="projectActions"></div></div><div class="project-space-main"><div id="projectSpace" class="project-space hidden"></div><div id="projectOverview"><div id="projectToolbar" class="project-toolbar"></div><div id="projectGrid" class="project-grid"></div><div class="repeat-admin-panel" id="repeatAdminPanel"><div class="panel-heading"><div><h2>固定任务规则</h2></div><button class="secondary-btn" id="createFixedBtn"><span class="icon-slot" data-icon="plus"></span>制定固定任务</button></div><div id="repeatList" class="repeat-list"></div></div></div></div></div></section>
+      <section id="projectsView" class="view projects-view"><div class="project-nav-rail"><aside class="project-nav" id="projectNav" aria-label="项目目录"></aside></div><div class="projects-page"><div class="page-intro"><div><div class="eyebrow">项目空间 · 3 个进行中</div><h1>项目进度</h1></div><button class="primary-btn" id="addProjectBtn"><span class="icon-slot" data-icon="plus"></span>新建项目</button><div class="page-actions space-actions hidden" id="projectActions"></div></div><div class="project-space-main"><div id="projectSpace" class="project-space hidden"></div><div id="projectOverview"><div id="projectToolbar" class="project-toolbar"></div><div id="projectGrid" class="project-grid"></div><div id="achievementShelf" class="achievement-shelf"><div class="achievement-stats" id="achievementStats"></div><div id="achievementGrid" class="achievement-grid"></div><div id="achievementEmpty" class="empty-state hidden"><div class="empty-icon"><span class="icon-slot" data-icon="award"></span></div><h3>还没有已结项的项目</h3></div></div><div class="repeat-admin-panel" id="repeatAdminPanel"><div class="panel-heading"><div><h2>固定任务规则</h2></div><button class="secondary-btn" id="createFixedBtn"><span class="icon-slot" data-icon="plus"></span>制定固定任务</button></div><div id="repeatList" class="repeat-list"></div></div></div></div></div></section>
       <section id="inboxView" class="view"><div class="page-intro"><div><div class="eyebrow">通知中心 · 3 条未读</div><h1>收件箱</h1></div><div class="inbox-head-actions"><button class="secondary-btn" id="manageInboxBtn">管理</button><button class="secondary-btn" id="markAllReadBtn">全部标为已读</button></div></div><div id="inboxToolbar" class="inbox-toolbar hidden"></div><div id="inboxList" class="inbox-list"></div></section>
       <section id="archiveView" class="view archive-view"><div class="page-intro">
         <div><div class="eyebrow" id="archiveEyebrow">档案</div><h1>档案室</h1></div>
@@ -86,6 +84,6 @@
     </div></div>
 
   </aside>
-  <script src="app.js?v=20261113-drafts"></script>
+  <script src="app.js?v=20261113-project-shelf"></script>
 </body>
 </html>

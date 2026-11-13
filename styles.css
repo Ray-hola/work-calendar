@@ -15140,3 +15140,20 @@ body.is-resizing-agent { user-select: none; }
 @media (max-width: 560px) {
   .guide-table td:first-child { white-space: normal; }
 }
+
+/* 成果库 · a shelf in the project space. The directory keeps it below the
+   folders; the page swaps the project grid for the finished projects. */
+.project-nav-shelf {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.achievement-shelf,
+#projectOverview.is-shelf > :not(.achievement-shelf) {
+  display: none;
+}
+
+#projectOverview.is-shelf > .achievement-shelf {
+  display: block;
+}
