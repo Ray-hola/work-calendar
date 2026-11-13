@@ -1272,7 +1272,11 @@ select {
   background: var(--accent);
   color: var(--surface);
   font-family: var(--font-serif);
-  font-size: 16px;
+  /* The mark is drawn (the "!" of 哗啦！ / Hola!, its dot a to-do box); the
+     letter in the markup stays as a text fallback and takes no space. */
+  font-size: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M25 9 H39 L36 39 H28 Z' fill='%23FFFDF9' stroke='%23FFFDF9' stroke-width='3' stroke-linejoin='round'/%3E%3Crect x='24' y='43' width='16' height='16' rx='4' fill='%23FFFDF9'/%3E%3C/svg%3E");
+  background-size: 100% 100%;
   box-shadow: 0 6px 14px -6px rgba(192, 95, 65, .55), inset 0 1px 0 rgba(255, 255, 255, .25);
   transition: transform var(--t-slow) var(--ease-spring);
 }

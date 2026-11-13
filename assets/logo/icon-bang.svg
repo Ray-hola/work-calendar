@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Hola! app icon">
+  <rect width="512" height="512" rx="116" fill="#D97757"/>
+  <g transform="translate(0 -20)">
+    <path d="M206 84 H306 L284 330 H228 Z" fill="#FFFDF9" stroke="#FFFDF9" stroke-width="22" stroke-linejoin="round"/>
+    <rect x="190" y="336" width="132" height="132" rx="30" fill="#FFFDF9"/>
+    <path d="M222 402 L248 428 L292 374" fill="none" stroke="#D97757" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
