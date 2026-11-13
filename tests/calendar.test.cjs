@@ -3761,12 +3761,23 @@ test('a stash is weighed by when its text was typed, not when the server stamped
     },
   };
   const row = {key: 'task.new', title: '新任务', label: '', fields: {taskName: '最后一句'},
-    reopen: {fn: 'newTask', args: [null]}, updatedAt: '2026-11-13T10:00:05.000Z', typedAt: '2026-11-13T10:00:05.000Z'};
+    reopen: {fn: 'newTask', args: [null]}, updatedAt: '2026-11-13T10:00:05.000Z', typedAt: '2026-11-13T10:00:05.000Z',
+    writer: 'page-a', seq: 3};
   store['hola-form-draft-stash'] = JSON.stringify({owner: 'writer', row});
+  // The page's earlier save landed after it closed: stamped later by the server, but earlier in that page's order.
   h.a.run("S.user={id:'writer'};S.formDrafts=[{key:'task.new',updatedAt:'2026-11-13T10:00:09Z',"
-    + "typedAt:'2026-11-13T10:00:04.000Z',fields:{}}];sendStashedFormDraft()");
+    + "typedAt:'2026-11-13T10:00:04.000Z',writer:'page-a',seq:2,fields:{}}];sendStashedFormDraft()");
   assert.ok(h.calls.some(c => c.action === 'formdraft.save' && c.data.fields.taskName === '最后一句'));
-  // A delete says when it was asked for, so the server keeps text typed after it.
-  h.a.run("writeFormDraft('writer','task.other',null)");
-  assert.match(h.calls.find(c => c.action === 'formdraft.delete').data.typedAt, /^\d{4}-\d{2}-\d{2}T/);
+  // Text typed later on another page wins over the stash.
+  store['hola-form-draft-stash'] = JSON.stringify({owner: 'writer', row});
+  h.a.run("UI.draftStashChecked=null;S.formDrafts=[{key:'task.new',typedAt:'2026-11-13T10:00:06.000Z',"
+    + "writer:'page-b',seq:1,fields:{}}]");
+  const sent = h.calls.length;
+  h.a.run('sendStashedFormDraft()');
+  assert.equal(h.calls.length, sent);
+  // Every write names this page and its place in the page's order.
+  h.a.run("writeFormDraft('writer','task.other',null);writeFormDraft('writer','task.third',null)");
+  const [first, second] = h.calls.filter(c => c.action === 'formdraft.delete').map(c => c.data);
+  assert.equal(first.writer, second.writer);
+  assert.ok(second.seq > first.seq);
 });

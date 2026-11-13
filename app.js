@@ -3359,6 +3359,10 @@ const DRAFT_OPENERS = {
 // Keep failed or in-flight writes by account so a state refresh cannot erase
 // a draft that the server has not acknowledged yet.
 const pendingFormDrafts = new Map();
+// This page's name and the number of its last draft write, so the server can tell a late write from it.
+const DRAFT_WRITER = (typeof crypto === 'object' && crypto.randomUUID?.())
+  || `page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+let draftSeq = 0;
 // Each save of a form's draft here bumps its generation, so a late submit can
 // tell whether the draft it would clear has been written again since.
 const draftGenerations = new Map();
@@ -3499,17 +3503,16 @@ function discardRestoredDraft(f) {
 function writeFormDraft(owner, key, row, options = {}) {
   const slot = formDraftSlot(owner, key);
   const previous = pendingFormDrafts.get(slot);
-  const write = {owner, key, row};
+  const write = {owner, key, row}, seq = ++draftSeq;
   pendingFormDrafts.set(slot, write);
   const send = async () => {
     if (S.user?.id !== owner) {
       throw new Error('账户已切换，草稿尚未同步');
     }
     const action = row ? 'formdraft.save' : 'formdraft.delete';
-    // A delete names the moment it was asked for, so text typed after it stays.
-    const data = row ? {...row, owner} : {key, owner, typedAt: new Date().toISOString()};
+    const data = {...(row ?? {key}), owner, writer: DRAFT_WRITER, seq};
     if (options.keepalive && row && !fitsKeepalive({action, data})) {
-      stashFormDraft(owner, row);
+      stashFormDraft(owner, {...row, writer: DRAFT_WRITER, seq});
       return;
     }
     const saved = await api('/api/action', {action, data}, options);
@@ -3626,8 +3629,11 @@ function sendStashedFormDraft() {
   const {owner, row} = stash;
   dropStashedFormDraft(owner, row.key);
   const current = formDraftOf(row.key);
-  // Both times come from the browser that typed them, not from the server.
-  if (current?.typedAt && row.typedAt && current.typedAt >= row.typedAt) {
+  // A copy the same page wrote later wins; from another page, the later typing does.
+  const newer = current && (current.writer === row.writer
+    ? (current.seq ?? 0) >= (row.seq ?? 0)
+    : Boolean(current.typedAt && row.typedAt && current.typedAt >= row.typedAt));
+  if (newer) {
     return;
   }
   keepFormDraftLocally(row);
