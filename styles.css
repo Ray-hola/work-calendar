@@ -2827,7 +2827,9 @@ html:lang(en) .nav-brand-name strong {
 .task-card {
   position: relative;
   display: grid;
-  grid-template-columns: 30px 34px minmax(0, 1fr) 72px 132px 178px 76px 16px;
+  /* English status labels (In progress, Pending approval) need more room than 进行中. */
+  --task-status-col: 76px;
+  grid-template-columns: 30px 34px minmax(0, 1fr) 72px 132px 178px var(--task-status-col) 16px;
   gap: 14px;
   align-items: center;
   min-height: 54px;
@@ -2927,6 +2929,10 @@ html:lang(en) .nav-brand-name strong {
   display: inline-flex;
   align-items: center;
   color: var(--ink-2);
+}
+
+html:lang(en) .task-card {
+  --task-status-col: 122px;
 }
 
 .task-arrow {
@@ -10199,7 +10205,7 @@ select:focus {
 @container (max-width: 800px) {
   .task-card,
   .daily-project-tasks .task-card {
-    grid-template-columns: 34px minmax(0, 1fr) 72px 156px 76px 16px;
+    grid-template-columns: 34px minmax(0, 1fr) 72px 156px var(--task-status-col) 16px;
   }
   .task-card::before,
   .daily-project-tasks .task-card::before,
@@ -10211,7 +10217,7 @@ select:focus {
 @container (max-width: 560px) {
   .task-card,
   .daily-project-tasks .task-card {
-    grid-template-columns: 34px minmax(0, 1fr) 72px 76px 16px;
+    grid-template-columns: 34px minmax(0, 1fr) 72px var(--task-status-col) 16px;
   }
   .task-when {
     display: none;

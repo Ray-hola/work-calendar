@@ -3496,6 +3496,19 @@ test('English mode translates labels, dates, weekdays and relative times', () =>
   assert.equal(a.run("tr('没有这句')"), '没有这句', 'a missing entry falls back to Chinese');
 });
 
+test('English labels built from pieces keep their spaces and button labels read as actions', () => {
+  const a = appIn('en');
+  assert.equal(a.run("tr('{0}完成 · {1}',tr('任务'),'整理竞品报价')"), 'Task completed · 整理竞品报价');
+  assert.equal(a.run("tr('{0}递延至 {1}{2}','',fmt('2026-11-10'),'')"), 'Deferred to Nov 10');
+  assert.equal(a.run("tr('{0}递延至 {1}{2}',tr('合并 ')+3+tr(' 期'),fmt('2026-11-10'),'')"), 'Merged 3 periods, deferred to Nov 10');
+  for (const [key, label] of [['{0}开始任务','Start'],['{0}记录完成','Record completion'],['{0}未完成，递延','Not done, defer'],
+                              ['{0}修改完成记录','Edit completion record'],['{0}打回','Send back'],['{0}同意修改','Approve change']])
+    assert.equal(a.run(`tr(${JSON.stringify(key)},'<i></i>')`), '<i></i>' + label);
+  const css = fs.readFileSync(path.join(__dirname, '../styles.css'), 'utf8');
+  assert.match(css, /html:lang\(en\) \.task-card \{\s*--task-status-col: 1[0-9]{2}px;/, 'English status labels get a wider column');
+  assert.equal((css.match(/var\(--task-status-col\) 16px/g) || []).length, 3, 'every task-row layout uses the shared status width');
+});
+
 test('user data is never looked up: names stay as typed inside translated sentences', () => {
   const a = appIn('en');
   assert.equal(a.run("tr('确认删除「{0}」？删除后将从日历移除。','周报')"), 'Delete “周报”? It will be removed from the calendar.');
