@@ -154,7 +154,10 @@ TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notific
 FORM_DRAFT_LIMIT = 30
 FORM_DRAFT_CHARS = 20_000
 FORM_DRAFT_KEY = r'[A-Za-z0-9_.:-]{1,120}'
-# When the browser had the text (its own clock), so a write that arrives late cannot undo a newer one.
+# Each page numbers its draft writes (writer, seq). A write that lands after a later one from the same
+# page is out of date and changes nothing; writes from different pages keep the last to arrive.
+FORM_DRAFT_WRITER = r'[A-Za-z0-9-]{8,40}'
+# When the browser had the text, by its own clock; kept for the client to weigh a stashed copy.
 FORM_DRAFT_TYPED_AT = r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z'
 FORM_DRAFT_OPENERS = ('newTask', 'newProject', 'editTaskRequest', 'projectSettings', 'complete', 'editCompletion',
                       'defer', 'reopenTask', 'requestProjectCompletion', 'fixedTask', 'reviewTaskEdit',
@@ -3111,13 +3114,13 @@ class Store:
         if (reopen.get('fn') not in FORM_DRAFT_OPENERS or not isinstance(args, list) or len(args) > 4
                 or any(not (a is None or isinstance(a, bool) or (isinstance(a, str) and len(a) <= 120)) for a in args)):
             raise Problem(400, '草稿来源无效')
-        row_id, typed_at = f'{user["id"]}:{key}', self.typed_at(d)
-        if typed_at and self.form_draft_typed_at(row_id) > typed_at:
+        row_id, (writer, seq) = f'{user["id"]}:{key}', self.draft_writer(d)
+        if self.out_of_date(row_id, writer, seq):
             return self.get('form_drafts', row_id)
         row = {'id': row_id, 'owner': user['id'], 'key': key,
                'title': str(d.get('title') or '草稿')[:120], 'label': str(d.get('label') or '')[:60],
                'fields': clean, 'reopen': {'fn': reopen['fn'], 'args': args}, 'updatedAt': timestamp(),
-               'typedAt': typed_at}
+               'typedAt': self.typed_at(d), 'writer': writer, 'seq': seq}
         self.put('form_drafts', row)
         # Keep the newest ones when someone leaves many forms half done.
         extra = self.form_drafts(user['id'])[FORM_DRAFT_LIMIT:]
@@ -3132,11 +3135,9 @@ class Store:
             raise Problem(400, '请选择要删除的草稿')
         if any(not isinstance(key, str) or not re.fullmatch(FORM_DRAFT_KEY, key) for key in keys):
             raise Problem(400, '请选择要删除的草稿')
-        owner, before = user.get('id', ''), self.typed_at(d)
-        ids = [f'{owner}:{key}' for key in keys]
-        if before:
-            # Text typed after the delete left the browser stays.
-            ids = [row_id for row_id in ids if self.form_draft_typed_at(row_id) <= before]
+        owner, (writer, seq) = user.get('id', ''), self.draft_writer(d)
+        # A draft the same page saved after asking for this delete stays.
+        ids = [row_id for row_id in (f'{owner}:{key}' for key in keys) if not self.out_of_date(row_id, writer, seq)]
         cur = self.db.executemany('DELETE FROM form_drafts WHERE id = ?', [(row_id,) for row_id in ids])
         return {'deleted': cur.rowcount}
 
@@ -3146,10 +3147,22 @@ class Store:
         value = d.get('typedAt')
         return value if isinstance(value, str) and re.fullmatch(FORM_DRAFT_TYPED_AT, value) else ''
 
-    def form_draft_typed_at(self, row_id: str) -> str:
-        """When the browser typed the draft kept as `row_id`; '' if there is none or it carries no time."""
+    @staticmethod
+    def draft_writer(d: dict) -> tuple:
+        """The page that sent a draft write and its place in that page's order; ('', 0) if absent or malformed."""
+        writer, seq = d.get('writer'), d.get('seq')
+        if (isinstance(writer, str) and re.fullmatch(FORM_DRAFT_WRITER, writer)
+                and isinstance(seq, int) and not isinstance(seq, bool) and 0 <= seq < 2 ** 53):
+            return writer, seq
+        return '', 0
+
+    def out_of_date(self, row_id: str, writer: str, seq: int) -> bool:
+        """Whether the page that sent this write already wrote `row_id` later."""
+        if not writer:
+            return False
         found = self.db.execute('SELECT data FROM form_drafts WHERE id = ?', (row_id,)).fetchone()
-        return json.loads(found['data']).get('typedAt', '') if found else ''
+        held = json.loads(found['data']) if found else {}
+        return held.get('writer') == writer and held.get('seq', 0) > seq
 
     def refuse_handing_out(self, user: dict, assignee: str) -> None:
         """A rule group set to 只给自己 keeps its members' 临时任务 to themselves."""

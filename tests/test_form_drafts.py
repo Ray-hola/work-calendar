@@ -72,17 +72,22 @@ class FormDraftTests(unittest.TestCase):
         self.assertEqual(self.store.action(member, 'formdraft.delete', {'key': 'task.new'}), {'deleted': 0})
         self.assertEqual(len(self.store.snapshot(self.store.user('test002'))['formDrafts']), 1)
 
-    def test_a_write_that_arrives_late_cannot_undo_newer_text(self):
-        member = self.store.user('test001')
-        self.save(fields={'taskName': '新的'}, typedAt='2026-11-13T10:00:02.000Z')
-        kept = self.save(fields={'taskName': '旧的'}, typedAt='2026-11-13T10:00:01.000Z')
+    def test_a_write_that_arrives_late_cannot_undo_newer_text_from_the_same_page(self):
+        member, page = self.store.user('test001'), 'page-0001'
+        self.save(fields={'taskName': '新的'}, writer=page, seq=2, typedAt='2026-11-13T10:00:02.000Z')
+        kept = self.save(fields={'taskName': '旧的'}, writer=page, seq=1)
         self.assertEqual(kept['fields']['taskName'], '新的')
-        self.store.action(member, 'formdraft.delete', {'key': 'task.new', 'typedAt': '2026-11-13T10:00:01.500Z'})
-        self.assertEqual(len(self.store.form_drafts('test001')), 1, '删除之后才打的字留着')
-        # A malformed time is ignored and the save still lands.
-        self.save(typedAt='not a time')
-        self.assertEqual(self.store.form_drafts('test001')[0]['typedAt'], '')
-        self.store.action(member, 'formdraft.delete', {'key': 'task.new', 'typedAt': '2026-11-13T10:00:03.000Z'})
+        self.assertEqual(kept['typedAt'], '2026-11-13T10:00:02.000Z')
+        self.store.action(member, 'formdraft.delete', {'key': 'task.new', 'writer': page, 'seq': 1})
+        self.assertEqual(len(self.store.form_drafts('test001')), 1, '同一页面之后存的字留着')
+        # Another page's write is not held back by this page's numbers, whatever its clock says.
+        other = self.save(fields={'taskName': '另一页'}, writer='page-0002', seq=1, typedAt='2020-01-01T00:00:00.000Z')
+        self.assertEqual(other['fields']['taskName'], '另一页')
+        # A malformed writer, seq or time is ignored and the save still lands.
+        self.save(writer='bad id!', seq=True, typedAt='not a time')
+        held = self.store.form_drafts('test001')[0]
+        self.assertEqual((held['writer'], held['seq'], held['typedAt']), ('', 0, ''))
+        self.store.action(member, 'formdraft.delete', {'key': 'task.new', 'writer': page, 'seq': 9})
         self.assertEqual(self.store.form_drafts('test001'), [])
 
     def test_only_the_newest_drafts_are_kept(self):
