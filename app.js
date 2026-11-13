@@ -3062,7 +3062,11 @@ async function signOutTo(userId){
   if(typeof agentResetUser==='function')agentResetUser();
   await meetingStopLive();
   toggleAccountMenu(false);
-  await flushFormDraft();
+  if(UI.formDraft){
+    const saving=flushFormDraft();
+    $('#modalBackdrop').classList.add('hidden');
+    await saving;
+  }
   try{await api('/api/logout',{})}catch(_){}
   showAuth();
   $('#loginUser').value=userId||'';
@@ -3147,8 +3151,12 @@ function resetFormDraft(){
   $('#modalBackdrop')?.classList.add('hidden');
 }
 const formDraftOf=key=>(S.formDrafts||[]).find(d=>d.key===key);
-function keepFormDraftLocally(row){S.formDrafts=[row,...(S.formDrafts||[]).filter(d=>d.key!==row.key)];renderDraftCount()}
-function dropFormDraftLocally(key){S.formDrafts=(S.formDrafts||[]).filter(d=>d.key!==key);renderDraftCount()}
+function updateDraftList(){
+  renderDraftCount();
+  if(UI.view==='drafts')renderDrafts();
+}
+function keepFormDraftLocally(row){S.formDrafts=[row,...(S.formDrafts||[]).filter(d=>d.key!==row.key)];updateDraftList()}
+function dropFormDraftLocally(key){S.formDrafts=(S.formDrafts||[]).filter(d=>d.key!==key);updateDraftList()}
 /* A form can capture and restore choices outside its input fields. */
 function draftForm(key,{title,label='',reopen,submit,extra=null,restore=null}){
   const root=$('#modalContent');if(!root?.querySelectorAll)return;
@@ -3287,7 +3295,7 @@ function renderDrafts(){
       button.disabled=true;
       try{
         await writeFormDraft(owner,key,null);
-        if(S.user?.id===owner){dropFormDraftLocally(key);renderDrafts()}
+        if(S.user?.id===owner)dropFormDraftLocally(key);
       }catch(e){
         const slot=formDraftSlot(owner,key);
         if(pendingFormDrafts.get(slot)?.row===null)pendingFormDrafts.delete(slot);
