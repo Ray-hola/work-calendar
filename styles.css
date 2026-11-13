@@ -2762,6 +2762,19 @@ html:lang(en) .nav-brand-name strong {
   text-align: center;
 }
 
+/* Turned away from today, the date is the way back. */
+#dateChip.is-away {
+  cursor: pointer;
+  color: var(--accent);
+  border-radius: 8px;
+}
+
+#dateChip.is-away:hover,
+#dateChip.is-away:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 #prevDay:hover {
   transform: translateX(-2px);
 }
