@@ -580,8 +580,8 @@ function taskCard(t){
      owner, time, DDL and status. The description lives in the drawer. */
   return `<article class="task-card" data-id="${escapeHTML(t.id)}" tabindex="0"${t.desc?` title="`
     +`${escapeHTML(t.desc)}"`:''}><span class="priority ${escapeHTML(t.priority)}">${escapeHTML(t.priority)}</span>`
-    +`<div class="task-main"><span class="task-name" title="${escapeHTML(t.name)}">${escapeHTML(t.name)}</span>${stackBadge(t)}${t.fixed?`<span class="fixed-badge">`
-    +`${tr("{0} 固定",icon('repeat'))}</span>`:''}${isMultiDay(t)?`<span class="span-badge">${tr("{0} 天",spanDays(t))}</span>`:''}`
+    +`<div class="task-main"><span class="task-name" title="${escapeHTML(t.name)}">${escapeHTML(t.name)}</span>${stackBadge(t)}${t.fixed?`<span class="fixed-badge"${LANG==='en'?` title="${tr('固定')}"`:''}>`
+    +`${icon('repeat')}<span class="badge-label">${tr('固定')}</span></span>`:''}${isMultiDay(t)?`<span class="span-badge">${tr("{0} 天",spanDays(t))}</span>`:''}`
     +`${isSuperseded(t)?`<span class="superseded-badge">${tr("已被后续任务接替")}</span>`:''}${carriedFrom?`<span class="carried-badge">`
     +tr("{0} 由 {1} 递延{2}",icon('arrow-right'),escapeHTML(carriedDay||tr('前一日')),deferHops(t)>1?` ${tr("· 第 {0} 次",deferHops(t))}`:'')
     +`</span>`:''}${deferLog?.target?`<span class="defer-target">${icon('arrow-right')} ${escapeHTML(deferLog.target)}`

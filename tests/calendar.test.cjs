@@ -3505,8 +3505,15 @@ test('English labels built from pieces keep their spaces and button labels read 
                               ['{0}修改完成记录','Edit completion record'],['{0}打回','Send back'],['{0}同意修改','Approve change']])
     assert.equal(a.run(`tr(${JSON.stringify(key)},'<i></i>')`), '<i></i>' + label);
   const css = fs.readFileSync(path.join(__dirname, '../styles.css'), 'utf8');
-  assert.match(css, /html:lang\(en\) \.task-card \{\s*--task-status-col: 1[0-9]{2}px;/, 'English status labels get a wider column');
+  const en = css.match(/html:lang\(en\) \.task-card \{([^}]*)\}/)[1];
+  const px = name => Number((en.match(new RegExp(`--${name}: (\\d+)px`)) || [])[1]);
+  assert.ok(px('task-status-col') > 76, 'English status labels get a wider column than Chinese');
+  assert.ok(px('task-when-col') < 178 && px('task-when-col-narrow') < 156, 'which the shorter English dates pay for');
   assert.equal((css.match(/var\(--task-status-col\) 16px/g) || []).length, 3, 'every task-row layout uses the shared status width');
+  assert.match(css, /html:lang\(en\) \.task-card \.task-status \{\s*white-space: normal;/, 'Pending approval wraps instead of clipping');
+  assert.match(css, /@container \(max-width: 800px\)[\s\S]*?html:lang\(en\) \.task-card \.fixed-badge \.badge-label \{[^}]*clip-path/, 'narrow English rows keep only the recurring icon');
+  assert.match(source, /class="fixed-badge"\$\{LANG==='en'\?` title="\$\{tr\('固定'\)\}"`:''\}>/, 'and its title still says recurring');
+  assert.equal(a.run("tr('固定')"), 'recurring');
 });
 
 test('user data is never looked up: names stay as typed inside translated sentences', () => {

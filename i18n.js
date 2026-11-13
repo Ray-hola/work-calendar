@@ -76,7 +76,6 @@ var HOLA_I18N_EN={
   "{0} · 今天到期":"{0} · Due today",
   "{0} · 还剩 {1} 天":"{0} · {1}d left",
   "{0} / {1} 已完成":"{0} / {1} done",
-  "{0} 固定":"{0} recurring",
   "{0} 天":"{0}d",
   "已被后续任务接替":"Taken over by a later task",
   "前一日":"Previous day",
@@ -2448,6 +2447,7 @@ var HOLA_I18N_EN={
   "你所在的规则组只能给自己建临时任务":"Your rule group can only create ad-hoc tasks for yourself",
   "请选择要删除的草稿":"Pick drafts to delete",
   "临时任务指派规则无效":"Invalid ad-hoc task assignment rule",
+  "固定":"recurring",
 };
 /* Templated text the server writes (notifications, errors). Each pattern
    matches a whole message; $1… are the names and dates it captured, left as
