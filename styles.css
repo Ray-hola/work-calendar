@@ -1580,6 +1580,51 @@ select {
   font-size: 11px;
 }
 
+/* 界面语言: a two-way segmented choice, in the account menu and on the login card. */
+.language-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 2px 10px 4px;
+}
+
+.language-option {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+  background: var(--surface);
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+
+.language-option:hover {
+  background: var(--surface-sunk);
+  color: var(--ink);
+}
+
+.language-option.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.auth-language {
+  margin-top: 22px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.auth-language .language-options {
+  padding: 2px 0 0;
+}
+
+.auth-language .account-menu-label {
+  padding: 0 0 6px;
+  display: block;
+}
+
 /* The chat entry sits at the right end of the brand row. */
 .brand-chat {
   position: relative;
@@ -1610,6 +1655,12 @@ select {
 .brand strong {
   font-weight: 600;
   color: var(--ink);
+}
+
+/* “Hola-Calendar” is wider than 哗啦待办; keep it inside the sidebar. */
+html:lang(en) .nav-brand-name strong {
+  font-size: 14px;
+  letter-spacing: -.01em;
 }
 
 .brand:hover .brand-mark {
@@ -2780,7 +2831,11 @@ select {
 .task-card {
   position: relative;
   display: grid;
-  grid-template-columns: 30px 34px minmax(0, 1fr) 72px 132px 178px 76px 16px;
+  /* Column widths English overrides below; the name gets what is left. */
+  --task-status-col: 76px;
+  --task-when-col: 178px;
+  --task-when-col-narrow: 156px;
+  grid-template-columns: 30px 34px minmax(0, 1fr) 72px 132px var(--task-when-col) var(--task-status-col) 16px;
   gap: 14px;
   align-items: center;
   min-height: 54px;
@@ -2880,6 +2935,27 @@ select {
   display: inline-flex;
   align-items: center;
   color: var(--ink-2);
+}
+
+/* English labels run longer than 进行中 and 固定 but its dates are shorter
+   (Nov 13): the date column gives the status column room, and the rare
+   two-word status (Pending approval) wraps instead of clipping. */
+html:lang(en) .task-card {
+  --task-status-col: 88px;
+  --task-when-col: 138px;
+  --task-when-col-narrow: 114px;
+}
+
+html:lang(en) .task-card .task-status {
+  white-space: normal;
+  line-height: 1.25;
+}
+
+/* A deadline chip that does not fit puts “12d left” under its date. */
+html:lang(en) .task-card .task-ddl {
+  flex-wrap: wrap;
+  row-gap: 0;
+  max-width: 100%;
 }
 
 .task-arrow {
@@ -10152,19 +10228,27 @@ select:focus {
 @container (max-width: 800px) {
   .task-card,
   .daily-project-tasks .task-card {
-    grid-template-columns: 34px minmax(0, 1fr) 72px 156px 76px 16px;
+    grid-template-columns: 34px minmax(0, 1fr) 72px var(--task-when-col-narrow) var(--task-status-col) 16px;
   }
   .task-card::before,
   .daily-project-tasks .task-card::before,
   .task-time {
     display: none;
   }
+  /* “recurring” is twice as wide as 固定: narrow English rows keep only the icon (its title says it). */
+  html:lang(en) .task-card .fixed-badge .badge-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
 }
 
 @container (max-width: 560px) {
   .task-card,
   .daily-project-tasks .task-card {
-    grid-template-columns: 34px minmax(0, 1fr) 72px 76px 16px;
+    grid-template-columns: 34px minmax(0, 1fr) 72px var(--task-status-col) 16px;
   }
   .task-when {
     display: none;

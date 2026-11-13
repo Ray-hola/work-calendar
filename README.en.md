@@ -2,7 +2,7 @@
 
 # Hola-Calendar
 
-**A self-hosted task and project workbench for small teams.** One Python file and one SQLite database, no runtime dependencies, and your data stays on your own machine. The interface is in Chinese; the product is called **哗啦！** (哗啦待办).
+**A self-hosted task and project workbench for small teams.** One Python file and one SQLite database, no runtime dependencies, and your data stays on your own machine. The interface comes in 简体中文 and English; the product is called **Hola!** (Hola-Calendar) in English and **哗啦！** (哗啦待办) in Chinese.
 
 [![Tests](https://github.com/Ray-hola/Hola-Calendar/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Ray-hola/Hola-Calendar/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -18,6 +18,8 @@
 Most collaboration tools want your tasks, daily notes and team data in someone else's cloud. Hola-Calendar keeps the whole loop (plan → do → finish → archive) and its rules in one auditable local service: `server.py` plus a SQLite file, reached on a local port and published through Cloudflare Tunnel or a reverse proxy when you need outside access.
 
 ## Features
+
+- Interface language: each person picks 简体中文 or English in the avatar menu (or on the sign-in card). The choice is saved on the account and in the browser (`localStorage` key `hola-lang`); `?lang=en` shows one page in English without saving anything. Names people typed are never translated.
 
 **Tasks**
 - Three kinds: project tasks, one-off tasks (outside any project; members can create them for themselves or other members under their rule group, and the creator follows progress and reviews edit requests), and fixed tasks (daily, workdays, chosen weekdays, monthly or specific dates; can belong to a project; single days can be skipped).
@@ -110,7 +112,7 @@ Open `http://127.0.0.1:4173/`. The first start creates `data/work-calendar.sqlit
 docker compose -f deploy/docker-compose.example.yml up -d --build
 ```
 
-The image holds only the four runtime files, and data is mounted from the repository's `data/`. Public access, Tunnel and backups are covered in the [deployment guide](deploy/README.md#docker) (Chinese).
+The image holds only the runtime files (server, front end and dictionary), and data is mounted from the repository's `data/`. Public access, Tunnel and backups are covered in the [deployment guide](deploy/README.md#docker) (Chinese).
 
 ## Configuration
 
@@ -142,8 +144,9 @@ Templates for Docker Compose, Cloudflare Tunnel, Caddy, systemd, Windows schedul
 server.py            HTTP API, permissions, SQLite storage, scheduler and agent loop
 agent_workspace.py   Isolated read-only SQL workspace, tool schemas and record reads
 assistant_privacy.py  Connection-bound keys and assistant record redaction
-app.js               Front-end views and interaction
-index.html           Page skeleton; the two ?v= values are the asset cache version
+app.js               Front-end views and interaction; UI text is written in Chinese inside tr('…')
+i18n.js              English UI dictionary (keyed by the Chinese source text)
+index.html           Page skeleton; the ?v= values are the asset cache version
 styles.css           Styles (desktop / tablet / phone)
 tests/               Back-end unittest and front-end node:test suites
 deploy/              Docker Compose, Tunnel, Caddy, systemd, backup templates
@@ -158,7 +161,7 @@ data/                Runtime data (database, account file), never committed
 
 A typical change:
 
-1. **Interface or interaction**: edit `app.js` / `styles.css` and bump the `?v=` version in `index.html`.
+1. **Interface or interaction**: edit `app.js` / `styles.css` and bump the `?v=` version in `index.html`. Write new UI text as `tr('中文')` and add its English to `i18n.js`.
 2. **Rules or API**: edit the matching `action` branch in `server.py`; its permission checks live there too.
 3. **Tests**: back-end behaviour goes in `tests/test_*.py`, front-end visibility and date edge cases in `tests/calendar.test.cjs`.
 4. **Check locally**:
