@@ -3982,8 +3982,9 @@ function renderAchievements(){
 function openWorkLogDetail(taskId,projectId,kind){
   if(taskId&&kind!=='project'&&S.tasks.some(t=>t.id===taskId))return openDrawer(taskId);
   if(!projectId){toast('这条记录已不在当前数据中');return}
-  if([...visibleProjects(),...(S.fileArchives||[])].some(p=>p.id===projectId))return openProjectSpace(projectId);
-  const p=[...(S.achievements||[]),...S.projects].find(x=>x.id===projectId);
+  if(visibleProjects().some(p=>p.id===projectId))return openProjectSpace(projectId);
+  const p=completedProjects().find(x=>x.id===projectId);
+  if(!p&&(S.fileArchives||[]).some(x=>x.id===projectId))return openProjectSpace(projectId);
   if(!p){toast('这个项目已不在当前数据中');return}
   const tasks=sortTasks(Array.isArray(p.tasks)?p.tasks:S.tasks.filter(t=>t.projectId===p.id)),done=tasks.filter(t=>t.status==='done').length;
   openModal(`<div class="eyebrow">已归档成果</div><h2>${escapeHTML(p.name)}</h2>${p.desc?`<p>${escapeHTML(p.desc)}</p>`:''}`
@@ -3992,8 +3993,10 @@ function openWorkLogDetail(taskId,projectId,kind){
     +`<div><span>完成于</span><strong>${escapeHTML(String(p.completedAt||p.end||'—').slice(0,10))}</strong></div></div>`
     +`${p.completionReport?`<div class="completion-summary"><span>结项报告</span><p>${escapeHTML(p.completionReport)}</p></div>`:''}`
     +`${tasks.length?`<div class="detail-grid">${tasks.map(t=>`<div><span>${escapeHTML(t.name)}</span><strong>${escapeHTML(t.assignee?nameOf(t.assignee):'—')} · ${status(t)[1]}</strong></div>`).join('')}</div>`:''}`
-    +`<div class="modal-footer"><button class="secondary-btn" id="cancelAction">关闭</button></div>`);
-  $('#cancelAction').onclick=closeModal;
+    +`<div class="modal-footer"><button class="secondary-btn" id="closeWorkLogDetail">关闭</button></div>`);
+  const close=$('#closeWorkLogDetail');
+  close.onclick=closeModal;
+  close.focus?.();
 }
 const DAY_MS=86400000;
 const dateNumber=iso=>{
@@ -4589,7 +4592,7 @@ function renderInboxToolbar(){
   $('#inboxDeletePicked').onclick=()=>deleteNotices([...UI.inboxPicked]);
   $('#inboxDeleteRead').onclick=()=>deleteNotices(null,true);
 }
-function openSearch(){openModal(`<div class="eyebrow">工作台搜索</div><h2>搜索任务与项目</h2><label class="form-field">关键词<input id="searchQuery" placeholder="搜索"></label><div id="searchResults" class="search-results"><span class="muted">输入关键词开始搜索</span></div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">关闭</button></div>`);$('#cancelAction').onclick=closeModal;const input=$('#searchQuery'),results=$('#searchResults');input.oninput=()=>{const q=input.value.trim().toLowerCase();if(!q){results.innerHTML='<span class="muted">输入关键词开始搜索</span>';return}const ts=(S.user?.admin?S.tasks.filter(t=>!isSuperseded(t)):scheduleTasks()).filter(t=>[t.name,t.assignee,nameOf(t.assignee),projectName(t)].some(v=>String(v||'').toLowerCase().includes(q)));const ps=S.projects.filter(p=>[p.name,p.owner,nameOf(p.owner),p.desc].some(v=>String(v||'').toLowerCase().includes(q)));results.innerHTML=ts.map(t=>`<button class="search-result" data-task="${escapeHTML(t.id)}"><strong>${escapeHTML(t.name)}</strong><small>${escapeHTML(nameOf(t.assignee))} · ${escapeHTML(projectName(t))}</small></button>`).join('')+ps.map(p=>`<button class="search-result" data-project="${escapeHTML(p.id)}"><strong>${escapeHTML(p.name)}</strong><small>Owner · ${escapeHTML(nameOf(p.owner))} · ${projectStatus(p)}</small></button>`).join('')||'<span class="muted">没有找到匹配项</span>';$$('.search-result').forEach(b=>b.onclick=()=>{if(b.dataset.task)openDrawer(b.dataset.task);else{closeModal();switchView('projects')}})};input.focus()}
+function openSearch(){openModal(`<div class="eyebrow">工作台搜索</div><h2>搜索任务与项目</h2><label class="form-field">关键词<input id="searchQuery" placeholder="搜索"></label><div id="searchResults" class="search-results"><span class="muted">输入关键词开始搜索</span></div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">关闭</button></div>`);$('#cancelAction').onclick=closeModal;const input=$('#searchQuery'),results=$('#searchResults');input.oninput=()=>{const q=input.value.trim().toLowerCase();if(!q){results.innerHTML='<span class="muted">输入关键词开始搜索</span>';return}const ts=(S.user?.admin?S.tasks.filter(t=>!isSuperseded(t)):scheduleTasks()).filter(t=>[t.name,t.assignee,nameOf(t.assignee),projectName(t)].some(v=>String(v||'').toLowerCase().includes(q)));const ps=S.projects.filter(p=>[p.name,p.owner,nameOf(p.owner),p.desc].some(v=>String(v||'').toLowerCase().includes(q)));results.innerHTML=ts.map(t=>`<button class="search-result" data-task="${escapeHTML(t.id)}"><strong>${escapeHTML(t.name)}</strong><small>${escapeHTML(nameOf(t.assignee))} · ${escapeHTML(projectName(t))}</small></button>`).join('')+ps.map(p=>`<button class="search-result" data-project="${escapeHTML(p.id)}"><strong>${escapeHTML(p.name)}</strong><small>Owner · ${escapeHTML(nameOf(p.owner))} · ${projectStatus(p)}</small></button>`).join('')||'<span class="muted">没有找到匹配项</span>';$$('.search-result').forEach(b=>b.onclick=()=>{if(b.dataset.task)openDrawer(b.dataset.task);else{closeModal();openWorkLogDetail('',b.dataset.project,'project')}})};input.focus()}
 $$('.nav-item').forEach(b=>b.onclick=()=>switchView(b.dataset.view));
 window.addEventListener('beforeunload',e=>{if(meetingLive.session||meetingLive.active||$('#meetingEditor')?.dataset?.dirty==='true'){e.preventDefault();e.returnValue=''}});
 $('#workspaceSwitcher')?.addEventListener('click',()=>toggleAccountMenu());

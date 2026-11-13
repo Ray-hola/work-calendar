@@ -1592,10 +1592,11 @@ test('work-log and 成果库 detail opens the live task, the live project, or an
     S.user={id:'superadmin',admin:1};S.users=[{id:'chenxi',displayName:'陈曦'},{id:'wang00',displayName:'王零'}];
     S.tasks=[{id:'t1',name:'进行中任务',projectId:'live',status:'doing'}];
     S.projects=[{id:'live',name:'进行中项目',owner:'chenxi',status:'active'}];
+    S.fileArchives=[{id:'old',name:'已交付项目'},{id:'files-only',name:'只读资料'}];
     S.achievements=[{id:'old',name:'已交付项目',owner:'chenxi',status:'done',completedAt:'2026-11-01T10:00:00+08:00',completionReport:'按期交付',
       tasks:[{id:'t9',name:'收尾',assignee:'wang00',status:'done',priority:'P1'}]}];
-    openWorkLogDetail('t1','live','task');openWorkLogDetail('','live','project');openWorkLogDetail('t9','old','task');openWorkLogDetail('','gone','project');`);
-  assert.deepEqual(a.json('opened'),['task:t1','space:live']);
+    openWorkLogDetail('t1','live','task');openWorkLogDetail('','live','project');openWorkLogDetail('t9','old','task');openWorkLogDetail('','files-only','project');openWorkLogDetail('','gone','project');`);
+  assert.deepEqual(a.json('opened'),['task:t1','space:live','space:files-only']);
   const modal=a.run('modal');
   for(const text of ['已交付项目','陈曦','1/1','2026-11-01','按期交付','收尾','王零 · 已完成'])assert.ok(modal.includes(text),text);
   assert.equal(a.json('toasts').length,1,'找不到的项目给出提示而不是报错');
