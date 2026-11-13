@@ -3411,7 +3411,7 @@ function draftHarness() {
   const a = app(), calls = [], toasts = [];
   const fields = [{id: 'taskName', value: ''}, {id: 'taskDesc', value: ''}];
   const state = {listener: null, banner: '', timer: null};
-  const root = {querySelectorAll: () => fields, addEventListener: (_, f) => { state.listener = f; },
+  const root = {querySelectorAll: () => fields, addEventListener: (event, f) => { if(event==='input')state.listener = f; },
     insertAdjacentHTML: (_, html) => { state.banner = html; }};
   a.context.document = {querySelector: s => s === '#modalContent' ? root : null, querySelectorAll: () => []};
   a.context.setTimeout = f => { state.timer = f; return 1; };
@@ -3427,7 +3427,7 @@ function draftHarness() {
   return {a, calls, toasts, fields, state, open, type};
 }
 
-test('what is typed into a form is kept as a draft and filled back in when it reopens', () => {
+test('what is typed into a form is kept as a draft and filled back in when it reopens', async () => {
   const h = draftHarness();
   h.open();
   h.type(1, '先列提纲');
@@ -3436,7 +3436,7 @@ test('what is typed into a form is kept as a draft and filled back in when it re
   assert.deepEqual(saved.data.reopen, {fn: 'newTask', args: [null]});
   assert.equal(h.a.run('S.formDrafts.length'), 1);
   // Closing says it was kept; the same form opens with it again.
-  h.a.run('flushFormDraft(true)');
+  await h.a.run('flushFormDraft(true)');
   assert.ok(h.toasts.some(m => m.includes('草稿箱')));
   h.fields.forEach(f => { f.value = ''; });
   h.open();
@@ -3448,7 +3448,7 @@ test('a submitted form leaves no draft, and typing back to the start removes it'
   const h = draftHarness();
   h.open();
   h.type(0, '周报');
-  await h.a.run("draftSubmitted('/api/action',{action:'task.create'})");
+  await h.a.run("api('/api/action',{action:'task.create'})");
   assert.ok(h.calls.some(c => c.action === 'formdraft.delete' && c.data.key === 'task.new'));
   assert.equal(h.a.run('S.formDrafts.length'), 0);
   assert.equal(h.a.run('UI.formDraft'), null);
@@ -3459,8 +3459,35 @@ test('a submitted form leaves no draft, and typing back to the start removes it'
   assert.equal(h.a.run('S.formDrafts.length'), 0, '和打开时一样就不算草稿');
   // An unrelated action leaves the draft where it is.
   h.type(1, '补充');
-  await h.a.run("draftSubmitted('/api/action',{action:'chat.send'})");
+  await h.a.run("api('/api/action',{action:'chat.send'})");
   assert.equal(h.a.run('S.formDrafts.length'), 1);
+});
+
+test('failed draft writes survive refresh in this tab and are not reported as saved', async () => {
+  const h=draftHarness();
+  h.a.context.fetch=async()=>{throw new Error('offline')};
+  h.a.run("S.user={id:'writer'}");h.open();h.type(1,'未同步的描述');
+  await h.a.run('flushFormDraft(true)');
+  h.a.run('S.formDrafts=[];restorePendingFormDrafts()');
+  assert.equal(h.a.run('S.formDrafts[0].fields.taskDesc'),'未同步的描述');
+  assert.ok(h.toasts.some(m=>m.includes('未同步')));
+  assert.ok(h.toasts.every(m=>!m.startsWith('已存为草稿')));
+  h.a.run("S.user={id:'other'};S.formDrafts=[];restorePendingFormDrafts()");
+  assert.equal(h.a.run('S.formDrafts.length'),0);
+});
+
+test('a delayed task submission cannot clear the draft in a newer dialog', async () => {
+  const h=draftHarness();let finish;
+  const fetch=h.a.context.fetch;
+  h.a.context.fetch=(path,options)=>JSON.parse(options.body).action==='task.create'
+    ?new Promise(resolve=>{finish=resolve}):fetch(path,options);
+  h.open();h.type(0,'第一项');
+  const submitting=h.a.run("api('/api/action',{action:'task.create'})");
+  await h.a.run('flushFormDraft()');
+  h.fields[0].value='';h.open();h.type(0,'第二项');
+  finish({ok:true,text:async()=> '{}'});await submitting;
+  assert.equal(h.a.run('UI.formDraft.fields[0].value'),'第二项');
+  assert.equal(h.a.run('S.formDrafts[0].fields.taskName'),'第二项');
 });
 
 test('a draft also keeps the choices around the text, such as which kind of task', () => {

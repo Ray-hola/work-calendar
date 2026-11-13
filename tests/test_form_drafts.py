@@ -44,9 +44,20 @@ class FormDraftTests(unittest.TestCase):
     def test_bad_drafts_are_refused(self):
         for extra in ({'key': '../x'}, {'fields': {}}, {'fields': {'a': 1}},
                       {'fields': {'taskDesc': 'x' * 60_001}}, {'reopen': {'fn': 'eval', 'args': []}},
+                      {'reopen': ['newTask']}, {'reopen': {'fn': 'newTask', 'args': ''}},
                       {'reopen': {'fn': 'newTask', 'args': [{'x': 1}]}}):
             with self.subTest(extra=extra), self.assertRaises(Problem):
                 self.save(**extra)
+
+    def test_delayed_draft_operations_cannot_run_under_the_next_account(self):
+        self.save(who='test002')
+        with self.assertRaises(Problem) as rejected:
+            self.save(who='test002', owner='test001')
+        self.assertEqual(rejected.exception.status, 403)
+        with self.assertRaises(Problem) as rejected:
+            self.store.action(self.store.user('test002'), 'formdraft.delete', {'owner': 'test001', 'key': 'task.new'})
+        self.assertEqual(rejected.exception.status, 403)
+        self.assertEqual(len(self.store.form_drafts('test002')), 1)
 
     def test_only_the_newest_drafts_are_kept(self):
         for i in range(FORM_DRAFT_LIMIT + 3):

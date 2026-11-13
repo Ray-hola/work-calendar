@@ -320,7 +320,11 @@ let S={user:null,users:[],tasks:[],projects:[],folders:[],files:[],fileArchives:
    Safari reports parsing that as "The string did not match the expected
    pattern", so anything that is not JSON becomes a readable message here. */
 const readJSON=async r=>{const text=await r.text();try{return text?JSON.parse(text):{}}catch(_){throw new Error([504,524].includes(r.status)?'服务响应超时，请稍后再试；给 AI 助手的需求可以拆短一点':`服务暂时不可用（HTTP ${r.status}），请稍后再试`)}};
-const api=(path,body,options={})=>fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Work-Calendar':'1'},credentials:'same-origin',body:JSON.stringify(body),...options}).then(async r=>{const x=await readJSON(r);if(!r.ok)throw new Error(x.error||'操作未完成');await draftSubmitted(path,body);return x});
+const api=(path,body,options={})=>{
+  const draft=UI.formDraft;
+  return fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Work-Calendar':'1'},credentials:'same-origin',body:JSON.stringify(body),...options})
+    .then(async r=>{const x=await readJSON(r);if(!r.ok)throw new Error(x.error||'操作未完成');await draftSubmitted(path,body,draft);return x});
+};
 /* Raw-body sibling of api() for uploads: audio is sent as-is, not as JSON. */
 const apiBlob=(path,blob,options={})=>fetch(path,{...options,method:'POST',headers:{'Content-Type':blob.type||'application/octet-stream','X-Work-Calendar':'1'},credentials:'same-origin',body:blob}).then(async r=>{const x=await r.json().catch(()=>({}));if(!r.ok)throw new Error(x.error||'请求未完成');return x});
 const getState=()=>fetch('/api/state',{credentials:'same-origin'}).then(async r=>{const x=await readJSON(r);if(!r.ok){const e=new Error(x.error||'读取工作台失败');e.status=r.status;throw e}return x});
@@ -348,7 +352,7 @@ const status=t=>{
 };
 const projectName=t=>(S.projects.find(p=>p.id===t.projectId)||{}).name||'个人';
 function toast(msg){const e=$('#toast');e.textContent=msg;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200)}
-function showAuth(){cancelTourOffer();endTour(false);meetingCancelCapture();meetingStopLive().catch(()=>{});if(typeof agentCancelVoice==='function')agentCancelVoice();document.body.classList.add('auth-locked');let e=$('#authScreen');if(!e){e=document.createElement('section');e.id='authScreen';document.body.prepend(e)}const local=location.protocol==='file:';e.innerHTML=`<div class="auth-card"><div class="brand"><span class="brand-mark">哗</span><span>哗啦！<br><strong>哗啦待办</strong></span></div><h1>登录工作台</h1><form id="loginForm"><label>账户<input id="loginUser" autocomplete="username" value="superadmin" required></label><label>密码<input id="loginPass" type="password" autocomplete="current-password" required></label><button class="primary-btn" type="submit" ${local?'disabled':''}>${local?'请先启动本地服务':'进入工作台'}</button><div id="loginError" class="login-error">${local?'请在工作区运行 ./run.sh，然后访问 http://127.0.0.1:4173/':''}</div></form></div>`;$('#loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/login',{username:$('#loginUser').value,password:$('#loginPass').value});document.body.classList.remove('auth-locked');e.target.closest('#authScreen').remove();await refresh();switchView('calendar')}catch(err){$('#loginError').textContent=err.message}}}
+function showAuth(){resetFormDraft();cancelTourOffer();endTour(false);meetingCancelCapture();meetingStopLive().catch(()=>{});if(typeof agentCancelVoice==='function')agentCancelVoice();document.body.classList.add('auth-locked');let e=$('#authScreen');if(!e){e=document.createElement('section');e.id='authScreen';document.body.prepend(e)}const local=location.protocol==='file:';e.innerHTML=`<div class="auth-card"><div class="brand"><span class="brand-mark">哗</span><span>哗啦！<br><strong>哗啦待办</strong></span></div><h1>登录工作台</h1><form id="loginForm"><label>账户<input id="loginUser" autocomplete="username" value="superadmin" required></label><label>密码<input id="loginPass" type="password" autocomplete="current-password" required></label><button class="primary-btn" type="submit" ${local?'disabled':''}>${local?'请先启动本地服务':'进入工作台'}</button><div id="loginError" class="login-error">${local?'请在工作区运行 ./run.sh，然后访问 http://127.0.0.1:4173/':''}</div></form></div>`;$('#loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/login',{username:$('#loginUser').value,password:$('#loginPass').value});document.body.classList.remove('auth-locked');e.target.closest('#authScreen').remove();await refresh();switchView('calendar')}catch(err){$('#loginError').textContent=err.message}}}
 /* Accounts that have signed in on this browser, newest first. The switcher
    offers only these, so it never lists the whole team to everyone. */
 const KNOWN_ACCOUNTS_KEY='wc-accounts';
@@ -358,13 +362,14 @@ async function refresh(){
   let next;
   try{next=await getState()}catch(e){if(e.status===401){showAuth();return}throw e}
   if(S.user?.id!==next.user.id){
+    if(S.user)resetFormDraft();
     cancelTourOffer();endTour(false);meetingCancelCapture();
     if(S.user&&typeof agentResetUser==='function')agentResetUser();
     Object.assign(UI,{space:'',folder:'',view:'calendar',member:'all',filter:'all',selectedWeek:0,detailDate:null,timelineScroll:null,dayOffset:0});
   }
   /* updateChatDot is defined further down the file than the unit-test sandbox
      loads, so guard the call rather than assume it is in scope. */
-  S=next;if(S.dateHorizon)DATE_HORIZON=S.dateHorizon;rememberAccount(S.user.id);renderAll();if(typeof offerTour==='function')offerTour();renderPip();if(typeof loadSpeechStatus==='function')loadSpeechStatus();if(typeof updateChatDot==='function')updateChatDot();
+  S=next;restorePendingFormDrafts();if(S.dateHorizon)DATE_HORIZON=S.dateHorizon;rememberAccount(S.user.id);renderAll();if(typeof offerTour==='function')offerTour();renderPip();if(typeof loadSpeechStatus==='function')loadSpeechStatus();if(typeof updateChatDot==='function')updateChatDot();
 }
 let inboxRefreshPromise=null;
 async function refreshInboxState(){
@@ -3057,6 +3062,7 @@ async function signOutTo(userId){
   if(typeof agentResetUser==='function')agentResetUser();
   await meetingStopLive();
   toggleAccountMenu(false);
+  await flushFormDraft();
   try{await api('/api/logout',{})}catch(_){}
   showAuth();
   $('#loginUser').value=userId||'';
@@ -3106,10 +3112,10 @@ function fitTextarea(el){
    same form opens with its draft filled back in, and 草稿箱 lists every one.
    A form registers here with the actions that submit it; once one of them goes
    through, its draft is gone. */
-const DRAFT_FIELDS='textarea[id], input[id]:not([type]), input[id][type="text"]';
+const DRAFT_FIELDS='textarea[id]:not([readonly]):not([disabled]), select[id]:not([disabled]), input[id]:not([disabled]):not([readonly]):is(:not([type]),[type="text"],[type="date"],[type="time"],[type="number"])';
 const DRAFT_DELAY=700;
 const DRAFT_OPENERS={
-  newTask:projectId=>newTask(projectId||undefined),
+  newTask:(projectId,initialDate)=>newTask(projectId||undefined,initialDate||undefined),
   newProject:()=>newProject(),
   editTaskRequest:(id,direct)=>editTaskRequest(id,Boolean(direct)),
   projectSettings:id=>projectSettings(id),
@@ -3124,60 +3130,131 @@ const DRAFT_OPENERS={
   reviewProjectCompletion:(id,notice)=>reviewProjectCompletion(id,false,notice||undefined),
   reviewProject:(id,notice)=>reviewProject(id,false,notice||undefined),
 };
+// Keep failed or in-flight writes by account so a state refresh cannot erase
+// a draft that the server has not acknowledged yet.
+const pendingFormDrafts=new Map();
+const formDraftSlot=(owner,key)=>JSON.stringify([owner,key]);
+function restorePendingFormDrafts(){
+  for(const write of pendingFormDrafts.values()){
+    if(write.owner!==S.user?.id)continue;
+    if(write.row)keepFormDraftLocally(write.row);else dropFormDraftLocally(write.key);
+  }
+}
+function resetFormDraft(){
+  if(!UI.formDraft)return;
+  clearTimeout(UI.formDraft.timer);
+  UI.formDraft=null;
+  $('#modalBackdrop')?.classList.add('hidden');
+}
 const formDraftOf=key=>(S.formDrafts||[]).find(d=>d.key===key);
 function keepFormDraftLocally(row){S.formDrafts=[row,...(S.formDrafts||[]).filter(d=>d.key!==row.key)];renderDraftCount()}
 function dropFormDraftLocally(key){S.formDrafts=(S.formDrafts||[]).filter(d=>d.key!==key);renderDraftCount()}
-/* `extra` adds choices that are not typed (which kind of task, which project)
-   and `restore` puts them back; only typed text decides whether there is a draft. */
+/* A form can capture and restore choices outside its input fields. */
 function draftForm(key,{title,label='',reopen,submit,extra=null,restore=null}){
   const root=$('#modalContent');if(!root?.querySelectorAll)return;
   const fields=[...root.querySelectorAll(DRAFT_FIELDS)];if(!fields.length)return;
   const initial=Object.fromEntries(fields.map(el=>[el.id,el.value]));
   const [fn,...args]=reopen;
-  UI.formDraft={key,title,label,reopen:{fn,args:args.map(a=>a??null)},submit,fields,initial,extra,timer:null,saved:false};
+  UI.formDraft={owner:S.user?.id,key,title,label,reopen:{fn,args:args.map(a=>a??null)},submit,fields,initial,extra,initialExtra:extra?.(),timer:null,saved:false};
   if(!UI.formDraftBound){
     UI.formDraftBound=true;
-    root.addEventListener('input',e=>{const f=UI.formDraft;if(f&&f.fields.includes(e.target)){clearTimeout(f.timer);f.timer=setTimeout(saveFormDraft,DRAFT_DELAY)}});
+    const schedule=e=>{
+      const f=UI.formDraft;
+      if(!f||!f.fields.includes(e.target))return;
+      clearTimeout(f.timer);
+      f.timer=setTimeout(saveFormDraft,DRAFT_DELAY);
+    };
+    root.addEventListener('input',schedule);
+    root.addEventListener('change',schedule);
+    root.addEventListener('click',e=>{if(e.target.closest('.task-kind-btn'))schedule({target:UI.formDraft?.fields[0]})});
     if(typeof window!=='undefined')window.addEventListener('pagehide',()=>{if(UI.formDraft?.timer)saveFormDraft({keepalive:true})});
   }
   const old=formDraftOf(key);if(!old)return;
-  if(restore)restore(old.fields||{});
-  fields.forEach(el=>{if(typeof old.fields?.[el.id]==='string'&&old.fields[el.id]!==el.value){el.value=old.fields[el.id];fitTextarea(el)}});
+  const values=old.fields||{};
+  restore?.(values);
+  fields.forEach(el=>{
+    const value=values[el.id];
+    if(typeof value!=='string'||value===el.value)return;
+    if(el.options&&![...el.options].some(o=>o.value===value))return;
+    el.value=value;
+    if(el.tagName==='TEXTAREA')fitTextarea(el);
+  });
   UI.formDraft.saved=true;
   root.insertAdjacentHTML('afterbegin',`<div class="draft-restored" id="draftRestored">${icon('file-pen')}<span>已恢复草稿 · `
     +`${escapeHTML(relTime(old.updatedAt))}</span><button type="button" class="text-btn" id="discardDraft">丢弃</button></div>`);
   const discard=$('#discardDraft');if(discard)discard.onclick=()=>{const f=UI.formDraft;if(!f)return;f.fields.forEach(el=>{el.value=f.initial[el.id]});
-    $('#draftRestored')?.remove();discardFormDraft(f)};
+    restore?.(f.initialExtra||{});
+    $('#draftRestored')?.remove();
+    discardFormDraft(f).catch(e=>toast(e.message));
+  };
+}
+function writeFormDraft(owner,key,row,options={}){
+  const slot=formDraftSlot(owner,key);
+  const previous=pendingFormDrafts.get(slot);
+  const write={owner,key,row};
+  pendingFormDrafts.set(slot,write);
+  const send=async()=>{
+    if(S.user?.id!==owner)throw new Error('账户已切换，草稿尚未同步');
+    const action=row?'formdraft.save':'formdraft.delete';
+    const data={...(row||{key}),owner};
+    const saved=await api('/api/action',{action,data},options);
+    if(pendingFormDrafts.get(slot)!==write)return;
+    pendingFormDrafts.delete(slot);
+    if(row&&S.user?.id===owner&&saved.key===key)keepFormDraftLocally(saved);
+  };
+  write.promise=previous?previous.promise.catch(()=>{}).then(send):send();
+  return write.promise;
 }
 function discardFormDraft(f){
-  clearTimeout(f.timer);f.timer=null;f.saved=false;dropFormDraftLocally(f.key);
-  return api('/api/action',{action:'formdraft.delete',data:{key:f.key}}).catch(()=>{});
+  clearTimeout(f.timer);
+  f.timer=null;
+  f.saved=false;
+  if(S.user?.id===f.owner)dropFormDraftLocally(f.key);
+  return writeFormDraft(f.owner,f.key,null);
 }
-/* Saves when something differs from how the form opened; back to that, the draft goes. */
 function saveFormDraft(options={}){
-  const f=UI.formDraft;if(!f)return false;
-  clearTimeout(f.timer);f.timer=null;
-  const typed=Object.fromEntries(f.fields.map(el=>[el.id,el.value]));
-  if(!Object.keys(typed).some(k=>typed[k]!==f.initial[k])){if(f.saved||formDraftOf(f.key))discardFormDraft(f);return false}
-  const fields={...typed,...(f.extra?f.extra():{})};
-  const body={key:f.key,title:f.title,label:f.label,fields,reopen:f.reopen};
-  keepFormDraftLocally({...body,updatedAt:new Date().toISOString()});f.saved=true;
-  api('/api/action',{action:'formdraft.save',data:body},options).catch(()=>{});
-  return true;
-}
-/* Leaving a form (closing it, or another dialog taking its place) keeps what
-   was typed; closing says so. */
-function flushFormDraft(closing=false){
-  const f=UI.formDraft;if(!f)return;
-  const kept=f.timer||f.saved?saveFormDraft():false;
-  UI.formDraft=null;
-  if(closing&&kept)toast('已存为草稿，可在草稿箱继续');
-}
-async function draftSubmitted(path,body){
   const f=UI.formDraft;
-  if(!f||path!=='/api/action'||!f.submit.includes(body?.action))return;
-  UI.formDraft=null;clearTimeout(f.timer);
-  if(f.saved||formDraftOf(f.key))await discardFormDraft(f);
+  if(!f||f.owner!==S.user?.id)return null;
+  clearTimeout(f.timer);
+  f.timer=null;
+  const typed=Object.fromEntries(f.fields.map(el=>[el.id,el.value]));
+  const extra=f.extra?.()||{};
+  const changed=Object.keys(typed).some(k=>typed[k]!==f.initial[k])
+    ||Object.keys(extra).some(k=>extra[k]!==f.initialExtra?.[k]);
+  if(!changed){
+    if(f.saved||formDraftOf(f.key))discardFormDraft(f).catch(e=>toast(e.message));
+    return null;
+  }
+  const row={key:f.key,title:f.title,label:f.label,fields:{...typed,...extra},reopen:f.reopen,updatedAt:new Date().toISOString()};
+  keepFormDraftLocally(row);
+  f.saved=true;
+  const saved=writeFormDraft(f.owner,f.key,row,options);
+  saved.catch(()=>{if(UI.formDraft===f)toast('草稿未同步，请检查网络后重试')});
+  return saved;
+}
+async function flushFormDraft(closing=false){
+  const f=UI.formDraft;
+  if(!f)return;
+  const saved=saveFormDraft();
+  UI.formDraft=null;
+  if(!saved)return;
+  try{
+    await saved;
+    if(closing&&S.user?.id===f.owner)toast('已存为草稿，可在草稿箱继续');
+  }catch(_){
+    if(S.user?.id===f.owner)toast('草稿未同步，可在本页草稿箱继续编辑');
+  }
+}
+async function draftSubmitted(path,body,f){
+  if(!f||UI.formDraft!==f||f.owner!==S.user?.id||path!=='/api/action'||!f.submit.includes(body?.action))return;
+  const target=f.reopen.fn==='newTask'?null:f.reopen.args[0];
+  if(target&&body.data?.id!==target)return;
+  if(f.key.includes('.reject:')&&body.data?.accept!==false)return;
+  UI.formDraft=null;
+  clearTimeout(f.timer);
+  if(f.saved||formDraftOf(f.key)){
+    try{await discardFormDraft(f)}catch(_){toast('提交成功，草稿删除未同步')}
+  }
 }
 function renderDraftCount(){
   const n=(S.formDrafts||[]).length,badge=$('#draftCount');
@@ -3206,13 +3283,22 @@ function renderDrafts(){
     row.querySelector('.draft-open').onclick=()=>openFormDraft(row.dataset.key);
     row.querySelector('.draft-delete').onclick=async()=>{
       if(!confirm('删除这份草稿？'))return;
-      dropFormDraftLocally(row.dataset.key);renderDrafts();
-      try{await api('/api/action',{action:'formdraft.delete',data:{key:row.dataset.key}})}catch(e){toast(e.message)}
+      const owner=S.user?.id,key=row.dataset.key,button=row.querySelector('.draft-delete');
+      button.disabled=true;
+      try{
+        await writeFormDraft(owner,key,null);
+        if(S.user?.id===owner){dropFormDraftLocally(key);renderDrafts()}
+      }catch(e){
+        const slot=formDraftSlot(owner,key);
+        if(pendingFormDrafts.get(slot)?.row===null)pendingFormDrafts.delete(slot);
+        button.disabled=false;toast(e.message);
+      }
     };
   });
 }
 function newTask(projectId,initialDate){
   const admin=Boolean(S.user.admin),paths=taskProjects(),projects=paths.map(x=>x.p),temp=tempTaskMode(),locked=typeof projectId==='string';
+  if(locked&&!projects.some(p=>p.id===projectId)){toast('原项目已不可新建任务');return}
   if(!projects.length&&temp==='none'){toast('你所在的规则组不能新建任务');return}
   const initial=projects.find(p=>p.id===projectId)?.id||projects[0]?.id;
   /* 临时任务 belongs to no project. Like a small project, whoever writes it may
@@ -3253,8 +3339,8 @@ function newTask(projectId,initialDate){
      the server; an admin already holds every task. */
   const recount=()=>{
     serverMinutes=null;render();const p=project();if(admin||!p||p.owner!==S.user.id)return;
-    const [start,end]=span(),mine=++ask;
-    api('/api/action',{action:'project.member_loads',data:{id:p.id,start,end}}).then(r=>{if(mine!==ask||$('#modalBackdrop').classList.contains('hidden'))return;serverMinutes=r.minutes||null;render()}).catch(()=>{});
+    const [start,end]=span(),mine=++ask,dialog=$('#taskDialogTitle');
+    api('/api/action',{action:'project.member_loads',data:{id:p.id,start,end}}).then(r=>{if(mine!==ask||dialog!==$('#taskDialogTitle')||$('#modalBackdrop').classList.contains('hidden'))return;serverMinutes=r.minutes||null;render()}).catch(()=>{});
   };
   const setKind=k=>{kind=k;$$('.task-kind-btn[data-kind]').forEach(b=>b.classList.toggle('active',b.dataset.kind===k));$('#taskProjectField').classList.toggle('hidden',k!=='project');
     $('#taskAssigneeField').classList.toggle('hidden',k==='adhoc'&&tempSelfOnly());recount()};
@@ -3265,7 +3351,7 @@ function newTask(projectId,initialDate){
   _sd.onchange=()=>{_syncDl();recount()};_dl.onchange=recount;$('#taskProject').onchange=recount;$('#taskAssignee').onchange=render;_syncDl();
   setKind(kind);$('#cancelAction').onclick=closeModal;
   draftForm(`task.new${locked?':'+projectId:''}`,{title:'新任务',label:locked?projects.find(p=>p.id===projectId)?.name||'':'',
-    reopen:['newTask',locked?projectId:null],submit:['task.create'],
+    reopen:['newTask',locked?projectId:null,initialDate],submit:['task.create'],
     extra:()=>({_kind:kind,_project:kind==='project'?$('#taskProject').value:''}),
     restore:f=>{if(!locked&&projects.some(p=>p.id===f._project))$('#taskProject').value=f._project;
       if(f._kind==='adhoc'&&temp!=='none'||f._kind==='project'&&projects.length)setKind(f._kind)}});

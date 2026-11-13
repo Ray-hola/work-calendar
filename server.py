@@ -3043,8 +3043,10 @@ class Store:
             clean[str(name)] = value
         if sum(len(v) for v in clean.values()) > FORM_DRAFT_CHARS:
             raise Problem(400, '草稿太长了')
-        reopen = d.get('reopen') or {}
-        args = reopen.get('args') or []
+        reopen = d.get('reopen')
+        if not isinstance(reopen, dict):
+            raise Problem(400, '草稿来源无效')
+        args = reopen.get('args', [])
         if (reopen.get('fn') not in FORM_DRAFT_OPENERS or not isinstance(args, list) or len(args) > 4
                 or any(not (a is None or isinstance(a, bool) or (isinstance(a, str) and len(a) <= 120)) for a in args)):
             raise Problem(400, '草稿来源无效')
@@ -3480,11 +3482,15 @@ class Store:
                     if row.get('user')==target:self.db.execute('DELETE FROM agent_drafts WHERE id=?',(row['id'],))
             self.audit(user['id'],'agent.history.clear',{'target':target})
             return {'cleared':True,'userId':target}
+        if action in ('formdraft.save', 'formdraft.delete') and 'owner' in d and d['owner'] != user['id']:
+            raise Problem(403, '账户已切换，草稿未同步')
         if action=='formdraft.save':
             return self.save_form_draft(user, d)
         if action=='formdraft.delete':
             keys=d.get('keys') if isinstance(d.get('keys'),list) else [d.get('key')]
-            if not keys or len(keys)>FORM_DRAFT_LIMIT:raise Problem(400,'请选择要删除的草稿')
+            if (not keys or len(keys)>FORM_DRAFT_LIMIT
+                    or any(not isinstance(key, str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,120}', key) for key in keys)):
+                raise Problem(400,'请选择要删除的草稿')
             for key in keys:
                 self.db.execute('DELETE FROM form_drafts WHERE id=?',(f'{user["id"]}:{key}',))
             return {'deleted':len(keys)}
