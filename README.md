@@ -17,6 +17,8 @@
 
 ## 功能
 
+- 界面语言：每个人在头像菜单（或登录卡片）里选简体中文或 English；选择保存在账户上，也记在浏览器里（`localStorage` 的 `hola-lang`）。地址加 `?lang=en` 只让这一页显示英文，不保存。大家填写的名称不会被翻译。
+
 **任务**
 - 三种任务：项目任务、临时任务（不挂项目，成员可按规则给自己或其他成员创建，创建人跟进进度并处理修改申请）、固定安排（每天 / 工作日 / 每周几 / 每月 / 指定日期，可挂到项目，单日可挖空）。
 - 完成即结束，不需要审批：执行人可以修改完成记录，项目 Owner 或管理员可以写明原因打回。
@@ -146,8 +148,9 @@ Docker Compose、Cloudflare Tunnel、Caddy、systemd、Windows 计划任务与�
 server.py            HTTP 接口、权限、SQLite 存储、调度与助手工具循环
 agent_workspace.py   隔离只读 SQL 工作区、工具定义、分页与记录读取
 assistant_privacy.py  连接密钥绑定与助手记录脱敏
-app.js               前端视图与交互
-index.html           页面骨架；两处 ?v= 是静态资源的缓存版本号
+app.js               前端视图与交互；界面文字用中文写在 tr('…') 里
+i18n.js              英文界面词典（键是中文原文）
+index.html           页面骨架；?v= 是静态资源的缓存版本号
 styles.css           样式（桌面 / 平板 / 手机三档）
 tests/               后端 unittest 与前端 node:test 回归测试
 deploy/              Docker Compose、Tunnel、Caddy、systemd、备份模板
@@ -162,7 +165,7 @@ data/                运行时数据（数据库、账户文件），不进版�
 
 一次常见改动的路径：
 
-1. **改界面或交互**：改 `app.js` / `styles.css`，同时更新 `index.html` 里的 `?v=` 版本号。
+1. **改界面或交互**：改 `app.js` / `styles.css`，同时更新 `index.html` 里的 `?v=` 版本号。新增的界面文字写成 `tr('中文')`，并在 `i18n.js` 补上英文。
 2. **改规则或接口**：改 `server.py` 中对应的 `action` 分支，权限检查也在那里。
 3. **补测试**：后端行为写进 `tests/test_*.py`，前端可见范围和日期边界写进 `tests/calendar.test.cjs`。
 4. **本地验证**：

@@ -1,4 +1,4 @@
-# Hola-Calendar in one small image: the standard-library server and the three
+# Hola-Calendar in one small image: the standard-library server and the four
 # front-end files. Everything it writes lives in /app/data; mount it as a volume.
 FROM python:3.12-slim
 
@@ -12,7 +12,7 @@ WORKDIR /app
 # The server needs no packages; tzdata supplies Asia/Shanghai, which slim images leave out.
 RUN pip install --no-cache-dir tzdata
 
-COPY server.py agent_workspace.py assistant_privacy.py app.js index.html styles.css ./
+COPY server.py agent_workspace.py assistant_privacy.py app.js i18n.js index.html styles.css ./
 
 EXPOSE 4173
 VOLUME ["/app/data"]

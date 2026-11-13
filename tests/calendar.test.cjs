@@ -8,6 +8,8 @@ const vm = require('node:vm');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../app.js'), 'utf8');
 const definitions = source.slice(0, source.indexOf("$$('.nav-item').forEach(b=>b.onclick="));
+/* Source fragments lifted out on their own still call tr(); in Chinese it only fills {0}… */
+const tr = (text, ...args) => text.replace(/\{(\d+)\}/g, (m, i) => i < args.length ? String(args[i]) : m);
 
 function app() {
   const context = vm.createContext({});
@@ -235,8 +237,8 @@ test('entry points follow the rule group: new, request, or not offered', () => {
   // Your own project is always direct; a project you only collaborate on follows the group.
   assert.deepEqual(a.json('taskProjects().map(x=>[x.p.id,x.mode])'),[['q','direct']]);
   assert.equal(a.run('taskEntryMode()'),'direct');
-  assert.ok(a.run("entryLabel('approval','项目')").endsWith('申请项目'));
-  assert.ok(a.run("entryLabel('direct','任务')").endsWith('新任务'));
+  assert.ok(a.run("entryLabel('approval','project')").endsWith('申请项目'));
+  assert.ok(a.run("entryLabel('direct','task')").endsWith('新任务'));
   a.run(`S.projects=S.projects.filter(p=>p.id!=='q');S.creationRules={project:'none',tempTask:'approval',projectTask:'approval'}`);
   assert.deepEqual(a.json('taskProjects().map(x=>[x.p.id,x.mode])'),[['p','approval']]);
   assert.equal(a.run('taskEntryMode()'),'approval');
@@ -329,7 +331,7 @@ test('project summaries label collaborator progress as personal instead of proje
 test('project content tabs keep the dedicated meetings workspace and keyboard navigation',()=>{
   const a=app();
   const sourceText=source;
-  assert.match(sourceText,/const SPACE_TABS=\{[^}]*meetings:'会议'/);
+  assert.match(sourceText,/const SPACE_TABS=\{[^}]*meetings:tr\('会议'\)/);
   assert.match(sourceText,/panel\('meetings',projectMeetings\(p/);
   assert.match(sourceText,/function bindProjectContentTabs\(\)/);
   assert.match(sourceText,/archive\?\['files','meetings'\]/,'归档项目只留文件和会议两个标签');
@@ -646,9 +648,9 @@ function agentHarness(queue, verdicts) {
   };
   const loop = new Function(
     'agentState', 'agentAppend', 'agentUpdateBusy', 'agentNext', 'agentRunOne',
-    'AGENT_MAX_STEPS', 'AGENT_MAX_FAILURES', 'AGENT_MAX_REPEATS', 'AGENT_ACTION_LABELS',
+    'AGENT_MAX_STEPS', 'AGENT_MAX_FAILURES', 'AGENT_MAX_REPEATS', 'AGENT_ACTION_LABELS', 'tr',
     AGENT_LOOP_SOURCE + '\nreturn agentLoop;'
-  )(state, append, busy, next, runOne, AGENT_MAX_STEPS, AGENT_MAX_FAILURES, AGENT_MAX_REPEATS, {});
+  )(state, append, busy, next, runOne, AGENT_MAX_STEPS, AGENT_MAX_FAILURES, AGENT_MAX_REPEATS, {}, tr);
   return {
     loop,
     ran: () => trace.filter(x => x[0] === 'ran').map(x => x[1]),
@@ -766,9 +768,9 @@ const CHAT_BODY_SOURCE = ['CHAT_URL_RE', 'chatMentionName', 'chatParseMentions',
 function chatRoom(users) {
   const a = app();
   a.run(`S.user={id:'superadmin',admin:1};S.users=${JSON.stringify(users)}`);
-  const built = new Function('escapeHTML', 'nameOf', 'S', 'CHAT_EVERYONE',
+  const built = new Function('escapeHTML', 'nameOf', 'S', 'CHAT_EVERYONE', 'tr',
     CHAT_BODY_SOURCE + '\nreturn {chatBodyHTML, chatParseMentions};')(
-      a.run('escapeHTML'), a.run('nameOf'), a.run('S'), CHAT_EVERYONE);
+      a.run('escapeHTML'), a.run('nameOf'), a.run('S'), CHAT_EVERYONE, tr);
   return {render: built.chatBodyHTML, mentions: built.chatParseMentions};
 }
 
@@ -1127,7 +1129,7 @@ function voiceApp() {
     $: selector => (selector === '#agentInput' ? input : selector === '#agentVoiceBar' ? bar : null),
     agentSyncPlanButton() {}, agentUpdateBusy() {}, toast() {}, agentServerAsr: null,
     TRANSCRIBE_ENDPOINT: '/api/transcribe', apiBlob: async () => ({text: ''}),
-    navigator: {languages: ['zh-CN']},
+    navigator: {languages: ['zh-CN']}, tr,
     Blob: class { constructor(parts, options) { this.parts = parts; this.type = options.type; } },
   });
   vm.runInContext(section, context);
@@ -1746,7 +1748,7 @@ test('the week starts on the day the team picked', () => {
 test('the assistant keeps conversations in a side list and its message tools are icons', () => {
   const tools = source.match(/function agentMessageTools\([\s\S]*?\n\}/)[0];
   for (const [name, label] of [['copy','复制'],['edit','修改重发'],['undo','回退到这里']])
-    assert.ok(tools.includes(`button('${name}','${label}'`), label);
+    assert.ok(tools.includes(`button('${name}',tr('${label}')`), label);
   assert.ok(!/agentShowHistory/.test(source), '不再弹出单独的工作记录卡片');
   assert.ok(/agentHistoryBtn'\)\?\.addEventListener\('click',\(\)=>agentToggleSessions\(\)\)/.test(source));
   const use = source.match(/function agentUseConversation\(id\)\{[\s\S]*?\n\}/)[0];
@@ -3479,15 +3481,206 @@ test('meeting modal binds save and deletion to its own controls instead of a hid
   assert.equal(calls.at(-1).data.title,'modal title');assert.equal(nodes['#meetingEditor'].innerHTML,'background');
 });
 
+/* Interface language: 简体中文 stays the source text, English comes from i18n.js. */
+const i18nSource = fs.readFileSync(path.join(__dirname, '../i18n.js'), 'utf8');
+function appIn(lang, search = '') {
+  const context = vm.createContext({
+    localStorage: {getItem: key => (key === 'hola-lang' ? lang : null), setItem() {}},
+    location: {search}, URLSearchParams,
+  });
+  vm.runInContext(i18nSource, context);
+  vm.runInContext(definitions, context);
+  return {context, run: code => vm.runInContext(code, context)};
+}
+
+test('the interface language defaults to Chinese and follows the saved choice or ?lang=', () => {
+  assert.equal(app().run('LANG'), 'zh', 'no storage at all means Chinese');
+  assert.equal(appIn(null).run('LANG'), 'zh');
+  assert.equal(appIn('fr').run('LANG'), 'zh', 'an unknown value is ignored');
+  assert.equal(appIn('en').run('LANG'), 'en');
+  assert.equal(appIn('zh', '?lang=en').run('LANG'), 'en', 'the address overrides storage for one page');
+  assert.equal(appIn('en', '?lang=zh').run('LANG'), 'zh');
+});
+
+test('Chinese mode renders the source text unchanged, including placeholders', () => {
+  const a = appIn('zh');
+  assert.equal(a.run("tr('今日任务')"), '今日任务');
+  assert.equal(a.run("tr('{0} 分钟前',5)"), '5 分钟前');
+  assert.equal(a.run("fmt('2026-11-09')"), '11月9日');
+  assert.equal(a.run("wd('2026-11-09')"), '周一');
+  assert.equal(a.run("status({status:'doing'})[1]"), '进行中');
+});
+
+test('English mode translates labels, dates, weekdays and relative times', () => {
+  const a = appIn('en');
+  assert.equal(a.run("tr('今日任务')"), 'Today');
+  assert.equal(a.run("fmt('2026-11-09')"), 'Nov 9');
+  assert.equal(a.run("wd('2026-11-09')"), 'Mon');
+  assert.equal(a.run("monthLabel('2026-11')"), 'Nov 2026');
+  assert.equal(a.run("archiveDay('2026-11-09')"), 'Nov 9 · Mon');
+  assert.equal(a.run("tr('{0} 分钟前',5)"), '5 min ago');
+  assert.equal(a.run("status({status:'doing'})[1]"), 'In progress');
+  assert.equal(a.run("status({status:'done'})[1]"), 'Done');
+  assert.equal(a.run("tr('{0} 个项目',1)"), '1 project', 'a count of one reads singular');
+  assert.equal(a.run("tr('{0} 个项目',3)"), '3 projects');
+  assert.equal(a.run("tr('哗啦！')"), 'Hola!');
+  assert.equal(a.run("tr('没有这句')"), '没有这句', 'a missing entry falls back to Chinese');
+});
+
+test('English labels built from pieces keep their spaces and button labels read as actions', () => {
+  const a = appIn('en');
+  assert.equal(a.run("tr('{0}完成 · {1}',tr('任务'),'整理竞品报价')"), 'Task completed · 整理竞品报价');
+  assert.equal(a.run("tr('{0}递延至 {1}{2}','',fmt('2026-11-10'),'')"), 'Deferred to Nov 10');
+  assert.equal(a.run("tr('{0}递延至 {1}{2}',tr('合并 {0} 期',3),fmt('2026-11-10'),'')"),
+    '3 periods merged, deferred to Nov 10');
+  for (const [key, label] of [['{0}开始任务','Start'],['{0}记录完成','Record completion'],['{0}未完成，递延','Not done, defer'],
+                              ['{0}修改完成记录','Edit completion record'],['{0}打回','Send back'],['{0}同意修改','Approve change']])
+    assert.equal(a.run(`tr(${JSON.stringify(key)},'<i></i>')`), `<i></i>${label}`);
+  const css = fs.readFileSync(path.join(__dirname, '../styles.css'), 'utf8');
+  const block = selector => {
+    const found = css.match(new RegExp(`${selector} \\{([^}]*)\\}`));
+    assert.ok(found, `styles.css 缺少 ${selector}`);
+    return found[1];
+  };
+  const zh = block('(?:^|\\n)\\.task-card'), en = block('html:lang\\(en\\) \\.task-card');
+  const px = (rules, name) => Number(rules.match(new RegExp(`--${name}: (\\d+)px`))?.[1]);
+  assert.ok(px(en, 'task-status-col') > px(zh, 'task-status-col'),
+    'English status labels get a wider column than Chinese');
+  assert.ok(px(en, 'task-when-col') < px(zh, 'task-when-col'), 'which the shorter English dates pay for');
+  // A task row is the grid with the 72px priority column and the 16px arrow.
+  const layouts = css.match(/grid-template-columns:[^;]* 72px [^;]* 16px;/g) ?? [];
+  assert.ok(layouts.length > 1);
+  assert.ok(layouts.every(l => l.includes('var(--task-status-col) 16px')),
+    'every task-row layout uses the shared status width');
+  assert.match(css, /html:lang\(en\) \.task-card \.task-status \{\s*white-space: normal;/, 'Pending approval wraps instead of clipping');
+  assert.match(css, /@container \(max-width: 800px\)[\s\S]*?html:lang\(en\) \.task-card \.fixed-badge \.badge-label \{[^}]*clip-path/, 'narrow English rows keep only the recurring icon');
+  assert.match(source, /class="fixed-badge"\$\{LANG==='en'\?` title="\$\{tr\('固定'\)\}"`:''\}>/, 'and its title still says recurring');
+  assert.equal(a.run("tr('固定')"), 'recurring');
+});
+
+test('user data is never looked up: names stay as typed inside translated sentences', () => {
+  const a = appIn('en');
+  assert.equal(a.run("tr('确认删除「{0}」？删除后将从日历移除。','周报')"), 'Delete “周报”? It will be removed from the calendar.');
+  assert.equal(a.run("tr('{0}','今日任务')"), '今日任务');
+});
+
+test('the account menu offers both languages and marks the current one', () => {
+  const html = appIn('en').run("languageChooserHTML('account-menu-group')");
+  assert.match(html, /data-lang="zh"[^>]*>简体中文</);
+  assert.match(html, /class="language-option is-active" data-lang="en"[^>]*aria-pressed="true">English</);
+  assert.match(html, /aria-label="Language"/);
+  assert.match(source, /menu\.innerHTML=`\$\{head\}\$\{mine\}\$\{languageChooserHTML\('account-menu-group'\)\}/);
+});
+
+test('the account’s saved language wins over the browser unless ?lang= is set', () => {
+  const a = appIn('zh');
+  let reloaded = 0;
+  const writes = [], kept = {};
+  a.context.location.reload = () => {
+    reloaded++;
+  };
+  a.context.localStorage.setItem = (k, v) => {
+    writes.push([k, v]);
+    kept[k] = v;
+  };
+  a.context.localStorage.getItem = k => kept[k] ?? null;
+  assert.equal(a.run("syncAccountLanguage({lang:''})"), false, 'no saved choice keeps the browser’s');
+  assert.equal(a.run("syncAccountLanguage({lang:'zh'})"), false);
+  assert.equal(a.run("syncAccountLanguage({lang:'en'})"), true);
+  assert.equal(reloaded, 1);
+  assert.equal(a.run('UI.reloading'), true, 'sign-in stops there instead of showing the old page');
+  assert.match(source, /await refresh\(\);\n[^\n]*\n\s*if\(!UI\.reloading\)switchView\('calendar'\)/);
+  assert.deepEqual(writes.at(-1), ['hola-lang', 'en']);
+  const pinned = appIn('zh', '?lang=zh');
+  pinned.context.location.reload = () => { throw new Error('should not reload'); };
+  assert.equal(pinned.run("syncAccountLanguage({lang:'en'})"), false);
+  // A browser that keeps nothing moves to ?lang= once instead of reloading for ever.
+  const forgetful = appIn('zh');
+  const moves = [];
+  forgetful.context.location.href = 'https://work.example/';
+  forgetful.context.URL = URL;
+  forgetful.context.location.reload = () => {
+    throw new Error('should not reload');
+  };
+  forgetful.context.location.replace = href => moves.push(href);
+  forgetful.context.localStorage.setItem = () => {
+    throw new Error('blocked');
+  };
+  assert.equal(forgetful.run("syncAccountLanguage({lang:'en'})"), true);
+  assert.deepEqual(moves, ['https://work.example/?lang=en&langAuto=1']);
+  // That mark does not pin the language for the next account to sign in on the page.
+  const next = appIn('zh', '?lang=en&langAuto=1');
+  next.context.location.href = 'https://work.example/?lang=en&langAuto=1';
+  next.context.URL = URL;
+  next.context.location.replace = href => moves.push(href);
+  next.context.localStorage.setItem = () => {
+    throw new Error('blocked');
+  };
+  assert.equal(next.run('LANG'), 'en');
+  assert.equal(next.run("syncAccountLanguage({lang:'zh'})"), true);
+  assert.equal(moves.at(-1), 'https://work.example/?lang=zh&langAuto=1');
+  assert.equal(next.run("syncAccountLanguage({lang:'en'})"), false, 'the language already shown stays');
+});
+
+test('server messages follow the language while keeping the names they carry', () => {
+  const en = appIn('en'), zh = appIn('zh');
+  assert.equal(en.run("trServer('账户或密码错误')"), 'Wrong account or password');
+  assert.equal(en.run("trServer('收到任务指派')"), 'New task assigned');
+  assert.equal(en.run("trServer('林默 指派「整理竞品报价」，安排日期 2026-11-09。')"),
+    '林默 assigned “整理竞品报价”, scheduled for 2026-11-09.');
+  assert.equal(en.run("trServer('「官网改版」被 陈曦 打回，请继续处理。\\n原因：补上数据')"),
+    '陈曦 sent “官网改版” back for more work.\nReason: 补上数据');
+  assert.equal(en.run("trServer('一条没见过的消息')"), '一条没见过的消息');
+  assert.equal(zh.run("trServer('账户或密码错误')"), '账户或密码错误');
+});
+
+test('every string app.js and index.html translate has an English entry with the same placeholders', () => {
+  const a = appIn('en'), dict = a.run('I18N_EN');
+  const keys = new Set();
+  for (const m of source.matchAll(/\btr\((['"])((?:\\.|(?!\1).)*)\1/g)) keys.add(vm.runInNewContext(`${m[1]}${m[2]}${m[1]}`));
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8').replace(/<script[\s\S]*?<\/script>/g, '');
+  for (const m of html.matchAll(/>([^<>]*[一-鿿][^<>]*)</g)) keys.add(m[1].trim());
+  for (const m of html.matchAll(/\s(?:title|aria-label|placeholder|data-keywords|data-nav)="([^"]*[一-鿿][^"]*)"/g)) keys.add(m[1].trim());
+  const missing = [...keys].filter(k => /[一-鿿]/.test(k) && !Object.prototype.hasOwnProperty.call(dict, k));
+  assert.deepEqual(missing, []);
+  const holes = s => [...new Set(String(s).match(/\{\d+\}/g) || [])].sort().join();
+  const mismatched = Object.entries(dict).filter(([k, v]) => typeof v === 'string' && holes(k) !== holes(v)).map(([k]) => k);
+  assert.deepEqual(mismatched, []);
+  const quoted = Object.entries(dict).filter(([k, v]) => typeof v === 'string' && v.includes('"') && !k.includes('"')).map(([k]) => k);
+  assert.deepEqual(quoted, [], 'English must not add ASCII double quotes: translations sit inside HTML attributes');
+});
+
+test('the built-in rule group shows translated but saves back as stored', () => {
+  const a = appIn('en');
+  assert.equal(a.run("ruleGroupName({id:'default',name:'默认规则'})"), 'Default rules');
+  assert.equal(a.run("ruleGroupName({id:'default',name:'市场部'})"), '市场部');
+  assert.equal(a.run("ruleGroupName({id:'g2',name:'默认规则'})"), '默认规则');
+  assert.match(source, /name:label===ruleGroupName\(draft\)\?draft\.name:label/);
+});
+
 function draftHarness() {
   const a = app(), calls = [], toasts = [];
   const fields = [{id: 'taskName', value: ''}, {id: 'taskDesc', value: ''}];
   const state = {listener: null, banner: '', timer: null};
-  const root = {querySelectorAll: () => fields, addEventListener: (event, f) => { if(event==='input')state.listener = f; },
-    insertAdjacentHTML: (_, html) => { state.banner = html; }};
-  a.context.document = {querySelector: s => s === '#modalContent' ? root : null, querySelectorAll: () => []};
-  a.context.setTimeout = f => { state.timer = f; return 1; };
-  a.context.clearTimeout = () => { state.timer = null; };
+  const root = {
+    querySelectorAll: () => fields,
+    addEventListener: (event, f) => {
+      if (event === 'input') {
+        state.listener = f;
+      }
+    },
+    insertAdjacentHTML: (_, html) => {
+      state.banner = html;
+    },
+  };
+  a.context.document = {querySelector: s => (s === '#modalContent' ? root : null), querySelectorAll: () => []};
+  a.context.setTimeout = f => {
+    state.timer = f;
+    return 1;
+  };
+  a.context.clearTimeout = () => {
+    state.timer = null;
+  };
   a.context.fetch = (path, options) => {
     calls.push(JSON.parse(options.body));
     return Promise.resolve({ok: true, status: 200, text: async () => '{}'});
@@ -3495,93 +3688,377 @@ function draftHarness() {
   a.context.toasts = toasts;
   a.run('toast=m=>toasts.push(m);S.formDrafts=[];UI.formDraft=null;');
   const open = () => a.run("draftForm('task.new',{title:'新任务',reopen:['newTask',null],submit:['task.create']})");
-  const type = (i, text) => { fields[i].value = text; state.listener({target: fields[i]}); state.timer(); };
-  return {a, calls, toasts, fields, state, open, type};
+  const type = (i, text) => {
+    fields[i].value = text;
+    state.listener({target: fields[i]});
+    return state.timer();
+  };
+  const settle = () => a.run("pendingFormDrafts.get(formDraftSlot(S.user?.id,'task.new'))?.promise.catch(()=>{})");
+  return {a, calls, toasts, fields, state, open, type, settle};
 }
 
 test('what is typed into a form is kept as a draft and filled back in when it reopens', async () => {
   const h = draftHarness();
   h.open();
-  h.type(1, '先列提纲');
+  await h.type(1, '先列提纲');
   const saved = h.calls.find(c => c.action === 'formdraft.save');
   assert.deepEqual(saved.data.fields, {taskName: '', taskDesc: '先列提纲'});
   assert.deepEqual(saved.data.reopen, {fn: 'newTask', args: [null]});
   assert.equal(h.a.run('S.formDrafts.length'), 1);
-  // Closing says it was kept; the same form opens with it again.
+  // Closing says it was kept, without saving again; the same form opens with it.
   await h.a.run('flushFormDraft(true)');
   assert.ok(h.toasts.some(m => m.includes('草稿箱')));
-  h.fields.forEach(f => { f.value = ''; });
+  assert.equal(h.calls.filter(c => c.action === 'formdraft.save').length, 1);
+  h.fields.forEach(f => {
+    f.value = '';
+  });
   h.open();
   assert.equal(h.fields[1].value, '先列提纲');
   assert.ok(h.state.banner.includes('已恢复草稿'));
+  await h.a.run('flushFormDraft(true)');
+  assert.equal(h.calls.filter(c => c.action === 'formdraft.save').length, 1, '恢复后没改就关闭，不再重存');
 });
 
-test('a submitted form leaves no draft, and typing back to the start removes it', async () => {
+test('a submitted form leaves no draft, even if it was closed while the request was out', async () => {
   const h = draftHarness();
   h.open();
-  h.type(0, '周报');
-  await h.a.run("api('/api/action',{action:'task.create'})");
+  await h.type(0, '周报');
+  const sending = h.a.run("api('/api/action',{action:'task.create',data:{}})");
+  await h.a.run('flushFormDraft(true)');
+  await sending;
+  await h.settle();
   assert.ok(h.calls.some(c => c.action === 'formdraft.delete' && c.data.key === 'task.new'));
   assert.equal(h.a.run('S.formDrafts.length'), 0);
   assert.equal(h.a.run('UI.formDraft'), null);
-  h.fields.forEach(f => { f.value = ''; });
+  assert.ok(!h.toasts.some(m => m.includes('已存为草稿')), '提交途中关闭不说已存草稿');
+  h.fields.forEach(f => {
+    f.value = '';
+  });
   h.open();
-  h.type(0, '周报');
-  h.type(0, '');
+  await h.type(0, '周报');
+  await h.type(0, '');
+  await h.settle();
   assert.equal(h.a.run('S.formDrafts.length'), 0, '和打开时一样就不算草稿');
   // An unrelated action leaves the draft where it is.
-  h.type(1, '补充');
-  await h.a.run("api('/api/action',{action:'chat.send'})");
+  await h.type(1, '补充');
+  await h.a.run("api('/api/action',{action:'chat.send',data:{}})");
   assert.equal(h.a.run('S.formDrafts.length'), 1);
 });
 
 test('failed draft writes survive refresh in this tab and are not reported as saved', async () => {
-  const h=draftHarness();
-  h.a.context.fetch=async()=>{throw new Error('offline')};
-  h.a.run("S.user={id:'writer'}");h.open();h.type(1,'未同步的描述');
+  const h = draftHarness();
+  h.a.context.fetch = async () => {
+    throw new Error('offline');
+  };
+  h.a.run("S.user={id:'writer'}");
+  h.open();
+  h.type(1, '未同步的描述').catch(() => {});
   await h.a.run('flushFormDraft(true)');
   h.a.run('S.formDrafts=[];restorePendingFormDrafts()');
-  assert.equal(h.a.run('S.formDrafts[0].fields.taskDesc'),'未同步的描述');
-  assert.ok(h.toasts.some(m=>m.includes('未同步')));
-  assert.ok(h.toasts.every(m=>!m.startsWith('已存为草稿')));
+  assert.equal(h.a.run('S.formDrafts[0].fields.taskDesc'), '未同步的描述');
+  assert.ok(h.toasts.some(m => m.includes('未同步')));
+  assert.ok(h.toasts.every(m => !m.startsWith('已存为草稿')));
   h.a.run("S.user={id:'other'};S.formDrafts=[];restorePendingFormDrafts()");
-  assert.equal(h.a.run('S.formDrafts.length'),0);
+  assert.equal(h.a.run('S.formDrafts.length'), 0);
 });
 
 test('a delayed task submission cannot clear the draft in a newer dialog', async () => {
-  const h=draftHarness();let finish;
-  const fetch=h.a.context.fetch;
-  h.a.context.fetch=(path,options)=>JSON.parse(options.body).action==='task.create'
-    ?new Promise(resolve=>{finish=resolve}):fetch(path,options);
-  h.open();h.type(0,'第一项');
-  const submitting=h.a.run("api('/api/action',{action:'task.create'})");
+  const h = draftHarness();
+  let finish;
+  const fetch = h.a.context.fetch;
+  h.a.context.fetch = (path, options) => (JSON.parse(options.body).action === 'task.create'
+    ? new Promise(resolve => {
+      finish = resolve;
+    })
+    : fetch(path, options));
+  h.open();
+  await h.type(0, '第一项');
+  const submitting = h.a.run("api('/api/action',{action:'task.create'})");
   await h.a.run('flushFormDraft()');
-  h.fields[0].value='';h.open();h.type(0,'第二项');
-  finish({ok:true,text:async()=> '{}'});await submitting;
-  assert.equal(h.a.run('UI.formDraft.fields[0].value'),'第二项');
-  assert.equal(h.a.run('S.formDrafts[0].fields.taskName'),'第二项');
+  h.fields[0].value = '';
+  h.open();
+  await h.type(0, '第二项');
+  finish({ok: true, text: async () => '{}'});
+  await submitting;
+  assert.equal(h.a.run('UI.formDraft.fields[0].value'), '第二项');
+  assert.equal(h.a.run('S.formDrafts[0].fields.taskName'), '第二项');
 });
 
-test('a draft also keeps the choices around the text, such as which kind of task', () => {
+test('a draft also keeps the choices around the text, and 丢弃 puts them back', async () => {
   const h = draftHarness();
-  h.a.run("var kind='adhoc',restored=null");
+  h.a.run("var kind='project',restored=[]");
   const open = () => h.a.run("draftForm('task.new',{title:'新任务',reopen:['newTask',null],submit:['task.create'],"
-    + "extra:()=>({_kind:kind}),restore:f=>{restored=f._kind}})");
+    + 'extra:()=>({_kind:kind}),restore:f=>{restored.push(f._kind);kind=f._kind}})');
   open();
-  h.type(0, '临时的事');
+  h.a.run("kind='adhoc'");
+  await h.type(0, '临时的事');
   assert.equal(h.calls.find(c => c.action === 'formdraft.save').data.fields._kind, 'adhoc');
   h.a.run("kind='project'");
-  h.fields.forEach(f => { f.value = ''; });
+  h.fields.forEach(f => {
+    f.value = '';
+  });
   open();
-  assert.equal(h.a.run('restored'), 'adhoc');
+  assert.deepEqual(h.a.json('restored'), ['adhoc']);
+  h.a.run('discardRestoredDraft(UI.formDraft)');
+  assert.deepEqual(h.a.json('restored'), ['adhoc', 'project']);
+  assert.equal(h.fields[0].value, '');
+});
+
+test('a draft reopens only while its work can still take it', () => {
+  const a = app(), opened = [];
+  a.context.opened = opened;
+  a.run("S.user={id:'u',admin:0};S.tasks=[{id:'t',status:'done'}];");
+  a.run("S.taskRequests=[{id:'r',status:'approved',projectId:'p'}];");
+  a.run("S.projects=[{id:'p',status:'active',owner:'u'}];");
+  a.run('complete=t=>opened.push(t.id);reviewTaskRequest=id=>opened.push(id);reviewProject=id=>opened.push(id)');
+  a.run("DRAFT_OPENERS.complete('t');DRAFT_OPENERS.reviewTaskRequest('r');DRAFT_OPENERS.reviewProject('p')");
+  assert.deepEqual(opened, []);
+  a.run("S.tasks[0].status='doing';S.taskRequests[0].status='pending';S.projects[0].status='pending'");
+  a.run("DRAFT_OPENERS.complete('t');DRAFT_OPENERS.reviewTaskRequest('r');DRAFT_OPENERS.reviewProject('p')");
+  assert.deepEqual(opened, ['t', 'r', 'p']);
+  // Someone who can no longer review the request cannot reopen its rejection.
+  a.run("S.projects[0].owner='v';DRAFT_OPENERS.reviewTaskRequest('r')");
+  assert.deepEqual(opened, ['t', 'r', 'p']);
 });
 
 test('a rule group can keep its members temp tasks to themselves', () => {
   const a = app();
-  a.run("S.user={id:'test001',admin:0};S.creationRules={project:'approval',tempTask:'direct',projectTask:'none',agent:'read',tempAssign:'self'}");
+  a.run("S.user={id:'test001',admin:0};");
+  a.run("S.creationRules={project:'approval',tempTask:'direct',projectTask:'none',agent:'read',tempAssign:'self'}");
   assert.equal(a.run('tempSelfOnly()'), true);
   a.run("S.creationRules.tempAssign='anyone'");
   assert.equal(a.run('tempSelfOnly()'), false);
   a.run("S.user={id:'superadmin',admin:1};S.creationRules.tempAssign='self'");
   assert.equal(a.run('tempSelfOnly()'), false, '管理员不受这条限制');
+});
+
+const tick = () => new Promise(resolve => setImmediate(resolve));
+
+test('a stashed draft waits for its own account and gives way to a newer copy', async () => {
+  const h = draftHarness(), store = {};
+  h.a.context.localStorage = {
+    getItem: k => store[k] ?? null,
+    setItem: (k, v) => {
+      store[k] = String(v);
+    },
+    removeItem: k => {
+      delete store[k];
+    },
+  };
+  const row = {key: 'task.new', title: '新任务', label: '', fields: {taskName: '长稿'},
+    reopen: {fn: 'newTask', args: [null]}, updatedAt: '2026-11-13T10:00:00Z', typedAt: '2026-11-13T10:00:00.000Z'};
+  const stash = JSON.stringify({owner: 'writer', row});
+  store['hola-form-draft-stash'] = stash;
+  h.a.run("S.user={id:'other'};S.formDrafts=[];sendStashedFormDraft()");
+  assert.equal(store['hola-form-draft-stash'], stash, '别的账户登录不动这份暂存');
+  h.a.run("S.user={id:'writer'};sendStashedFormDraft()");
+  await h.settle();
+  assert.equal(store['hola-form-draft-stash'], undefined);
+  assert.ok(h.calls.some(c => c.action === 'formdraft.save' && c.data.fields.taskName === '长稿'));
+  // A copy saved after the stash was written wins.
+  store['hola-form-draft-stash'] = stash;
+  h.a.run("UI.draftStashChecked=null;S.formDrafts=[{key:'task.new',updatedAt:'2026-11-13T09:00:00Z',"
+    + "typedAt:'2026-11-13T11:00:00.000Z',fields:{}}]");
+  const sent = h.calls.length;
+  h.a.run('sendStashedFormDraft()');
+  assert.equal(h.calls.length, sent);
+  assert.equal(store['hola-form-draft-stash'], undefined);
+});
+
+test('a closing page sends its draft without waiting for the save before it', () => {
+  const h = draftHarness();
+  const fetch = h.a.context.fetch;
+  let hold = true;
+  h.a.context.fetch = (path, options) => {
+    if (!hold) {
+      return fetch(path, options);
+    }
+    hold = false;
+    h.calls.push(JSON.parse(options.body));
+    return new Promise(() => {});
+  };
+  h.open();
+  h.type(0, '第一段');
+  h.fields[0].value = '第一段，第二段';
+  h.state.listener({target: h.fields[0]});
+  h.a.run('saveFormDraft({keepalive:true})');
+  const saves = h.calls.filter(c => c.action === 'formdraft.save');
+  assert.deepEqual(saves.map(c => c.data.fields.taskName), ['第一段', '第一段，第二段']);
+});
+
+test('a 丢弃 that does not reach the server puts the draft back', async () => {
+  const h = draftHarness();
+  h.open();
+  await h.type(0, '要留下的');
+  h.a.context.fetch = async () => {
+    throw new Error('offline');
+  };
+  h.fields[0].value = '';
+  h.open();
+  h.a.run('discardRestoredDraft(UI.formDraft)');
+  await tick();
+  assert.equal(h.a.run('S.formDrafts.length'), 1);
+  assert.ok(h.toasts.includes('offline'));
+});
+
+test('a form opened again but left alone loses the draft its earlier submit used', async () => {
+  const h = draftHarness();
+  let finish;
+  const fetch = h.a.context.fetch;
+  h.a.context.fetch = (path, options) => (JSON.parse(options.body).action === 'task.create'
+    ? new Promise(resolve => {
+      finish = resolve;
+    })
+    : fetch(path, options));
+  h.open();
+  await h.type(0, '第一项');
+  const submitting = h.a.run("api('/api/action',{action:'task.create'})");
+  await h.a.run('flushFormDraft()');
+  h.fields[0].value = '';
+  h.open();
+  assert.ok(h.state.banner.includes('已恢复草稿'));
+  finish({ok: true, text: async () => '{}'});
+  await submitting;
+  await h.settle();
+  assert.equal(h.a.run('S.formDrafts.length'), 0);
+  assert.equal(h.a.run('UI.formDraft.saved'), false);
+});
+
+test('closing right after 丢弃 does not say the draft was kept', async () => {
+  const h = draftHarness();
+  h.open();
+  await h.type(0, '先写着');
+  h.fields[0].value = '';
+  h.open();
+  let finish;
+  h.a.context.fetch = (path, options) => {
+    h.calls.push(JSON.parse(options.body));
+    return new Promise(resolve => {
+      finish = resolve;
+    });
+  };
+  h.a.run('discardRestoredDraft(UI.formDraft)');
+  const closing = h.a.run('flushFormDraft(true)');
+  finish({ok: true, status: 200, text: async () => '{}'});
+  await closing;
+  assert.ok(h.calls.some(c => c.action === 'formdraft.delete'));
+  assert.ok(!h.toasts.some(m => m.startsWith('已存为草稿')));
+});
+
+test('a submit that fails keeps the draft and lets the form submit again', async () => {
+  const h = draftHarness();
+  h.open();
+  await h.type(0, '会失败的提交');
+  const fetch = h.a.context.fetch;
+  h.a.context.fetch = (path, options) => (JSON.parse(options.body).action === 'task.create'
+    ? Promise.resolve({ok: false, status: 400, text: async () => JSON.stringify({error: '名称重复'})})
+    : fetch(path, options));
+  await assert.rejects(h.a.run("api('/api/action',{action:'task.create',data:{}})"), /名称重复/);
+  assert.equal(h.a.run('S.formDrafts.length'), 1);
+  assert.equal(h.a.run('UI.formDraft.submitting'), false);
+  assert.ok(!h.calls.some(c => c.action === 'formdraft.delete'));
+});
+
+test('a refused request keeps its status and the server’s own words under the translation', async () => {
+  const a = appIn('en');
+  a.context.fetch = async () => ({ok: false, status: 409,
+    text: async () => JSON.stringify({error: '草稿已在其他页面更新，请重新打开后继续'})});
+  const e = await a.run("api('/api/action',{action:'agent.draft.save',data:{}}).catch(e=>e)");
+  assert.equal(e.status, 409);
+  assert.equal(e.raw, '草稿已在其他页面更新，请重新打开后继续');
+  assert.equal(e.message, 'The draft was updated on another page. Reopen it to continue');
+  assert.match(source, /board\.conflict=\/其他页面\|已删除\/\.test\(raw\)/,
+    'the plan board checks the words, not the message');
+});
+
+test('a language the account could not save is not switched to', async () => {
+  const a = appIn('zh');
+  const writes = [];
+  a.context.localStorage.setItem = (k, v) => writes.push([k, v]);
+  a.context.location.reload = () => {
+    throw new Error('should not reload');
+  };
+  a.context.toasts = [];
+  a.run("S.user={id:'u'};toast=m=>toasts.push(m);api=async()=>{throw new Error('offline')}");
+  await a.run("setLanguage('en')");
+  assert.deepEqual(writes, []);
+  assert.deepEqual([...a.context.toasts], ['offline']);
+});
+
+test('a count of one reads singular without touching the names put into a sentence', () => {
+  const a = appIn('en');
+  assert.equal(a.run("tr('{0} 个项目',1)"), '1 project');
+  assert.equal(a.run("tr('已退出「{0}」','Top 1 tasks')"), 'Left “Top 1 tasks”');
+});
+
+test('what the interface fills in is sent in Chinese and read in the viewer’s language', () => {
+  assert.match(source, /summary:\$\('#doneText'\)\.value\|\|'完成任务'/);
+  assert.match(source, /remaining:\$\('#remainText'\)\.value\|\|'继续完成原任务'/);
+  assert.match(source, /reason:\$\('#projectRejectReason'\)\.value\|\|'申请信息需要补充'/);
+  assert.match(source, /summary:'完成任务',[\s\S]{0,120}feeling:'顺利'/);
+  assert.match(source, /DEFER_REASONS\.map\(r=>`<option value="\$\{r\}">\$\{tr\(r\)\}<\/option>`\)/);
+  const a = appIn('en');
+  assert.deepEqual(JSON.parse(a.run('JSON.stringify(DEFER_REASONS)')), ['时间不足', '等待他人', '需求变化', '遇到阻塞', '其他']);
+  assert.equal(a.run("tr(DEFER_REASONS[0])"), a.run("I18N_EN['时间不足']"));
+  assert.ok(a.run("logLine({kind:'complete',summary:'完成任务'})").endsWith(a.run("I18N_EN['完成任务']")));
+});
+
+test('a plan typed with either language’s marker is still a plan', () => {
+  assert.match(source, /const AGENT_PLAN_ALIASES=\[AGENT_PLAN_MARK,'\/plan','\[规划\]','\[Plan\]'\];/);
+});
+
+test('every fixed message the server sends has an English entry', () => {
+  const a = appIn('en');
+  const dict = a.run('I18N_EN'), patterns = a.run('I18N_EN_PATTERNS');
+  const server = fs.readFileSync(path.join(__dirname, '../server.py'), 'utf8');
+  const sent = [...server.matchAll(/Problem\(\d+,\s*'([^'{]*[\u4e00-\u9fff][^'{]*)'\)/g)].map(m => m[1]);
+  assert.ok(sent.length > 100);
+  const known = k => Object.prototype.hasOwnProperty.call(dict, k) || patterns.some(([re]) => re.test(k));
+  assert.deepEqual(sent.filter(k => !known(k)), []);
+});
+
+test('a stash is weighed by when its text was typed, not when the server stamped a copy', () => {
+  const h = draftHarness(), store = {};
+  h.a.context.localStorage = {
+    getItem: k => store[k] ?? null,
+    setItem: (k, v) => {
+      store[k] = String(v);
+    },
+    removeItem: k => {
+      delete store[k];
+    },
+  };
+  const row = {key: 'task.new', title: '新任务', label: '', fields: {taskName: '最后一句'},
+    reopen: {fn: 'newTask', args: [null]}, updatedAt: '2026-11-13T10:00:05.000Z', typedAt: '2026-11-13T10:00:05.000Z',
+    writer: 'page-a', seq: 3};
+  store['hola-form-draft-stash'] = JSON.stringify({owner: 'writer', row});
+  // The page's earlier save landed after it closed: stamped later by the server, but earlier in that page's order.
+  h.a.run("S.user={id:'writer'};S.formDrafts=[{key:'task.new',updatedAt:'2026-11-13T10:00:09Z',"
+    + "typedAt:'2026-11-13T10:00:04.000Z',writer:'page-a',seq:2,fields:{}}];sendStashedFormDraft()");
+  assert.ok(h.calls.some(c => c.action === 'formdraft.save' && c.data.fields.taskName === '最后一句'));
+  // Text typed later on another page wins over the stash.
+  store['hola-form-draft-stash'] = JSON.stringify({owner: 'writer', row});
+  h.a.run("UI.draftStashChecked=null;S.formDrafts=[{key:'task.new',typedAt:'2026-11-13T10:00:06.000Z',"
+    + "writer:'page-b',seq:1,fields:{}}]");
+  const sent = h.calls.length;
+  h.a.run('sendStashedFormDraft()');
+  assert.equal(h.calls.length, sent);
+  // Every write names this page and its place in the page's order.
+  h.a.run("writeFormDraft('writer','task.other',null);writeFormDraft('writer','task.third',null)");
+  const [first, second] = h.calls.filter(c => c.action === 'formdraft.delete').map(c => c.data);
+  assert.equal(first.writer, second.writer);
+  assert.ok(second.seq > first.seq);
+});
+
+test('草稿箱 previews the typed text, not the project picked above it', async () => {
+  const h = draftHarness();
+  h.fields.unshift({id: 'taskProject', value: 'p-1234', tagName: 'SELECT'});
+  h.fields[1].tagName = 'INPUT';
+  h.fields[1].type = 'text';
+  h.fields[2].tagName = 'TEXTAREA';
+  h.open();
+  await h.type(2, '先列提纲');
+  const saved = h.calls.find(c => c.action === 'formdraft.save').data;
+  assert.deepEqual(Object.keys(saved.fields), ['taskName', 'taskDesc', 'taskProject']);
+  assert.equal(h.a.run('draftPreview(S.formDrafts[0])'), '先列提纲');
 });
