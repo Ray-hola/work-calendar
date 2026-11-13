@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 128" role="img" aria-label="Hola! mark">
+  <!-- the exclamation of 哗啦！ / Hola!: an ink stroke, and a dot that is a checked box -->
+  <path d="M36 6 H64 L57.5 78 H42.5 Z" fill="#1F1B15" stroke="#1F1B15" stroke-width="6" stroke-linejoin="round"/>
+  <rect x="31" y="89" width="38" height="38" rx="9" fill="#D97757"/>
+  <path d="M40.5 108.5 L47.5 115.5 L60 100" fill="none" stroke="#FFFDF9" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

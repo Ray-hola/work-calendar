@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo/icon-bang.svg" alt="Hola! logo: an exclamation mark whose dot is a checked to-do" width="96"></p>
+
 # Hola-Calendar
 
 **A self-hosted task and project workbench for small teams.** One Python file and one SQLite database, no runtime dependencies, and your data stays on your own machine. The interface comes in 简体中文 and English; the product is called **Hola!** (Hola-Calendar) in English and **哗啦！** (哗啦待办) in Chinese.
