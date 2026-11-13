@@ -951,13 +951,16 @@ const MIN_DEFER_MINUTES = 15;
 const DEFER_REASONS = ['时间不足', '等待他人', '需求变化', '遇到阻塞', '其他'];
 function defer(t){
   const remain=Math.max(MIN_DEFER_MINUTES,Math.round(t.duration/2));
+  /* A task spanning several days may have started days ago: the day it moves
+     to is counted from today, never from a day already gone. */
+  const next=add(t.date>S.today?t.date:S.today,1),target=next>DATE_HORIZON?DATE_HORIZON:next;
   openModal([
     `<div class="eyebrow">${tr('未完成 · 递延预览')}</div><h2>${tr('先说说卡在哪里')}</h2>`,
     `<label class="form-field">${tr('原因')}<select id="deferReason">`,
     DEFER_REASONS.map(r=>`<option value="${r}">${tr(r)}</option>`).join(''),
     `</select></label><label class="form-field">${tr('剩余工作')}<textarea id="remainText"></textarea></label>`,
     `<label class="form-field">${tr('递延到')}`,
-    `<input id="deferDate" type="date" max="${DATE_HORIZON}" value="${add(t.date,1)}"></label>`,
+    `<input id="deferDate" type="date" min="${t.date<S.today?S.today:add(t.date,1)}" max="${DATE_HORIZON}" value="${target}"></label>`,
     `<label class="form-field">${tr('剩余时长')}<input id="remainMins" type="number" value="${remain}"></label>`,
     `<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('返回修改')}</button>`,
     `<button class="primary-btn" id="confirmDefer">${tr('确认递延')}</button></div>`,
@@ -5494,7 +5497,10 @@ async function deleteNotices(ids,read=false){
   try{
     const r=await api('/api/action',{action:'inbox.delete',data:read?{read:true}:{ids}});
     (ids||[]).forEach(id=>UI.inboxPicked?.delete(id));
-    await refresh();toast(r.deleted?tr('已删除 {0} 条通知',r.deleted):tr('没有可删除的通知'));
+    await refresh();
+    // A notice whose approval is still open stays: it may be the only way to reach it.
+    toast(r.kept?tr('已删除 {0} 条通知，{1} 条待审批的已保留',r.deleted,r.kept)
+      :r.deleted?tr('已删除 {0} 条通知',r.deleted):tr('没有可删除的通知'));
   }catch(e){toast(e.message)}
 }
 function renderInboxToolbar(){

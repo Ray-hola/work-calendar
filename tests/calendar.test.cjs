@@ -4062,3 +4062,25 @@ test('草稿箱 previews the typed text, not the project picked above it', async
   assert.deepEqual(Object.keys(saved.fields), ['taskName', 'taskDesc', 'taskProject']);
   assert.equal(h.a.run('draftPreview(S.formDrafts[0])'), '先列提纲');
 });
+
+test('递延 opens on a day still ahead, also for a task that started days ago', () => {
+  const a=app();
+  a.context.document={querySelector:()=>({}),querySelectorAll:()=>[]};
+  a.run("var modal='';openModal=h=>{modal=h};draftForm=()=>{};S.today='2026-11-13';DATE_HORIZON='2028-11-12'");
+  const field=task=>{a.context.task=task;a.run('defer(task)');return a.run('modal').match(/id="deferDate"[^>]*/)[0]};
+  const spanning=field({id:'s',name:'跨天',date:'2026-11-10',deadline:'2026-11-14',duration:60});
+  assert.match(spanning,/min="2026-11-13"/,'今天仍可选');assert.match(spanning,/value="2026-11-14"/,'默认明天，而不是已经过去的 11 日');
+  const today=field({id:'t',name:'当天',date:'2026-11-13',duration:60});
+  assert.match(today,/min="2026-11-14"/);assert.match(today,/value="2026-11-14"/);
+  const ahead=field({id:'f',name:'以后',date:'2026-11-20',duration:60});
+  assert.match(ahead,/min="2026-11-21"/);assert.match(ahead,/value="2026-11-21"/);
+});
+
+test('deleting notices says how many open approvals were kept', async () => {
+  const a=app();
+  a.run(`var toasts=[],reply={};toast=m=>toasts.push(m);refresh=async()=>{};api=async()=>reply;UI.inboxPicked=new Set(['n1'])`);
+  for(const reply of [{deleted:2,kept:1},{deleted:0,kept:1},{deleted:3,kept:0},{deleted:0,kept:0}]){
+    a.context.reply=reply;a.run('reply=globalThis.reply');await a.run("deleteNotices(['n1'])");
+  }
+  assert.deepEqual(a.json('toasts'),['已删除 2 条通知，1 条待审批的已保留','已删除 0 条通知，1 条待审批的已保留','已删除 3 条通知','没有可删除的通知']);
+});

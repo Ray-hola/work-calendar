@@ -104,6 +104,10 @@ CHAT_TIME_SQL = "COALESCE(json_extract(data,'$.createdAt'),'')"
 # Notices the page acts on by reference; they stay in the state however old.
 ACTIONABLE_NOTICES = ('approval', 'project_completion', 'task_edit_approval', 'task_request')
 READ_NOTICES_KEPT = 200
+# Left out of the audit log: drafts are private scratch text saved as people
+# type, and an open chat room asks for news every few seconds, which would bury
+# every real action under its own polling.
+UNAUDITED_ACTIONS = ('formdraft.save', 'formdraft.delete', 'chat.list', 'chat.presence', 'chat.read')
 
 # The assistant proxy is the one place a browser can make the server send a body
 # it did not write, so its size is bounded twice, for two different reasons.
@@ -2067,6 +2071,12 @@ class Store:
         if fresh:record['fresh']=True
         return self.put('notifications', record)
 
+    def notify_admins(self, title, body, kind, reference=None):
+        """File a notice for every active admin, since any of them may settle
+        it; the built-in account hears alone when no admin is active."""
+        admins=[u['id'] for u in self.users() if u['active'] and u['admin']] or ['superadmin']
+        for account in admins:self.notify(account,title,body,kind,reference)
+
     def notices_for(self, account):
         rows = [json.loads(r['data']) for r in self.db.execute(
             "SELECT data FROM notifications WHERE json_extract(data,'$.to')=? ORDER BY rowid", (account,))]
@@ -2074,6 +2084,19 @@ class Store:
         settled = [i for i, n in enumerate(rows) if n.get('read') and n.get('kind') not in ACTIONABLE_NOTICES]
         dropped = set(settled[:-READ_NOTICES_KEPT]) if len(settled) > READ_NOTICES_KEPT else set()
         return [n for i, n in enumerate(rows) if i not in dropped]
+
+    def awaits_decision(self, notice):
+        """Whether a notice still carries an approval its recipient has to give."""
+        kind=notice.get('kind')
+        table={'approval':'projects','project_completion':'projects',
+               'task_edit_approval':'edit_requests','task_request':'task_requests'}.get(kind)
+        if not table:return False
+        row=self.db.execute(f'SELECT data FROM {table} WHERE id=?',(notice.get('reference'),)).fetchone()
+        record=json.loads(row['data']) if row else {}
+        if kind=='approval':return notice.get('title')=='项目审批申请' and record.get('status')=='pending'
+        if kind=='project_completion':return notice.get('title')=='项目完成待审批' and record.get('status')=='pending_completion'
+        if kind=='task_edit_approval':return record.get('status')=='pending' and record.get('approver')==notice.get('to')
+        return record.get('status')=='pending'
 
     def recent_audit(self, limit):
         rows = self.db.execute('SELECT data FROM audit ORDER BY rowid DESC LIMIT ?', (limit,)).fetchall()
@@ -2529,6 +2552,8 @@ class Store:
         elif action=='task.defer':
             target=valid_date(d.get('date'))
             if target<=t['date']:raise Problem(400,'递延日期必须晚于原日期')
+            # A task that spans several days may have started well before today.
+            if target<now().date().isoformat():raise Problem(400,'递延日期不能早于今天')
             if t.get('projectId'):
                 project=self.get('projects',t['projectId'])
                 if project.get('status')!='active':raise Problem(409,'只能递延进行中项目的任务')
@@ -2768,7 +2793,10 @@ class Store:
         approver=self.get('projects',pid)['owner'] if pid else 'superadmin'
         fields=('name','desc','priority','projectId','duration','date','time','deadline','assignee','type')
         req=self.put('task_requests',{'requester':user['id'],'approver':approver,'projectId':pid,'draft':{k:draft[k] for k in fields},'status':'pending','createdAt':timestamp()})
-        self.notify(approver,'任务创建申请',f'{self.display_name(user["id"])} 申请新建「{draft["name"]}」，安排日期 {draft["date"]}。','task_request',req['id'])
+        body=f'{self.display_name(user["id"])} 申请新建「{draft["name"]}」，安排日期 {draft["date"]}。'
+        # A project task is its Owner's to settle; a one-off goes to the admins.
+        if pid:self.notify(approver,'任务创建申请',body,'task_request',req['id'])
+        else:self.notify_admins('任务创建申请',body,'task_request',req['id'])
         return {**req,'requested':True}
 
     def seed(self):
@@ -3083,10 +3111,9 @@ class Store:
             with self.lock, self.db:
                 self.audit(user['id'], action, {'ok': result.get('ok')})
             return result
-        if action in ('formdraft.save', 'formdraft.delete'):
-            # Drafts are private scratch text saved as people type; not audited.
+        if action in UNAUDITED_ACTIONS:
             with self.lock, self.db:
-                return self._action(user, action, data)
+                return self._action(user, action, data) or {'ok': True}
         with self.lock, self.db:
             result=self._action(user,action,data)
             # Never persist credentials or chat message bodies in the audit log.
@@ -3804,7 +3831,7 @@ class Store:
                     self.notify(owner,'项目 Owner 指派',f'superadmin 指定你负责「{p["name"]}」，可在项目下创建和分配任务。',
                                 'project',p['id'],fresh=True)
             elif direct:self.invite(p)
-            else:self.notify('superadmin','项目审批申请',f'{self.display_name(user["id"])} 申请创建「{p["name"]}」。','approval',p['id'])
+            else:self.notify_admins('项目审批申请',f'{self.display_name(user["id"])} 申请创建「{p["name"]}」。','approval',p['id'])
             return p
         if action=='project.delete':
             # Destructive and irreversible: allowed for superadmin and the
@@ -3849,6 +3876,10 @@ class Store:
         if action=='project.review':
             self.admin(user);p=self.get('projects',d['id'])
             if p['status']!='pending':raise Problem(409,'该申请已经处理')
+            # One admin settles it for all of them.
+            for n in self.all('notifications'):
+                if n.get('kind')=='approval' and n.get('reference')==p['id'] and n.get('title')=='项目审批申请' and not n.get('read'):
+                    n['read']=True;self.put('notifications',n)
             if d.get('accept'):
                 p['status']='active';p['approvedAt']=timestamp();p['approvedBy']=user['id'];self.invite(p)
             else:p['status']='rejected';p['rejection']=required(d,'reason')
@@ -3879,13 +3910,16 @@ class Store:
             open_tasks=self.open_project_tasks(p['id'])
             p['status']='pending_completion';p['completionReport']=report;p['completionRequestedBy']=user['id'];p['completionRequestedAt']=timestamp();self.put('projects',p)
             left=f'\n仍有 {len(open_tasks)} 项未完成任务，结项后不再继续。' if open_tasks else ''
-            self.notify('superadmin','项目完成待审批',
-                        f'{self.display_name(user["id"])} 申请将项目「{p["name"]}」结项，请审批。{left}\n结项报告：{report}',
-                        'project_completion',p['id'])
+            self.notify_admins('项目完成待审批',
+                               f'{self.display_name(user["id"])} 申请将项目「{p["name"]}」结项，请审批。{left}\n结项报告：{report}',
+                               'project_completion',p['id'])
             return p
         if action=='project.complete_review':
             self.admin(user);p=self.get('projects',d['id'])
             if p['status']!='pending_completion':raise Problem(409,'该项目没有待审批的完成申请')
+            for n in self.all('notifications'):
+                if n.get('kind')=='project_completion' and n.get('reference')==p['id'] and n.get('title')=='项目完成待审批' and not n.get('read'):
+                    n['read']=True;self.put('notifications',n)
             if d.get('accept'):
                 self.finish_project(user,p)
             else:
@@ -4037,8 +4071,17 @@ class Store:
             return {'id':f['id'],'deleted':True}
         if action=='project.update':
             p=self.get('projects',d['id']);self.project_owner(user,p);old=dict(p)
-            if d.get('status')=='done' and not user['admin']:
-                raise Problem(403,'项目完成需由 superadmin 审批')
+            if 'status' in d and d['status']!=p['status']:
+                # A status only moves here between the states a project has
+                # after approval; creating and closing one keep their own
+                # reviews, and only an admin closes or reopens a project.
+                if p['status'] not in ('active','paused','done','archived'):
+                    raise Problem(400,'不能绕过审批更改项目状态')
+                if not user['admin']:
+                    if d['status'] in ('done','archived'):
+                        raise Problem(403,'项目完成需由 superadmin 审批')
+                    if p['status'] in ('done','archived'):
+                        raise Problem(403,'只有管理员可以重新开启已结束的项目')
             if d.get('owner') and d['owner']!=p['owner']:
                 self.admin(user)
                 if self.user(d['owner'])['admin']:raise Problem(400,'管理员账号不担任项目 Owner')
@@ -4137,9 +4180,12 @@ class Store:
             chain=next(c for c in self._task_chains(self.all('tasks')) if any(x['id']==task_id for x in c))
             removed={x['id'] for x in chain}
             self.db.executemany('DELETE FROM tasks WHERE id=?',[(i,) for i in removed])
+            # A change still waiting for approval has nothing left to change.
+            gone={r['id'] for r in self.all('edit_requests') if r.get('taskId') in removed}
+            self.db.executemany('DELETE FROM edit_requests WHERE id=?',[(i,) for i in gone])
             # Resolve any stale inbox cards that pointed at the removed task.
             for notice in self.all('notifications'):
-                if notice.get('reference') in removed and not notice.get('read'):
+                if notice.get('reference') in removed|gone and not notice.get('read'):
                     notice['read']=True;self.put('notifications',notice)
             if assignee and assignee!=user['id']:
                 self.notify(assignee,'任务已删除',f'{self.display_name(user["id"])} 删除了「{task.get("name","")}」。','task',task_id)
@@ -4551,7 +4597,8 @@ class Store:
                     'work':self.week_work(start.isoformat(),min(end,today))}
         if action=='inbox.delete':
             # Only the recipient's own notices. Invitations are answered, not
-            # deleted, so they are not touched here.
+            # deleted, so they are not touched here; nor is a notice whose
+            # approval is still open, which may be the only way to reach it.
             if d.get('read'):
                 targets=[n for n in self.all('notifications') if n['to']==user['id'] and n.get('read')]
             else:
@@ -4560,8 +4607,10 @@ class Store:
                 wanted={str(x) for x in ids}
                 targets=[n for n in self.all('notifications') if n['id'] in wanted]
                 if any(n['to']!=user['id'] for n in targets):raise Problem(403,'只能删除自己的通知')
+            kept={n['id'] for n in targets if self.awaits_decision(n)}
+            targets=[n for n in targets if n['id'] not in kept]
             for n in targets:self.db.execute('DELETE FROM notifications WHERE id=?',(n['id'],))
-            return {'deleted':len(targets)}
+            return {'deleted':len(targets),'kept':len(kept)}
         if action=='profile.correct':
             return self.put('corrections',{'user':user['id'],'text':required(d,'text'),'createdAt':timestamp()})
         if action in ('assignment.propose','assignment.manual'):
