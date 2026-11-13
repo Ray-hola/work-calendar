@@ -1,3 +1,6 @@
+// Clock times are read in local time and the team works in Asia/Shanghai, as
+// CI does; pin it here so a plain local `node --test` agrees with CI anywhere.
+process.env.TZ = 'Asia/Shanghai';
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -1584,6 +1587,44 @@ test('archived attachments have a read-only navigation and achievements entry wi
   assert.equal(a.run('visibleProjects().length'),0,'归档项目不回到进行中列表');
   a.run("S.user={id:'superadmin',admin:1};S.achievements=[{id:'old',name:'已交付项目',status:'done',tasks:[]}];renderAchievements()");
   assert.ok(elements['#achievementGrid'].innerHTML.includes('achievement-files'),'管理员可从成果库进入归档附件');
+});
+
+test('work-log and 成果库 detail opens the live task, the live project, or an archived summary',()=>{
+  const a=app(),elements={};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={dataset:{},classList:{toggle(){}}}),querySelectorAll:()=>[]};
+  a.run(`var opened=[],modal='',toasts=[];openDrawer=id=>opened.push('task:'+id);openProjectSpace=id=>opened.push('space:'+id);
+    openModal=h=>{modal=h};toast=m=>toasts.push(m);
+    S.user={id:'superadmin',admin:1};S.users=[{id:'chenxi',displayName:'陈曦'},{id:'wang00',displayName:'王零'}];
+    S.tasks=[{id:'t1',name:'进行中任务',projectId:'live',status:'doing'}];
+    S.projects=[{id:'live',name:'进行中项目',owner:'chenxi',status:'active'}];
+    S.fileArchives=[{id:'old',name:'已交付项目'},{id:'files-only',name:'只读资料'}];
+    S.achievements=[{id:'old',name:'已交付项目',owner:'chenxi',status:'done',completedAt:'2026-11-01T10:00:00+08:00',completionReport:'按期交付',
+      tasks:[{id:'t9',name:'收尾',assignee:'wang00',status:'done',priority:'P1'}]}];
+    openWorkLogDetail('t1','live','task');openWorkLogDetail('','live','project');openWorkLogDetail('t9','old','task');openWorkLogDetail('','files-only','project');openWorkLogDetail('','gone','project');`);
+  assert.deepEqual(a.json('opened'),['task:t1','space:live','space:files-only']);
+  const modal=a.run('modal');
+  for(const text of ['已交付项目','陈曦','1/1','2026-11-01','按期交付','收尾','王零 · 已完成'])assert.ok(modal.includes(text),text);
+  assert.equal(a.json('toasts').length,1,'找不到的项目给出提示而不是报错');
+});
+
+test('project invites show the owner display name',()=>{
+  const a=app(),elements={};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={dataset:{},classList:{toggle(){}}}),querySelectorAll:()=>[]};
+  a.run(`var modal='';openModal=h=>{modal=h};fetch=()=>Promise.reject(new Error('offline'));
+    S.users=[{id:'chenxi',displayName:'陈曦'}];S.projects=[{id:'p',name:'新项目',owner:'chenxi',status:'active'}];
+    S.requests=[{id:'r',projectId:'p'}];openRequest('r')`);
+  assert.ok(a.run('modal').includes('<strong>陈曦</strong>'));
+});
+
+test('achievement cards show the owner display name, not the account id',()=>{
+  const a=app(),elements={};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={dataset:{},classList:{toggle(){}}}),querySelectorAll:()=>[]};
+  a.run(`S.user={id:'superadmin',admin:1};S.users=[{id:'chenxi',displayName:'陈曦'}];
+    S.achievements=[{id:'a',name:'已交付项目',owner:'chenxi',status:'done',tasks:[]},{id:'b',name:'无主项目',status:'done',tasks:[]}];renderAchievements()`);
+  const html=elements['#achievementGrid'].innerHTML;
+  assert.ok(html.includes('Owner · <b>陈曦</b>'));
+  assert.ok(html.includes('Owner · <b>—</b>'));
+  assert.ok(!html.includes('<b>chenxi</b>'));
 });
 
 test('a folder lists its projects in a chosen order', () => {
@@ -3518,4 +3559,111 @@ test('the built-in rule group shows translated but saves back as stored', () => 
   assert.equal(a.run("ruleGroupName({id:'default',name:'市场部'})"), '市场部');
   assert.equal(a.run("ruleGroupName({id:'g2',name:'默认规则'})"), '默认规则');
   assert.match(source, /name:label===ruleGroupName\(draft\)\?draft\.name:label/);
+});
+
+function draftHarness() {
+  const a = app(), calls = [], toasts = [];
+  const fields = [{id: 'taskName', value: ''}, {id: 'taskDesc', value: ''}];
+  const state = {listener: null, banner: '', timer: null};
+  const root = {querySelectorAll: () => fields, addEventListener: (event, f) => { if(event==='input')state.listener = f; },
+    insertAdjacentHTML: (_, html) => { state.banner = html; }};
+  a.context.document = {querySelector: s => s === '#modalContent' ? root : null, querySelectorAll: () => []};
+  a.context.setTimeout = f => { state.timer = f; return 1; };
+  a.context.clearTimeout = () => { state.timer = null; };
+  a.context.fetch = (path, options) => {
+    calls.push(JSON.parse(options.body));
+    return Promise.resolve({ok: true, status: 200, text: async () => '{}'});
+  };
+  a.context.toasts = toasts;
+  a.run('toast=m=>toasts.push(m);S.formDrafts=[];UI.formDraft=null;');
+  const open = () => a.run("draftForm('task.new',{title:'新任务',reopen:['newTask',null],submit:['task.create']})");
+  const type = (i, text) => { fields[i].value = text; state.listener({target: fields[i]}); state.timer(); };
+  return {a, calls, toasts, fields, state, open, type};
+}
+
+test('what is typed into a form is kept as a draft and filled back in when it reopens', async () => {
+  const h = draftHarness();
+  h.open();
+  h.type(1, '先列提纲');
+  const saved = h.calls.find(c => c.action === 'formdraft.save');
+  assert.deepEqual(saved.data.fields, {taskName: '', taskDesc: '先列提纲'});
+  assert.deepEqual(saved.data.reopen, {fn: 'newTask', args: [null]});
+  assert.equal(h.a.run('S.formDrafts.length'), 1);
+  // Closing says it was kept; the same form opens with it again.
+  await h.a.run('flushFormDraft(true)');
+  assert.ok(h.toasts.some(m => m.includes('草稿箱')));
+  h.fields.forEach(f => { f.value = ''; });
+  h.open();
+  assert.equal(h.fields[1].value, '先列提纲');
+  assert.ok(h.state.banner.includes('已恢复草稿'));
+});
+
+test('a submitted form leaves no draft, and typing back to the start removes it', async () => {
+  const h = draftHarness();
+  h.open();
+  h.type(0, '周报');
+  await h.a.run("api('/api/action',{action:'task.create'})");
+  assert.ok(h.calls.some(c => c.action === 'formdraft.delete' && c.data.key === 'task.new'));
+  assert.equal(h.a.run('S.formDrafts.length'), 0);
+  assert.equal(h.a.run('UI.formDraft'), null);
+  h.fields.forEach(f => { f.value = ''; });
+  h.open();
+  h.type(0, '周报');
+  h.type(0, '');
+  assert.equal(h.a.run('S.formDrafts.length'), 0, '和打开时一样就不算草稿');
+  // An unrelated action leaves the draft where it is.
+  h.type(1, '补充');
+  await h.a.run("api('/api/action',{action:'chat.send'})");
+  assert.equal(h.a.run('S.formDrafts.length'), 1);
+});
+
+test('failed draft writes survive refresh in this tab and are not reported as saved', async () => {
+  const h=draftHarness();
+  h.a.context.fetch=async()=>{throw new Error('offline')};
+  h.a.run("S.user={id:'writer'}");h.open();h.type(1,'未同步的描述');
+  await h.a.run('flushFormDraft(true)');
+  h.a.run('S.formDrafts=[];restorePendingFormDrafts()');
+  assert.equal(h.a.run('S.formDrafts[0].fields.taskDesc'),'未同步的描述');
+  assert.ok(h.toasts.some(m=>m.includes('未同步')));
+  assert.ok(h.toasts.every(m=>!m.startsWith('已存为草稿')));
+  h.a.run("S.user={id:'other'};S.formDrafts=[];restorePendingFormDrafts()");
+  assert.equal(h.a.run('S.formDrafts.length'),0);
+});
+
+test('a delayed task submission cannot clear the draft in a newer dialog', async () => {
+  const h=draftHarness();let finish;
+  const fetch=h.a.context.fetch;
+  h.a.context.fetch=(path,options)=>JSON.parse(options.body).action==='task.create'
+    ?new Promise(resolve=>{finish=resolve}):fetch(path,options);
+  h.open();h.type(0,'第一项');
+  const submitting=h.a.run("api('/api/action',{action:'task.create'})");
+  await h.a.run('flushFormDraft()');
+  h.fields[0].value='';h.open();h.type(0,'第二项');
+  finish({ok:true,text:async()=> '{}'});await submitting;
+  assert.equal(h.a.run('UI.formDraft.fields[0].value'),'第二项');
+  assert.equal(h.a.run('S.formDrafts[0].fields.taskName'),'第二项');
+});
+
+test('a draft also keeps the choices around the text, such as which kind of task', () => {
+  const h = draftHarness();
+  h.a.run("var kind='adhoc',restored=null");
+  const open = () => h.a.run("draftForm('task.new',{title:'新任务',reopen:['newTask',null],submit:['task.create'],"
+    + "extra:()=>({_kind:kind}),restore:f=>{restored=f._kind}})");
+  open();
+  h.type(0, '临时的事');
+  assert.equal(h.calls.find(c => c.action === 'formdraft.save').data.fields._kind, 'adhoc');
+  h.a.run("kind='project'");
+  h.fields.forEach(f => { f.value = ''; });
+  open();
+  assert.equal(h.a.run('restored'), 'adhoc');
+});
+
+test('a rule group can keep its members temp tasks to themselves', () => {
+  const a = app();
+  a.run("S.user={id:'test001',admin:0};S.creationRules={project:'approval',tempTask:'direct',projectTask:'none',agent:'read',tempAssign:'self'}");
+  assert.equal(a.run('tempSelfOnly()'), true);
+  a.run("S.creationRules.tempAssign='anyone'");
+  assert.equal(a.run('tempSelfOnly()'), false);
+  a.run("S.user={id:'superadmin',admin:1};S.creationRules.tempAssign='self'");
+  assert.equal(a.run('tempSelfOnly()'), false, '管理员不受这条限制');
 });
