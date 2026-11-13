@@ -142,11 +142,15 @@ MAX_AUDIO_BYTES = 8_000_000
 FILES_PATH = '/api/files'
 FILE_TEXT_PATH = FILES_PATH + '/text'
 MAX_FILE_BYTES = 20_000_000
-TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests', 'task_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages', 'messages', 'folders', 'files', 'agent_conversations', 'agent_drafts', 'agent_receipts', 'meetings', 'form_drafts')
+TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests',
+          'task_requests', 'suggestions', 'audit', 'corrections', 'settings', 'agent_messages', 'messages',
+          'folders', 'files', 'agent_conversations', 'agent_drafts', 'agent_receipts', 'meetings', 'form_drafts')
 # 草稿箱: text typed into a form is kept per account as it is typed, so closing
-# the form by accident loses nothing. Drafts are private and capped.
-FORM_DRAFT_LIMIT = 50
-FORM_DRAFT_CHARS = 60_000
+# the form by accident loses nothing. Drafts are private and capped; the text cap
+# keeps one draft inside the 64 KB a browser sends while a page is closing.
+FORM_DRAFT_LIMIT = 30
+FORM_DRAFT_CHARS = 20_000
+FORM_DRAFT_KEY = r'[A-Za-z0-9_.:-]{1,120}'
 FORM_DRAFT_OPENERS = ('newTask', 'newProject', 'editTaskRequest', 'projectSettings', 'complete', 'editCompletion',
                       'defer', 'reopenTask', 'requestProjectCompletion', 'fixedTask', 'reviewTaskEdit',
                       'reviewTaskRequest', 'reviewProjectCompletion', 'reviewProject')
@@ -165,8 +169,8 @@ TEMP_ASSIGN = ('anyone', 'self')
 # The parts of a filed team report an admin may rewrite by hand.
 BRIEF_PROJECT_FIELDS = ('done', 'progress', 'collaborators', 'risks', 'next')
 BRIEF_MEMBER_FIELDS = ('done', 'risks', 'next', 'summary')
-DEFAULT_GROUP = {'id': 'default', 'name': '默认规则', 'project': 'approval', 'tempTask': 'direct', 'projectTask': 'none', 'agent': 'read',
-                 'tempAssign': 'anyone'}
+DEFAULT_GROUP = {'id': 'default', 'name': '默认规则', 'project': 'approval', 'tempTask': 'direct', 'projectTask': 'none',
+                 'agent': 'read', 'tempAssign': 'anyone'}
 
 # Agent capability boundary.  The future chat/browser adapter must use these
 # capabilities instead of exposing Store internals or the generic action API.
@@ -2661,19 +2665,21 @@ class Store:
 
     def creation_policy(self):
         value=next((x.get('value') for x in self.all('settings') if x.get('id')=='creation'),None) or {}
-        groups=[{'agent':DEFAULT_GROUP['agent'],'tempAssign':DEFAULT_GROUP['tempAssign'],**g}
-                for g in value.get('groups') or [] if isinstance(g,dict)]
+        groups = [{'agent': DEFAULT_GROUP['agent'], 'tempAssign': DEFAULT_GROUP['tempAssign'], **g}
+                  for g in value.get('groups') or [] if isinstance(g, dict)]
         if not any(g.get('id')=='default' for g in groups):groups.insert(0,dict(DEFAULT_GROUP))
         return {'groups':groups,'assign':dict(value.get('assign') or {})}
 
     def creation_rules(self, user):
         """What `user` may start ('direct' | 'approval' | 'none' per kind) and
         how far their AI assistant goes ('off' | 'read' | 'operate')."""
-        if user.get('admin'):return {'group':None,**{k:'direct' for k in CREATION_KINDS},'agent':'operate','tempAssign':'anyone'}
+        if user.get('admin'):
+            return {'group': None, **{k: 'direct' for k in CREATION_KINDS}, 'agent': 'operate', 'tempAssign': 'anyone'}
         policy=self.creation_policy();groups={g['id']:g for g in policy['groups']}
         group=groups.get(policy['assign'].get(user['id'])) or groups['default']
-        return {'group':group['id'],**{k:group.get(k,DEFAULT_GROUP[k]) for k in CREATION_KINDS},'agent':group.get('agent',DEFAULT_GROUP['agent']),
-                'tempAssign':group.get('tempAssign',DEFAULT_GROUP['tempAssign'])}
+        return {'group': group['id'], **{k: group.get(k, DEFAULT_GROUP[k]) for k in CREATION_KINDS},
+                'agent': group.get('agent', DEFAULT_GROUP['agent']),
+                'tempAssign': group.get('tempAssign', DEFAULT_GROUP['tempAssign'])}
 
     def task_create_mode(self, user, data):
         """'direct' or 'approval' for this new task, or refuse it outright."""
@@ -2699,10 +2705,10 @@ class Store:
         pid=data.get('projectId') or None
         if not pid:
             # A one-off task outside any project works like a small project:
-            # whoever writes it may hand it to anyone, and follows it from then on.
+            # whoever writes it may hand it to anyone, unless their rule group
+            # keeps 临时任务 to oneself, and follows it from then on.
             if self.user(assignee)['admin']:raise Problem(400,'管理员账号不执行任务，临时任务请指派给成员')
-            if assignee!=user['id'] and self.creation_rules(user)['tempAssign']=='self':
-                raise Problem(403,'你所在的规则组只能给自己建临时任务')
+            self.refuse_handing_out(user, assignee)
         if pid:
             p=self.get('projects',pid)
             if not collaborator:self.project_owner(user,p)
@@ -2861,8 +2867,43 @@ class Store:
         owned={p['id'] for p in projects if p['owner']==user['id']}
         task_requests=[r for r in self.all('task_requests') if user['admin'] or r.get('requester')==user['id'] or r.get('projectId') in owned]
         automation=next((x.get('value',{}) for x in self.all('settings') if x.get('id')=='automation'),{})
-        return {'user':user,'users':self.users(),'today':at.date().isoformat(),'dateHorizon':calendar_end(at.date()).isoformat(),'weekStart':self.week_start(),'repeatStacking':self.repeat_stacking(),'projects':projects,
-'folders':folders,'fileArchives':file_archives,'files':[f for f in all_files if f.get('projectId') in file_pids],'meetings':[self.meeting_summary(m) for m in all_meetings if m.get('projectId') in file_pids],'meetingPrompt':self.meeting_prompt() if user['admin'] else None,'tasks':tasks,'logs':[l for l in self.all('logs') if l['taskId'] in ids],'workCompletions':self.work_completions(user),'achievements':self.achievements(user),'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees'] or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],'reports':reports,'diaries':diaries,'diaryStats':self.diary_statistics(user),'notifications':self.notices_for(user['id']), 'requests':[r for r in self.all('requests') if r['to']==user['id']], 'editRequests':edit_requests, 'taskRequests':task_requests, 'creationRules':self.creation_rules(user), 'creationPolicy':self.creation_policy() if user.get('role')=='superadmin' else None, 'accountOrder':next((x.get('value') or [] for x in self.all('settings') if x.get('id')=='account_order'),[]) if user['admin'] else [], 'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids and (user['admin'] or owner_of.get(s['projectId'])==user['id'])], 'chat':self.chat_summary(user), 'collectionSettings':automation, 'automation':automation, 'agentCapabilities':self.agent_capabilities(user), 'formDrafts':self.form_drafts(user['id']), 'audit':self.recent_audit(60) if user['admin'] else []}
+        return {'user':user,
+                'users':self.users(),
+                'today':at.date().isoformat(),
+                'dateHorizon':calendar_end(at.date()).isoformat(),
+                'weekStart':self.week_start(),
+                'repeatStacking':self.repeat_stacking(),
+                'projects':projects,
+                'folders':folders,
+                'fileArchives':file_archives,
+                'files':[f for f in all_files if f.get('projectId') in file_pids],
+                'meetings':[self.meeting_summary(m) for m in all_meetings if m.get('projectId') in file_pids],
+                'meetingPrompt':self.meeting_prompt() if user['admin'] else None,
+                'tasks':tasks,
+                'logs':[l for l in self.all('logs') if l['taskId'] in ids],
+                'workCompletions':self.work_completions(user),
+                'achievements':self.achievements(user),
+                'repeats':[r for r in self.all('repeats') if user['admin'] or user['id'] in r['assignees']
+                           or r.get('projectId') in {p['id'] for p in projects if p['owner']==user['id']}],
+                'reports':reports,
+                'diaries':diaries,
+                'diaryStats':self.diary_statistics(user),
+                'notifications':self.notices_for(user['id']),
+                'requests':[r for r in self.all('requests') if r['to']==user['id']],
+                'editRequests':edit_requests,
+                'taskRequests':task_requests,
+                'creationRules':self.creation_rules(user),
+                'creationPolicy':self.creation_policy() if user.get('role')=='superadmin' else None,
+                'accountOrder':next((x.get('value') or [] for x in self.all('settings')
+                                     if x.get('id')=='account_order'),[]) if user['admin'] else [],
+                'suggestions':[s for s in self.all('suggestions') if s['projectId'] in pids
+                               and (user['admin'] or owner_of.get(s['projectId'])==user['id'])],
+                'chat':self.chat_summary(user),
+                'collectionSettings':automation,
+                'automation':automation,
+                'agentCapabilities':self.agent_capabilities(user),
+                'formDrafts': self.form_drafts(user['id']),
+                'audit':self.recent_audit(60) if user['admin'] else []}
 
     def diary_statistics(self, viewer, start=None, end=None):
         """Return daily completion/load summaries for the diary dashboard.
@@ -3024,14 +3065,23 @@ class Store:
             self.audit(user['id'], action, details)
             return result or {'ok':True}
 
-    def form_drafts(self, owner):
-        """One account's drafts, newest first."""
-        rows = [d for d in self.all('form_drafts') if d.get('owner') == owner]
-        return sorted(rows, key=lambda d: d.get('updatedAt', ''), reverse=True)
+    def form_drafts(self, owner: str) -> list:
+        """One account's drafts, newest first, read by row id prefix only."""
+        prefix = f'{owner}:'
+        rows = self.db.execute('SELECT data FROM form_drafts WHERE substr(id, 1, ?) = ?',
+                               (len(prefix), prefix)).fetchall()
+        drafts = [json.loads(row['data']) for row in rows]
+        return sorted(drafts, key=lambda draft: draft.get('updatedAt', ''), reverse=True)
 
-    def save_form_draft(self, user, d):
+    def save_form_draft(self, user: dict, d: dict) -> dict:
+        """Keep the text typed into one form as `user`'s draft.
+
+        `d` carries the form `key`, its `title`/`label`, the typed `fields`
+        and how to `reopen` it (an opener from FORM_DRAFT_OPENERS and its
+        arguments). Saving the same key again replaces that draft.
+        """
         key = str(d.get('key') or '')
-        if not re.fullmatch(r'[A-Za-z0-9_.:-]{1,120}', key):
+        if not re.fullmatch(FORM_DRAFT_KEY, key):
             raise Problem(400, '草稿编号无效')
         fields = d.get('fields')
         if not isinstance(fields, dict) or not fields or len(fields) > 30:
@@ -3055,9 +3105,27 @@ class Store:
                'fields': clean, 'reopen': {'fn': reopen['fn'], 'args': args}, 'updatedAt': timestamp()}
         self.put('form_drafts', row)
         # Keep the newest ones when someone leaves many forms half done.
-        for old in self.form_drafts(user['id'])[FORM_DRAFT_LIMIT:]:
-            self.db.execute('DELETE FROM form_drafts WHERE id=?', (old['id'],))
+        extra = self.form_drafts(user['id'])[FORM_DRAFT_LIMIT:]
+        if extra:
+            self.db.executemany('DELETE FROM form_drafts WHERE id = ?', [(old['id'],) for old in extra])
         return row
+
+    def delete_form_drafts(self, user: dict, d: dict) -> dict:
+        """Remove `user`'s drafts named by `key` or `keys`; returns how many went."""
+        keys = d.get('keys') if isinstance(d.get('keys'), list) else [d.get('key')]
+        if not keys or len(keys) > FORM_DRAFT_LIMIT:
+            raise Problem(400, '请选择要删除的草稿')
+        if any(not isinstance(key, str) or not re.fullmatch(FORM_DRAFT_KEY, key) for key in keys):
+            raise Problem(400, '请选择要删除的草稿')
+        deleted = 0
+        for key in keys:
+            deleted += self.db.execute('DELETE FROM form_drafts WHERE id = ?', (f'{user["id"]}:{key}',)).rowcount
+        return {'deleted': deleted}
+
+    def refuse_handing_out(self, user: dict, assignee: str) -> None:
+        """A rule group set to 只给自己 keeps its members' 临时任务 to themselves."""
+        if assignee != user['id'] and self.creation_rules(user)['tempAssign'] == 'self':
+            raise Problem(403, '你所在的规则组只能给自己建临时任务')
 
     def display_name(self, account):
         """What the team calls this account — 中文名称 when it has one."""
@@ -3484,16 +3552,10 @@ class Store:
             return {'cleared':True,'userId':target}
         if action in ('formdraft.save', 'formdraft.delete') and 'owner' in d and d['owner'] != user['id']:
             raise Problem(403, '账户已切换，草稿未同步')
-        if action=='formdraft.save':
+        if action == 'formdraft.save':
             return self.save_form_draft(user, d)
-        if action=='formdraft.delete':
-            keys=d.get('keys') if isinstance(d.get('keys'),list) else [d.get('key')]
-            if (not keys or len(keys)>FORM_DRAFT_LIMIT
-                    or any(not isinstance(key, str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,120}', key) for key in keys)):
-                raise Problem(400,'请选择要删除的草稿')
-            for key in keys:
-                self.db.execute('DELETE FROM form_drafts WHERE id=?',(f'{user["id"]}:{key}',))
-            return {'deleted':len(keys)}
+        if action == 'formdraft.delete':
+            return self.delete_form_drafts(user, d)
         if action=='account.profile':
             # 中文名称 is the formal name the superadmin group assigns; 昵称 is
             # the holder's own choice and is edited through profile.self.
@@ -3636,8 +3698,8 @@ class Store:
 
                 for diary in self.all('diaries'):
                     if diary.get('author')==target:self.db.execute('DELETE FROM diaries WHERE id=?',(diary['id'],))
-                for draft in self.all('form_drafts'):
-                    if draft.get('owner')==target:self.db.execute('DELETE FROM form_drafts WHERE id=?',(draft['id'],))
+                prefix = f'{target}:'
+                self.db.execute('DELETE FROM form_drafts WHERE substr(id, 1, ?) = ?', (len(prefix), prefix))
                 for notice in self.all('notifications'):
                     if notice.get('to')==target:self.db.execute('DELETE FROM notifications WHERE id=?',(notice['id'],))
                 for request in self.all('requests'):
@@ -4090,9 +4152,8 @@ class Store:
                 t['deadline']=valid_date(t['deadline'])
                 if t['deadline'] < t['date']: raise Problem(400,'截止时间不能早于安排日期')
             if not t.get('projectId') and self.user(t['assignee'])['admin']:raise Problem(400,'管理员账号不执行任务，临时任务请指派给成员')
-            if (not t.get('projectId') and t['assignee']!=old['assignee'] and t['assignee']!=user['id']
-                    and self.creation_rules(user)['tempAssign']=='self'):
-                raise Problem(403,'你所在的规则组只能给自己建临时任务')
+            if not t.get('projectId') and t['assignee'] != old['assignee']:
+                self.refuse_handing_out(user, t['assignee'])
             if t.get('projectId'):
                 project=self.get('projects',t['projectId'])
                 if project.get('start') and t['date'] < project['start']: raise Problem(400,'任务日期不能早于项目开始日期')
@@ -4277,9 +4338,11 @@ class Store:
                 if any(v not in CREATION_RULES for v in rules.values()):raise Problem(400,'创建规则无效')
                 agent=g.get('agent',DEFAULT_GROUP['agent'])
                 if agent not in AGENT_ACCESS:raise Problem(400,'AI 助手权限无效')
-                temp_assign=g.get('tempAssign',DEFAULT_GROUP['tempAssign'])
-                if temp_assign not in TEMP_ASSIGN:raise Problem(400,'临时任务指派规则无效')
-                ids.add(gid);names.add(name);clean.append({'id':gid,'name':name,**rules,'agent':agent,'tempAssign':temp_assign})
+                temp_assign = g.get('tempAssign', DEFAULT_GROUP['tempAssign'])
+                if temp_assign not in TEMP_ASSIGN:
+                    raise Problem(400, '临时任务指派规则无效')
+                ids.add(gid);names.add(name)
+                clean.append({'id': gid, 'name': name, **rules, 'agent': agent, 'tempAssign': temp_assign})
             if 'default' not in ids:raise Problem(400,'默认规则组不能删除')
             members={u['id'] for u in self.users() if not u['admin']}
             assign={str(uid):str(gid) for uid,gid in (d.get('assign') or {}).items() if uid in members and gid in ids and gid!='default'}

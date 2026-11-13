@@ -17,8 +17,8 @@
         <button class="nav-item" data-view="today"><span class="icon-slot" data-icon="calendar-check"></span><span class="nav-text">今日任务</span><b id="todayCount">0</b></button>
         <button class="nav-item active" data-view="calendar"><span class="icon-slot" data-icon="layout-grid"></span><span class="nav-text">周视图</span></button>
         <button class="nav-item" data-view="archive"><span class="icon-slot" data-icon="archive"></span><span class="nav-text">档案室</span></button>
-        <button class="nav-item" data-view="drafts"><span class="icon-slot" data-icon="file-pen"></span><span class="nav-text">草稿箱</span><b
-          id="draftCount" class="hidden">0</b></button>
+        <button class="nav-item" data-view="drafts"><span class="icon-slot" data-icon="file-pen"></span><span
+          class="nav-text">草稿箱</span><b id="draftCount" class="hidden">0</b></button>
         <button class="nav-item" data-view="projects"><span class="icon-slot" data-icon="folder"></span><span class="nav-text">项目空间</span><i
           class="nav-new-dot hidden" id="projectsNewDot" aria-hidden="true"></i></button>
         <button class="nav-item" data-view="timeline"><span class="icon-slot" data-icon="gantt"></span><span class="nav-text">项目时间轴</span></button>
@@ -63,10 +63,13 @@
         <div id="archiveCabinet" class="archive-cabinet"></div>
         <div id="archiveLedger" class="archive-ledger hidden"></div>
       </section>
-      <section id="draftsView" class="view"><div class="page-intro"><div><div class="eyebrow">草稿箱</div><h1>草稿箱</h1></div></div>
+      <section id="draftsView" class="view">
+        <div class="page-intro"><div><div class="eyebrow">草稿箱</div><h1>草稿箱</h1></div></div>
         <div id="draftList" class="draft-list"></div>
-        <div id="draftEmpty" class="empty-state hidden"><div class="empty-icon"><span class="icon-slot" data-icon="file-pen"></span></div>
-          <h3>没有草稿</h3></div>
+        <div id="draftEmpty" class="empty-state hidden">
+          <div class="empty-icon"><span class="icon-slot" data-icon="file-pen"></span></div>
+          <h3>没有草稿</h3>
+        </div>
       </section>
       <section id="chatView" class="view"><div class="page-intro"><div><div class="eyebrow">团队沟通</div><h1>沟通区</h1></div></div><div class="chat-room"><aside class="chat-side" id="chatNavigation" aria-label="频道列表"><div class="chat-side-head"><div class="chat-side-title nav-text">频道</div></div><div class="chat-channels" id="chatChannels" role="tablist" aria-label="频道"></div></aside><div class="chat-main"><div class="chat-bar"><h2 class="chat-current" id="chatCurrent">沟通</h2><div class="chat-members" id="chatMembers"></div></div><div class="chat-log" id="chatLog"></div><form class="chat-compose" id="chatForm"><div class="chat-mention-menu hidden" id="chatMentionMenu" role="listbox" aria-label="选择要提及的成员"></div><textarea id="chatInput" rows="1" maxlength="1000" placeholder="发消息…" aria-label="消息内容"></textarea><button class="primary-btn" type="submit" id="chatSendBtn">发送</button></form></div></div></section>
       <section id="accountsView" class="view"><div class="page-intro"><div><h1>账户管理</h1></div><div class="page-actions"><button class="secondary-btn" id="forceAssignBtn">管理项目与任务</button><button class="secondary-btn" id="createAccountBtn"><span class="icon-slot" data-icon="plus"></span>添加账户</button></div></div><div id="accountList" class="account-list"></div></section>

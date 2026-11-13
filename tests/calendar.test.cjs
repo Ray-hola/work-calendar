@@ -3411,11 +3411,25 @@ function draftHarness() {
   const a = app(), calls = [], toasts = [];
   const fields = [{id: 'taskName', value: ''}, {id: 'taskDesc', value: ''}];
   const state = {listener: null, banner: '', timer: null};
-  const root = {querySelectorAll: () => fields, addEventListener: (event, f) => { if(event==='input')state.listener = f; },
-    insertAdjacentHTML: (_, html) => { state.banner = html; }};
-  a.context.document = {querySelector: s => s === '#modalContent' ? root : null, querySelectorAll: () => []};
-  a.context.setTimeout = f => { state.timer = f; return 1; };
-  a.context.clearTimeout = () => { state.timer = null; };
+  const root = {
+    querySelectorAll: () => fields,
+    addEventListener: (event, f) => {
+      if (event === 'input') {
+        state.listener = f;
+      }
+    },
+    insertAdjacentHTML: (_, html) => {
+      state.banner = html;
+    },
+  };
+  a.context.document = {querySelector: s => (s === '#modalContent' ? root : null), querySelectorAll: () => []};
+  a.context.setTimeout = f => {
+    state.timer = f;
+    return 1;
+  };
+  a.context.clearTimeout = () => {
+    state.timer = null;
+  };
   a.context.fetch = (path, options) => {
     calls.push(JSON.parse(options.body));
     return Promise.resolve({ok: true, status: 200, text: async () => '{}'});
@@ -3423,90 +3437,139 @@ function draftHarness() {
   a.context.toasts = toasts;
   a.run('toast=m=>toasts.push(m);S.formDrafts=[];UI.formDraft=null;');
   const open = () => a.run("draftForm('task.new',{title:'新任务',reopen:['newTask',null],submit:['task.create']})");
-  const type = (i, text) => { fields[i].value = text; state.listener({target: fields[i]}); state.timer(); };
-  return {a, calls, toasts, fields, state, open, type};
+  const type = (i, text) => {
+    fields[i].value = text;
+    state.listener({target: fields[i]});
+    return state.timer();
+  };
+  const settle = () => a.run("pendingFormDrafts.get(formDraftSlot(S.user?.id,'task.new'))?.promise.catch(()=>{})");
+  return {a, calls, toasts, fields, state, open, type, settle};
 }
 
 test('what is typed into a form is kept as a draft and filled back in when it reopens', async () => {
   const h = draftHarness();
   h.open();
-  h.type(1, '先列提纲');
+  await h.type(1, '先列提纲');
   const saved = h.calls.find(c => c.action === 'formdraft.save');
   assert.deepEqual(saved.data.fields, {taskName: '', taskDesc: '先列提纲'});
   assert.deepEqual(saved.data.reopen, {fn: 'newTask', args: [null]});
   assert.equal(h.a.run('S.formDrafts.length'), 1);
-  // Closing says it was kept; the same form opens with it again.
+  // Closing says it was kept, without saving again; the same form opens with it.
   await h.a.run('flushFormDraft(true)');
   assert.ok(h.toasts.some(m => m.includes('草稿箱')));
-  h.fields.forEach(f => { f.value = ''; });
+  assert.equal(h.calls.filter(c => c.action === 'formdraft.save').length, 1);
+  h.fields.forEach(f => {
+    f.value = '';
+  });
   h.open();
   assert.equal(h.fields[1].value, '先列提纲');
   assert.ok(h.state.banner.includes('已恢复草稿'));
+  await h.a.run('flushFormDraft(true)');
+  assert.equal(h.calls.filter(c => c.action === 'formdraft.save').length, 1, '恢复后没改就关闭，不再重存');
 });
 
-test('a submitted form leaves no draft, and typing back to the start removes it', async () => {
+test('a submitted form leaves no draft, even if it was closed while the request was out', async () => {
   const h = draftHarness();
   h.open();
-  h.type(0, '周报');
-  await h.a.run("api('/api/action',{action:'task.create'})");
+  await h.type(0, '周报');
+  const sending = h.a.run("api('/api/action',{action:'task.create',data:{}})");
+  await h.a.run('flushFormDraft(true)');
+  await sending;
+  await h.settle();
   assert.ok(h.calls.some(c => c.action === 'formdraft.delete' && c.data.key === 'task.new'));
   assert.equal(h.a.run('S.formDrafts.length'), 0);
   assert.equal(h.a.run('UI.formDraft'), null);
-  h.fields.forEach(f => { f.value = ''; });
+  assert.ok(!h.toasts.some(m => m.includes('已存为草稿')), '提交途中关闭不说已存草稿');
+  h.fields.forEach(f => {
+    f.value = '';
+  });
   h.open();
-  h.type(0, '周报');
-  h.type(0, '');
+  await h.type(0, '周报');
+  await h.type(0, '');
+  await h.settle();
   assert.equal(h.a.run('S.formDrafts.length'), 0, '和打开时一样就不算草稿');
   // An unrelated action leaves the draft where it is.
-  h.type(1, '补充');
-  await h.a.run("api('/api/action',{action:'chat.send'})");
+  await h.type(1, '补充');
+  await h.a.run("api('/api/action',{action:'chat.send',data:{}})");
   assert.equal(h.a.run('S.formDrafts.length'), 1);
 });
 
 test('failed draft writes survive refresh in this tab and are not reported as saved', async () => {
-  const h=draftHarness();
-  h.a.context.fetch=async()=>{throw new Error('offline')};
-  h.a.run("S.user={id:'writer'}");h.open();h.type(1,'未同步的描述');
+  const h = draftHarness();
+  h.a.context.fetch = async () => {
+    throw new Error('offline');
+  };
+  h.a.run("S.user={id:'writer'}");
+  h.open();
+  h.type(1, '未同步的描述').catch(() => {});
   await h.a.run('flushFormDraft(true)');
   h.a.run('S.formDrafts=[];restorePendingFormDrafts()');
-  assert.equal(h.a.run('S.formDrafts[0].fields.taskDesc'),'未同步的描述');
-  assert.ok(h.toasts.some(m=>m.includes('未同步')));
-  assert.ok(h.toasts.every(m=>!m.startsWith('已存为草稿')));
+  assert.equal(h.a.run('S.formDrafts[0].fields.taskDesc'), '未同步的描述');
+  assert.ok(h.toasts.some(m => m.includes('未同步')));
+  assert.ok(h.toasts.every(m => !m.startsWith('已存为草稿')));
   h.a.run("S.user={id:'other'};S.formDrafts=[];restorePendingFormDrafts()");
-  assert.equal(h.a.run('S.formDrafts.length'),0);
+  assert.equal(h.a.run('S.formDrafts.length'), 0);
 });
 
 test('a delayed task submission cannot clear the draft in a newer dialog', async () => {
-  const h=draftHarness();let finish;
-  const fetch=h.a.context.fetch;
-  h.a.context.fetch=(path,options)=>JSON.parse(options.body).action==='task.create'
-    ?new Promise(resolve=>{finish=resolve}):fetch(path,options);
-  h.open();h.type(0,'第一项');
-  const submitting=h.a.run("api('/api/action',{action:'task.create'})");
+  const h = draftHarness();
+  let finish;
+  const fetch = h.a.context.fetch;
+  h.a.context.fetch = (path, options) => (JSON.parse(options.body).action === 'task.create'
+    ? new Promise(resolve => {
+      finish = resolve;
+    })
+    : fetch(path, options));
+  h.open();
+  await h.type(0, '第一项');
+  const submitting = h.a.run("api('/api/action',{action:'task.create'})");
   await h.a.run('flushFormDraft()');
-  h.fields[0].value='';h.open();h.type(0,'第二项');
-  finish({ok:true,text:async()=> '{}'});await submitting;
-  assert.equal(h.a.run('UI.formDraft.fields[0].value'),'第二项');
-  assert.equal(h.a.run('S.formDrafts[0].fields.taskName'),'第二项');
+  h.fields[0].value = '';
+  h.open();
+  await h.type(0, '第二项');
+  finish({ok: true, text: async () => '{}'});
+  await submitting;
+  assert.equal(h.a.run('UI.formDraft.fields[0].value'), '第二项');
+  assert.equal(h.a.run('S.formDrafts[0].fields.taskName'), '第二项');
 });
 
-test('a draft also keeps the choices around the text, such as which kind of task', () => {
+test('a draft also keeps the choices around the text, and 丢弃 puts them back', async () => {
   const h = draftHarness();
-  h.a.run("var kind='adhoc',restored=null");
+  h.a.run("var kind='project',restored=[]");
   const open = () => h.a.run("draftForm('task.new',{title:'新任务',reopen:['newTask',null],submit:['task.create'],"
-    + "extra:()=>({_kind:kind}),restore:f=>{restored=f._kind}})");
+    + 'extra:()=>({_kind:kind}),restore:f=>{restored.push(f._kind);kind=f._kind}})');
   open();
-  h.type(0, '临时的事');
+  h.a.run("kind='adhoc'");
+  await h.type(0, '临时的事');
   assert.equal(h.calls.find(c => c.action === 'formdraft.save').data.fields._kind, 'adhoc');
   h.a.run("kind='project'");
-  h.fields.forEach(f => { f.value = ''; });
+  h.fields.forEach(f => {
+    f.value = '';
+  });
   open();
-  assert.equal(h.a.run('restored'), 'adhoc');
+  assert.deepEqual(h.a.json('restored'), ['adhoc']);
+  h.a.run('discardRestoredDraft(UI.formDraft)');
+  assert.deepEqual(h.a.json('restored'), ['adhoc', 'project']);
+  assert.equal(h.fields[0].value, '');
+});
+
+test('a draft reopens only while its work can still take it', () => {
+  const a = app(), opened = [];
+  a.context.opened = opened;
+  a.run("S.tasks=[{id:'t',status:'done'}];S.taskRequests=[{id:'r',status:'approved'}];");
+  a.run("S.projects=[{id:'p',status:'active'}];");
+  a.run('complete=t=>opened.push(t.id);reviewTaskRequest=id=>opened.push(id);reviewProject=id=>opened.push(id)');
+  a.run("DRAFT_OPENERS.complete('t');DRAFT_OPENERS.reviewTaskRequest('r');DRAFT_OPENERS.reviewProject('p')");
+  assert.deepEqual(opened, []);
+  a.run("S.tasks[0].status='doing';S.taskRequests[0].status='pending';S.projects[0].status='pending'");
+  a.run("DRAFT_OPENERS.complete('t');DRAFT_OPENERS.reviewTaskRequest('r');DRAFT_OPENERS.reviewProject('p')");
+  assert.deepEqual(opened, ['t', 'r', 'p']);
 });
 
 test('a rule group can keep its members temp tasks to themselves', () => {
   const a = app();
-  a.run("S.user={id:'test001',admin:0};S.creationRules={project:'approval',tempTask:'direct',projectTask:'none',agent:'read',tempAssign:'self'}");
+  a.run("S.user={id:'test001',admin:0};");
+  a.run("S.creationRules={project:'approval',tempTask:'direct',projectTask:'none',agent:'read',tempAssign:'self'}");
   assert.equal(a.run('tempSelfOnly()'), true);
   a.run("S.creationRules.tempAssign='anyone'");
   assert.equal(a.run('tempSelfOnly()'), false);

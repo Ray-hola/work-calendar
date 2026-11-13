@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from server import Store, Problem, FORM_DRAFT_LIMIT, now
+from server import Store, Problem, FORM_DRAFT_CHARS, FORM_DRAFT_LIMIT, now
 
 
 class FormDraftTests(unittest.TestCase):
@@ -43,7 +43,7 @@ class FormDraftTests(unittest.TestCase):
 
     def test_bad_drafts_are_refused(self):
         for extra in ({'key': '../x'}, {'fields': {}}, {'fields': {'a': 1}},
-                      {'fields': {'taskDesc': 'x' * 60_001}}, {'reopen': {'fn': 'eval', 'args': []}},
+                      {'fields': {'taskDesc': 'x' * (FORM_DRAFT_CHARS + 1)}}, {'reopen': {'fn': 'eval', 'args': []}},
                       {'reopen': ['newTask']}, {'reopen': {'fn': 'newTask', 'args': ''}},
                       {'reopen': {'fn': 'newTask', 'args': [{'x': 1}]}}):
             with self.subTest(extra=extra), self.assertRaises(Problem):
@@ -58,6 +58,19 @@ class FormDraftTests(unittest.TestCase):
             self.store.action(self.store.user('test002'), 'formdraft.delete', {'owner': 'test001', 'key': 'task.new'})
         self.assertEqual(rejected.exception.status, 403)
         self.assertEqual(len(self.store.form_drafts('test002')), 1)
+
+    def test_deleting_names_the_drafts_and_counts_what_went(self):
+        member = self.store.user('test001')
+        self.save()
+        for data in ({}, {'key': None}, {'keys': ['../x']}):
+            with self.subTest(data=data), self.assertRaises(Problem):
+                self.store.action(member, 'formdraft.delete', data)
+        gone = self.store.action(member, 'formdraft.delete', {'keys': ['task.new', 'task.gone']})
+        self.assertEqual(gone, {'deleted': 1})
+        # Another account's draft with the same key is not touched.
+        self.save(who='test002')
+        self.assertEqual(self.store.action(member, 'formdraft.delete', {'key': 'task.new'}), {'deleted': 0})
+        self.assertEqual(len(self.store.snapshot(self.store.user('test002'))['formDrafts']), 1)
 
     def test_only_the_newest_drafts_are_kept(self):
         for i in range(FORM_DRAFT_LIMIT + 3):
@@ -76,7 +89,7 @@ class TempAssignRuleTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.store = Store(Path(self.tmp.name) / 'rules.sqlite3', seed=False)
-        for name in ('superadmin', 'test001', 'test002'):
+        for name in ('superadmin', 'test001', 'test002', 'test003'):
             self.store.create_user(name, 'password-long', name == 'superadmin')
         self.admin = self.store.user('superadmin')
         self.day = now().date().isoformat()
@@ -109,10 +122,19 @@ class TempAssignRuleTests(unittest.TestCase):
         with self.assertRaises(Problem):
             self.store.action(self.store.user('test001'), 'task.update', {'id': own['id'], 'assignee': 'test002'})
         # Other edits to one's own temp task still go through.
-        self.assertEqual(self.store.action(self.store.user('test001'), 'task.update', {'id': own['id'], 'duration': 45})['duration'], 45)
+        moved = self.store.action(self.store.user('test001'), 'task.update', {'id': own['id'], 'duration': 45})
+        self.assertEqual(moved['duration'], 45)
         # Admins still hand temp tasks to members.
         given = self.store.action(self.admin, 'task.create', {'name': '派给成员', 'assignee': 'test002', 'date': self.day})
         self.assertEqual(given['assignee'], 'test002')
+
+    def test_no_edit_request_can_hand_a_temp_task_on(self):
+        # So approving one never gets round the 只给自己 rule either.
+        task = self.hand('test002')
+        with self.assertRaises(Problem):
+            self.store.action(self.store.user('test002'), 'task.edit_request', {
+                'id': task['id'], 'changes': {'assignee': 'test003'}, 'reason': '交给更合适的人',
+            })
 
     def test_an_unknown_assign_rule_is_refused(self):
         with self.assertRaises(Problem):
