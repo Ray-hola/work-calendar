@@ -3635,7 +3635,8 @@ function writeFormDraft(owner, key, row, options = {}) {
       throw new Error(tr('账户已切换，草稿尚未同步'));
     }
     const action = row ? 'formdraft.save' : 'formdraft.delete';
-    const data = {...(row || {key}), owner};
+    // A delete names the moment it was asked for, so text typed after it stays.
+    const data = row ? {...row, owner} : {key, owner, typedAt: new Date().toISOString()};
     if (options.keepalive && row && !fitsKeepalive({action, data})) {
       stashFormDraft(owner, row);
       return;
@@ -3691,8 +3692,9 @@ function saveFormDraft(options = {}) {
     }
     return null;
   }
+  const now = new Date().toISOString();
   const row = {key: f.key, title: f.title, label: f.label, fields: {...typed, ...extra}, reopen: f.reopen,
-    updatedAt: new Date().toISOString()};
+    updatedAt: now, typedAt: now};
   keepFormDraftLocally(row);
   f.saved = true;
   f.generation = (draftGenerations.get(f.key) ?? 0) + 1;
@@ -3753,7 +3755,8 @@ function sendStashedFormDraft() {
   const {owner, row} = stash;
   dropStashedFormDraft(owner, row.key);
   const current = formDraftOf(row.key);
-  if (current && Date.parse(current.updatedAt) >= Date.parse(row.updatedAt)) {
+  // Both times come from the browser that typed them, not from the server.
+  if (current?.typedAt && row.typedAt && current.typedAt >= row.typedAt) {
     return;
   }
   keepFormDraftLocally(row);

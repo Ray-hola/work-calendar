@@ -3801,7 +3801,7 @@ test('a stashed draft waits for its own account and gives way to a newer copy', 
     },
   };
   const row = {key: 'task.new', title: '新任务', label: '', fields: {taskName: '长稿'},
-    reopen: {fn: 'newTask', args: [null]}, updatedAt: '2026-11-13T10:00:00Z'};
+    reopen: {fn: 'newTask', args: [null]}, updatedAt: '2026-11-13T10:00:00Z', typedAt: '2026-11-13T10:00:00.000Z'};
   const stash = JSON.stringify({owner: 'writer', row});
   store['hola-form-draft-stash'] = stash;
   h.a.run("S.user={id:'other'};S.formDrafts=[];sendStashedFormDraft()");
@@ -3812,7 +3812,8 @@ test('a stashed draft waits for its own account and gives way to a newer copy', 
   assert.ok(h.calls.some(c => c.action === 'formdraft.save' && c.data.fields.taskName === '长稿'));
   // A copy saved after the stash was written wins.
   store['hola-form-draft-stash'] = stash;
-  h.a.run("UI.draftStashChecked=null;S.formDrafts=[{key:'task.new',updatedAt:'2026-11-13T11:00:00Z',fields:{}}]");
+  h.a.run("UI.draftStashChecked=null;S.formDrafts=[{key:'task.new',updatedAt:'2026-11-13T09:00:00Z',"
+    + "typedAt:'2026-11-13T11:00:00.000Z',fields:{}}]");
   const sent = h.calls.length;
   h.a.run('sendStashedFormDraft()');
   assert.equal(h.calls.length, sent);
@@ -3969,4 +3970,26 @@ test('every fixed message the server sends has an English entry', () => {
   assert.ok(sent.length > 100);
   const known = k => Object.prototype.hasOwnProperty.call(dict, k) || patterns.some(([re]) => re.test(k));
   assert.deepEqual(sent.filter(k => !known(k)), []);
+});
+
+test('a stash is weighed by when its text was typed, not when the server stamped a copy', () => {
+  const h = draftHarness(), store = {};
+  h.a.context.localStorage = {
+    getItem: k => store[k] ?? null,
+    setItem: (k, v) => {
+      store[k] = String(v);
+    },
+    removeItem: k => {
+      delete store[k];
+    },
+  };
+  const row = {key: 'task.new', title: '新任务', label: '', fields: {taskName: '最后一句'},
+    reopen: {fn: 'newTask', args: [null]}, updatedAt: '2026-11-13T10:00:05.000Z', typedAt: '2026-11-13T10:00:05.000Z'};
+  store['hola-form-draft-stash'] = JSON.stringify({owner: 'writer', row});
+  h.a.run("S.user={id:'writer'};S.formDrafts=[{key:'task.new',updatedAt:'2026-11-13T10:00:09Z',"
+    + "typedAt:'2026-11-13T10:00:04.000Z',fields:{}}];sendStashedFormDraft()");
+  assert.ok(h.calls.some(c => c.action === 'formdraft.save' && c.data.fields.taskName === '最后一句'));
+  // A delete says when it was asked for, so the server keeps text typed after it.
+  h.a.run("writeFormDraft('writer','task.other',null)");
+  assert.match(h.calls.find(c => c.action === 'formdraft.delete').data.typedAt, /^\d{4}-\d{2}-\d{2}T/);
 });

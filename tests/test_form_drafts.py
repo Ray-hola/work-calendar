@@ -72,6 +72,19 @@ class FormDraftTests(unittest.TestCase):
         self.assertEqual(self.store.action(member, 'formdraft.delete', {'key': 'task.new'}), {'deleted': 0})
         self.assertEqual(len(self.store.snapshot(self.store.user('test002'))['formDrafts']), 1)
 
+    def test_a_write_that_arrives_late_cannot_undo_newer_text(self):
+        member = self.store.user('test001')
+        self.save(fields={'taskName': '新的'}, typedAt='2026-11-13T10:00:02.000Z')
+        kept = self.save(fields={'taskName': '旧的'}, typedAt='2026-11-13T10:00:01.000Z')
+        self.assertEqual(kept['fields']['taskName'], '新的')
+        self.store.action(member, 'formdraft.delete', {'key': 'task.new', 'typedAt': '2026-11-13T10:00:01.500Z'})
+        self.assertEqual(len(self.store.form_drafts('test001')), 1, '删除之后才打的字留着')
+        # A malformed time is ignored and the save still lands.
+        self.save(typedAt='not a time')
+        self.assertEqual(self.store.form_drafts('test001')[0]['typedAt'], '')
+        self.store.action(member, 'formdraft.delete', {'key': 'task.new', 'typedAt': '2026-11-13T10:00:03.000Z'})
+        self.assertEqual(self.store.form_drafts('test001'), [])
+
     def test_only_the_newest_drafts_are_kept(self):
         for i in range(FORM_DRAFT_LIMIT + 3):
             self.save(key=f'task.edit:{i}')
