@@ -179,13 +179,13 @@ function toggleNavigation(kind){
 function navigationControls(kind){
   const c=NAVIGATION[kind],id={main:'mainNavigation',project:'projectNav',chat:'chatNavigation'}[kind];
   return `<button type="button" class="nav-collapse-toggle" data-nav-toggle="${kind}" aria-controls="${id}" `
-    +`${tr("aria-label=\"收起{0}\" title=\"收起{1}\">{2}",c.label,c.label,icon('chevron-right'))}</button>`;
+    +`${tr('aria-label="收起{0}" title="收起{1}">{2}',c.label,c.label,icon('chevron-right'))}</button>`;
 }
 function navigationHandle(kind){
   const c=NAVIGATION[kind],id={main:'mainNavigation',project:'projectNav',chat:'chatNavigation'}[kind];
   return `<div class="nav-resize-handle" data-nav-resize="${kind}" role="separator" tabindex="0" `
-    +`${tr("aria-orientation=\"vertical\" aria-controls=\"{0}\" aria-label=\"调整{1}宽度\"",id,c.label)} `
-    +`${tr("title=\"拖动调整{0}宽度；方向键微调，Home / End 到上下限，Enter 收起或展开，双击恢复默认\">",c.label)}</div>`;
+    +`${tr('aria-orientation="vertical" aria-controls="{0}" aria-label="调整{1}宽度"',id,c.label)} `
+    +`${tr('title="拖动调整{0}宽度；方向键微调，Home / End 到上下限，Enter 收起或展开，双击恢复默认">',c.label)}</div>`;
 }
 function applyNavigationLayout(){
   if(typeof window==='undefined'||!document.documentElement)return;
@@ -319,7 +319,7 @@ function applyAgentPanelSize(){
   Object.assign(panel.style,{width:size.width+'px',height:size.height+'px',right:b.gap+'px',bottom:b.gap+'px'});
   panel.querySelectorAll('[data-agent-resize]').forEach(h=>{
     const width=h.dataset.agentResize==='w',both=h.dataset.agentResize==='nw';
-    h.setAttribute('aria-label',both?tr("调整助手宽高，当前 {0} × {1} 像素",size.width,size.height):width?tr('调整助手宽度'):tr('调整助手高度'));
+    h.setAttribute('aria-label',both?tr('调整助手宽高，当前 {0} × {1} 像素',size.width,size.height):width?tr('调整助手宽度'):tr('调整助手高度'));
     if(!both){h.setAttribute('aria-valuemin',width?b.minWidth:b.minHeight);h.setAttribute('aria-valuemax',width?b.maxWidth:b.maxHeight);h.setAttribute('aria-valuenow',width?size.width:size.height)}
   });
 }
@@ -345,7 +345,7 @@ function initAgentPanelResize(){
   for(const [edge,label] of [['w',tr('宽度')],['n',tr('高度')],['nw',tr('宽高')]]){
     panel.insertAdjacentHTML('beforeend',`<div class="agent-resize-edge edge-${edge}" data-agent-resize="${edge}" tabindex="0" `
       +`role="${edge==='nw'?'button':'separator'}"${edge==='nw'?'':` aria-orientation="${edge==='w'?'vertical':'horizontal'}"`} `
-      +`${tr("aria-controls=\"agentPanel\" aria-label=\"调整助手{0}\" title=\"拖动调整助手{1}，方向键微调，Shift 加速，Home 恢复默认，End 到上限，双击恢复默认尺寸\">",label,label)}</div>`);
+      +`${tr('aria-controls="agentPanel" aria-label="调整助手{0}" title="拖动调整助手{1}，方向键微调，Shift 加速，Home 恢复默认，End 到上限，双击恢复默认尺寸">',label,label)}</div>`);
   }
   panel.addEventListener('pointerdown',e=>{
     const handle=e.target.closest('[data-agent-resize]');if(!handle||e.button!==0||agentPanelDrag)return;
@@ -419,7 +419,7 @@ function api(path, body, options = {}) {
 /* Raw-body sibling of api() for uploads: audio is sent as-is, not as JSON. */
 const apiBlob=(path,blob,options={})=>fetch(path,{...options,method:'POST',headers:{'Content-Type':blob.type||'application/octet-stream','X-Work-Calendar':'1'},credentials:'same-origin',body:blob}).then(async r=>{const x=await r.json().catch(()=>({}));if(!r.ok)throw new Error(trServer(x.error)||tr('请求未完成'));return x});
 const getState=()=>fetch('/api/state',{credentials:'same-origin'}).then(async r=>{const x=await readJSON(r);if(!r.ok){const e=new Error(trServer(x.error)||tr('读取工作台失败'));e.status=r.status;throw e}return x});
-const fmt=iso=>{const d=new Date(`${iso}T12:00:00`);return tr("{0}月{1}日",d.getMonth()+1,d.getDate())};
+const fmt=iso=>{const d=new Date(`${iso}T12:00:00`);return tr('{0}月{1}日',d.getMonth()+1,d.getDate())};
 const monthLabel=ym=>{const [y,m]=ym.split('-').map(Number);return tr('{0} 年 {1} 月',y,m)};
 const wd=iso=>[tr('周日'),tr('周一'),tr('周二'),tr('周三'),tr('周四'),tr('周五'),tr('周六')][new Date(`${iso}T12:00:00`).getDay()];
 const add=(iso,n)=>{const d=new Date(`${iso}T12:00:00`);d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)};
@@ -558,7 +558,7 @@ const deferHops=t=>taskLineageIds(t,false).size-1;
    can give a small bump when another period joins since the last render. */
 const stackKey=t=>(t.stackPeriods||[])[0]||t.originId||t.reworkOf||t.id;
 const stackBadge=t=>{const n=Number(t.stackCount);if(!(n>1))return '';const before=UI.stackSeen?.get(stackKey(t));
-  return `<span class="stack-badge${before&&n>before?' is-bumped':''}" aria-label="${tr("合并 {0} 期",n)}">${tr("{0} 期",n)}</span>`};
+  return `<span class="stack-badge${before&&n>before?' is-bumped':''}" aria-label="${tr('合并 {0} 期',n)}">${tr('{0} 期',n)}</span>`};
 function rememberStackSizes(){
   UI.stackSeen=new Map((S.tasks||[]).filter(t=>!isSuperseded(t)).map(t=>[stackKey(t),Number(t.stackCount)||1]));
 }
@@ -595,17 +595,17 @@ function ddlBadge(t){
   const left=daysCount(S.today,end);
   const settled=t.status==='done';
   const state=settled?'settled':left<0?'overdue':left===0?'due':'left';
-  const label=settled?tr('已完成'):left<0?tr("已逾期 {0} 天",-left):left===0?tr('今天到期'):tr("还剩 {0} 天",left);
+  const label=settled?tr('已完成'):left<0?tr('已逾期 {0} 天',-left):left===0?tr('今天到期'):tr('还剩 {0} 天',left);
   return `<span class="task-ddl ${state}"><em>DDL</em> ${escapeHTML(fmt(end))}<b>${label}</b></span>`;
 }
 function ddlText(t){
   const end=taskEnd(t);
   if(!isMultiDay(t))return fmt(end);
   const left=daysCount(S.today,end);
-  if(t.status==='done')return tr("{0} · 已完成",fmt(end));
-  if(left<0)return tr("{0} · 已逾期 {1} 天",fmt(end),-left);
-  if(left===0)return tr("{0} · 今天到期",fmt(end));
-  return tr("{0} · 还剩 {1} 天",fmt(end),left);
+  if(t.status==='done')return tr('{0} · 已完成',fmt(end));
+  if(left<0)return tr('{0} · 已逾期 {1} 天',fmt(end),-left);
+  if(left===0)return tr('{0} · 今天到期',fmt(end));
+  return tr('{0} · 还剩 {1} 天',fmt(end),left);
 }
 function renderStats(day=displayDay()){renderFreshDot();const d=scheduleTasks().filter(t=>taskActiveOn(t,day)),
   current=d.filter(t=>!isArchivedTask(t)),done=current.filter(t=>t.status==='done').length;
@@ -614,7 +614,7 @@ function renderStats(day=displayDay()){renderFreshDot();const d=scheduleTasks().
   $('#doingCount').textContent=scheduleTasks().filter(t=>t.status==='doing').length;
   $('#deferredCount').textContent=scheduleTasks().filter(isDeferredTask).length;$('#allTabCount').textContent=d.length;
   $('#openTabCount').textContent=current.length-done;$('#doneTabCount').textContent=done;
-  $('#progressText').textContent=tr("{0} / {1} 已完成",done,current.length);const pct=current.length?done/current.length*100:0;
+  $('#progressText').textContent=tr('{0} / {1} 已完成',done,current.length);const pct=current.length?done/current.length*100:0;
   $('#dayProgress').style.width=`${pct}%`;$('#progressPercent').textContent=`${Math.round(pct)}%`;
   $('#focusTime').textContent=`${String(Math.floor(current.reduce((n,t)=>n+t.duration,0)/60)).padStart(2,'0')}:`
   +`${String(current.reduce((n,t)=>n+t.duration,0)%60).padStart(2,'0')}`;$('#focusProgress').style.width=`${pct}%`}
@@ -628,13 +628,13 @@ function taskCard(t){
   return `<article class="task-card" data-id="${escapeHTML(t.id)}" tabindex="0"${t.desc?` title="`
     +`${escapeHTML(t.desc)}"`:''}><span class="priority ${escapeHTML(t.priority)}">${escapeHTML(t.priority)}</span>`
     +`<div class="task-main"><span class="task-name" title="${escapeHTML(t.name)}">${escapeHTML(t.name)}</span>${stackBadge(t)}${t.fixed?`<span class="fixed-badge"${LANG==='en'?` title="${tr('固定')}"`:''}>`
-    +`${icon('repeat')}<span class="badge-label"> ${tr('固定')}</span></span>`:''}${isMultiDay(t)?`<span class="span-badge">${tr("{0} 天",spanDays(t))}</span>`:''}`
-    +`${isSuperseded(t)?`<span class="superseded-badge">${tr("已被后续任务接替")}</span>`:''}${carriedFrom?`<span class="carried-badge">`
-    +tr("{0} 由 {1} 递延{2}",icon('arrow-right'),escapeHTML(carriedDay||tr('前一日')),deferHops(t)>1?` ${tr("· 第 {0} 次",deferHops(t))}`:'')
+    +`${icon('repeat')}<span class="badge-label"> ${tr('固定')}</span></span>`:''}${isMultiDay(t)?`<span class="span-badge">${tr('{0} 天',spanDays(t))}</span>`:''}`
+    +`${isSuperseded(t)?`<span class="superseded-badge">${tr('已被后续任务接替')}</span>`:''}${carriedFrom?`<span class="carried-badge">`
+    +tr('{0} 由 {1} 递延{2}',icon('arrow-right'),escapeHTML(carriedDay||tr('前一日')),deferHops(t)>1?` ${tr('· 第 {0} 次',deferHops(t))}`:'')
     +`</span>`:''}${deferLog?.target?`<span class="defer-target">${icon('arrow-right')} ${escapeHTML(deferLog.target)}`
     +`</span>`:''}<span class="project-tag">${escapeHTML(projectName(t))}</span></div>`
     +`<span class="assignee-tag" title="${escapeHTML(t.assignee)}">${escapeHTML(nameOf(t.assignee))}</span>`
-    +`<span class="task-time">${tr("{0} {1} · {2} 分钟",icon('clock'),escapeHTML(t.time||'09:00'),t.duration)}</span>`
+    +`<span class="task-time">${tr('{0} {1} · {2} 分钟',icon('clock'),escapeHTML(t.time||'09:00'),t.duration)}</span>`
     +`<span class="task-when">${ddlBadge(t)}</span><span class="task-status"><i class="status-dot ${c}"></i>${l}</span>`
     +`<span class="task-arrow">${icon('chevron-right')}</span></article>`;
 }
@@ -647,11 +647,11 @@ function dailyTaskGroups(tasks){
   }
   return [...groups.values()].map(({project,tasks})=>{
     const unattached=!project, title=project?.name||(tasks.every(t=>t.fixed)?tr('固定安排'):tasks.every(t=>t.type==='临时')?tr('临时任务'):tr('其他安排')), sub=project?`Owner · ${nameOf(project.owner)} · ${projectStatus(project)}`:tasks.every(t=>t.fixed)?tr('按周期自动生成'):tasks.every(t=>t.type==='临时')?tr('不属于任何项目'):tr('历史记录'), done=tasks.filter(t=>t.status==='done').length;
-    return `<section class="daily-project-card ${unattached?'unattached-project':''}" data-project="${escapeHTML(project?.id||'')}"><div class="daily-project-heading"><div><span class="daily-project-kicker">${unattached?tr('安排'):tr('项目')}</span><h3>${escapeHTML(title)}</h3></div><span class="daily-project-meta">${tr("{0} · {1}/{2} 已完成",escapeHTML(sub),done,tasks.length)}</span></div><div class="daily-project-tasks">${tasks.map(taskCard).join('')}</div></section>`;
+    return `<section class="daily-project-card ${unattached?'unattached-project':''}" data-project="${escapeHTML(project?.id||'')}"><div class="daily-project-heading"><div><span class="daily-project-kicker">${unattached?tr('安排'):tr('项目')}</span><h3>${escapeHTML(title)}</h3></div><span class="daily-project-meta">${tr('{0} · {1}/{2} 已完成',escapeHTML(sub),done,tasks.length)}</span></div><div class="daily-project-tasks">${tasks.map(taskCard).join('')}</div></section>`;
   }).join('');
 }
 function bindTaskCards(root){$$(root+' .task-card').forEach(e=>{e.onclick=()=>openDrawer(e.dataset.id);e.onkeydown=x=>{if(x.key==='Enter')openDrawer(e.dataset.id)}})}
-function renderDayTab(day){const tab=$('#dayTab');if(!tab)return;const d=new Date(`${day}T12:00:00`),n=String(d.getDate());if($('#dayTabDay').textContent!==n){tab.classList.remove('turn');void tab.offsetWidth;tab.classList.add('turn')}$('#dayTabMonth').textContent=tr("{0}月",d.getMonth()+1);$('#dayTabDay').textContent=n;$('#dayTabWeek').textContent=wd(day);tab.classList.toggle('is-today',day===S.today);const h=$('#todayView h1');if(h)h.textContent=day===S.today?tr('今天做什么？'):day===add(S.today,1)?tr('明天做什么？'):day===add(S.today,-1)?tr('昨天做了什么？'):tr('这一天的安排')}
+function renderDayTab(day){const tab=$('#dayTab');if(!tab)return;const d=new Date(`${day}T12:00:00`),n=String(d.getDate());if($('#dayTabDay').textContent!==n){tab.classList.remove('turn');void tab.offsetWidth;tab.classList.add('turn')}$('#dayTabMonth').textContent=tr('{0}月',d.getMonth()+1);$('#dayTabDay').textContent=n;$('#dayTabWeek').textContent=wd(day);tab.classList.toggle('is-today',day===S.today);const h=$('#todayView h1');if(h)h.textContent=day===S.today?tr('今天做什么？'):day===add(S.today,1)?tr('明天做什么？'):day===add(S.today,-1)?tr('昨天做了什么？'):tr('这一天的安排')}
 function renderToday(){if(typeof syncFilterLinks==='function')syncFilterLinks();const day=displayDay(),deferredView=UI.filter==='deferred';renderStats(day);renderDayTab(day);
   $('#todayLabel').textContent=deferredView?tr('递延任务'):`${wd(day)} · `
   +`${fmt(day)}`;$('#dateChip').textContent=deferredView?tr('全部日期'):fmt(day);
@@ -671,16 +671,16 @@ function renderToday(){if(typeof syncFilterLinks==='function')syncFilterLinks();
 const WEEK_DAY_LIMIT=6;
 function weekLabel(off){
   if(off===0)return tr('本周');if(off===-1)return tr('上周');if(off===1)return tr('下周');
-  return off>0?tr("{0} 周后",off):tr("{0} 周前",-off);
+  return off>0?tr('{0} 周后',off):tr('{0} 周前',-off);
 }
 function weekTaskChip(t,iso){
   const cont=iso>t.date,[c,l]=status(t);
-  const meta=cont?tr("续 · {0}",nameOf(t.assignee)):`${escapeHTML(t.time||'09:00')} · ${nameOf(t.assignee)}`;
+  const meta=cont?tr('续 · {0}',nameOf(t.assignee)):`${escapeHTML(t.time||'09:00')} · ${nameOf(t.assignee)}`;
   return `<button class="week-task ${escapeHTML(t.priority)} ${c}${cont?' cont':''}${t.stackCount>1?' is-stacked':''}" type="button" data-id="${escapeHTML(t.id)}" title="${escapeHTML(`${t.name} · ${nameOf(t.assignee)} · ${l}`)}">`
     +`${t.stackCount>1?`<span class="week-task-title"><span class="week-task-name">${escapeHTML(t.name)}</span>${stackBadge(t)}</span>`
     :`<span class="week-task-name">${escapeHTML(t.name)}</span>`}`
 
-    +`<span class="week-task-meta">${escapeHTML(meta)}${!cont&&isMultiDay(t)?` ${tr("· {0} 天",spanDays(t))}`:''}</span></button>`;
+    +`<span class="week-task-meta">${escapeHTML(meta)}${!cont&&isMultiDay(t)?` ${tr('· {0} 天',spanDays(t))}`:''}</span></button>`;
 }
 /* A past day keeps a trace of what moved on: its unfinished occurrences were
    carried forward and leave the board, which used to make the day look empty.
@@ -690,12 +690,12 @@ function weekDayColumn(iso,tasks,canAdd,carried=0){
   const shown=day.slice(0,WEEK_DAY_LIMIT),more=day.length-shown.length,done=day.filter(t=>t.status==='done').length;
   const quiet=past&&!day.length&&!carried;
   return `<section class="week-day${today?' today':''}${past?' past':''}${out?' out':''}${quiet?' is-quiet':''}" data-date="${iso}">`
-    +`<header class="week-day-head"><button class="week-day-open" type="button" data-date="${iso}" aria-label="${escapeHTML(tr("{0} {1}，{2} 项任务",wd(iso),fmt(iso),day.length))}"><span>${wd(iso)}</span><strong>${new Date(`${iso}T12:00:00`).getDate()}</strong>${today?tr('<em>今天</em>'):''}</button>`
+    +`<header class="week-day-head"><button class="week-day-open" type="button" data-date="${iso}" aria-label="${escapeHTML(tr('{0} {1}，{2} 项任务',wd(iso),fmt(iso),day.length))}"><span>${wd(iso)}</span><strong>${new Date(`${iso}T12:00:00`).getDate()}</strong>${today?tr('<em>今天</em>'):''}</button>`
     +`${day.length?`<small>${done}/${day.length}</small>`:''}</header>`
     +`<div class="week-day-tasks">${shown.map(t=>weekTaskChip(t,iso)).join('')}`
-    +`${more>0?`<button class="week-day-more" type="button" data-date="${iso}">${tr("还有 {0} 项",more)}</button>`:''}`
-    +`${past&&carried?`<p class="week-day-carried">${tr("{0}{1} 项未完成，已递延",icon('arrow-right'),carried)}</p>`:''}</div>`
-    +`${canAdd&&!out&&!past?`<button class="week-day-add" type="button" data-date="${iso}" aria-label="${tr("在 {0} 新增任务",escapeHTML(fmt(iso)))}">${icon('plus')}</button>`:''}</section>`;
+    +`${more>0?`<button class="week-day-more" type="button" data-date="${iso}">${tr('还有 {0} 项',more)}</button>`:''}`
+    +`${past&&carried?`<p class="week-day-carried">${tr('{0}{1} 项未完成，已递延',icon('arrow-right'),carried)}</p>`:''}</div>`
+    +`${canAdd&&!out&&!past?`<button class="week-day-add" type="button" data-date="${iso}" aria-label="${tr('在 {0} 新增任务',escapeHTML(fmt(iso)))}">${icon('plus')}</button>`:''}</section>`;
 }
 function weekDeferralCounts(){
   // A deferral is a historical event, even when its successor is now done.
@@ -709,7 +709,7 @@ function renderCalendar(){
   UI.selectedWeek=Math.min(UI.selectedWeek||0,horizon);
   const days=week(UI.selectedWeek),tasks=scheduleTasks(),canAdd=taskEntryMode()!=='none';
   const inWeek=tasks.filter(t=>days.some(d=>taskActiveOn(t,d))),done=inWeek.filter(t=>t.status==='done').length;
-  $('#weekRangeLabel').textContent=tr("{0} · {1} — {2} · {3} 项任务{4}",weekLabel(UI.selectedWeek),fmt(days[0]),fmt(days[6]),inWeek.length,inWeek.length?` ${tr("· 完成 {0}",done)}`:'');
+  $('#weekRangeLabel').textContent=tr('{0} · {1} — {2} · {3} 项任务{4}',weekLabel(UI.selectedWeek),fmt(days[0]),fmt(days[6]),inWeek.length,inWeek.length?` ${tr('· 完成 {0}',done)}`:'');
   $('#backTodayBtn').classList.toggle('is-current',UI.selectedWeek===0);
   $('#nextWeekBtn').disabled=UI.selectedWeek>=horizon;
   const board=$('#weekCarousel');
@@ -725,7 +725,7 @@ function renderCalendar(){
   if(board.scrollWidth>board.clientWidth)board.scrollLeft=today?today.getBoundingClientRect().left-board.getBoundingClientRect().left+board.scrollLeft-(board.clientWidth-today.offsetWidth)/2:0;
 }
 function turnWeek(step){
-  if(step>0&&UI.selectedWeek>=weekOffsetFor(DATE_HORIZON)){toast(tr("日期范围目前只支持到 {0}",DATE_HORIZON));return}
+  if(step>0&&UI.selectedWeek>=weekOffsetFor(DATE_HORIZON)){toast(tr('日期范围目前只支持到 {0}',DATE_HORIZON));return}
   UI.weekDir=step>0?'next':'prev';UI.selectedWeek=(UI.selectedWeek||0)+step;
   renderScheduleScope();renderCalendar();
 }
@@ -742,11 +742,11 @@ function renderDayContent(){
 /* Log kinds are storage keys; the drawer reads them back in people's words. */
 const LOG_LABELS={start:tr('开始任务'),auto_start:tr('到点自动开始'),complete:tr('完成任务'),complete_pending:tr('提交完成审批'),defer:tr('未完成，递延'),skip:tr('跳过本次'),edit_request:tr('申请修改任务'),task_approval_superseded:tr('审批由后续任务接续'),complete_edit:tr('修改完成记录'),reopen:tr('被打回')};
 function logLine(x){
-  if(x.stackCount>1&&x.kind==='reopen')return tr("打回合并 {0} 期{1}",x.stackCount,x.reason?' · '+x.reason:'');
-  if(x.stackCount>1&&x.kind==='complete_edit')return tr("修改合并 {0} 期完成记录{1}{2}",x.stackCount,x.summary?' · '+x.summary:'',x.actual?tr(' · 实际 ')+x.actual+tr(' 分钟'):'');
-  if(x.stackCount>1&&x.kind==='complete')return tr("完成合并 {0} 期{1}{2}",x.stackCount,x.summary?' · '+x.summary:'',x.actual?tr(' · 实际 ')+x.actual+tr(' 分钟'):'');
-  if(x.kind==='defer'&&x.target)return tr("{0}递延至 {1}{2}",x.stackCount>1?tr('合并 ')+x.stackCount+tr(' 期'):'',fmt(x.target),x.reason?' · '+x.reason:'');
-  if(x.kind==='adjust')return tr("指派调整：{0} → {1}",nameOf(x.before?.assignee),nameOf(x.after?.assignee));
+  if(x.stackCount>1&&x.kind==='reopen')return tr('打回合并 {0} 期{1}',x.stackCount,x.reason?' · '+x.reason:'');
+  if(x.stackCount>1&&x.kind==='complete_edit')return tr('修改合并 {0} 期完成记录{1}{2}',x.stackCount,x.summary?' · '+x.summary:'',x.actual?tr(' · 实际 ')+x.actual+tr(' 分钟'):'');
+  if(x.stackCount>1&&x.kind==='complete')return tr('完成合并 {0} 期{1}{2}',x.stackCount,x.summary?' · '+x.summary:'',x.actual?tr(' · 实际 ')+x.actual+tr(' 分钟'):'');
+  if(x.kind==='defer'&&x.target)return tr('{0}递延至 {1}{2}',x.stackCount>1?tr('合并 ')+x.stackCount+tr(' 期'):'',fmt(x.target),x.reason?' · '+x.reason:'');
+  if(x.kind==='adjust')return tr('指派调整：{0} → {1}',nameOf(x.before?.assignee),nameOf(x.after?.assignee));
   if(x.kind==='approval'||x.kind==='edit_approval'){const verdict=x.decision==='approved'?tr('通过'):x.decision==='rejected'?tr('驳回'):'';return `${x.kind==='approval'?tr('完成审批'):tr('修改审批')}${verdict}${x.reason?` · ${x.reason}`:''}`}
   const detail=x.summary||x.reason||x.remaining||'';
   return `${LOG_LABELS[x.kind]||x.kind}${detail?` · ${detail}`:''}`;
@@ -765,7 +765,7 @@ function taskHistoryHTML(task,ids=taskLineageIds(task)){
   const section=(title,events)=>`<section class="history-period"><h4>${escapeHTML(title)}</h4>${events.map(row).join('')}</section>`;
   return [...groups].sort(([a],[b])=>a.localeCompare(b)).map(([day,events])=>section(day?fmt(day):tr('任务记录'),events)).join('')+(shared.length?section(tr('合并操作'),shared):'');
 }
-function logTime(iso){const m=String(iso||'').match(/^\d{4}-(\d{2})-(\d{2})T(\d{2}:\d{2})/);return m?tr("{0}月{1}日 {2}",Number(m[1]),Number(m[2]),m[3]):''}
+function logTime(iso){const m=String(iso||'').match(/^\d{4}-(\d{2})-(\d{2})T(\d{2}:\d{2})/);return m?tr('{0}月{1}日 {2}',Number(m[1]),Number(m[2]),m[3]):''}
 function openDrawer(id){
   const alias=S.tasks.find(x=>x.id===id);if(alias&&isSuperseded(alias)&&alias.supersededBy&&(['todo','doing'].includes(alias.status)||alias.stackCompletedBy)){const target=S.tasks.find(x=>x.id===alias.supersededBy);if(target&&target.id!==id)return openDrawer(target.id)}
   const t=S.tasks.find(x=>x.id===id);if(!t)return;
@@ -783,19 +783,19 @@ function openDrawer(id){
   const settled=t.status==='done'&&!t.carriedCompletion&&!isSuperseded(t)&&(!p||p.status==='active');
   const canEditCompletion=settled&&!S.user.admin&&t.assignee===S.user.id,
   canReopen=settled&&(p?canManageProject(p):Boolean(S.user.admin)||giver);
-  const completionActions=canEditCompletion||canReopen?`<div class="drawer-actions">${canEditCompletion?`<button class="secondary-btn" id="editCompletion">${tr("{0}修改完成记录",icon('edit'))}</button>`:''}${canReopen?`<button class="secondary-btn" id="reopenTask">${tr("{0}打回",icon('arrow-up-right'))}</button>`:''}</div>`:'';
-  const reopenNote=t.reopen&&['todo','doing'].includes(t.status)?`<p class="rejection-note">${tr("{0} 打回：{1}",escapeHTML(nameOf(t.reopen.by)),escapeHTML(t.reopen.reason||''))}</p>`:'';
-  const editReviewActions=editPending&&editReviewer?`<div class="drawer-actions approval-actions"><button class="primary-btn" id="approveEditRequest">${tr("{0}同意修改",icon('check'))}</button><button class="secondary-btn" id="rejectEditRequest">${tr("驳回修改申请")}</button></div>`:'';
+  const completionActions=canEditCompletion||canReopen?`<div class="drawer-actions">${canEditCompletion?`<button class="secondary-btn" id="editCompletion">${tr('{0}修改完成记录',icon('edit'))}</button>`:''}${canReopen?`<button class="secondary-btn" id="reopenTask">${tr('{0}打回',icon('arrow-up-right'))}</button>`:''}</div>`:'';
+  const reopenNote=t.reopen&&['todo','doing'].includes(t.status)?`<p class="rejection-note">${tr('{0} 打回：{1}',escapeHTML(nameOf(t.reopen.by)),escapeHTML(t.reopen.reason||''))}</p>`:'';
+  const editReviewActions=editPending&&editReviewer?`<div class="drawer-actions approval-actions"><button class="primary-btn" id="approveEditRequest">${tr('{0}同意修改',icon('check'))}</button><button class="secondary-btn" id="rejectEditRequest">${tr('驳回修改申请')}</button></div>`:'';
   const completionLogs=S.logs.filter(x=>x.taskId===t.id&&['complete','complete_pending'].includes(x.kind)),latestCompletion=completionLogs[completionLogs.length-1],completionSummary=t.completionSummary||latestCompletion?.summary||t.approval?.summary,completionActual=t.completionActual||latestCompletion?.actual;
   const rejection=t.rejection||t.approval?.reason;
-  const actionCopy=pendingApproval?`<p class="muted approval-pending-note">${tr("等待")} `
-    +tr("{0} 审批",escapeHTML(nameOf(t.approval?.approver||p?.owner||'superadmin')))
-    +`</p>`:editPending?`<p class="muted approval-pending-note">${tr("修改申请待 {0} 审批",escapeHTML(nameOf(editApprover(t))))}`
-    +`</p>`:rejected?`<p class="rejection-note">${tr("任务已驳回{0}",rejection?tr("：{0}",escapeHTML(rejection)):'')}`
-    +`</p>`:archived?`<p class="muted">${isSuperseded(t)?tr('已由后续任务接替'):tr("{0} · 已归档",l)}`
+  const actionCopy=pendingApproval?`<p class="muted approval-pending-note">${tr('等待')} `
+    +tr('{0} 审批',escapeHTML(nameOf(t.approval?.approver||p?.owner||'superadmin')))
+    +`</p>`:editPending?`<p class="muted approval-pending-note">${tr('修改申请待 {0} 审批',escapeHTML(nameOf(editApprover(t))))}`
+    +`</p>`:rejected?`<p class="rejection-note">${tr('任务已驳回{0}',rejection?tr('：{0}',escapeHTML(rejection)):'')}`
+    +`</p>`:archived?`<p class="muted">${isSuperseded(t)?tr('已由后续任务接替'):tr('{0} · 已归档',l)}`
     +`</p>`:perform?`<div class="drawer-actions">${t.status==='todo'?`<button class="secondary-btn" id="startTask">`
-    +`${tr("{0}开始任务",icon('play'))}</button>`:''}<button class="primary-btn complete-btn" id="completeTask">${tr("{0}记录完成",icon('check'))}`
-    +`</button><button class="defer-btn" id="deferTask">${tr("{0}未完成，递延",icon('arrow-up-right'))}</button></div>`:'';
+    +`${tr('{0}开始任务',icon('play'))}</button>`:''}<button class="primary-btn complete-btn" id="completeTask">${tr('{0}记录完成',icon('check'))}`
+    +`</button><button class="defer-btn" id="deferTask">${tr('{0}未完成，递延',icon('arrow-up-right'))}</button></div>`:'';
   const editSummary=editPending?renderEditRequestSummary(t):'';
   const canDelete=S.user.admin&&!t.fixed&&!t.repeatId&&!pendingApproval&&!rejected;
   const canDirectEdit=(S.user.admin||(perform&&ownTemp)||giver)&&!editPending&&(!p||p.status==='active')
@@ -803,22 +803,22 @@ function openDrawer(id){
   $('#drawerContent').innerHTML=`<div class="drawer-kicker">${escapeHTML(projectName(t))} · ${escapeHTML(t.priority)}`
     +`</div><h2 class="drawer-title">${escapeHTML(t.name)}${stackBadge(t)}</h2><p class="drawer-description">`
     +`${escapeHTML(t.desc||tr('暂无描述'))}</p>${completionSummary?`<div class="completion-summary"><span>`
-    +`${reopenNote?tr('上次完成总结'):tr('最新完成总结')}</span><p>${escapeHTML(completionSummary)}${completionActual?` ${tr("· 实际")} `
-    +tr("{0} 分钟",completionActual):''}</p></div>`:''}${reopenNote}${editSummary}<div class="detail-grid"><div><span>${tr("状态")}`
-    +`</span><strong><i class="status-dot ${c}"></i>${l}</strong></div><div><span>${tr("预计时长")}</span><strong>${tr("{0} 分钟",t.duration)}`
-    +`</strong></div>${t.stackCount>1?`<div><span>${tr("合并期次")}</span><strong class="stack-period-list">${stackPeriodDates(t).map(d=>`<span>${escapeHTML(fmt(d))}</span>`).join('')}</strong></div>`:''}<div><span>${isMultiDay(t)?tr("任务周期 · {0} 天",spanDays(t)):tr('安排日期')}</span><strong>${escapeHTML(fmt(t.date))}`
+    +`${reopenNote?tr('上次完成总结'):tr('最新完成总结')}</span><p>${escapeHTML(completionSummary)}${completionActual?` ${tr('· 实际')} `
+    +tr('{0} 分钟',completionActual):''}</p></div>`:''}${reopenNote}${editSummary}<div class="detail-grid"><div><span>${tr('状态')}`
+    +`</span><strong><i class="status-dot ${c}"></i>${l}</strong></div><div><span>${tr('预计时长')}</span><strong>${tr('{0} 分钟',t.duration)}`
+    +`</strong></div>${t.stackCount>1?`<div><span>${tr('合并期次')}</span><strong class="stack-period-list">${stackPeriodDates(t).map(d=>`<span>${escapeHTML(fmt(d))}</span>`).join('')}</strong></div>`:''}<div><span>${isMultiDay(t)?tr('任务周期 · {0} 天',spanDays(t)):tr('安排日期')}</span><strong>${escapeHTML(fmt(t.date))}`
     +`${isMultiDay(t)?` → ${escapeHTML(fmt(taskEnd(t)))}`:''}</strong></div><div><span>DDL</span><strong class="`
     +`${t.status==='done'?'':daysCount(S.today,taskEnd(t))<0?'overdue-text':''}">${escapeHTML(ddlText(t))}</strong>`
-    +`</div><div><span>${tr("负责人")}</span><strong>${escapeHTML(nameOf(t.assignee))}</strong></div>`
-    +`${!t.projectId&&t.creator&&t.creator!==t.assignee?`<div><span>${tr("指派人")}</span><strong>${escapeHTML(nameOf(t.creator))}`
+    +`</div><div><span>${tr('负责人')}</span><strong>${escapeHTML(nameOf(t.assignee))}</strong></div>`
+    +`${!t.projectId&&t.creator&&t.creator!==t.assignee?`<div><span>${tr('指派人')}</span><strong>${escapeHTML(nameOf(t.creator))}`
     +`</strong></div>`:''}</div>`
     +`${canRequestEdit?tr('<button class="secondary-btn edit-task-request-btn" id="requestTaskEdit">申请修改任务</button>'):''}`
     +`${canDirectEdit?tr('<button class="secondary-btn edit-task-request-btn" id="directTaskEdit">直接调整任务</button>'):''}`
     +`${manage?tr('<button class="secondary-btn" id="adjustTaskAssignment">调整任务指派</button>'):''}`
     +`${canDelete?tr('<button class="secondary-btn danger-btn" id="deleteTask">删除此任务</button>'):''}<div class="history">`
-    +`<h3>${tr("任务记录")}</h3>${taskHistoryHTML(t,lineageIds)}</div>${actionCopy}`
+    +`<h3>${tr('任务记录')}</h3>${taskHistoryHTML(t,lineageIds)}</div>${actionCopy}`
     +`${completionActions}${editReviewActions}`;
-  $('#taskDrawer').classList.remove('hidden');$('#startTask')?.addEventListener('click',()=>act('task.start',{id:t.id}).then(()=>closeDrawer()).catch(()=>{}));$('#completeTask')?.addEventListener('click',()=>complete(t));$('#deferTask')?.addEventListener('click',()=>defer(t));$('#requestTaskEdit')?.addEventListener('click',()=>editTaskRequest(id));$('#directTaskEdit')?.addEventListener('click',()=>editTaskRequest(id,true));$('#adjustTaskAssignment')?.addEventListener('click',()=>editTaskAssignment(id));$('#deleteTask')?.addEventListener('click',async()=>{if(!confirm(tr("确认删除「{0}」？删除后将从日历移除。",t.name)))return;try{await act('task.delete',{id:t.id});closeDrawer()}catch(e){}});$('#editCompletion')?.addEventListener('click',()=>editCompletion(t));$('#reopenTask')?.addEventListener('click',()=>reopenTask(t));$('#approveEditRequest')?.addEventListener('click',()=>reviewTaskEdit(t.id,true));$('#rejectEditRequest')?.addEventListener('click',()=>reviewTaskEdit(t.id,false));
+  $('#taskDrawer').classList.remove('hidden');$('#startTask')?.addEventListener('click',()=>act('task.start',{id:t.id}).then(()=>closeDrawer()).catch(()=>{}));$('#completeTask')?.addEventListener('click',()=>complete(t));$('#deferTask')?.addEventListener('click',()=>defer(t));$('#requestTaskEdit')?.addEventListener('click',()=>editTaskRequest(id));$('#directTaskEdit')?.addEventListener('click',()=>editTaskRequest(id,true));$('#adjustTaskAssignment')?.addEventListener('click',()=>editTaskAssignment(id));$('#deleteTask')?.addEventListener('click',async()=>{if(!confirm(tr('确认删除「{0}」？删除后将从日历移除。',t.name)))return;try{await act('task.delete',{id:t.id});closeDrawer()}catch(e){}});$('#editCompletion')?.addEventListener('click',()=>editCompletion(t));$('#reopenTask')?.addEventListener('click',()=>reopenTask(t));$('#approveEditRequest')?.addEventListener('click',()=>reviewTaskEdit(t.id,true));$('#rejectEditRequest')?.addEventListener('click',()=>reviewTaskEdit(t.id,false));
 }
 function taskEditRequest(t){
   if(!t)return null;
@@ -837,19 +837,19 @@ function editApprover(t){
   return giver?.active&&!giver.admin?t.creator:'superadmin';
 }
 function taskEditPending(t){const r=taskEditRequest(t);return Boolean(r&&(r.status==='pending'||r.state==='pending'))}
-function renderEditRequestSummary(t){const r=taskEditRequest(t);if(!r)return '';const c=r.changes||r.requested||{};const labels={name:tr('名称'),desc:tr('描述'),date:tr('日期'),deadline:tr('期限'),duration:tr('时长'),priority:tr('优先级'),assignee:tr('负责人')};const rows=Object.entries(labels).filter(([k])=>c[k]!==undefined&&String(c[k])!==String(t[k]??'')).map(([k,label])=>`<li><b>${label}</b><span>${escapeHTML(String(c[k]))}</span></li>`).join('');const state=r.status==='approved'?tr('修改已通过'):r.status==='rejected'?tr('修改申请已驳回'):tr('待审批的修改申请');return `<div class="edit-request-summary"><strong>${state}</strong><small>${tr("申请人：{0}{1}{2}",escapeHTML(r.requester||r.requestedBy||t.assignee),r.reason?` ${tr("· 理由：{0}",escapeHTML(r.reason))}`:'',r.rejection?` ${tr("· 驳回建议：{0}",escapeHTML(r.rejection))}`:'')}</small>${rows?`<ul>${rows}</ul>`:''}</div>`}
+function renderEditRequestSummary(t){const r=taskEditRequest(t);if(!r)return '';const c=r.changes||r.requested||{};const labels={name:tr('名称'),desc:tr('描述'),date:tr('日期'),deadline:tr('期限'),duration:tr('时长'),priority:tr('优先级'),assignee:tr('负责人')};const rows=Object.entries(labels).filter(([k])=>c[k]!==undefined&&String(c[k])!==String(t[k]??'')).map(([k,label])=>`<li><b>${label}</b><span>${escapeHTML(String(c[k]))}</span></li>`).join('');const state=r.status==='approved'?tr('修改已通过'):r.status==='rejected'?tr('修改申请已驳回'):tr('待审批的修改申请');return `<div class="edit-request-summary"><strong>${state}</strong><small>${tr('申请人：{0}{1}{2}',escapeHTML(r.requester||r.requestedBy||t.assignee),r.reason?` ${tr('· 理由：{0}',escapeHTML(r.reason))}`:'',r.rejection?` ${tr('· 驳回建议：{0}',escapeHTML(r.rejection))}`:'')}</small>${rows?`<ul>${rows}</ul>`:''}</div>`}
 /* Stored in Chinese whatever the interface language; shown through tr(). */
 const FEELINGS=['顺利','一般','困难','阻塞'];
-function completionFields(summary='',actual=30,feeling='顺利'){return `<label class="form-field">${tr("完成总结")}<textarea id="doneText">${escapeHTML(summary)}</textarea></label><label class="form-field">${tr("实际耗时（分钟）")}<input id="actualMins" type="number" min="1" max="1440" value="${Number(actual)||30}"></label><label class="form-field">${tr("工作感受")}<select id="feeling">${FEELINGS.map(f=>`<option value="${f}" ${f===feeling?'selected':''}>${tr(f)}</option>`).join('')}</select></label>`}
+function completionFields(summary='',actual=30,feeling='顺利'){return `<label class="form-field">${tr('完成总结')}<textarea id="doneText">${escapeHTML(summary)}</textarea></label><label class="form-field">${tr('实际耗时（分钟）')}<input id="actualMins" type="number" min="1" max="1440" value="${Number(actual)||30}"></label><label class="form-field">${tr('工作感受')}<select id="feeling">${FEELINGS.map(f=>`<option value="${f}" ${f===feeling?'selected':''}>${tr(f)}</option>`).join('')}</select></label>`}
 function editCompletion(t){
-  openModal(`<div class="eyebrow">${tr("完成记录 · {0}",escapeHTML(t.name))}</div><h2>${tr("修改完成记录")}</h2>${completionFields(t.completionSummary||'',t.completionActual||t.duration,t.completionFeeling||'顺利')}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr("取消")}</button><button class="primary-btn" id="confirmCompletionEdit">${tr("保存修改")}</button></div>`);
+  openModal(`<div class="eyebrow">${tr('完成记录 · {0}',escapeHTML(t.name))}</div><h2>${tr('修改完成记录')}</h2>${completionFields(t.completionSummary||'',t.completionActual||t.duration,t.completionFeeling||'顺利')}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('取消')}</button><button class="primary-btn" id="confirmCompletionEdit">${tr('保存修改')}</button></div>`);
   draftForm(`task.completion:${t.id}`, {title: tr('修改完成记录'), label: t.name, reopen: ['editCompletion', t.id],
     submit: ['task.completion.update']});
   $('#cancelAction').onclick=closeModal;
   $('#confirmCompletionEdit').onclick=async()=>{const summary=$('#doneText').value.trim();if(!summary){toast(tr('请填写完成总结'));return}try{await act('task.completion.update',{id:t.id,summary,actual:Number($('#actualMins').value),feeling:$('#feeling').value});closeModal();closeDrawer();toast(tr('完成记录已更新'))}catch(e){}};
 }
 function reopenTask(t){
-  openModal(`<div class="eyebrow">${tr("{0} · 打回",escapeHTML(projectName(t)))}</div><h2>${tr("打回「{0}」",escapeHTML(t.name))}</h2><p>${tr("任务回到 {0} 的待办{1}，并通知对方。",escapeHTML(nameOf(t.assignee)),t.date<S.today?tr('，排到今天'):'')}</p><label class="form-field">${tr("打回原因")}<textarea id="reopenReason" placeholder="${tr("哪里还需要补充")}"></textarea></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr("取消")}</button><button class="primary-btn" id="confirmReopen">${tr("打回并通知")}</button></div>`);
+  openModal(`<div class="eyebrow">${tr('{0} · 打回',escapeHTML(projectName(t)))}</div><h2>${tr('打回「{0}」',escapeHTML(t.name))}</h2><p>${tr('任务回到 {0} 的待办{1}，并通知对方。',escapeHTML(nameOf(t.assignee)),t.date<S.today?tr('，排到今天'):'')}</p><label class="form-field">${tr('打回原因')}<textarea id="reopenReason" placeholder="${tr('哪里还需要补充')}"></textarea></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('取消')}</button><button class="primary-btn" id="confirmReopen">${tr('打回并通知')}</button></div>`);
   draftForm(`task.reopen:${t.id}`, {title: tr('打回任务'), label: t.name, reopen: ['reopenTask', t.id],
     submit: ['task.reopen']});
   $('#cancelAction').onclick=closeModal;
@@ -883,22 +883,22 @@ function editTaskRequest(id,direct=false){
   // Keep the current assignee selectable so saving other fields never silently reassigns the task.
   const users=pool.some(u=>u.id===t.assignee)?pool:[...S.users.filter(u=>u.id===t.assignee),...pool];
   const minDate=p?.start||S.today,maxDate=p?.end? (p.end<DATE_HORIZON?p.end:DATE_HORIZON):DATE_HORIZON;
-  openModal(`<div class="eyebrow">${tr("{0} · 任务修改",escapeHTML(projectName(t)))}</div><h2>${direct?tr('直接调整任务'):tr('申请修改任务')}</h2>`
-    +`${direct?'':`<p>${tr("审批人：{0}",escapeHTML(nameOf(editApprover(t))))}</p>`}<label class="form-field">${tr("任务名称")}`
-    +`<input id="editTaskName" maxlength="120" value="${escapeHTML(t.name)}"></label><label class="form-field">${tr("任务描述")}`
+  openModal(`<div class="eyebrow">${tr('{0} · 任务修改',escapeHTML(projectName(t)))}</div><h2>${direct?tr('直接调整任务'):tr('申请修改任务')}</h2>`
+    +`${direct?'':`<p>${tr('审批人：{0}',escapeHTML(nameOf(editApprover(t))))}</p>`}<label class="form-field">${tr('任务名称')}`
+    +`<input id="editTaskName" maxlength="120" value="${escapeHTML(t.name)}"></label><label class="form-field">${tr('任务描述')}`
     +`<textarea id="editTaskDesc">${escapeHTML(t.desc||'')}</textarea></label><div class="task-form-grid">`
-    +`<label class="form-field">${tr("安排日期")}<input id="editTaskDate" type="date" min="${escapeHTML(minDate)}" ${maxDate?`max="`
-    +`${escapeHTML(maxDate)}"`:''} value="${escapeHTML(t.date||S.today)}"></label><label class="form-field">${tr("截止时间")}`
+    +`<label class="form-field">${tr('安排日期')}<input id="editTaskDate" type="date" min="${escapeHTML(minDate)}" ${maxDate?`max="`
+    +`${escapeHTML(maxDate)}"`:''} value="${escapeHTML(t.date||S.today)}"></label><label class="form-field">${tr('截止时间')}`
     +`<input id="editTaskDeadline" type="date" min="${escapeHTML(minDate)}" ${maxDate?`max="`
-    +`${escapeHTML(maxDate)}"`:''} value="${escapeHTML(t.deadline||t.date||'')}"></label><label class="form-field">${tr("预计时长")}`
+    +`${escapeHTML(maxDate)}"`:''} value="${escapeHTML(t.deadline||t.date||'')}"></label><label class="form-field">${tr('预计时长')}`
     +`<input id="editTaskDuration" type="number" min="1" max="1440" value="${Number(t.duration)||30}"></label>`
-    +`<label class="form-field">${tr("优先级")}<select id="editTaskPriority"><option ${t.priority==='P0'?'selected':''}>P0</option>`
+    +`<label class="form-field">${tr('优先级')}<select id="editTaskPriority"><option ${t.priority==='P0'?'selected':''}>P0</option>`
     +`<option ${t.priority==='P1'?'selected':''}>P1</option><option ${t.priority==='P2'?'selected':''}>P2</option>`
-    +`</select></label></div><label class="form-field">${tr("协作人 / 负责人")}<select id="editTaskAssignee">`
+    +`</select></label></div><label class="form-field">${tr('协作人 / 负责人')}<select id="editTaskAssignee">`
     +`${users.map(u=>`<option value="${escapeHTML(u.id)}" ${u.id===t.assignee?'selected':''}>${escapeHTML(nameOf(u.id))}`
-    +`${p&&u.id===p.owner?' · Owner':''}</option>`).join('')}</select></label><label class="form-field">${tr("修改理由")}`
+    +`${p&&u.id===p.owner?' · Owner':''}</option>`).join('')}</select></label><label class="form-field">${tr('修改理由')}`
     +`<textarea id="editTaskReason" required ></textarea></label><div class="modal-footer">`
-    +`<button class="secondary-btn" id="cancelAction">${tr("取消")}</button><button class="primary-btn" id="confirmTaskEdit">`
+    +`<button class="secondary-btn" id="cancelAction">${tr('取消')}</button><button class="primary-btn" id="confirmTaskEdit">`
     +`${direct?tr('保存调整'):tr('提交修改申请')}</button></div>`);
   if(direct)$('#editTaskReason')?.closest('label')?.remove();
   draftForm(`task.edit:${id}${direct ? ':direct' : ''}`, {title: direct ? tr('直接调整任务') : tr('申请修改任务'),
@@ -964,7 +964,7 @@ function diaryContent(author,day){
 }
 /* What was actually finished on a day, newest first; for one person or the team. */
 function workLogEntries(day,who=null){
-  const rows=Array.isArray(S.workCompletions)?S.workCompletions.filter(l=>String(l.completedAt||'').slice(0,10)===day).map(l=>({label:tr("{0}完成 · {1}",l.kind==='project'?tr('项目'):tr('任务'),l.name),user:l.assignee||l.owner,at:l.completedAt,project:l.projectName,taskId:l.taskId,projectId:l.projectId,kind:l.kind})):S.tasks.filter(t=>t.status==='done'&&String(t.completedAt||t.date||'').slice(0,10)===day).map(t=>({label:tr("任务完成 · {0}",t.name),user:t.assignee,at:t.completedAt||t.date,project:projectName(t),taskId:t.id,projectId:t.projectId,kind:'task'}));
+  const rows=Array.isArray(S.workCompletions)?S.workCompletions.filter(l=>String(l.completedAt||'').slice(0,10)===day).map(l=>({label:tr('{0}完成 · {1}',l.kind==='project'?tr('项目'):tr('任务'),l.name),user:l.assignee||l.owner,at:l.completedAt,project:l.projectName,taskId:l.taskId,projectId:l.projectId,kind:l.kind})):S.tasks.filter(t=>t.status==='done'&&String(t.completedAt||t.date||'').slice(0,10)===day).map(t=>({label:tr('任务完成 · {0}',t.name),user:t.assignee,at:t.completedAt||t.date,project:projectName(t),taskId:t.id,projectId:t.projectId,kind:'task'}));
   return (who?rows.filter(l=>l.user===who):rows).sort((a,b)=>String(b.at||'').localeCompare(String(a.at||'')));
 }
 /* Under an admin's 档案室: the picked day's work log and everyone's load. */
@@ -972,9 +972,9 @@ function renderArchiveLedger(day){
   const box=$('#archiveLedger');if(!box)return;
   const show=Boolean(S.user?.admin&&day);box.classList.toggle('hidden',!show);if(!show)return;
   const members=S.users.filter(u=>u.active&&!u.admin),logs=workLogEntries(day);
-  const rows=members.map(u=>{const stats=diaryDayStats(u.id,day),pct=stats.total?Math.round(stats.completed/stats.total*100):0;return `<div class="diary-load-row"><strong title="${escapeHTML(u.id)}">${escapeHTML(nameOf(u.id))}</strong><span>${tr("{0}/{1} 项完成",stats.completed,stats.total)}</span><div class="progress"><i style="width:${pct}%"></i></div><b>${pct}%</b></div>`}).join('');
-  const projectRows=visibleProjects().filter(p=>p.status==='active').map(p=>{const ts=S.tasks.filter(t=>t.projectId===p.id&&t.status!=='skipped'&&!isSuperseded(t)),done=ts.filter(t=>t.status==='done').length,pct=ts.length?Math.round(done/ts.length*100):0;return `<div class="diary-project-progress"><strong>${escapeHTML(p.name)}</strong><span>${tr("{0}/{1} 完成 · {2}%",done,ts.length,pct)}</span></div>`}).join('');
-  box.innerHTML=`<div class="diary-admin-grid"><div class="diary-log-panel"><div class="panel-heading"><h2>${tr("工作日志 · {0}",fmt(day))}</h2></div><div class="diary-log-list">${logs.map(l=>`<button class="diary-log-item diary-log-button" data-task-id="${escapeHTML(l.taskId||'')}" data-project-id="${escapeHTML(l.projectId||'')}" data-log-kind="${escapeHTML(l.kind||'')}"><i></i><span>${escapeHTML(l.label)}${l.project?`<small class="diary-log-project">${escapeHTML(l.project)}</small>`:''}</span><small>${escapeHTML(l.user?nameOf(l.user):'')}　${icon('chevron-right')}</small></button>`).join('')||tr('<p class="muted">当日暂无已完成任务或项目。</p>')}</div><div class="diary-projects"><h3>${tr("项目当前进度")}</h3>${projectRows||tr('<p class="muted">暂无进行中的项目。</p>')}</div></div><div class="diary-load-panel"><div class="panel-heading"><h2>${tr("成员负载 · {0}",fmt(day))}</h2></div>${rows||tr('<p class="muted">暂无成员数据。</p>')}</div></div>`;
+  const rows=members.map(u=>{const stats=diaryDayStats(u.id,day),pct=stats.total?Math.round(stats.completed/stats.total*100):0;return `<div class="diary-load-row"><strong title="${escapeHTML(u.id)}">${escapeHTML(nameOf(u.id))}</strong><span>${tr('{0}/{1} 项完成',stats.completed,stats.total)}</span><div class="progress"><i style="width:${pct}%"></i></div><b>${pct}%</b></div>`}).join('');
+  const projectRows=visibleProjects().filter(p=>p.status==='active').map(p=>{const ts=S.tasks.filter(t=>t.projectId===p.id&&t.status!=='skipped'&&!isSuperseded(t)),done=ts.filter(t=>t.status==='done').length,pct=ts.length?Math.round(done/ts.length*100):0;return `<div class="diary-project-progress"><strong>${escapeHTML(p.name)}</strong><span>${tr('{0}/{1} 完成 · {2}%',done,ts.length,pct)}</span></div>`}).join('');
+  box.innerHTML=`<div class="diary-admin-grid"><div class="diary-log-panel"><div class="panel-heading"><h2>${tr('工作日志 · {0}',fmt(day))}</h2></div><div class="diary-log-list">${logs.map(l=>`<button class="diary-log-item diary-log-button" data-task-id="${escapeHTML(l.taskId||'')}" data-project-id="${escapeHTML(l.projectId||'')}" data-log-kind="${escapeHTML(l.kind||'')}"><i></i><span>${escapeHTML(l.label)}${l.project?`<small class="diary-log-project">${escapeHTML(l.project)}</small>`:''}</span><small>${escapeHTML(l.user?nameOf(l.user):'')}　${icon('chevron-right')}</small></button>`).join('')||tr('<p class="muted">当日暂无已完成任务或项目。</p>')}</div><div class="diary-projects"><h3>${tr('项目当前进度')}</h3>${projectRows||tr('<p class="muted">暂无进行中的项目。</p>')}</div></div><div class="diary-load-panel"><div class="panel-heading"><h2>${tr('成员负载 · {0}',fmt(day))}</h2></div>${rows||tr('<p class="muted">暂无成员数据。</p>')}</div></div>`;
   box.querySelectorAll('.diary-log-button').forEach(b=>b.onclick=()=>openWorkLogDetail(b.dataset.taskId,b.dataset.projectId,b.dataset.logKind));
 }
 function canManageProject(p){return Boolean(p&&(S.user?.admin||p.owner===S.user?.id))}
@@ -1038,7 +1038,7 @@ function requestProjectCompletion(id){
     const report=$('#projectCompletionReport').value.trim();
     if(!admin&&!report){toast(tr('请填写结项报告'));return}
     try{await act(admin?'project.complete':'project.complete_request',{id,report});closeModal();toast(admin?`「`
-      +tr("{0}」已完成",p.name):tr('结项申请已提交，等待审批'))}catch(e){}
+      +tr('{0}」已完成',p.name):tr('结项申请已提交，等待审批'))}catch(e){}
   };
 }
 /* 项目任务排序. The mode is a per-browser view preference; the manual order
@@ -1091,11 +1091,11 @@ function renderProjects(){
 
   const pool=visibleProjects().filter(p=>!folder||p.folderId===folder.id),mode=folderSortMode();
   const projects=mode==='nav'?navSequence().filter(p=>pool.includes(p)):sortFolderProjects(pool,mode);
-  $('#projectsView .eyebrow').innerHTML=folder?tr("{0} · {1} 个项目",crumb(tr('全部项目'),''),projects.length)
-    :tr("{0} · {1} 个项目",admin?tr('团队项目'):tr('我参与的项目'),projects.length);
+  $('#projectsView .eyebrow').innerHTML=folder?tr('{0} · {1} 个项目',crumb(tr('全部项目'),''),projects.length)
+    :tr('{0} · {1} 个项目',admin?tr('团队项目'):tr('我参与的项目'),projects.length);
   bindCrumbs();
   $('#projectsView h1').textContent=folder?folder.name:tr('全部项目');
-  $('#projectToolbar').innerHTML=projects.length>1?`<label class="project-sort">${tr("排序")}<select id="projectSort">`
+  $('#projectToolbar').innerHTML=projects.length>1?`<label class="project-sort">${tr('排序')}<select id="projectSort">`
     +`${Object.entries(FOLDER_SORTS).map(([k,v])=>`<option value="${k}"${k===mode?' selected':''}>${v}</option>`).join('')}</select></label>`:'';
   const sort=$('#projectSort');if(sort)sort.onchange=()=>{setFolderSortMode(sort.value);renderProjects()};
   $('#projectGrid').innerHTML=projects.map(projectSummaryHTML).join('')+(folder?'':tempTaskCard())
@@ -1133,11 +1133,11 @@ function projectSummaryHTML(p){
     +`<span class="project-status${projectOverdue(p)?' is-overdue':''}">${projectStatus(p)}</span></div>`
     +`<p class="summary-desc">${escapeHTML(p.desc||tr('暂无描述'))}</p>`
     +`<div class="summary-progress"><div class="progress"><i style="width:${pct}%"></i></div>`
-    +`<span>${tasks.length?tr("{0} {1}/{2} 完成",personal?tr('我的任务'):tr('项目'),done,tasks.length):tr('暂无任务')}</span></div>`
+    +`<span>${tasks.length?tr('{0} {1}/{2} 完成',personal?tr('我的任务'):tr('项目'),done,tasks.length):tr('暂无任务')}</span></div>`
     +`<div class="summary-foot"><span class="summary-people" title="${escapeHTML(people.map(nameOf).join('、'))}">`
     +`${people.slice(0,4).map(id=>avatarHTML(id)).join('')}${people.length>4?`<b>+${people.length-4}</b>`:''}</span>`
-    +`${mine?`<span class="summary-mine">${tr("我的待办 {0}",mine)}</span>`:''}`
-    +`<span class="summary-end">${p.end?tr("截止 {0}",escapeHTML(fmt(p.end))):tr('长期')}</span></div></article>`;
+    +`${mine?`<span class="summary-mine">${tr('我的待办 {0}',mine)}</span>`:''}`
+    +`<span class="summary-end">${p.end?tr('截止 {0}',escapeHTML(fmt(p.end))):tr('长期')}</span></div></article>`;
 }
 /* What can be done to a project as a whole. One primary step in view; the
    rest, and deleting, wait in 更多 so they never sit beside everyday work. */
@@ -1145,16 +1145,16 @@ function projectActionsHTML(p){
   const admin=Boolean(S.user?.admin),manage=canManageProject(p)&&p.status==='active';
   const joined=p.status==='active'&&!manage&&(p.members||{})[S.user?.id]==='accepted';
   const id=escapeHTML(p.id),menu=[];
-  if(manage)menu.push(`<button type="button" class="project-settings" data-id="${id}">${tr("{0}项目设置",icon('settings'))}</button>`,
-    `<button type="button" class="request-project-completion" data-id="${id}">${tr("{0}完成项目",icon('check'))}</button>`);
-  if(joined)menu.push(`<button type="button" class="leave-project" data-id="${id}">${tr("{0}退出项目",icon('arrow-up-right'))}</button>`);
-  if(canManageProject(p))menu.push(`<button type="button" class="delete-project is-danger" data-id="${id}">${tr("{0}删除项目",icon('x'))}</button>`);
-  return `${manage?`<button class="primary-btn add-project-task" data-project="${id}">${tr("{0}新建任务",icon('plus'))}</button>`:''}`
+  if(manage)menu.push(`<button type="button" class="project-settings" data-id="${id}">${tr('{0}项目设置',icon('settings'))}</button>`,
+    `<button type="button" class="request-project-completion" data-id="${id}">${tr('{0}完成项目',icon('check'))}</button>`);
+  if(joined)menu.push(`<button type="button" class="leave-project" data-id="${id}">${tr('{0}退出项目',icon('arrow-up-right'))}</button>`);
+  if(canManageProject(p))menu.push(`<button type="button" class="delete-project is-danger" data-id="${id}">${tr('{0}删除项目',icon('x'))}</button>`);
+  return `${manage?`<button class="primary-btn add-project-task" data-project="${id}">${tr('{0}新建任务',icon('plus'))}</button>`:''}`
     +`${joined&&creationRules().projectTask!=='none'?`<button class="secondary-btn add-project-task" data-project="${id}">`
     +`${entryLabel(creationRules().projectTask,'task')}</button>`:''}`
-    +`${p.status==='pending'&&admin?`<button class="primary-btn approve-project" data-id="${id}">${tr("审批项目")}</button>`:''}`
-    +`${p.status==='pending_completion'&&admin?`<button class="primary-btn approve-project-completion" data-id="${id}">${tr("审批项目完成")}</button>`:''}`
-    +`${menu.length?`<details class="space-more"><summary class="secondary-btn" aria-label="${tr("更多项目操作")}">${tr("更多{0}",icon('chevron-down'))}</summary>`
+    +`${p.status==='pending'&&admin?`<button class="primary-btn approve-project" data-id="${id}">${tr('审批项目')}</button>`:''}`
+    +`${p.status==='pending_completion'&&admin?`<button class="primary-btn approve-project-completion" data-id="${id}">${tr('审批项目完成')}</button>`:''}`
+    +`${menu.length?`<details class="space-more"><summary class="secondary-btn" aria-label="${tr('更多项目操作')}">${tr('更多{0}',icon('chevron-down'))}</summary>`
     +`<div class="space-file-options">${menu.join('')}</div></details>`:''}`;
 }
 /* A project's task list: the root of each line of work, in the chosen order. */
@@ -1163,17 +1163,17 @@ function projectCardHTML(p){
     const fixed=(S.repeats||[]).filter(r=>r.projectId===p.id&&r.active!==false);
     const manage=canManageProject(p)&&p.status==='active';
     const drag=manage&&mode==='manual'&&tasks.length>1,byId=new Map(S.tasks.map(t=>[t.id,t]));
-    const sorter=tasks.length>1?`<select class="project-task-sort" data-project="${escapeHTML(p.id)}" aria-label="${tr("任务排序")}">${Object.entries(PROJECT_SORTS).map(([k,v])=>`<option value="${k}" ${k===mode?'selected':''}>${v}</option>`).join('')}</select>`:'';
+    const sorter=tasks.length>1?`<select class="project-task-sort" data-project="${escapeHTML(p.id)}" aria-label="${tr('任务排序')}">${Object.entries(PROJECT_SORTS).map(([k,v])=>`<option value="${k}" ${k===mode?'selected':''}>${v}</option>`).join('')}</select>`:'';
     return `<div class="project-task-tree" data-project="${escapeHTML(p.id)}"><div class="project-tree-label">`
       +`${canManageProject(p)?tr('全部任务'):tr('分配给我的任务')} <span>${tasks.length}</span>${sorter}</div>`
       +`${tasks.map(t=>projectChildRow(t,escapeHTML(nameOf(t.assignee)),{title:t.assignee,
       drag:drag?` draggable="true" data-root="${escapeHTML(taskRootId(t,byId))}"`:'',tail:manage&&['todo',
-      'doing'].includes(t.status)?`<button class="ghost-btn assign-project-task" data-id="${escapeHTML(t.id)}">${tr("调整指派")}`
+      'doing'].includes(t.status)?`<button class="ghost-btn assign-project-task" data-id="${escapeHTML(t.id)}">${tr('调整指派')}`
       +`</button>`:''})).join('')||`<p class="project-task-empty">${p.status==='pending'?tr('待审批'):tr('暂无任务')}</p>`}`
-      +`${fixed.length?`<div class="project-tree-label">${tr("固定任务")} <span>${fixed.length}</span></div>`
+      +`${fixed.length?`<div class="project-tree-label">${tr('固定任务')} <span>${fixed.length}</span></div>`
       +`${fixed.map(r=>`<div class="project-fixed-row"><strong>${escapeHTML(r.name)}</strong><small>`
       +`${escapeHTML(repeatPattern(r))} · ${escapeHTML(r.time||'09:00')} · `
-      +`${escapeHTML((r.assignees||[]).map(nameOf).join('、'))}${r.end?` ${tr("· 至 {0}",escapeHTML(r.end))}`:''}</small>`
+      +`${escapeHTML((r.assignees||[]).map(nameOf).join('、'))}${r.end?` ${tr('· 至 {0}',escapeHTML(r.end))}`:''}</small>`
       +`</div>`).join('')}`:''}</div>`;
 }
 /* The eyebrow above a folder or project names the levels above it; each opens. */
@@ -1254,7 +1254,7 @@ function renderProjectNav(){
   const drag=(kind,item)=>canDragNav(kind,item)?' data-drag="1"':'';
   const project=(n,level,parent='',archived=false)=>{
     const p=n.item,on=UI.space===p.id,open=UI.collapsedProjectNode!==p.id&&((UI.openProjectNodes||[]).includes(p.id)||on);
-    return `<div class="nav-node"><div class="project-nav-project${on?' is-on':''}" data-node-level="${level}"><button type="button" class="project-node-caret" data-project-expand="${escapeHTML(p.id)}" aria-expanded="${open}" aria-label="${tr("{0}「{1}」的内容",open?tr('收起'):tr('展开'),escapeHTML(p.name))}">${icon('chevron-right')}</button>`
+    return `<div class="nav-node"><div class="project-nav-project${on?' is-on':''}" data-node-level="${level}"><button type="button" class="project-node-caret" data-project-expand="${escapeHTML(p.id)}" aria-expanded="${open}" aria-label="${tr('{0}「{1}」的内容',open?tr('收起'):tr('展开'),escapeHTML(p.name))}">${icon('chevron-right')}</button>`
       +`<button class="project-nav-item${archived?'':' nav-row'}${on?' is-on':''}" data-kind="project" data-id="${escapeHTML(p.id)}" `
       +`data-level="${level}" data-parent="${escapeHTML(parent)}" data-space="${escapeHTML(p.id)}"${archived?'':drag('project',p)}`
       +` title="${escapeHTML(p.name)}" aria-label="${escapeHTML(p.name)}"${on?' aria-current="page"':''}>${icon('gantt')}`
@@ -1269,16 +1269,16 @@ function renderProjectNav(){
       +`${icon('chevron-right')}</button><button class="project-nav-toggle" data-open-folder="${escapeHTML(f.id)}"`
       +` title="${escapeHTML(f.name)}" aria-label="${escapeHTML(f.name)}"${on?' aria-current="page"':''}><span class="nav-folder-icon">${icon('folder','is-shut')}${icon('folder-open','is-open')}</span>`
       +`<span class="nav-text">${escapeHTML(f.name)}</span><b>${n.children.length}</b></button>`
-      +`${admin?tr("<button class=\"project-nav-edit\" data-edit-folder=\"{0}\" title=\"重命名或删除\" aria-label=\"",escapeHTML(f.id))
-      +`${tr("编辑文件夹「{0}」\">{1}",escapeHTML(f.name),icon('edit'))}</button>`:''}</div>`
+      +`${admin?tr('<button class="project-nav-edit" data-edit-folder="{0}" title="重命名或删除" aria-label="',escapeHTML(f.id))
+      +`${tr('编辑文件夹「{0}」">{1}',escapeHTML(f.name),icon('edit'))}</button>`:''}</div>`
       +`${open?`<div class="nav-branch">${n.children.map(c=>project(c,1,f.id)).join('')||tr('<p class="project-nav-empty">还没有项目</p>')}</div>`:''}</div>`;
   };
-  nav.innerHTML=`<div class="project-nav-head"><span class="nav-text">${tr("项目目录")}</span>${admin?`<button class="project-nav-add" `
-    +`${tr("id=\"addFolderBtn\" title=\"新建文件夹\" aria-label=\"新建文件夹\">{0}",icon('plus'))}</button>`:''}${navigationControls('project')}</div>`
-    +`<button class="project-nav-item project-nav-all${UI.space||UI.folder?'':' is-on'}" data-space="" title="${tr("全部项目")}" aria-label="${tr("全部项目")}">${icon('layout-grid')}`
-    +`<span class="nav-text">${tr("全部项目")}</span><b>${visibleProjects().length}</b></button>`
+  nav.innerHTML=`<div class="project-nav-head"><span class="nav-text">${tr('项目目录')}</span>${admin?`<button class="project-nav-add" `
+    +`${tr('id="addFolderBtn" title="新建文件夹" aria-label="新建文件夹">{0}',icon('plus'))}</button>`:''}${navigationControls('project')}</div>`
+    +`<button class="project-nav-item project-nav-all${UI.space||UI.folder?'':' is-on'}" data-space="" title="${tr('全部项目')}" aria-label="${tr('全部项目')}">${icon('layout-grid')}`
+    +`<span class="nav-text">${tr('全部项目')}</span><b>${visibleProjects().length}</b></button>`
     +`<div class="project-nav-tree" id="projectNavTree">${tree.map(n=>n.kind==='folder'?folder(n):project(n,0)).join('')}</div>`
-    +((S.fileArchives||[]).length?`<div class="project-nav-label">${tr("归档文件")}</div><div class="project-nav-tree">${S.fileArchives.map(p=>project({item:p},0,'',true)).join('')}</div>`:'')
+    +((S.fileArchives||[]).length?`<div class="project-nav-label">${tr('归档文件')}</div><div class="project-nav-tree">${S.fileArchives.map(p=>project({item:p},0,'',true)).join('')}</div>`:'')
     +navigationHandle('project');
   $$('#projectNav [data-space]').forEach(b=>b.onclick=()=>{if(!navClickBlocked())openProjectSpace(b.dataset.space)});
   $$('#projectNav [data-project-expand]').forEach(b=>b.onclick=()=>{
@@ -1538,13 +1538,13 @@ function projectArea(p,area){
   setSpaceTab(tab);openProjectSpace(p.id);renderProjectNav();
 }
 function projectSpaceTabs(p,keys=Object.keys(SPACE_TABS),counts={},tab=spaceTabNow()){
-  return `<div class="space-tabs" role="tablist" aria-label="${tr("项目内容")}">${keys.map(key=>
+  return `<div class="space-tabs" role="tablist" aria-label="${tr('项目内容')}">${keys.map(key=>
     `<button type="button" role="tab" class="space-tab" id="spaceTab-${key}" data-space-tab="${key}" aria-controls="spacePanel-${key}"`
     +` aria-selected="${key===tab}" tabindex="${key===tab?0:-1}">${SPACE_TABS[key]}${counts[key]==null?'':` <span>${counts[key]}</span>`}</button>`).join('')}</div>`;
 }
 function projectMeetingList(p){
   const meetings=(S.meetings||[]).filter(m=>m.projectId===p.id).sort((a,b)=>String(b.scheduledAt||b.createdAt).localeCompare(String(a.scheduledAt||a.createdAt)));
-  return meetings.map(m=>`<div class="meeting-list-row"><button type="button" class="meeting-row" data-meeting="${escapeHTML(m.id)}"><span class="meeting-icon">${icon('chat')}</span><span class="meeting-copy"><strong>${escapeHTML(m.title)}</strong><small>${escapeHTML(whenText(m.scheduledAt))} · ${m.minutes||m.hasMinutes?tr('已整理'):tr('待整理')}</small></span>${icon('chevron-right')}</button>${canDeleteMeeting(p,m)?`<button type="button" class="text-btn content-row-delete" data-delete-meeting="${escapeHTML(m.id)}" aria-label="${tr("删除会议 {0}",escapeHTML(m.title))}">${tr("删除")}</button>`:''}</div>`).join('')||tr('<p class="muted space-empty">还没有会议</p>');
+  return meetings.map(m=>`<div class="meeting-list-row"><button type="button" class="meeting-row" data-meeting="${escapeHTML(m.id)}"><span class="meeting-icon">${icon('chat')}</span><span class="meeting-copy"><strong>${escapeHTML(m.title)}</strong><small>${escapeHTML(whenText(m.scheduledAt))} · ${m.minutes||m.hasMinutes?tr('已整理'):tr('待整理')}</small></span>${icon('chevron-right')}</button>${canDeleteMeeting(p,m)?`<button type="button" class="text-btn content-row-delete" data-delete-meeting="${escapeHTML(m.id)}" aria-label="${tr('删除会议 {0}',escapeHTML(m.title))}">${tr('删除')}</button>`:''}</div>`).join('')||tr('<p class="muted space-empty">还没有会议</p>');
 }
 function projectContentWritable(p){
   return Boolean(p&&!['done','archived'].includes(p.status)
@@ -1560,7 +1560,7 @@ const contentDeletes=new Set();
 async function deleteProjectMeeting(p,id,button){
   const m=(S.meetings||[]).find(x=>x.id===id&&x.projectId===p.id),key=`meeting:${id}`,owner=S.user?.id;
   if(!m||!canDeleteMeeting(p,m)||contentDeletes.has(key))return false;
-  if(!confirm(tr("删除会议「{0}」？原始转录和纪要也会删除，无法恢复。",m.title)))return false;
+  if(!confirm(tr('删除会议「{0}」？原始转录和纪要也会删除，无法恢复。',m.title)))return false;
   contentDeletes.add(key);if(button)button.disabled=true;
   try{
     if(meetingLive.meetingId===id)await meetingStopLive();
@@ -1578,7 +1578,7 @@ async function deleteProjectMeeting(p,id,button){
 async function deleteProjectFile(p,id,button){
   const f=(S.files||[]).find(x=>x.id===id&&x.projectId===p.id),key=`file:${id}`,owner=S.user?.id;
   if(!f||!canDeleteFile(p,f)||contentDeletes.has(key))return false;
-  if(!confirm(tr("删除文件「{0}」？删除后无法恢复。",f.name)))return false;
+  if(!confirm(tr('删除文件「{0}」？删除后无法恢复。',f.name)))return false;
   contentDeletes.add(key);if(button)button.disabled=true;
   try{
     await api('/api/action',{action:'file.delete',data:{id}});
@@ -1591,7 +1591,7 @@ async function deleteProjectFile(p,id,button){
 }
 function projectMeetings(p,readonly=false){
   return `<section class="space-section space-meetings"><div class="space-head is-toolbar">${!readonly&&canManageProject(p)?tr('<button type="button" class="secondary-btn" id="newProjectMeeting">新增会议</button>'):''}</div>`
-    +`<div class="meeting-workspace"><div id="projectMeetingList" class="meeting-list">${projectMeetingList(p)}</div><div id="meetingEditor" class="meeting-detail"><p class="muted space-empty">${tr("选择一场会议")}</p></div></div></section>`;
+    +`<div class="meeting-workspace"><div id="projectMeetingList" class="meeting-list">${projectMeetingList(p)}</div><div id="meetingEditor" class="meeting-detail"><p class="muted space-empty">${tr('选择一场会议')}</p></div></div></section>`;
 }
 function bindMeetingList(p){
   $$('#projectMeetingList [data-meeting]').forEach(b=>b.onclick=()=>openMeetingEditor(p,b.dataset.meeting));
@@ -1600,11 +1600,11 @@ function bindMeetingList(p){
 }
 function editFolder(id){
   const f=(S.folders||[]).find(x=>x.id===id),count=f?S.projects.filter(p=>p.folderId===f.id).length:0;
-  openModal(`<div class="eyebrow">${tr("项目目录")}</div><h2>${f?tr('编辑文件夹'):tr('新建文件夹')}</h2><label class="form-field">${tr("文件夹名称")}`
-    +`<input id="folderName" maxlength="40" value="${escapeHTML(f?.name||'')}" placeholder="${tr("例如：年度战略")}"></label>`
-    +`${f?`<p class="muted">${tr("删除文件夹不会删除项目，里面的 {0} 个项目会回到目录根层。",count)}</p>`:''}`
+  openModal(`<div class="eyebrow">${tr('项目目录')}</div><h2>${f?tr('编辑文件夹'):tr('新建文件夹')}</h2><label class="form-field">${tr('文件夹名称')}`
+    +`<input id="folderName" maxlength="40" value="${escapeHTML(f?.name||'')}" placeholder="${tr('例如：年度战略')}"></label>`
+    +`${f?`<p class="muted">${tr('删除文件夹不会删除项目，里面的 {0} 个项目会回到目录根层。',count)}</p>`:''}`
     +`<div class="modal-footer">${f?tr('<button class="ghost-btn is-danger" id="deleteFolder">删除文件夹</button>'):''}`
-    +`<button class="secondary-btn" id="cancelAction">${tr("取消")}</button><button class="primary-btn" id="saveFolder">`
+    +`<button class="secondary-btn" id="cancelAction">${tr('取消')}</button><button class="primary-btn" id="saveFolder">`
     +`${f?tr('保存'):tr('创建')}</button></div>`);
   $('#cancelAction').onclick=closeModal;$('#folderName').focus();
   $('#saveFolder').onclick=async()=>{
@@ -1644,7 +1644,7 @@ function openArchivedMeeting(p,id){
   cancelMeetingOpen();
   const m=(S.meetings||[]).find(x=>x.id===id&&x.projectId===p.id);if(!m)return;
   if(!meetingLoaded(m))return loadMeeting(m,()=>openArchivedMeeting(p,id));
-  const root=meetingMount(`<div class="eyebrow">${tr("{0} · 归档会议",escapeHTML(p.name))}</div><h2>${escapeHTML(m.title)}</h2><p class="muted">${escapeHTML(m.scheduledAt||tr('未安排'))} · ${escapeHTML((m.participants||[]).join('、'))}</p><p>${escapeHTML(m.agenda||'')}</p><label class="form-field">${tr("原始转录")}<textarea readonly rows="10">${escapeHTML(m.rawTranscript||'')}</textarea></label><section class="meeting-minutes-preview"><h3>${tr("会议纪要")}</h3><div class="meeting-minutes-body md-body">${m.minutes?mdRender(m.minutes):tr('<p class="md-empty">尚未生成</p>')}</div></section><div class="modal-footer"><button type="button" class="secondary-btn" id="cancelAction">${tr("关闭")}</button></div>`);
+  const root=meetingMount(`<div class="eyebrow">${tr('{0} · 归档会议',escapeHTML(p.name))}</div><h2>${escapeHTML(m.title)}</h2><p class="muted">${escapeHTML(m.scheduledAt||tr('未安排'))} · ${escapeHTML((m.participants||[]).join('、'))}</p><p>${escapeHTML(m.agenda||'')}</p><label class="form-field">${tr('原始转录')}<textarea readonly rows="10">${escapeHTML(m.rawTranscript||'')}</textarea></label><section class="meeting-minutes-preview"><h3>${tr('会议纪要')}</h3><div class="meeting-minutes-body md-body">${m.minutes?mdRender(m.minutes):tr('<p class="md-empty">尚未生成</p>')}</div></section><div class="modal-footer"><button type="button" class="secondary-btn" id="cancelAction">${tr('关闭')}</button></div>`);
   const close=root?.querySelector?root.querySelector('#cancelAction'):$('#cancelAction');
   close.onclick=()=>{const pane=root&&root===$('#meetingEditor')?root:null;if(pane)pane.innerHTML=tr('<p class="muted space-empty">选择一场会议</p>');else closeModal()};
 }
@@ -1660,7 +1660,7 @@ function openMeetingEditor(p,meetingId=null){
   const owner=S.user?.id,current=meetingId?(S.meetings||[]).find(m=>m.id===meetingId&&m.projectId===p.id):null,manage=canManageProject(p);if(meetingId&&!current){toast(tr('会议已删除或无权访问'));return}if(!current&&!manage){toast(tr('只有项目 Owner 或管理员可以新增会议'));return}
   if(current)meetingLive.revisions.set(`${S.user?.id}:${current.id}`,current.revision||0);
   const m=current||{title:'',scheduledAt:'',participants:[],agenda:'',rawTranscript:'',minutes:'',status:'scheduled'};
-  const editorRoot=meetingMount(`<div class="eyebrow">${tr("{0} · 项目会议",escapeHTML(p.name))}</div><h2>${current?escapeHTML(m.title):tr('新增会议')}</h2><div class="meeting-editor-grid"><label class="form-field">${tr("会议名称")}<input id="meetingTitle" maxlength="120" value="${escapeHTML(m.title)}"></label><label class="form-field">${tr("安排时间")}<input id="meetingScheduledAt" type="datetime-local" value="${escapeHTML(m.scheduledAt||'')}"></label></div><label class="form-field">${tr("参会人（用逗号分隔）")}<input id="meetingParticipants" value="${escapeHTML((m.participants||[]).join('、'))}"></label><label class="form-field">${tr("会议议程")}<textarea id="meetingAgenda" rows="3">${escapeHTML(m.agenda||'')}</textarea></label><label class="form-field">${tr("原始转录")}<textarea id="meetingTranscript" rows="10" maxlength="200000" placeholder="${tr("可粘贴实时转录原稿，或使用下方实时录入")}">${escapeHTML(m.rawTranscript||'')}</textarea></label><div class="meeting-live-bar"><button type="button" class="secondary-btn" id="meetingLiveBtn">${tr("开始实时录入")}</button><span id="meetingLiveState" class="muted"></span></div><section class="meeting-minutes-preview"><div class="space-head"><h3>${tr("整理后的会议纪要")}</h3><button type="button" class="secondary-btn" id="generateMeetingMinutes" ${current&&m.rawTranscript?'':'disabled'}>${tr("根据模板生成")}</button></div>${mdEditorHTML({id:'meetingMinutesEditor',inputId:'meetingMinutesInput',viewId:'meetingMinutes',value:m.minutes||'',rows:12,mode:'preview',empty:tr('尚未生成，可以点「根据模板生成」，也可以直接编辑'),placeholder:tr('会议结论、待办、风险……（支持 Markdown）')})}</section><div class="modal-footer">${manage||current&&canDeleteMeeting(p,current)?`<button type="button" class="secondary-btn content-delete${current?'':' hidden'}" id="deleteMeeting">${tr("删除会议")}</button>`:''}<button type="button" class="secondary-btn" id="cancelAction">${tr("关闭")}</button><button type="button" class="primary-btn" id="saveMeeting">${current?tr('保存会议'):tr('创建会议')}</button></div>`,m.id||'');
+  const editorRoot=meetingMount(`<div class="eyebrow">${tr('{0} · 项目会议',escapeHTML(p.name))}</div><h2>${current?escapeHTML(m.title):tr('新增会议')}</h2><div class="meeting-editor-grid"><label class="form-field">${tr('会议名称')}<input id="meetingTitle" maxlength="120" value="${escapeHTML(m.title)}"></label><label class="form-field">${tr('安排时间')}<input id="meetingScheduledAt" type="datetime-local" value="${escapeHTML(m.scheduledAt||'')}"></label></div><label class="form-field">${tr('参会人（用逗号分隔）')}<input id="meetingParticipants" value="${escapeHTML((m.participants||[]).join('、'))}"></label><label class="form-field">${tr('会议议程')}<textarea id="meetingAgenda" rows="3">${escapeHTML(m.agenda||'')}</textarea></label><label class="form-field">${tr('原始转录')}<textarea id="meetingTranscript" rows="10" maxlength="200000" placeholder="${tr('可粘贴实时转录原稿，或使用下方实时录入')}">${escapeHTML(m.rawTranscript||'')}</textarea></label><div class="meeting-live-bar"><button type="button" class="secondary-btn" id="meetingLiveBtn">${tr('开始实时录入')}</button><span id="meetingLiveState" class="muted"></span></div><section class="meeting-minutes-preview"><div class="space-head"><h3>${tr('整理后的会议纪要')}</h3><button type="button" class="secondary-btn" id="generateMeetingMinutes" ${current&&m.rawTranscript?'':'disabled'}>${tr('根据模板生成')}</button></div>${mdEditorHTML({id:'meetingMinutesEditor',inputId:'meetingMinutesInput',viewId:'meetingMinutes',value:m.minutes||'',rows:12,mode:'preview',empty:tr('尚未生成，可以点「根据模板生成」，也可以直接编辑'),placeholder:tr('会议结论、待办、风险……（支持 Markdown）')})}</section><div class="modal-footer">${manage||current&&canDeleteMeeting(p,current)?`<button type="button" class="secondary-btn content-delete${current?'':' hidden'}" id="deleteMeeting">${tr('删除会议')}</button>`:''}<button type="button" class="secondary-btn" id="cancelAction">${tr('关闭')}</button><button type="button" class="primary-btn" id="saveMeeting">${current?tr('保存会议'):tr('创建会议')}</button></div>`,m.id||'');
   const field=selector=>editorRoot?.querySelector?editorRoot.querySelector(selector):$(selector);
   const inlinePane=editorRoot&&editorRoot===$('#meetingEditor')?editorRoot:null;
   const text=field('#meetingTranscript'),save=field('#saveMeeting'),generate=field('#generateMeetingMinutes'),live=field('#meetingLiveBtn'),drop=field('#deleteMeeting');
@@ -1707,7 +1707,7 @@ function meetingSaveTranscript(id,input,recording){
     }
     return result;
   });
-  meetingLive.pending=request.catch(e=>{toast(tr("原稿保存失败：{0}",e.message))});return request;
+  meetingLive.pending=request.catch(e=>{toast(tr('原稿保存失败：{0}',e.message))});return request;
 }
 /* Each clip is a complete recording, including its container header. The
    next recorder starts before uploading; only three clips may be queued. */
@@ -1743,7 +1743,7 @@ async function meetingDrain(s){
   })().catch(e=>{
     if(s.cancelled)return;
     s.error=e;meetingRelease(s);if(s.recorder?.state==='recording')s.recorder.stop();
-    meetingLive.active=false;meetingLiveStatus(tr("录入已暂停，{0} 段待重试：{1}",s.queue.length,e.message));
+    meetingLive.active=false;meetingLiveStatus(tr('录入已暂停，{0} 段待重试：{1}',s.queue.length,e.message));
     $('#meetingLiveBtn')?.replaceChildren(document.createTextNode(tr('重试转写')));
   }).finally(()=>{s.draining=null});
   return s.draining;
@@ -1831,7 +1831,7 @@ function meetingToggleBrowserLive(id,input){
     for(let i=e.resultIndex;i<e.results.length;i++){const t=e.results[i][0]?.transcript||'';e.results[i].isFinal?final+=t:interim+=t}
     meetingLive.interim=interim;
     if(final){input.value+=(input.value?'\n':'')+final;input.dispatchEvent(new Event('input',{bubbles:true}));meetingScheduleSave()}
-    if($('#meetingLiveState'))$('#meetingLiveState').textContent=interim?tr("正在识别：{0}",interim):tr('正在实时录入…');
+    if($('#meetingLiveState'))$('#meetingLiveState').textContent=interim?tr('正在识别：{0}',interim):tr('正在实时录入…');
   };
   r.onerror=e=>{if(generation!==meetingLive.generation)return;meetingStopLive().catch(()=>{});toast(e.error==='not-allowed'?tr('没有麦克风权限'):tr('实时识别中断'))};
   r.onend=()=>{if(generation===meetingLive.generation&&meetingLive.active){try{r.start()}catch(_){meetingStopLive().catch(()=>{})}}};
@@ -1922,15 +1922,15 @@ function projectLifecycle(p,manage){
   const folders=S.folders||[];
   return `<section class="space-section space-cycle"><div class="space-steps">${steps.map(([label,day],i)=>`<div class="space-step`
     +`${i<stage?' is-past':i===stage?' is-now':''}"><i></i><strong>${label}</strong><small>${escapeHTML(/^\d{4}-/.test(day||'')?fmt(day):day||'')}</small></div>`).join('')}</div>`
-    +`<div class="space-meters">${span?meter(tr('时间'),passed,span,tr("第 {0} / {1} 天",passed,span)):''}`
-    +`${meter(personal?tr('我的任务'):tr('任务'),done,tasks.length,tr("{0} / {1} 已完成",done,tasks.length))}</div>`
-    +`${manage&&folders.length?`<div class="space-meta"><label class="space-folder">${tr("放在文件夹")}<select id="spaceFolder"><option value="">${tr("未归类")}</option>`
+    +`<div class="space-meters">${span?meter(tr('时间'),passed,span,tr('第 {0} / {1} 天',passed,span)):''}`
+    +`${meter(personal?tr('我的任务'):tr('任务'),done,tasks.length,tr('{0} / {1} 已完成',done,tasks.length))}</div>`
+    +`${manage&&folders.length?`<div class="space-meta"><label class="space-folder">${tr('放在文件夹')}<select id="spaceFolder"><option value="">${tr('未归类')}</option>`
     +`${folders.map(f=>`<option value="${escapeHTML(f.id)}"${f.id===p.folderId?' selected':''}>${escapeHTML(f.name)}</option>`).join('')}`
     +`</select></label></div>`:''}</section>`;
 }
 function projectBackground(p,manage){
   const text=p.background||'';
-  return `<section class="space-section"><div class="space-head"><h2>${tr("项目背景")}</h2>${manage?'<button class="primary-btn is-idle" '
+  return `<section class="space-section"><div class="space-head"><h2>${tr('项目背景')}</h2>${manage?'<button class="primary-btn is-idle" '
     +tr('id="saveBackground" disabled>已保存</button>'):''}</div>`
     +`${manage?mdEditorHTML({id:'spaceBackgroundEditor',inputId:'spaceBackground',viewId:'spaceBackgroundView',value:text,rows:8,mode:text?'preview':'edit',placeholder:tr('为什么做、要达成什么、边界在哪里（支持 Markdown）'),empty:tr('还没有写项目背景')})
     :`<div class="space-text md-body">${text?mdRender(text):tr('<span class="muted">Owner 还没有写项目背景</span>')}</div>`}</section>`;
@@ -1948,10 +1948,10 @@ function projectStaffing(p,manage){
     return `<div class="staff-row">${avatarHTML(id)}<div class="staff-name"><strong>${escapeHTML(nameOf(id))}</strong>`
       +`<small>${id===p.owner?'Owner':tr('协作者')}</small></div>`
       +`${manage?`<input class="staff-role" data-member="${escapeHTML(id)}" maxlength="200" value="${escapeHTML(role)}" `
-      +tr("placeholder=\"填写分工\" aria-label=\"{0} 的分工\">",escapeHTML(nameOf(id))):`<span class="staff-role-text">${escapeHTML(role||'—')}</span>`}`
-      +`<span class="staff-load">${manage||id===S.user?.id?tr("进行中 {0} · 已完成 {1}{2}",open,done,mins?` ${tr("· {0} 小时",hours(mins))}`:''):''}</span></div>`;
+      +tr('placeholder="填写分工" aria-label="{0} 的分工">',escapeHTML(nameOf(id))):`<span class="staff-role-text">${escapeHTML(role||'—')}</span>`}`
+      +`<span class="staff-load">${manage||id===S.user?.id?tr('进行中 {0} · 已完成 {1}{2}',open,done,mins?` ${tr('· {0} 小时',hours(mins))}`:''):''}</span></div>`;
   };
-  return `<section class="space-section"><div class="space-head"><h2>${tr("分工与负荷")} <small class="space-window">${escapeHTML(loadWindowLabel(p))}</small></h2>`
+  return `<section class="space-section"><div class="space-head"><h2>${tr('分工与负荷')} <small class="space-window">${escapeHTML(loadWindowLabel(p))}</small></h2>`
     +`${manage&&p.status==='active'?'<button class="secondary-btn" id="spaceInvite">'+icon('plus')+tr('添加协作者</button>'):''}</div>`
     +`<div class="staff-list">${people.map(row).join('')}</div></section>`;
 }
@@ -2026,8 +2026,8 @@ const MD_TOOLS=[['h',tr('标题'),'## ',''],['b',tr('加粗'),'**','**'],['i',tr
   ['quote',tr('引用'),'> ',''],['code',tr('代码'),'`','`'],['link',tr('链接'),'[','](https://)']];
 function mdEditorHTML({id,inputId,viewId,value='',placeholder='',rows=10,mode='preview',empty=tr('还没有内容'),readonly=false}){
   return `<div class="md-editor${readonly?' is-readonly':''}" id="${id}" data-mode="${readonly?'preview':mode}" data-empty="${escapeHTML(empty)}">`
-    +`<div class="md-bar"><div class="md-tabs" role="tablist"><button type="button" role="tab" data-md-mode="edit">${tr("编辑")}</button>`
-    +`<button type="button" role="tab" data-md-mode="preview">${tr("预览")}</button></div>`
+    +`<div class="md-bar"><div class="md-tabs" role="tablist"><button type="button" role="tab" data-md-mode="edit">${tr('编辑')}</button>`
+    +`<button type="button" role="tab" data-md-mode="preview">${tr('预览')}</button></div>`
     +`<div class="md-tools">${MD_TOOLS.map(([k,label])=>`<button type="button" data-md-tool="${k}" title="${label}" aria-label="${label}">${MD_TOOL_GLYPH[k]}</button>`).join('')}</div></div>`
     +`<textarea class="md-input" id="${inputId}" rows="${rows}" placeholder="${escapeHTML(placeholder)}" spellcheck="false">${escapeHTML(value)}</textarea>`
     +`<div class="md-view md-body" id="${viewId}">${mdRender(value)||`<p class="md-empty">${escapeHTML(empty)}</p>`}</div></div>`;
@@ -2079,17 +2079,17 @@ function projectFiles(p,readonly=false,includeMeetings=true){
   const canDrop=f=>!readonly&&canDeleteFile(p,f);
   const file=f=>`<div class="file-row"><span class="file-ext">${escapeHTML(fileExt(f.name))}</span><button type="button" class="file-name" data-open-file="${escapeHTML(f.id)}" title="${escapeHTML(f.name)}">${escapeHTML(f.name)}</button>`
     +`<small>${escapeHTML(fileSize(f.size))} · ${escapeHTML(nameOf(f.uploader))} · <span title="${escapeHTML(f.createdAt)}">${escapeHTML(relTime(f.createdAt))}</span></small>`
-    +`<div class="file-actions"><button type="button" class="text-btn" data-open-file="${escapeHTML(f.id)}" aria-label="${tr("打开文件 {0}",escapeHTML(f.name))}">${tr("打开")}</button>`
-    +`<a class="text-btn" href="/api/files/${encodeURIComponent(f.id)}" download="${escapeHTML(f.name)}" aria-label="${tr("下载文件 {0}",escapeHTML(f.name))}">${tr("下载")}</a>`
-    +`${canDrop(f)?`<button type="button" class="text-btn file-delete" data-file="${escapeHTML(f.id)}" aria-label="${tr("删除文件 {0}",escapeHTML(f.name))}">${tr("删除")}</button>`:''}</div></div>`;
-  const meeting=m=>`<button type="button" class="file-row meeting-row" data-meeting="${escapeHTML(m.id)}"><span class="file-ext is-meeting">${tr("会议")}</span>`
+    +`<div class="file-actions"><button type="button" class="text-btn" data-open-file="${escapeHTML(f.id)}" aria-label="${tr('打开文件 {0}',escapeHTML(f.name))}">${tr('打开')}</button>`
+    +`<a class="text-btn" href="/api/files/${encodeURIComponent(f.id)}" download="${escapeHTML(f.name)}" aria-label="${tr('下载文件 {0}',escapeHTML(f.name))}">${tr('下载')}</a>`
+    +`${canDrop(f)?`<button type="button" class="text-btn file-delete" data-file="${escapeHTML(f.id)}" aria-label="${tr('删除文件 {0}',escapeHTML(f.name))}">${tr('删除')}</button>`:''}</div></div>`;
+  const meeting=m=>`<button type="button" class="file-row meeting-row" data-meeting="${escapeHTML(m.id)}"><span class="file-ext is-meeting">${tr('会议')}</span>`
     +`<span class="file-name">${escapeHTML(m.title)}</span><small>${escapeHTML(whenText(m.scheduledAt))} · ${m.minutes||m.hasMinutes?tr('纪要已整理'):tr('待整理')}`
-    +`${meetingChars(m)?` ${tr("· 原稿 {0} 字",meetingChars(m))}`:''}</small><span class="meeting-arrow">${icon('chevron-right')}</span></button>`;
+    +`${meetingChars(m)?` ${tr('· 原稿 {0} 字',meetingChars(m))}`:''}</small><span class="meeting-arrow">${icon('chevron-right')}</span></button>`;
   const rows=[...(S.files||[]).filter(f=>f.projectId===p.id).map(f=>({at:f.createdAt,html:file(f)})),
     ...(includeMeetings?(S.meetings||[]).filter(m=>m.projectId===p.id).map(m=>({at:m.scheduledAt||m.createdAt,html:meeting(m)})):[])]
     .sort((a,b)=>String(b.at||'').localeCompare(String(a.at||'')));
   return `<section class="space-section space-files" id="spaceFiles"><div class="space-head is-toolbar">`
-    +`${readonly?'':`<details class="space-file-create" id="fileCreateMenu"><summary class="secondary-btn">${tr("{0}新增文件",icon('plus'))}</summary><div class="space-file-options"><button type="button" id="uploadFileFromMenu">${tr("{0}上传文件",icon('file'))}</button>${canManageProject(p)?`<button type="button" id="createMeetingFromFiles">${tr("{0}新增会议",icon('chat'))}</button>`:''}</div></details><input type="file" id="spaceFileInput" multiple hidden>`}</div>`
+    +`${readonly?'':`<details class="space-file-create" id="fileCreateMenu"><summary class="secondary-btn">${tr('{0}新增文件',icon('plus'))}</summary><div class="space-file-options"><button type="button" id="uploadFileFromMenu">${tr('{0}上传文件',icon('file'))}</button>${canManageProject(p)?`<button type="button" id="createMeetingFromFiles">${tr('{0}新增会议',icon('chat'))}</button>`:''}</div></details><input type="file" id="spaceFileInput" multiple hidden>`}</div>`
     +`${rows.length?`<div class="file-list">${rows.map(r=>r.html).join('')}</div>`:tr('<p class="space-empty">还没有文件</p>')}`
     +`</section>`;
 
@@ -2099,13 +2099,13 @@ function projectFiles(p,readonly=false,includeMeetings=true){
 function openProjectFile(p,id){
   const f=(S.files||[]).find(x=>x.id===id&&x.projectId===p.id);if(!f)return;
   if(/\.md$/i.test(f.name))return openMarkdownFile(p,id);
-  openModal(`<div class="eyebrow">${tr("{0} · 文件",escapeHTML(p.name))}</div><h2>${escapeHTML(f.name)}</h2>`
-    +`<dl class="project-file-details" id="projectFileDetails" data-file-id="${escapeHTML(id)}"><div><dt>${tr("类型")}</dt><dd>${escapeHTML(fileExt(f.name))}</dd></div>`
-    +`<div><dt>${tr("大小")}</dt><dd>${escapeHTML(fileSize(f.size))}</dd></div><div><dt>${tr("上传者")}</dt><dd>${escapeHTML(nameOf(f.uploader))}</dd></div>`
-    +`<div><dt>${tr("上传时间")}</dt><dd>${escapeHTML(whenText(f.createdAt))}</dd></div></dl>`
+  openModal(`<div class="eyebrow">${tr('{0} · 文件',escapeHTML(p.name))}</div><h2>${escapeHTML(f.name)}</h2>`
+    +`<dl class="project-file-details" id="projectFileDetails" data-file-id="${escapeHTML(id)}"><div><dt>${tr('类型')}</dt><dd>${escapeHTML(fileExt(f.name))}</dd></div>`
+    +`<div><dt>${tr('大小')}</dt><dd>${escapeHTML(fileSize(f.size))}</dd></div><div><dt>${tr('上传者')}</dt><dd>${escapeHTML(nameOf(f.uploader))}</dd></div>`
+    +`<div><dt>${tr('上传时间')}</dt><dd>${escapeHTML(whenText(f.createdAt))}</dd></div></dl>`
     +`<div class="modal-footer">${canDeleteFile(p,f)?tr('<button type="button" class="secondary-btn content-delete" id="deleteProjectFileBtn">删除文件</button>'):''}`
-    +`${filePreviewable(f.name)?`<a class="secondary-btn" href="/api/files/${encodeURIComponent(id)}?preview=1" target="_blank" rel="noopener">${tr("预览")}</a>`:''}`
-    +`<a class="primary-btn" href="/api/files/${encodeURIComponent(id)}" download="${escapeHTML(f.name)}">${tr("下载文件")}</a><button type="button" class="secondary-btn" id="closeProjectFile">${tr("关闭")}</button></div>`);
+    +`${filePreviewable(f.name)?`<a class="secondary-btn" href="/api/files/${encodeURIComponent(id)}?preview=1" target="_blank" rel="noopener">${tr('预览')}</a>`:''}`
+    +`<a class="primary-btn" href="/api/files/${encodeURIComponent(id)}" download="${escapeHTML(f.name)}">${tr('下载文件')}</a><button type="button" class="secondary-btn" id="closeProjectFile">${tr('关闭')}</button></div>`);
   $('#closeProjectFile').onclick=closeModal;
   $('#closeProjectFile').focus?.();
   const drop=$('#deleteProjectFileBtn');if(drop)drop.onclick=()=>deleteProjectFile(p,id,drop);
@@ -2124,10 +2124,10 @@ async function openMarkdownFile(p,id){
   catch(e){if(current())toast(e.message);return}
   if(!current())return;
   const editable=canDeleteFile(p,f);
-  openModal(`<div class="eyebrow">${tr("{0} · 文件",escapeHTML(p.name))}</div><h2>${escapeHTML(f.name)}</h2>`
+  openModal(`<div class="eyebrow">${tr('{0} · 文件',escapeHTML(p.name))}</div><h2>${escapeHTML(f.name)}</h2>`
     +mdEditorHTML({id:'mdFileEditor',inputId:'mdFileInput',viewId:'mdFileView',value:text,rows:18,readonly:!editable,empty:tr('文件是空的')})
-    +`<div class="modal-footer">${editable?tr('<button type="button" class="secondary-btn content-delete" id="deleteMdFile">删除文件</button>'):''}<a class="secondary-btn" href="/api/files/${encodeURIComponent(id)}" download="${escapeHTML(f.name)}">${tr("下载")}</a>`
-    +`<button type="button" class="secondary-btn" id="cancelAction">${tr("关闭")}</button>${editable?tr('<button type="button" class="primary-btn" id="saveMdFile" disabled>保存</button>'):''}</div>`);
+    +`<div class="modal-footer">${editable?tr('<button type="button" class="secondary-btn content-delete" id="deleteMdFile">删除文件</button>'):''}<a class="secondary-btn" href="/api/files/${encodeURIComponent(id)}" download="${escapeHTML(f.name)}">${tr('下载')}</a>`
+    +`<button type="button" class="secondary-btn" id="cancelAction">${tr('关闭')}</button>${editable?tr('<button type="button" class="primary-btn" id="saveMdFile" disabled>保存</button>'):''}</div>`);
   $('#modalBackdrop .modal')?.classList?.add('is-wide');
   const editor=$('#mdFileEditor');editor.dataset.fileId=id;bindMdEditor(editor);$('#modalContent #cancelAction').onclick=closeModal;
   const drop=$('#deleteMdFile');if(drop)drop.onclick=()=>deleteProjectFile(p,id,drop);
@@ -2149,15 +2149,15 @@ async function openMarkdownFile(p,id){
 }
 async function uploadProjectFiles(p,list){
   const files=[...list];if(!files.length)return;
-  const big=files.find(f=>f.size>MAX_FILE_MB*1048576);if(big){toast(tr("「{0}」超过 {1}MB",big.name,MAX_FILE_MB));return}
-  toast(tr("正在上传 {0} 个文件…",files.length));
+  const big=files.find(f=>f.size>MAX_FILE_MB*1048576);if(big){toast(tr('「{0}」超过 {1}MB',big.name,MAX_FILE_MB));return}
+  toast(tr('正在上传 {0} 个文件…',files.length));
   try{
     for(const f of files){
       const r=await fetch(`/api/files?project=${encodeURIComponent(p.id)}`,{method:'POST',credentials:'same-origin',body:f,
         headers:{'Content-Type':f.type||'application/octet-stream','X-Work-Calendar':'1','X-File-Name':encodeURIComponent(f.name)}});
-      const x=await readJSON(r);if(!r.ok)throw new Error(trServer(x.error)||tr("「{0}」上传未完成",f.name));
+      const x=await readJSON(r);if(!r.ok)throw new Error(trServer(x.error)||tr('「{0}」上传未完成',f.name));
     }
-    await refresh();toast(tr("已上传 {0} 个文件",files.length));
+    await refresh();toast(tr('已上传 {0} 个文件',files.length));
   }catch(e){toast(e.message);refresh()}
 }
 /* Background and 分工 save in place without a full refresh, so typing in one
@@ -2224,9 +2224,9 @@ function tempTaskCard(){
   const mine=handed.filter(t=>t.assignee===me),given=handed.filter(t=>t.creator===me);
   if(!handed.length)return '';
   return `<article class="project-card project-node temp-task-node"><div class="project-node-heading"><div>`
-    +`<div class="project-title"><h3>${tr("临时任务")}</h3><span class="project-status">${tr("不属于任何项目")}</span></div></div></div>`
-    +`<div class="project-task-tree">${group(tr('派给我的'),mine,t=>tr("由 {0}",escapeHTML(nameOf(t.creator))))}`
-    +`${group(tr('我派出的'),given,t=>tr("给 {0}",escapeHTML(nameOf(t.assignee))))}</div></article>`;
+    +`<div class="project-title"><h3>${tr('临时任务')}</h3><span class="project-status">${tr('不属于任何项目')}</span></div></div></div>`
+    +`<div class="project-task-tree">${group(tr('派给我的'),mine,t=>tr('由 {0}',escapeHTML(nameOf(t.creator))))}`
+    +`${group(tr('我派出的'),given,t=>tr('给 {0}',escapeHTML(nameOf(t.assignee))))}</div></article>`;
 }
 /* New work handed to someone carries a notice marked fresh. Until it is opened
    the project space shows a hopping red dot on its menu entry and marks the
@@ -2244,7 +2244,7 @@ function renderFreshDot(){
   const dot=$('#projectsNewDot');if(!dot)return;
   const n=freshRefs().size;
   dot.classList.toggle('hidden',!n);
-  dot.closest('.nav-item')?.setAttribute('aria-label',n?tr("项目空间，{0} 项新工作",n):tr('项目空间'));
+  dot.closest('.nav-item')?.setAttribute('aria-label',n?tr('项目空间，{0} 项新工作',n):tr('项目空间'));
 }
 function clearFresh(refs){
   const wanted=new Set(refs),notices=(S.notifications||[]).filter(n=>n.fresh&&!n.read&&wanted.has(n.reference));
@@ -2267,7 +2267,7 @@ function projectSettings(projectId){
   if(!canManageProject(p)||p.status!=='active'){toast(tr('只有项目 Owner 或 superadmin 可设置进行中的项目'));return}
   const owners=S.users.filter(u=>u.active&&!u.admin||u.id===p.owner);
   const accepted=Object.entries(p.members||{}).filter(([id,v])=>v==='accepted'&&id!==p.owner).map(([id])=>nameOf(id));
-  openModal(`<div class="eyebrow">${tr("{0} · 项目设置",escapeHTML(p.name))}</div><h2>${tr("项目设置")}</h2><label class="form-field">${tr("项目名称")}<input id="settingsName" maxlength="120" value="${escapeHTML(p.name)}"></label><label class="form-field">${tr("项目描述")}<textarea id="settingsDesc">${escapeHTML(p.desc||'')}</textarea></label><div class="project-date-fields"><label class="form-field">${tr("开始日期")}<input id="settingsStart" type="date" max="${DATE_HORIZON}" value="${escapeHTML(p.start||S.today)}"></label><label class="form-field">${tr("截止日期（可留空）")}<input id="settingsEnd" type="date" min="${escapeHTML(p.start||S.today)}" max="${DATE_HORIZON}" value="${escapeHTML(p.end||'')}"></label></div>${admin?`<label class="form-field">${tr("项目 Owner")}<select id="settingsOwner">${owners.map(u=>`<option value="${escapeHTML(u.id)}" ${u.id===p.owner?'selected':''}>${escapeHTML(nameOf(u.id))}</option>`).join('')}</select></label>`:`<p class="muted">${tr("Owner · {0}（更换 Owner 需联系管理员）",escapeHTML(nameOf(p.owner)))}</p>`}<div class="form-field">${tr("协作者")}<p class="muted">${escapeHTML(accepted.join('、')||tr('暂无'))}</p><button type="button" class="secondary-btn" id="settingsMembers">${tr("管理协作者")}</button></div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr("取消")}</button><button class="primary-btn" id="confirmSettings">${tr("保存设置")}</button></div>`);
+  openModal(`<div class="eyebrow">${tr('{0} · 项目设置',escapeHTML(p.name))}</div><h2>${tr('项目设置')}</h2><label class="form-field">${tr('项目名称')}<input id="settingsName" maxlength="120" value="${escapeHTML(p.name)}"></label><label class="form-field">${tr('项目描述')}<textarea id="settingsDesc">${escapeHTML(p.desc||'')}</textarea></label><div class="project-date-fields"><label class="form-field">${tr('开始日期')}<input id="settingsStart" type="date" max="${DATE_HORIZON}" value="${escapeHTML(p.start||S.today)}"></label><label class="form-field">${tr('截止日期（可留空）')}<input id="settingsEnd" type="date" min="${escapeHTML(p.start||S.today)}" max="${DATE_HORIZON}" value="${escapeHTML(p.end||'')}"></label></div>${admin?`<label class="form-field">${tr('项目 Owner')}<select id="settingsOwner">${owners.map(u=>`<option value="${escapeHTML(u.id)}" ${u.id===p.owner?'selected':''}>${escapeHTML(nameOf(u.id))}</option>`).join('')}</select></label>`:`<p class="muted">${tr('Owner · {0}（更换 Owner 需联系管理员）',escapeHTML(nameOf(p.owner)))}</p>`}<div class="form-field">${tr('协作者')}<p class="muted">${escapeHTML(accepted.join('、')||tr('暂无'))}</p><button type="button" class="secondary-btn" id="settingsMembers">${tr('管理协作者')}</button></div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('取消')}</button><button class="primary-btn" id="confirmSettings">${tr('保存设置')}</button></div>`);
   $('#cancelAction').onclick=closeModal;
   $('#settingsStart').onchange=()=>$('#settingsEnd').min=$('#settingsStart').value;
   $('#settingsMembers').onclick=()=>inviteCollaborators(p.id);
@@ -2288,7 +2288,7 @@ function deleteProject(projectId){
   if(!canManageProject(p)){toast(tr('只有项目 Owner 或 superadmin 可删除项目'));return}
   const tasks=S.tasks.filter(t=>t.projectId===p.id),done=tasks.filter(t=>t.status==='done').length;
   const members=Object.entries(p.members||{}).filter(([,v])=>v==='accepted').map(([id])=>id);
-  openModal(`<div class="eyebrow danger-eyebrow">${tr("危险操作 · 不可撤销")}</div><h2>${tr("删除项目「{0}」",escapeHTML(p.name))}</h2><div class="danger-panel"><p>${tr("删除后无法恢复。")}</p><ul class="danger-impact"><li>${tr("子任务")} <strong>${tasks.length}</strong> ${tr("项（已完成 {0} 项）",done)}</li><li>${tr("参与成员")} <strong>${members.length}</strong> ${tr("人")}</li><li>${tr("附件、会议原稿与纪要、项目沟通记录、报告、申请与通知将一并清除")}</li></ul></div><label class="danger-check"><input type="checkbox" id="deleteAck"> ${tr("我已了解该项目及全部子任务将被永久删除，且无法恢复")}</label><label class="danger-confirm">${tr("请输入项目名称")} <code>${escapeHTML(p.name)}</code> ${tr("以继续")}<input id="deleteConfirmText" autocomplete="off" spellcheck="false" placeholder="${escapeHTML(p.name)}"></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr("取消")}</button><button class="danger-btn" id="confirmDeleteProject" disabled>${tr("永久删除项目")}</button></div>`);
+  openModal(`<div class="eyebrow danger-eyebrow">${tr('危险操作 · 不可撤销')}</div><h2>${tr('删除项目「{0}」',escapeHTML(p.name))}</h2><div class="danger-panel"><p>${tr('删除后无法恢复。')}</p><ul class="danger-impact"><li>${tr('子任务')} <strong>${tasks.length}</strong> ${tr('项（已完成 {0} 项）',done)}</li><li>${tr('参与成员')} <strong>${members.length}</strong> ${tr('人')}</li><li>${tr('附件、会议原稿与纪要、项目沟通记录、报告、申请与通知将一并清除')}</li></ul></div><label class="danger-check"><input type="checkbox" id="deleteAck"> ${tr('我已了解该项目及全部子任务将被永久删除，且无法恢复')}</label><label class="danger-confirm">${tr('请输入项目名称')} <code>${escapeHTML(p.name)}</code> ${tr('以继续')}<input id="deleteConfirmText" autocomplete="off" spellcheck="false" placeholder="${escapeHTML(p.name)}"></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('取消')}</button><button class="danger-btn" id="confirmDeleteProject" disabled>${tr('永久删除项目')}</button></div>`);
   const ack=$('#deleteAck'),text=$('#deleteConfirmText'),btn=$('#confirmDeleteProject');
   const sync=()=>{btn.disabled=!(ack.checked&&text.value.trim()===p.name)};
   ack.onchange=sync;text.oninput=sync;
@@ -2304,10 +2304,10 @@ function deleteProject(projectId){
    to cancel, the channel simply stops being yours. */
 function leaveProject(projectId){
   const p=S.projects.find(x=>x.id===projectId);if(!p)return;
-  openModal(`<div class="eyebrow">${tr("{0} · 退出项目",escapeHTML(p.name))}</div><h2>${tr("退出这个项目？")}</h2>`
-    +`<p class="muted">${tr("你在这里的任务和记录都会保留，之后被重新加入时会原样回来。")}</p>`
-    +`<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr("再想想")}</button>`
-    +`<button class="primary-btn" id="confirmLeaveProject">${tr("确认退出")}</button></div>`);
+  openModal(`<div class="eyebrow">${tr('{0} · 退出项目',escapeHTML(p.name))}</div><h2>${tr('退出这个项目？')}</h2>`
+    +`<p class="muted">${tr('你在这里的任务和记录都会保留，之后被重新加入时会原样回来。')}</p>`
+    +`<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('再想想')}</button>`
+    +`<button class="primary-btn" id="confirmLeaveProject">${tr('确认退出')}</button></div>`);
   $('#cancelAction').onclick=closeModal;
   $('#confirmLeaveProject').onclick=async()=>{
     try{
@@ -2322,17 +2322,17 @@ function inviteCollaborators(projectId){
   if(!canManageProject(p)||p.status!=='active'){toast(tr('只有项目 Owner 或 superadmin 可管理进行中的项目'));return}
   const candidates=S.users.filter(u=>u.active&&!u.admin&&u.id!==p.owner&&existing[u.id]!=='accepted');
   const current=Object.entries(existing).filter(([id,v])=>v==='accepted'&&id!==p.owner).map(([id])=>id);
-  openModal(`<div class="eyebrow">${escapeHTML(p.name)} · ${admin?tr('管理员直接指派'):tr('Owner 添加协作者')}</div><h2>${tr("添加协作者")}</h2>`
-    +`<fieldset class="member-checkboxes" id="currentMembers"><legend>${tr("当前协作者（{0}）",current.length)}</legend>`
+  openModal(`<div class="eyebrow">${escapeHTML(p.name)} · ${admin?tr('管理员直接指派'):tr('Owner 添加协作者')}</div><h2>${tr('添加协作者')}</h2>`
+    +`<fieldset class="member-checkboxes" id="currentMembers"><legend>${tr('当前协作者（{0}）',current.length)}</legend>`
     +`${current.map(id=>`<div class="member-row"><strong>${escapeHTML(nameOf(id))}</strong><small>`
-    +`${escapeHTML(id)} · ${escapeHTML(loadWindowLabel(p))} <b>${memberTaskCount(id,p)}</b> ${tr("项任务")}</small>`
-    +`<button type="button" class="ghost-btn remove-member" data-member="${escapeHTML(id)}">${tr("移出")}</button>`
+    +`${escapeHTML(id)} · ${escapeHTML(loadWindowLabel(p))} <b>${memberTaskCount(id,p)}</b> ${tr('项任务')}</small>`
+    +`<button type="button" class="ghost-btn remove-member" data-member="${escapeHTML(id)}">${tr('移出')}</button>`
     +`</div>`).join('')||tr('<p class="muted">还没有协作者</p>')}</fieldset><div class="member-checkboxes">`
     +`${candidates.map(u=>`<label><input type="checkbox" name="inviteMember" value="${escapeHTML(u.id)}"> <strong>`
-    +`${escapeHTML(u.id)}</strong><small>${tr("成员 · {0}",escapeHTML(loadWindowLabel(p)))} <b data-member-load="${escapeHTML(u.id)}">`
-    +`${memberTaskCount(u.id,p)}</b> ${tr("项任务")}</small></label>`).join('')||tr('<p class="muted">暂无可添加成员</p>')}</div>`
-    +`<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr("取消")}</button>`
-    +`<button class="primary-btn" id="confirmInvite" ${candidates.length?'':'disabled'}>${tr("添加并通知")}</button></div>`);
+    +`${escapeHTML(u.id)}</strong><small>${tr('成员 · {0}',escapeHTML(loadWindowLabel(p)))} <b data-member-load="${escapeHTML(u.id)}">`
+    +`${memberTaskCount(u.id,p)}</b> ${tr('项任务')}</small></label>`).join('')||tr('<p class="muted">暂无可添加成员</p>')}</div>`
+    +`<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('取消')}</button>`
+    +`<button class="primary-btn" id="confirmInvite" ${candidates.length?'':'disabled'}>${tr('添加并通知')}</button></div>`);
   $('#cancelAction').onclick=closeModal;
   $('#confirmInvite').onclick=async()=>{const members=$$('input[name="inviteMember"]:checked').map(x=>x.value);if(!members.length){toast(tr('至少选择一位协作者'));return}try{await act('project.invite',{id:projectId,members});closeModal()}catch(e){}};
   /* Removing someone is destructive and irreversible from this dialog, so it
@@ -2367,7 +2367,7 @@ function noticeLines(body){
   const lines=Object.entries(data).filter(([k,v])=>NOTICE_LABELS[k]&&typeof v==='string'&&v.trim()).map(([k,v])=>[NOTICE_LABELS[k],flat(v)]);
   return {lead:text.slice(0,at).trim(),lines};
 }
-function noticeText(body){const {lead,lines}=noticeLines(body);return [lead,...lines.map(([k,v])=>tr("{0}：{1}",k,v))].filter(Boolean).join('　')}
+function noticeText(body){const {lead,lines}=noticeLines(body);return [lead,...lines.map(([k,v])=>tr('{0}：{1}',k,v))].filter(Boolean).join('　')}
 function noticeDetail(body){
   const {lead,lines}=noticeLines(body);
   return (lead?`<p class="notification-detail">${escapeHTML(lead)}</p>`:'')
@@ -2376,20 +2376,20 @@ function noticeDetail(body){
 function relTime(iso){
   const at=new Date(iso);if(!iso||Number.isNaN(at.getTime()))return '';
   const mins=Math.round((Date.now()-at.getTime())/60000),hm=at.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});
-  if(mins<1)return tr('刚刚');if(mins<60)return tr("{0} 分钟前",mins);if(mins<360)return tr("{0} 小时前",Math.round(mins/60));
+  if(mins<1)return tr('刚刚');if(mins<60)return tr('{0} 分钟前',mins);if(mins<360)return tr('{0} 小时前',Math.round(mins/60));
   const day=d=>new Date(d.getFullYear(),d.getMonth(),d.getDate()).getTime(),gap=Math.round((day(new Date())-day(at))/86400000);
-  return gap===0?tr("今天 {0}",hm):gap===1?tr("昨天 {0}",hm):tr("{0}月{1}日 {2}",at.getMonth()+1,at.getDate(),hm);
+  return gap===0?tr('今天 {0}',hm):gap===1?tr('昨天 {0}',hm):tr('{0}月{1}日 {2}',at.getMonth()+1,at.getDate(),hm);
 }
 function renderInbox(){
   const notifications=S.notifications||[],requests=(S.requests||[]).filter(r=>r.status==='pending');
   const approvalInfo=x=>{const chatMention=x.kind==='chat_mention';const p=S.projects.find(p=>p.id===x.reference);const editReq=(S.editRequests||[]).find(r=>r.id===x.reference);const task=S.tasks.find(t=>t.id===x.reference||t.id===editReq?.taskId);const projectPending=Boolean(S.user?.admin&&x.kind==='approval'&&x.title==='项目审批申请'&&p?.status==='pending');const projectCompletionPending=Boolean(S.user?.admin&&x.kind==='project_completion'&&p?.status==='pending_completion');const editPending=Boolean(x.kind==='task_edit_approval'&&editReq&&editReq.status==='pending'&&editReq.approver===S.user?.id&&task);const taskRequestPending=x.kind==='task_request'&&canReviewTaskRequest(taskRequestById(x.reference));return {project:p,task,editReq,projectPending,projectCompletionPending,editPending,taskRequestPending,chatMention,pending:projectPending||projectCompletionPending||editPending||taskRequestPending}};
   const unreadRequests=requests.filter(r=>!r.read).length;
   const unreadNotifications=notifications.filter(x=>!x.read).length;
-  const unreadCount=unreadRequests+unreadNotifications;$('#inboxCount').textContent=unreadCount;$('.notification-dot').classList.toggle('hidden',unreadCount===0);$('#inboxView .eyebrow').textContent=tr("通知中心 · {0} 条未读",unreadCount);
+  const unreadCount=unreadRequests+unreadNotifications;$('#inboxCount').textContent=unreadCount;$('.notification-dot').classList.toggle('hidden',unreadCount===0);$('#inboxView .eyebrow').textContent=tr('通知中心 · {0} 条未读',unreadCount);
   /* Your own task requests stay visible while they wait; they are not notices,
      so they cannot be deleted and do not count as unread. */
   const asks=(S.taskRequests||[]).filter(r=>r.requester===S.user?.id&&r.status==='pending');
-  const cards=[...asks.map(r=>({priority:1,time:r.createdAt,html:`<article class="inbox-item task-ask-item" data-task-request="${escapeHTML(r.id)}"><div class="inbox-icon">${icon('clock')}</div><div class="inbox-copy"><strong>${tr("任务申请审批中")}</strong><p>${tr("「{0}」· {1} · 等待{2}审批",escapeHTML(r.draft?.name||tr('任务')),escapeHTML(fmt(r.draft?.date||S.today)),escapeHTML(taskRequestApprover(r)))}</p><small title="${escapeHTML(r.createdAt)}">${escapeHTML(relTime(r.createdAt))}</small></div><span class="task-arrow">${icon('chevron-right')}</span></article>`})),...requests.map(r=>{const p=S.projects.find(x=>x.id===r.projectId);const unread=!r.read;return {priority:2,time:r.createdAt,html:`<article class="inbox-item request-inbox-item ${unread?'unread':''}" data-request="${escapeHTML(r.id)}"><div class="inbox-icon">${icon('folder')}</div><div class="inbox-copy"><strong>${tr("项目协作邀请")}</strong>${unread?'<i class="unread-dot"></i>':''}<p>「${escapeHTML(p?.name||tr('项目'))}」</p><small title="${escapeHTML(r.createdAt)}">${escapeHTML(relTime(r.createdAt))}</small><div class="inbox-actions"><button class="primary-btn accept-request" data-id="${escapeHTML(r.id)}">${tr("接受")}</button><button class="secondary-btn reject-request" data-id="${escapeHTML(r.id)}">${tr("拒绝")}</button></div></div></article>`}}),...notifications.map(x=>{const {project,task,projectPending,projectCompletionPending,editPending,taskRequestPending,chatMention,pending}=approvalInfo(x);const unread=!x.read||pending;const actions=chatMention?`<div class="inbox-actions"><button class="primary-btn open-chat-from-mention" data-channel="${escapeHTML(x.channel||'')}">${tr("去沟通区")}</button></div>`:projectPending?`<div class="inbox-actions"><button class="primary-btn approve-project-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">${tr("同意创建")}</button><button class="secondary-btn reject-project-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">${tr("驳回申请")}</button></div>`:projectCompletionPending?`<div class="inbox-actions"><button class="primary-btn approve-project-completion-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">${tr("同意完成")}</button><button class="secondary-btn reject-project-completion-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">${tr("驳回申请")}</button></div>`:editPending?`<div class="inbox-actions"><button class="primary-btn approve-edit-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">${tr("同意修改")}</button><button class="secondary-btn reject-edit-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">${tr("驳回申请")}</button></div>`:taskRequestPending?`<div class="inbox-actions"><button class="primary-btn approve-task-request" data-id="${escapeHTML(x.reference)}">${tr("同意创建")}</button><button class="secondary-btn reject-task-request" data-id="${escapeHTML(x.reference)}">${tr("驳回申请")}</button></div>`:'';return {priority:pending?2:unread?1:0,time:x.createdAt,html:`<article class="inbox-item ${unread?'unread':''} ${pending?'approval-pending':''} ${UI.inboxManage?'is-managing':''} ${UI.inboxPicked?.has(x.id)?'is-picked':''}" data-id="${escapeHTML(x.id)}">${UI.inboxManage?`<label class="inbox-pick"><input type="checkbox" tabindex="-1" ${UI.inboxPicked?.has(x.id)?'checked':''} aria-label="${tr("选择这条通知")}"></label>`:''}<div class="inbox-icon${UI.inboxManage?' hidden':''}">${taskRequestPending?icon('plus'):editPending?icon('edit'):projectCompletionPending?icon('diamond'):x.kind==='brief'?icon('archive'):x.kind==='report'?icon('clock'):x.kind==='approval'?icon('folder'):x.kind==='request'?icon('mail'):icon('trend')}</div><div class="inbox-copy"><strong>${escapeHTML(trServer(x.title))}</strong>${unread?'<i class="unread-dot"></i>':''}<p>${escapeHTML(noticeText(trServer(x.body)))}</p><small title="${escapeHTML(x.createdAt)}">${escapeHTML(relTime(x.createdAt))}</small>${actions}</div><span class="task-arrow">${icon('chevron-right')}</span>${UI.inboxManage?'':`<button class="inbox-delete" data-delete="${escapeHTML(x.id)}" title="${tr("删除这条通知")}" aria-label="${tr("删除这条通知")}">${icon('x')}</button>`}</article>`}})].sort((a,b)=>(b.priority-a.priority)||String(b.time).localeCompare(String(a.time)));
+  const cards=[...asks.map(r=>({priority:1,time:r.createdAt,html:`<article class="inbox-item task-ask-item" data-task-request="${escapeHTML(r.id)}"><div class="inbox-icon">${icon('clock')}</div><div class="inbox-copy"><strong>${tr('任务申请审批中')}</strong><p>${tr('「{0}」· {1} · 等待{2}审批',escapeHTML(r.draft?.name||tr('任务')),escapeHTML(fmt(r.draft?.date||S.today)),escapeHTML(taskRequestApprover(r)))}</p><small title="${escapeHTML(r.createdAt)}">${escapeHTML(relTime(r.createdAt))}</small></div><span class="task-arrow">${icon('chevron-right')}</span></article>`})),...requests.map(r=>{const p=S.projects.find(x=>x.id===r.projectId);const unread=!r.read;return {priority:2,time:r.createdAt,html:`<article class="inbox-item request-inbox-item ${unread?'unread':''}" data-request="${escapeHTML(r.id)}"><div class="inbox-icon">${icon('folder')}</div><div class="inbox-copy"><strong>${tr('项目协作邀请')}</strong>${unread?'<i class="unread-dot"></i>':''}<p>「${escapeHTML(p?.name||tr('项目'))}」</p><small title="${escapeHTML(r.createdAt)}">${escapeHTML(relTime(r.createdAt))}</small><div class="inbox-actions"><button class="primary-btn accept-request" data-id="${escapeHTML(r.id)}">${tr('接受')}</button><button class="secondary-btn reject-request" data-id="${escapeHTML(r.id)}">${tr('拒绝')}</button></div></div></article>`}}),...notifications.map(x=>{const {project,task,projectPending,projectCompletionPending,editPending,taskRequestPending,chatMention,pending}=approvalInfo(x);const unread=!x.read||pending;const actions=chatMention?`<div class="inbox-actions"><button class="primary-btn open-chat-from-mention" data-channel="${escapeHTML(x.channel||'')}">${tr('去沟通区')}</button></div>`:projectPending?`<div class="inbox-actions"><button class="primary-btn approve-project-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">${tr('同意创建')}</button><button class="secondary-btn reject-project-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">${tr('驳回申请')}</button></div>`:projectCompletionPending?`<div class="inbox-actions"><button class="primary-btn approve-project-completion-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">${tr('同意完成')}</button><button class="secondary-btn reject-project-completion-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">${tr('驳回申请')}</button></div>`:editPending?`<div class="inbox-actions"><button class="primary-btn approve-edit-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">${tr('同意修改')}</button><button class="secondary-btn reject-edit-request" data-id="${escapeHTML(x.reference)}" data-notification="${escapeHTML(x.id)}">${tr('驳回申请')}</button></div>`:taskRequestPending?`<div class="inbox-actions"><button class="primary-btn approve-task-request" data-id="${escapeHTML(x.reference)}">${tr('同意创建')}</button><button class="secondary-btn reject-task-request" data-id="${escapeHTML(x.reference)}">${tr('驳回申请')}</button></div>`:'';return {priority:pending?2:unread?1:0,time:x.createdAt,html:`<article class="inbox-item ${unread?'unread':''} ${pending?'approval-pending':''} ${UI.inboxManage?'is-managing':''} ${UI.inboxPicked?.has(x.id)?'is-picked':''}" data-id="${escapeHTML(x.id)}">${UI.inboxManage?`<label class="inbox-pick"><input type="checkbox" tabindex="-1" ${UI.inboxPicked?.has(x.id)?'checked':''} aria-label="${tr('选择这条通知')}"></label>`:''}<div class="inbox-icon${UI.inboxManage?' hidden':''}">${taskRequestPending?icon('plus'):editPending?icon('edit'):projectCompletionPending?icon('diamond'):x.kind==='brief'?icon('archive'):x.kind==='report'?icon('clock'):x.kind==='approval'?icon('folder'):x.kind==='request'?icon('mail'):icon('trend')}</div><div class="inbox-copy"><strong>${escapeHTML(trServer(x.title))}</strong>${unread?'<i class="unread-dot"></i>':''}<p>${escapeHTML(noticeText(trServer(x.body)))}</p><small title="${escapeHTML(x.createdAt)}">${escapeHTML(relTime(x.createdAt))}</small>${actions}</div><span class="task-arrow">${icon('chevron-right')}</span>${UI.inboxManage?'':`<button class="inbox-delete" data-delete="${escapeHTML(x.id)}" title="${tr('删除这条通知')}" aria-label="${tr('删除这条通知')}">${icon('x')}</button>`}</article>`}})].sort((a,b)=>(b.priority-a.priority)||String(b.time).localeCompare(String(a.time)));
   $('#inboxList').innerHTML=cards.map(x=>x.html).join('')||tr('<div class="empty-state">收件箱很安静</div>');
   const pick=id=>{UI.inboxPicked=UI.inboxPicked||new Set();if(UI.inboxPicked.has(id))UI.inboxPicked.delete(id);else UI.inboxPicked.add(id);renderInbox()};
   $$('#inboxList .inbox-item').forEach(e=>{e.tabIndex=0;e.onkeydown=ev=>{if(ev.key==='Enter'&&!ev.target.closest('.inbox-actions,.inbox-delete')){if(e.dataset.id)UI.inboxManage?pick(e.dataset.id):openNotification(e.dataset.id);else openRequest(e.dataset.request)}}});
@@ -2408,32 +2408,32 @@ function renderInbox(){
    one-off task for an admin. */
 const taskRequestById=id=>(S.taskRequests||[]).find(r=>r.id===id);
 function canReviewTaskRequest(r){if(!r||r.status!=='pending')return false;if(S.user?.admin)return true;return Boolean(r.projectId&&S.projects.find(p=>p.id===r.projectId)?.owner===S.user?.id)}
-function taskRequestApprover(r){const p=r.projectId&&S.projects.find(x=>x.id===r.projectId);return p?tr("{0}（项目 Owner）",nameOf(p.owner)):tr('管理员')}
+function taskRequestApprover(r){const p=r.projectId&&S.projects.find(x=>x.id===r.projectId);return p?tr('{0}（项目 Owner）',nameOf(p.owner)):tr('管理员')}
 function openTaskRequest(id){
   const r=taskRequestById(id);if(!r)return;const t=r.draft||{},p=r.projectId&&S.projects.find(x=>x.id===r.projectId),review=canReviewTaskRequest(r);
-  const state=r.status==='pending'?tr("等待{0}审批",taskRequestApprover(r)):r.status==='approved'?tr('已通过'):tr("已驳回：{0}",r.reason||'');
-  const footer=review?`<button class="secondary-btn" id="detailRejectTaskRequest">${tr("驳回申请")}</button><button class="primary-btn" id="detailApproveTaskRequest">${tr("同意创建")}</button>`:tr('<button class="secondary-btn" id="cancelAction">关闭</button>');
-  openModal(`<div class="eyebrow">${tr("任务申请 · {0}",escapeHTML(nameOf(r.requester)))}</div><h2>${escapeHTML(t.name||tr('任务'))}</h2>${t.desc?`<p>${escapeHTML(t.desc)}</p>`:''}<div class="detail-grid"><div><span>${tr("项目")}</span><strong>${escapeHTML(p?.name||tr('临时任务'))}</strong></div><div><span>${tr("负责人")}</span><strong>${escapeHTML(nameOf(t.assignee))}</strong></div><div><span>${tr("安排")}</span><strong>${escapeHTML(fmt(t.date||S.today))} ${escapeHTML(t.time||'')}${t.deadline&&t.deadline!==t.date?' – '+escapeHTML(fmt(t.deadline)):''}</strong></div><div><span>${tr("时长 · 优先级")}</span><strong>${tr("{0} 分钟 · {1}",escapeHTML(String(t.duration||30)),escapeHTML(t.priority||'P1'))}</strong></div><div><span>${tr("状态")}</span><strong>${escapeHTML(state)}</strong></div></div><div class="modal-footer">${footer}</div>`);
+  const state=r.status==='pending'?tr('等待{0}审批',taskRequestApprover(r)):r.status==='approved'?tr('已通过'):tr('已驳回：{0}',r.reason||'');
+  const footer=review?`<button class="secondary-btn" id="detailRejectTaskRequest">${tr('驳回申请')}</button><button class="primary-btn" id="detailApproveTaskRequest">${tr('同意创建')}</button>`:tr('<button class="secondary-btn" id="cancelAction">关闭</button>');
+  openModal(`<div class="eyebrow">${tr('任务申请 · {0}',escapeHTML(nameOf(r.requester)))}</div><h2>${escapeHTML(t.name||tr('任务'))}</h2>${t.desc?`<p>${escapeHTML(t.desc)}</p>`:''}<div class="detail-grid"><div><span>${tr('项目')}</span><strong>${escapeHTML(p?.name||tr('临时任务'))}</strong></div><div><span>${tr('负责人')}</span><strong>${escapeHTML(nameOf(t.assignee))}</strong></div><div><span>${tr('安排')}</span><strong>${escapeHTML(fmt(t.date||S.today))} ${escapeHTML(t.time||'')}${t.deadline&&t.deadline!==t.date?' – '+escapeHTML(fmt(t.deadline)):''}</strong></div><div><span>${tr('时长 · 优先级')}</span><strong>${tr('{0} 分钟 · {1}',escapeHTML(String(t.duration||30)),escapeHTML(t.priority||'P1'))}</strong></div><div><span>${tr('状态')}</span><strong>${escapeHTML(state)}</strong></div></div><div class="modal-footer">${footer}</div>`);
   $('#cancelAction')?.addEventListener('click',closeModal);
   $('#detailApproveTaskRequest')?.addEventListener('click',()=>reviewTaskRequest(id,true));
   $('#detailRejectTaskRequest')?.addEventListener('click',()=>reviewTaskRequest(id,false));
 }
 async function reviewTaskRequest(id,accept){
   if(accept){try{closeModal();await act('task.request_review',{id,accept:true})}catch(e){}return}
-  openModal(`<div class="eyebrow">${tr("任务申请")}</div><h2>${tr("驳回任务申请")}</h2><label class="form-field">${tr("驳回原因")}<textarea id="taskRequestReason"></textarea></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr("取消")}</button><button class="primary-btn" id="confirmTaskRequestReject">${tr("确认驳回")}</button></div>`);
+  openModal(`<div class="eyebrow">${tr('任务申请')}</div><h2>${tr('驳回任务申请')}</h2><label class="form-field">${tr('驳回原因')}<textarea id="taskRequestReason"></textarea></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('取消')}</button><button class="primary-btn" id="confirmTaskRequestReject">${tr('确认驳回')}</button></div>`);
   draftForm(`taskreq.reject:${id}`, {title: tr('驳回任务申请'), reopen: ['reviewTaskRequest', id],
     submit: ['task.request_review']});
   $('#cancelAction').onclick=closeModal;
   $('#confirmTaskRequestReject').onclick=async()=>{const reason=$('#taskRequestReason').value.trim();if(!reason){toast(tr('请填写驳回原因'));return}try{await act('task.request_review',{id,accept:false,reason});closeModal()}catch(e){}};
 }
-function openRequest(id){const r=S.requests.find(x=>x.id===id);if(!r)return;const p=S.projects.find(x=>x.id===r.projectId);openModal(`<div class="eyebrow">${tr("收件箱详情 · 项目邀请")}</div><h2>${tr("加入「{0}」",escapeHTML(p?.name||tr('项目')))}</h2><div class="detail-grid"><div><span>Owner</span><strong>${escapeHTML(p?.owner?nameOf(p.owner):'—')}</strong></div><div><span>${tr("项目状态")}</span><strong>${p?projectStatus(p):'—'}</strong></div></div><div class="modal-footer"><button class="secondary-btn" id="detailRejectRequest">${tr("拒绝")}</button><button class="primary-btn" id="detailAcceptRequest">${tr("接受邀请")}</button></div>`);$('#detailAcceptRequest').onclick=()=>{closeModal();act('request.respond',{id,accept:true})};$('#detailRejectRequest').onclick=()=>{closeModal();act('request.respond',{id,accept:false})};api('/api/action',{action:'request.read',data:{id}}).then(refresh).catch(()=>{})}
+function openRequest(id){const r=S.requests.find(x=>x.id===id);if(!r)return;const p=S.projects.find(x=>x.id===r.projectId);openModal(`<div class="eyebrow">${tr('收件箱详情 · 项目邀请')}</div><h2>${tr('加入「{0}」',escapeHTML(p?.name||tr('项目')))}</h2><div class="detail-grid"><div><span>Owner</span><strong>${escapeHTML(p?.owner?nameOf(p.owner):'—')}</strong></div><div><span>${tr('项目状态')}</span><strong>${p?projectStatus(p):'—'}</strong></div></div><div class="modal-footer"><button class="secondary-btn" id="detailRejectRequest">${tr('拒绝')}</button><button class="primary-btn" id="detailAcceptRequest">${tr('接受邀请')}</button></div>`);$('#detailAcceptRequest').onclick=()=>{closeModal();act('request.respond',{id,accept:true})};$('#detailRejectRequest').onclick=()=>{closeModal();act('request.respond',{id,accept:false})};api('/api/action',{action:'request.read',data:{id}}).then(refresh).catch(()=>{})}
 function openNotification(id){
   const n=S.notifications.find(x=>x.id===id); if(!n)return;
   if(n.kind==='brief'){if(!n.read)api('/api/action',{action:'inbox.read',data:{id}}).then(refresh).catch(()=>{});openBrief(String(n.reference||'').replace(/^brief:/,''));return}
   if((n.kind==='task_request'||n.kind==='task_request_result')&&taskRequestById(n.reference)){if(!n.read)api('/api/action',{action:'inbox.read',data:{id}}).then(refresh).catch(()=>{});openTaskRequest(n.reference);return}
   const editReq=(S.editRequests||[]).find(r=>r.id===n.reference),p=n.reference&&S.projects.find(x=>x.id===n.reference),t=n.reference&&S.tasks.find(x=>x.id===n.reference)||S.tasks.find(x=>x.id===editReq?.taskId),projectPending=Boolean(S.user?.admin&&n.kind==='approval'&&p?.status==='pending'),projectCompletionPending=Boolean(S.user?.admin&&n.kind==='project_completion'&&p?.status==='pending_completion'),editPending=Boolean(n.kind==='task_edit_approval'&&editReq&&editReq.status==='pending'&&editReq.approver===S.user?.id&&t);
-  const action=projectPending?`<div class="modal-footer"><button class="secondary-btn" id="detailRejectProject">${tr("驳回申请")}</button><button class="primary-btn" id="detailApproveProject">${tr("同意创建")}</button></div>`:projectCompletionPending?`<div class="modal-footer"><button class="secondary-btn" id="detailRejectProjectCompletion">${tr("驳回申请")}</button><button class="primary-btn" id="detailApproveProjectCompletion">${tr("同意完成")}</button></div>`:editPending?`<div class="modal-footer"><button class="secondary-btn" id="detailRejectEdit">${tr("驳回申请")}</button><button class="primary-btn" id="detailApproveEdit">${tr("同意修改")}</button></div>`:tr('<div class="modal-footer"><button class="secondary-btn" id="cancelAction">关闭</button></div>');
-  openModal(`<div class="eyebrow">${tr("收件箱详情 · {0}",escapeHTML(n.kind||tr('通知')))}</div><h2>${escapeHTML(trServer(n.title))}</h2>${noticeDetail(trServer(n.body))}${t?`<div class="detail-grid"><div><span>${tr("任务")}</span><strong>${escapeHTML(t.name)}</strong></div><div><span>${tr("负责人")}</span><strong>${escapeHTML(nameOf(t.assignee))}</strong></div><div><span>${tr("状态")}</span><strong>${status(t)[1]}</strong></div><div><span>${tr("项目")}</span><strong>${escapeHTML(projectName(t))}</strong></div></div>${t.completionSummary?`<div class="completion-summary"><span>${tr("提交的完成总结")}</span><p>${escapeHTML(t.completionSummary)}</p></div>`:''}${editReq?renderEditRequestSummary(t):''}`:p?`<div class="detail-grid"><div><span>${tr("关联项目")}</span><strong>${escapeHTML(p.name)}</strong></div><div><span>${tr("项目 Owner")}</span><strong>${escapeHTML(nameOf(p.owner))}</strong></div><div><span>${tr("项目状态")}</span><strong>${projectStatus(p)}</strong></div></div>${p.completionReport?`<div class="completion-summary"><span>${tr("结项报告")}</span><p>${escapeHTML(p.completionReport)}</p></div>`:''}`:''}<div class="detail-grid"><div><span>${tr("通知时间")}</span><strong title="${escapeHTML(n.createdAt)}">${escapeHTML(relTime(n.createdAt))}</strong></div></div>${action}`);
+  const action=projectPending?`<div class="modal-footer"><button class="secondary-btn" id="detailRejectProject">${tr('驳回申请')}</button><button class="primary-btn" id="detailApproveProject">${tr('同意创建')}</button></div>`:projectCompletionPending?`<div class="modal-footer"><button class="secondary-btn" id="detailRejectProjectCompletion">${tr('驳回申请')}</button><button class="primary-btn" id="detailApproveProjectCompletion">${tr('同意完成')}</button></div>`:editPending?`<div class="modal-footer"><button class="secondary-btn" id="detailRejectEdit">${tr('驳回申请')}</button><button class="primary-btn" id="detailApproveEdit">${tr('同意修改')}</button></div>`:tr('<div class="modal-footer"><button class="secondary-btn" id="cancelAction">关闭</button></div>');
+  openModal(`<div class="eyebrow">${tr('收件箱详情 · {0}',escapeHTML(n.kind||tr('通知')))}</div><h2>${escapeHTML(trServer(n.title))}</h2>${noticeDetail(trServer(n.body))}${t?`<div class="detail-grid"><div><span>${tr('任务')}</span><strong>${escapeHTML(t.name)}</strong></div><div><span>${tr('负责人')}</span><strong>${escapeHTML(nameOf(t.assignee))}</strong></div><div><span>${tr('状态')}</span><strong>${status(t)[1]}</strong></div><div><span>${tr('项目')}</span><strong>${escapeHTML(projectName(t))}</strong></div></div>${t.completionSummary?`<div class="completion-summary"><span>${tr('提交的完成总结')}</span><p>${escapeHTML(t.completionSummary)}</p></div>`:''}${editReq?renderEditRequestSummary(t):''}`:p?`<div class="detail-grid"><div><span>${tr('关联项目')}</span><strong>${escapeHTML(p.name)}</strong></div><div><span>${tr('项目 Owner')}</span><strong>${escapeHTML(nameOf(p.owner))}</strong></div><div><span>${tr('项目状态')}</span><strong>${projectStatus(p)}</strong></div></div>${p.completionReport?`<div class="completion-summary"><span>${tr('结项报告')}</span><p>${escapeHTML(p.completionReport)}</p></div>`:''}`:''}<div class="detail-grid"><div><span>${tr('通知时间')}</span><strong title="${escapeHTML(n.createdAt)}">${escapeHTML(relTime(n.createdAt))}</strong></div></div>${action}`);
   $('#cancelAction')?.addEventListener('click',closeModal);
   $('#detailApproveProject')?.addEventListener('click',()=>reviewProject(p.id,true,n.id));
   $('#detailRejectProject')?.addEventListener('click',()=>reviewProject(p.id,false,n.id));
@@ -2478,10 +2478,10 @@ function repeatPattern(r){
   const every=Math.max(1,Number(r.every||1));
   if(r.frequency==='daily')return tr('每天');
   if(r.frequency==='workdays')return tr('工作日');
-  if(r.frequency==='monthly')return tr("每月 {0} 号",Math.min(31,Math.max(1,Number(r.monthDay||1))));
+  if(r.frequency==='monthly')return tr('每月 {0} 号',Math.min(31,Math.max(1,Number(r.monthDay||1))));
   if(r.frequency==='dates'||r.frequency==='specific')return tr('指定日期');
-  const base=days||(r.start?tr("同起始日（{0}）",weekdayName(r.start)):tr('每周'));
-  return every>1?tr("每 {0} 周 · {1}",every,base):tr("每周 · {0}",base);
+  const base=days||(r.start?tr('同起始日（{0}）',weekdayName(r.start)):tr('每周'));
+  return every>1?tr('每 {0} 周 · {1}',every,base):tr('每周 · {0}',base);
 }
 /* Attach a fixed-task rule to a project, move it to another, or take it out.
    Only the project's members can carry it, so the dialog says who is missing
@@ -2490,13 +2490,13 @@ function repeatProjectDialog(repeatId){
   const r=(S.repeats||[]).find(x=>x.id===repeatId);if(!r)return;
   const current=r.projectId&&S.projects.find(x=>x.id===r.projectId);
   const choices=S.projects.filter(p=>p.status==='active'&&p.id!==r.projectId);
-  openModal(`<div class="eyebrow">${tr("固定任务 · 所属项目")}</div><h2>${r.projectId?tr('调整所属项目'):tr('挂载到项目')}</h2><p>${escapeHTML(r.name)} · ${escapeHTML(repeatPattern(r))} · ${escapeHTML((r.assignees||[]).map(nameOf).join('、'))}</p><p class="muted">${tr("当前：{0}",r.projectId?escapeHTML(current?.name||tr('项目已结束')):tr('不属于任何项目'))}</p>${choices.length?`<label class="form-field">${r.projectId?tr('改挂到'):tr('挂载到')}<select id="repeatTarget">${choices.map(p=>`<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}${p.end?` ${tr("· 截止 {0}",escapeHTML(p.end))}`:''}</option>`).join('')}</select></label><p class="muted" id="repeatTargetHint"></p>`:tr('<p class="muted">没有其他进行中的项目可以挂载。</p>')}<div class="modal-footer">${r.projectId?tr('<button class="secondary-btn" id="repeatDetach">移出项目</button>'):''}<button class="secondary-btn" id="cancelAction">${tr("取消")}</button>${choices.length?`<button class="primary-btn" id="repeatAttach">${r.projectId?tr('保存调整'):tr('挂载')}</button>`:''}</div>`);
+  openModal(`<div class="eyebrow">${tr('固定任务 · 所属项目')}</div><h2>${r.projectId?tr('调整所属项目'):tr('挂载到项目')}</h2><p>${escapeHTML(r.name)} · ${escapeHTML(repeatPattern(r))} · ${escapeHTML((r.assignees||[]).map(nameOf).join('、'))}</p><p class="muted">${tr('当前：{0}',r.projectId?escapeHTML(current?.name||tr('项目已结束')):tr('不属于任何项目'))}</p>${choices.length?`<label class="form-field">${r.projectId?tr('改挂到'):tr('挂载到')}<select id="repeatTarget">${choices.map(p=>`<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}${p.end?` ${tr('· 截止 {0}',escapeHTML(p.end))}`:''}</option>`).join('')}</select></label><p class="muted" id="repeatTargetHint"></p>`:tr('<p class="muted">没有其他进行中的项目可以挂载。</p>')}<div class="modal-footer">${r.projectId?tr('<button class="secondary-btn" id="repeatDetach">移出项目</button>'):''}<button class="secondary-btn" id="cancelAction">${tr('取消')}</button>${choices.length?`<button class="primary-btn" id="repeatAttach">${r.projectId?tr('保存调整'):tr('挂载')}</button>`:''}</div>`);
   $('#cancelAction').onclick=closeModal;
   const save=async projectId=>{try{await act('repeat.update',{id:r.id,projectId});closeModal();toast(projectId?tr('已挂到项目，从今天起生效'):tr('已移出项目'))}catch(e){}};
   const sync=()=>{
     const p=S.projects.find(x=>x.id===$('#repeatTarget')?.value);if(!p)return;
     const missing=(r.assignees||[]).filter(a=>(p.members||{})[a]!=='accepted');
-    $('#repeatTargetHint').textContent=missing.length?tr("{0} 不是该项目成员，请先把他们加入项目",missing.map(nameOf).join('、')):tr("从今天起的安排归入该项目{0}；已发生的记录保持不变。",p.end?tr("，{0} 之后不再生成",p.end):'');
+    $('#repeatTargetHint').textContent=missing.length?tr('{0} 不是该项目成员，请先把他们加入项目',missing.map(nameOf).join('、')):tr('从今天起的安排归入该项目{0}；已发生的记录保持不变。',p.end?tr('，{0} 之后不再生成',p.end):'');
     $('#repeatAttach').disabled=missing.length>0;
   };
   if(choices.length){$('#repeatTarget').onchange=sync;sync();$('#repeatAttach').onclick=()=>save($('#repeatTarget').value)}
@@ -2508,10 +2508,10 @@ function renderRepeats(){
   list.innerHTML=repeats.map(r=>{
     const span=Math.max(1,Number(r.span||1));
     const state=r.active===false?tr('已暂停'):tr('启用中');
-    const spanText=span>1?` ${tr("· 持续 {0} 天",span)}`:'';
-    const untilText=r.end?` ${tr("· 至 {0}",escapeHTML(r.end))}`:'';
-    const project=r.projectId&&S.projects.find(x=>x.id===r.projectId),projectText=r.projectId?` ${tr("· 项目 {0}",escapeHTML(project?.name||tr('已结束')))}`:'';
-    return `<article class="repeat-admin-item"><div><strong>${escapeHTML(r.name)}</strong><span>${escapeHTML(patternOf(r))} · ${escapeHTML(r.time||'09:00')} · ${escapeHTML((r.assignees||[]).join('、'))}</span><small>${state}${projectText}${spanText}${untilText}${r.skipDates?.length?` ${tr("· 已挖空 {0} 天",r.skipDates.length)}`:''}</small></div><div class="repeat-admin-actions"><button class="ghost-btn repeat-project" data-id="${escapeHTML(r.id)}">${r.projectId?tr('调整项目'):tr('挂载到项目')}</button><button class="ghost-btn skip-repeat" data-id="${escapeHTML(r.id)}">${tr("挖空本次")}</button></div></article>`}).join('')||tr('<p class="muted">还没有固定任务规则。</p>');
+    const spanText=span>1?` ${tr('· 持续 {0} 天',span)}`:'';
+    const untilText=r.end?` ${tr('· 至 {0}',escapeHTML(r.end))}`:'';
+    const project=r.projectId&&S.projects.find(x=>x.id===r.projectId),projectText=r.projectId?` ${tr('· 项目 {0}',escapeHTML(project?.name||tr('已结束')))}`:'';
+    return `<article class="repeat-admin-item"><div><strong>${escapeHTML(r.name)}</strong><span>${escapeHTML(patternOf(r))} · ${escapeHTML(r.time||'09:00')} · ${escapeHTML((r.assignees||[]).join('、'))}</span><small>${state}${projectText}${spanText}${untilText}${r.skipDates?.length?` ${tr('· 已挖空 {0} 天',r.skipDates.length)}`:''}</small></div><div class="repeat-admin-actions"><button class="ghost-btn repeat-project" data-id="${escapeHTML(r.id)}">${r.projectId?tr('调整项目'):tr('挂载到项目')}</button><button class="ghost-btn skip-repeat" data-id="${escapeHTML(r.id)}">${tr('挖空本次')}</button></div></article>`}).join('')||tr('<p class="muted">还没有固定任务规则。</p>');
   $$('.repeat-project').forEach(b=>b.onclick=()=>repeatProjectDialog(b.dataset.id));
   $$('.skip-repeat').forEach(b=>b.onclick=()=>{const date=prompt(tr('请输入本次不执行的日期（YYYY-MM-DD）'),S.today);if(!date)return;act('repeat.skip',{id:b.dataset.id,date,skip:true}).catch(()=>{})});
 }
@@ -2580,11 +2580,11 @@ function editProfile(id,initialMode){
   const canName=S.user?.role==='superadmin';
   if(!canName&&!self){toast(tr('只有 superadmin 可以修改他人资料'));return}
   let pendingAvatar=target.avatar||'';
-  const nameField=canName?`<label class="form-field">${tr("中文名称")}<input id="profileDisplayName" maxlength="12" value="${escapeHTML(target.displayName||'')}" ></label>`:'';
-  const selfFields=self?`<label class="form-field">${tr("昵称")}<input id="profileNickname" maxlength="12" value="${escapeHTML(target.nickname||'')}" placeholder="${tr("自己想被叫的名字")}"></label>
-    <div class="form-field">${tr("头像")}<div class="avatar-editor"><span class="avatar large" id="profileAvatarPreview">${escapeHTML(avatarSeed(id))}</span><input type="file" id="profileAvatarFile" accept="image/*" class="hidden"><button type="button" class="secondary-btn" id="profileAvatarPick">${tr("选择图片")}</button><button type="button" class="ghost-btn" id="profileAvatarClear">${tr("移除")}</button></div></div>
-    <label class="form-field">${tr("个性签名")}<input id="profileSignature" maxlength="40" value="${escapeHTML(target.signature||'')}" placeholder="${tr("一句话，显示在头像下方")}"></label>`:'';
-  openModal(`<div class="eyebrow">${tr("账户资料 · {0}",escapeHTML(target.id))}</div><h2>${escapeHTML(target.displayName||target.id)}</h2>${nameField}${selfFields}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr("取消")}</button><button class="primary-btn" id="confirmProfile">${tr("保存")}</button></div>`);
+  const nameField=canName?`<label class="form-field">${tr('中文名称')}<input id="profileDisplayName" maxlength="12" value="${escapeHTML(target.displayName||'')}" ></label>`:'';
+  const selfFields=self?`<label class="form-field">${tr('昵称')}<input id="profileNickname" maxlength="12" value="${escapeHTML(target.nickname||'')}" placeholder="${tr('自己想被叫的名字')}"></label>
+    <div class="form-field">${tr('头像')}<div class="avatar-editor"><span class="avatar large" id="profileAvatarPreview">${escapeHTML(avatarSeed(id))}</span><input type="file" id="profileAvatarFile" accept="image/*" class="hidden"><button type="button" class="secondary-btn" id="profileAvatarPick">${tr('选择图片')}</button><button type="button" class="ghost-btn" id="profileAvatarClear">${tr('移除')}</button></div></div>
+    <label class="form-field">${tr('个性签名')}<input id="profileSignature" maxlength="40" value="${escapeHTML(target.signature||'')}" placeholder="${tr('一句话，显示在头像下方')}"></label>`:'';
+  openModal(`<div class="eyebrow">${tr('账户资料 · {0}',escapeHTML(target.id))}</div><h2>${escapeHTML(target.displayName||target.id)}</h2>${nameField}${selfFields}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('取消')}</button><button class="primary-btn" id="confirmProfile">${tr('保存')}</button></div>`);
   /* The avatar element only exists on your own card. A superadmin opening
      someone else's card just to set their 中文名称 used to hit a null here and
      throw, which skipped the whole footer wiring below — so 保存 did nothing.
@@ -2665,25 +2665,25 @@ function renderSettingsPage(){
   $('#settingsView .settings-layout')?.classList?.toggle('hidden',Boolean(page));box?.classList?.toggle('hidden',!page);
   const eyebrow=$('#settingsView .page-intro .eyebrow'),title=$('#settingsView .page-intro h1');
   if(!page){if(eyebrow)eyebrow.textContent=tr('团队设置');if(title)title.textContent=tr('系统设置');return false}
-  if(eyebrow)eyebrow.innerHTML=`<button type="button" class="settings-back" id="settingsBack">${tr("{0}系统设置",icon('chevron-left'))}</button>`;
+  if(eyebrow)eyebrow.innerHTML=`<button type="button" class="settings-back" id="settingsBack">${tr('{0}系统设置',icon('chevron-left'))}</button>`;
   if(title)title.textContent=page.title;
   const back=$('#settingsBack');if(back)back.onclick=()=>openSettingsPage('');
   page.render();return true;
 }
 /* The list shows where each page stands without opening it. */
 function renderSettingsSummaries(){
-  const accounts=$('#accountSummary');if(accounts)accounts.textContent=tr("{0} 个账户",(S.users||[]).filter(u=>u.active).length);
+  const accounts=$('#accountSummary');if(accounts)accounts.textContent=tr('{0} 个账户',(S.users||[]).filter(u=>u.active).length);
   const prompt=$('#promptSummary');if(prompt)prompt.textContent=S.meetingPrompt&&S.meetingPrompt!==MEETING_PROMPT_DEFAULT?tr('已自定义'):tr('内置模板');
   const ai=$('#aiSummary');if(!ai)return;
   if(!aiSettings&&S.user?.admin){loadAiSettings();return}
   const chat=aiSettings?.scenes?.chat,count=aiSettings?.sources?.length||0;
-  ai.textContent=!aiSettings||aiSettings.error?'':count?tr("{0} 个来源 · 对话助手 {1}",count,chat?.model||tr('未选模型')):tr('还没有来源');
+  ai.textContent=!aiSettings||aiSettings.error?'':count?tr('{0} 个来源 · 对话助手 {1}',count,chat?.model||tr('未选模型')):tr('还没有来源');
 }
 function renderPromptPage(){
   const box=$('#settingsPage');if(!box)return;
-  if(!box.querySelector('#meetingPromptSetting'))box.innerHTML=`<section class="settings-sheet"><dl class="prompt-vars"><dt>{{title}}</dt><dd>${tr("会议标题")}</dd>`
-    +`<dt>{{agenda}}</dt><dd>${tr("议程，没有时写「未提及」")}</dd><dt>{{transcript}}</dt><dd>${tr("会议原稿")}</dd></dl>`
-    +`<div class="setting-row is-wide" data-setting="prompt" data-role="admin"><div class="setting-text"><h3><span>${tr("提示词")}</span><span class="setting-meta">`
+  if(!box.querySelector('#meetingPromptSetting'))box.innerHTML=`<section class="settings-sheet"><dl class="prompt-vars"><dt>{{title}}</dt><dd>${tr('会议标题')}</dd>`
+    +`<dt>{{agenda}}</dt><dd>${tr('议程，没有时写「未提及」')}</dd><dt>{{transcript}}</dt><dd>${tr('会议原稿')}</dd></dl>`
+    +`<div class="setting-row is-wide" data-setting="prompt" data-role="admin"><div class="setting-text"><h3><span>${tr('提示词')}</span><span class="setting-meta">`
     +`<span class="setting-status" aria-live="polite"></span><span class="setting-reset-slot"></span></span></h3></div><div id="meetingPromptSetting" class="setting-body"></div></div></section>`;
   renderMeetingPromptSetting();
   const row=box.querySelector('.setting-row'),changed=SETTING_DEFAULTS.prompt.modified(),slot=row?.querySelector('.setting-reset-slot');
@@ -2720,7 +2720,7 @@ function aiSceneModels(source,current){return [...new Set([...(source?.models||[
 function renderAiSettingsPage(){
   const box=$('#settingsPage');if(!box||UI.settingsPage!=='ai')return;
   if(!aiSettings||aiSettings.loading){box.innerHTML=tr('<p class="muted settings-loading">正在读取…</p>');loadAiSettings();return}
-  if(aiSettings.error){box.innerHTML=`<p class="muted settings-loading">${tr("读取失败：{0}",escapeHTML(aiSettings.error))}</p>`;return}
+  if(aiSettings.error){box.innerHTML=`<p class="muted settings-loading">${tr('读取失败：{0}',escapeHTML(aiSettings.error))}</p>`;return}
   // Keep the actual editor (including password, selection and pending submit)
   // across unrelated source-test and scene updates. Explicit cancel/save drops it.
   const editor=box.querySelector('.ai-source-editor'),focused=document.activeElement;
@@ -2735,39 +2735,39 @@ function renderAiSettingsPage(){
     return `<article class="ai-source" data-source="${escapeHTML(s.id)}"><div class="ai-source-main"><div class="ai-source-title"><strong>${escapeHTML(s.name)}</strong>`
       +`${s.kind==='speech'||s.name!==kind?`<span class="ai-chip${s.kind==='speech'?' is-speech':''}">${escapeHTML(kind)}</span>`:''}</div>`
       +`<div class="ai-source-meta"><span>${escapeHTML(aiHost(s.baseUrl))}</span><span>${s.apiKeySet?tr('密钥 ')+escapeHTML(s.apiKeyMasked):tr('未设置密钥')}</span>`
-      +`<span>${s.models?.length?tr("{0} 个模型",s.models.length):tr('还没有模型列表')}</span></div>`
-      +`<p class="ai-source-usage">${used.length?tr("用于 {0}",escapeHTML(used.join('、'))):tr('暂未使用')}</p>`
+      +`<span>${s.models?.length?tr('{0} 个模型',s.models.length):tr('还没有模型列表')}</span></div>`
+      +`<p class="ai-source-usage">${used.length?tr('用于 {0}',escapeHTML(used.join('、'))):tr('暂未使用')}</p>`
       +`${t.text?`<p class="ai-source-status is-${t.state}" role="status">${escapeHTML(t.text)}</p>`:''}</div>`
       +`<div class="ai-source-actions"><button type="button" class="secondary-btn" data-ai-test="${escapeHTML(s.id)}"${t.busy?' disabled aria-busy="true"':''}>${t.busy?tr('测试中…'):tr('测试')}</button>`
-      +`<button type="button" class="text-btn" data-ai-edit="${escapeHTML(s.id)}">${tr("编辑")}</button><button type="button" class="text-btn is-danger" data-ai-delete="${escapeHTML(s.id)}">${tr("删除")}</button></div></article>`;
+      +`<button type="button" class="text-btn" data-ai-edit="${escapeHTML(s.id)}">${tr('编辑')}</button><button type="button" class="text-btn is-danger" data-ai-delete="${escapeHTML(s.id)}">${tr('删除')}</button></div></article>`;
   };
   const sceneRow=info=>{
     const c=scenes[info.id]||{},speech=info.id==='transcribe',pool=sources.filter(s=>(s.kind==='speech')===speech),follow=['plan','minutes'].includes(info.id);
     const source=pool.find(s=>s.id===c.source),models=aiSceneModels(source,c.model),pending=aiEditing?.scene===info.id;
-    const controls=!pool.length?`<span class="ai-scene-empty">${tr("添加{0}来源后可选",speech?tr('语音转写'):tr('对话模型'))}</span>`
-      :`<label class="ai-field"><span>${tr("来源")}</span><select data-scene-source="${info.id}">${follow?`<option value=""${c.follows?' selected':''}>${tr("跟随对话助手")}</option>`:''}`
-        +`${speech?`<option value=""${!c.source?' selected':''}>${tr("停用")}</option>`:!c.source&&!follow?tr('<option value="" selected disabled>选择来源</option>'):''}`
+    const controls=!pool.length?`<span class="ai-scene-empty">${tr('添加{0}来源后可选',speech?tr('语音转写'):tr('对话模型'))}</span>`
+      :`<label class="ai-field"><span>${tr('来源')}</span><select data-scene-source="${info.id}">${follow?`<option value=""${c.follows?' selected':''}>${tr('跟随对话助手')}</option>`:''}`
+        +`${speech?`<option value=""${!c.source?' selected':''}>${tr('停用')}</option>`:!c.source&&!follow?tr('<option value="" selected disabled>选择来源</option>'):''}`
         +`${pool.map(s=>`<option value="${escapeHTML(s.id)}"${!c.follows&&s.id===c.source?' selected':''}>${escapeHTML(s.name)}</option>`).join('')}</select></label>`
-        +`<label class="ai-field"><span>${tr("模型")}</span>${c.follows||speech&&!c.source?`<input value="${escapeHTML(c.model||'')}" disabled aria-label="${tr("模型")}">`
-          :models.length&&!pending?`<select data-scene-model="${info.id}">${models.map(m=>`<option${m===c.model?' selected':''}>${escapeHTML(m)}</option>`).join('')}<option value="__custom">${tr("手动填写…")}</option></select>`
-          :`<input data-scene-model-input="${info.id}" value="${escapeHTML(c.model||'')}" placeholder="${tr("填写模型 ID，回车保存")}" aria-label="${tr("模型 ID")}">`}</label>`
-        +`${speech?`<label class="ai-field is-short"><span>${tr("语言")}</span><input data-scene-language="${info.id}" value="${escapeHTML(c.language||'zh')}" maxlength="12"${!c.source?' disabled':''}></label>`
-          :`<label class="ai-field"><span>${tr("思考强度")}</span><select data-scene-reasoning="${info.id}" title="${tr("需模型支持；默认使用服务商设置")}"${c.follows||!c.source||!c.model?' disabled':''}>${Object.entries(AI_REASONING_CHOICES).map(([v,label])=>`<option value="${v}"${v===(c.reasoningEffort||'auto')?' selected':''}>${label}</option>`).join('')}</select></label>`}`;
+        +`<label class="ai-field"><span>${tr('模型')}</span>${c.follows||speech&&!c.source?`<input value="${escapeHTML(c.model||'')}" disabled aria-label="${tr('模型')}">`
+          :models.length&&!pending?`<select data-scene-model="${info.id}">${models.map(m=>`<option${m===c.model?' selected':''}>${escapeHTML(m)}</option>`).join('')}<option value="__custom">${tr('手动填写…')}</option></select>`
+          :`<input data-scene-model-input="${info.id}" value="${escapeHTML(c.model||'')}" placeholder="${tr('填写模型 ID，回车保存')}" aria-label="${tr('模型 ID')}">`}</label>`
+        +`${speech?`<label class="ai-field is-short"><span>${tr('语言')}</span><input data-scene-language="${info.id}" value="${escapeHTML(c.language||'zh')}" maxlength="12"${!c.source?' disabled':''}></label>`
+          :`<label class="ai-field"><span>${tr('思考强度')}</span><select data-scene-reasoning="${info.id}" title="${tr('需模型支持；默认使用服务商设置')}"${c.follows||!c.source||!c.model?' disabled':''}>${Object.entries(AI_REASONING_CHOICES).map(([v,label])=>`<option value="${v}"${v===(c.reasoningEffort||'auto')?' selected':''}>${label}</option>`).join('')}</select></label>`}`;
     return `<div class="setting-row ai-scene" data-scene="${info.id}"><div class="setting-text"><h3><span>${escapeHTML(info.name)}</span><span class="setting-meta">`
       +`<span class="setting-status" aria-live="polite"></span></span></h3><p>${escapeHTML(info.desc)}</p></div><div class="ai-scene-controls">${controls}</div></div>`;
   };
   const adding=aiEditing&&!aiEditing.id&&!aiEditing.scene;
-  box.innerHTML=`<section class="settings-sheet"><h2 class="settings-group-title">${tr("来源")}</h2><div class="ai-sources">${sources.map(card).join('')}`
-    +`${!sources.length&&!adding?`<div class="ai-empty-state"><strong>${tr("还没有模型来源")}</strong>`
-      +`<div class="ai-empty-actions"><button type="button" class="primary-btn" data-ai-add="chat">${tr("{0}添加对话模型来源",icon('plus'))}</button>`
-      +`<button type="button" class="text-btn" data-ai-add="speech">${tr("添加语音转写来源")}</button></div></div>`:''}`
-    +`${adding?aiSourceEditor(null):''}</div>${adding||!sources.length?'':`<div class="ai-add-row"><button type="button" class="text-btn is-add" data-ai-add="chat">${tr("{0}添加对话模型来源",icon('plus'))}</button>`
-    +`<button type="button" class="text-btn is-add" data-ai-add="speech">${tr("{0}添加语音转写来源",icon('plus'))}</button></div>`}</section>`
-    +`<section class="settings-sheet"><h2 class="settings-group-title">${tr("使用场景")}</h2>`
+  box.innerHTML=`<section class="settings-sheet"><h2 class="settings-group-title">${tr('来源')}</h2><div class="ai-sources">${sources.map(card).join('')}`
+    +`${!sources.length&&!adding?`<div class="ai-empty-state"><strong>${tr('还没有模型来源')}</strong>`
+      +`<div class="ai-empty-actions"><button type="button" class="primary-btn" data-ai-add="chat">${tr('{0}添加对话模型来源',icon('plus'))}</button>`
+      +`<button type="button" class="text-btn" data-ai-add="speech">${tr('添加语音转写来源')}</button></div></div>`:''}`
+    +`${adding?aiSourceEditor(null):''}</div>${adding||!sources.length?'':`<div class="ai-add-row"><button type="button" class="text-btn is-add" data-ai-add="chat">${tr('{0}添加对话模型来源',icon('plus'))}</button>`
+    +`<button type="button" class="text-btn is-add" data-ai-add="speech">${tr('{0}添加语音转写来源',icon('plus'))}</button></div>`}</section>`
+    +`<section class="settings-sheet"><h2 class="settings-group-title">${tr('使用场景')}</h2>`
     +`${sceneInfo.map(sceneRow).join('')}</section>`
-    +`<section class="settings-sheet"><h2 class="settings-group-title">${tr("对话")}</h2><div class="setting-row" data-ai="context"><div class="setting-text"><h3><span>${tr("单次对话容量")}</span>`
+    +`<section class="settings-sheet"><h2 class="settings-group-title">${tr('对话')}</h2><div class="setting-row" data-ai="context"><div class="setting-text"><h3><span>${tr('单次对话容量')}</span>`
     +`<span class="setting-meta"><span class="setting-status" aria-live="polite"></span></span></h3></div>`
-    +`<div class="setting-control"><select id="aiContextChars" aria-label="${tr("单次对话容量")}">${Object.entries(AI_CONTEXT_CHOICES).map(([v,l])=>`<option value="${v}"${Number(v)===contextChars?' selected':''}>${l}</option>`).join('')}</select></div></div></section>`;
+    +`<div class="setting-control"><select id="aiContextChars" aria-label="${tr('单次对话容量')}">${Object.entries(AI_CONTEXT_CHOICES).map(([v,l])=>`<option value="${v}"${Number(v)===contextChars?' selected':''}>${l}</option>`).join('')}</select></div></div></section>`;
   if(keepEditor)box.querySelector('.ai-source-editor')?.replaceWith(editor);
   bindAiSettingsPage(box);
   if(keepEditor&&editor.contains(focused))focused.focus({preventScroll:true});
@@ -2775,12 +2775,12 @@ function renderAiSettingsPage(){
 function aiSourceEditor(s){
   const kind=s?.kind||aiEditing?.kind||'chat',provider=s?.provider||(kind==='speech'?'custom':'openai');
   return `<form class="ai-source-editor" data-editor="${escapeHTML(s?.id||'')}" data-kind="${kind}"><div class="ai-editor-title">${s?tr('编辑来源'):kind==='speech'?tr('添加语音转写来源'):tr('添加对话模型来源')}</div>`
-    +`<div class="ai-editor-grid">${kind==='speech'?'':`<label class="ai-field"><span>${tr("服务商")}</span><select name="provider">${Object.entries(LLM_PRESETS).map(([k,v])=>`<option value="${k}"${k===provider?' selected':''}>${escapeHTML(v.name)}</option>`).join('')}</select></label>`}`
-    +`<label class="ai-field"><span>${tr("名称")}</span><input name="name" maxlength="40" value="${escapeHTML(s?.name||'')}" placeholder="${kind==='speech'?tr('例如：本地 Qwen3-ASR'):tr('例如：DeepSeek 主账号')}"></label>`
-    +`<label class="ai-field is-wide"><span>${tr("API 地址")}</span><input name="baseUrl" value="${escapeHTML(s?.baseUrl||(kind==='speech'?'':LLM_PRESETS[provider]?.base||''))}" placeholder="https://api.example.com/v1" autocomplete="url"></label>`
-    +`<label class="ai-field is-wide"><span>API Key</span><input name="apiKey" type="password" autocomplete="off" placeholder="${s?.apiKeySet?tr("留空沿用已保存的密钥（{0}）",escapeHTML(s.apiKeyMasked)):LLM_PRESETS[provider]?.key&&kind!=='speech'?tr("例如 {0}",LLM_PRESETS[provider].key):tr('本地服务可以不填')}"></label>`
+    +`<div class="ai-editor-grid">${kind==='speech'?'':`<label class="ai-field"><span>${tr('服务商')}</span><select name="provider">${Object.entries(LLM_PRESETS).map(([k,v])=>`<option value="${k}"${k===provider?' selected':''}>${escapeHTML(v.name)}</option>`).join('')}</select></label>`}`
+    +`<label class="ai-field"><span>${tr('名称')}</span><input name="name" maxlength="40" value="${escapeHTML(s?.name||'')}" placeholder="${kind==='speech'?tr('例如：本地 Qwen3-ASR'):tr('例如：DeepSeek 主账号')}"></label>`
+    +`<label class="ai-field is-wide"><span>${tr('API 地址')}</span><input name="baseUrl" value="${escapeHTML(s?.baseUrl||(kind==='speech'?'':LLM_PRESETS[provider]?.base||''))}" placeholder="https://api.example.com/v1" autocomplete="url"></label>`
+    +`<label class="ai-field is-wide"><span>API Key</span><input name="apiKey" type="password" autocomplete="off" placeholder="${s?.apiKeySet?tr('留空沿用已保存的密钥（{0}）',escapeHTML(s.apiKeyMasked)):LLM_PRESETS[provider]?.key&&kind!=='speech'?tr('例如 {0}',LLM_PRESETS[provider].key):tr('本地服务可以不填')}"></label>`
     +`${s?.apiKeySet?tr('<label class="ai-check"><input type="checkbox" name="clearApiKey">移除已保存的密钥</label>'):''}</div>`
-    +`<div class="ai-editor-actions"><button type="button" class="secondary-btn" data-ai-cancel>${tr("取消")}</button><button type="submit" class="primary-btn">${tr("保存并测试")}</button></div></form>`;
+    +`<div class="ai-editor-actions"><button type="button" class="secondary-btn" data-ai-cancel>${tr('取消')}</button><button type="submit" class="primary-btn">${tr('保存并测试')}</button></div></form>`;
 }
 /* Run one test of a saved source; a newer test or an edit makes this one stale. */
 async function aiTestSource(id){
@@ -2823,7 +2823,7 @@ function bindAiSettingsPage(box){
     const s=sourceOf(b.dataset.aiDelete);
     /* A second click deletes, so one stray click never does. */
     if(!b.dataset.armed){b.dataset.armed='1';b.textContent=tr('再点一次删除');b.classList.add('is-armed');setTimeout(()=>{if(b.isConnected){delete b.dataset.armed;b.textContent=tr('删除');b.classList.remove('is-armed')}},3000);return}
-    try{aiSettings=await api('/api/action',{action:'ai.source.delete',data:{id:s.id}});delete aiTests[s.id];renderAiSettingsPage();toast(tr("已删除「{0}」",s.name))}catch(e){toast(e.message)}
+    try{aiSettings=await api('/api/action',{action:'ai.source.delete',data:{id:s.id}});delete aiTests[s.id];renderAiSettingsPage();toast(tr('已删除「{0}」',s.name))}catch(e){toast(e.message)}
   });
   const form=box.querySelector('.ai-source-editor');
   if(form){
@@ -2890,7 +2890,7 @@ function renderSettingIndicators(){
     row.classList.toggle('is-modified',changed);
     const saving=row.dataset.setting==='prompt'&&$('#meetingPromptSettingInput')?.dataset.saving==='true';
     /* A row that opens its own page offers 恢复默认 there, not on the link. */
-    if(slot)slot.innerHTML=changed&&!row.classList.contains('is-link')?`<button type="button" class="setting-reset" data-reset="${row.dataset.setting}"${saving?' disabled':''}>${tr("恢复默认")}</button>`:'';
+    if(slot)slot.innerHTML=changed&&!row.classList.contains('is-link')?`<button type="button" class="setting-reset" data-reset="${row.dataset.setting}"${saving?' disabled':''}>${tr('恢复默认')}</button>`:'';
   });
   $$('#settingsView [data-reset]').forEach(b=>b.onclick=async()=>{
     if(b.disabled)return;
@@ -2952,7 +2952,7 @@ function applySettingsFilter(){
   const first=$$('#settingsView .settings-group').find(g=>!g.classList.contains('is-filtered')&&!g.classList.contains('is-forbidden'));
   if(query&&first&&document.getElementById(UI.settingsSection||'')?.classList.contains('is-filtered'))setSettingsSection(first.id);
   const empty=$('#settingsEmpty');
-  if(empty?.classList){empty.classList.toggle('hidden',shown>0);empty.textContent=shown?'':tr("没有和「{0}」相关的设置",String(input?.value||'').trim())}
+  if(empty?.classList){empty.classList.toggle('hidden',shown>0);empty.textContent=shown?'':tr('没有和「{0}」相关的设置',String(input?.value||'').trim())}
 }
 function renderMeetingPromptSetting(){
   const box=$('#meetingPromptSetting');if(!box)return;
@@ -2960,8 +2960,8 @@ function renderMeetingPromptSetting(){
   if(box.dataset.owner!==S.user.id){box.innerHTML='';box.dataset.owner=S.user.id}
   const existing=box.querySelector('#meetingPromptSettingInput');if(existing&&(existing.value!==existing.dataset.saved||existing===document.activeElement||existing.dataset.saving==='true'))return;
   const value=S.meetingPrompt||MEETING_PROMPT_DEFAULT;
-  box.innerHTML=`<textarea aria-label="${tr("会议纪要系统提示词")}" id="meetingPromptSettingInput" class="settings-prompt" rows="7" maxlength="12000">${escapeHTML(value)}</textarea>`
-    +`<div class="setting-actions"><button type="button" class="primary-btn" id="saveMeetingPrompt">${tr("保存")}</button></div>`;
+  box.innerHTML=`<textarea aria-label="${tr('会议纪要系统提示词')}" id="meetingPromptSettingInput" class="settings-prompt" rows="7" maxlength="12000">${escapeHTML(value)}</textarea>`
+    +`<div class="setting-actions"><button type="button" class="primary-btn" id="saveMeetingPrompt">${tr('保存')}</button></div>`;
   const input=$('#meetingPromptSettingInput'),save=$('#saveMeetingPrompt');let saved=value,saving=false;input.dataset.saved=saved;
   const sync=()=>{save.disabled=saving||!input.value.trim()||input.value===saved;};input.oninput=sync;sync();
   const owner=S.user.id;
@@ -3010,13 +3010,13 @@ function renderCollectionSchedule(){
   const cfg=S.automation||{},modes={daily:tr('每天'),weekly:tr('每周几'),dates:tr('指定日期')};
   let mode=cfg.mode==='specific'?'dates':modes[cfg.mode]?cfg.mode:'daily';
   const picked=new Set(cfg.weekdays||[]),days=[tr('一'),tr('二'),tr('三'),tr('四'),tr('五'),tr('六'),tr('日')];
-  box.innerHTML=`<div class="collection-form"><div class="rule-line"><span>${tr("周期")}</span><div class="rule-seg" role="radiogroup" aria-label="${tr("补报周期")}">`
+  box.innerHTML=`<div class="collection-form"><div class="rule-line"><span>${tr('周期')}</span><div class="rule-seg" role="radiogroup" aria-label="${tr('补报周期')}">`
     +`${Object.entries(modes).map(([v,l])=>`<button type="button" class="rule-opt${v===mode?' is-on':''}" role="radio" aria-checked="${v===mode}" data-mode="${v}">${l}</button>`).join('')}</div></div>`
-    +`<div class="rule-line${mode==='weekly'?'':' hidden'}" data-part="weekly"><span>${tr("星期")}</span><div class="rule-seg is-multi" role="group" aria-label="${tr("每周补报日")}">`
+    +`<div class="rule-line${mode==='weekly'?'':' hidden'}" data-part="weekly"><span>${tr('星期')}</span><div class="rule-seg is-multi" role="group" aria-label="${tr('每周补报日')}">`
     +`${days.map((d,i)=>`<button type="button" class="rule-opt${picked.has(i)?' is-on':''}" aria-pressed="${picked.has(i)}" data-weekday="${i}">${d}</button>`).join('')}</div></div>`
-    +`<div class="rule-line${mode==='dates'?'':' hidden'}" data-part="dates"><span>${tr("日期")}</span><input id="collectionDates" class="settings-input" value="${escapeHTML((cfg.dates||[]).join(', '))}" placeholder="2026-12-01, 2026-12-15" aria-label="${tr("指定补报日期")}"></div>`
-    +`<div class="rule-line"><span>${tr("时间")}</span><input id="collectionTime" class="settings-input is-time" type="time" value="${escapeHTML(cfg.time||'00:00')}" aria-label="${tr("补报时间")}"></div>`
-    +`<p class="collection-hint muted" aria-live="polite"></p><button type="button" class="ghost-btn hidden" id="collectionRetry">${tr("重试保存")}</button></div>`;
+    +`<div class="rule-line${mode==='dates'?'':' hidden'}" data-part="dates"><span>${tr('日期')}</span><input id="collectionDates" class="settings-input" value="${escapeHTML((cfg.dates||[]).join(', '))}" placeholder="2026-12-01, 2026-12-15" aria-label="${tr('指定补报日期')}"></div>`
+    +`<div class="rule-line"><span>${tr('时间')}</span><input id="collectionTime" class="settings-input is-time" type="time" value="${escapeHTML(cfg.time||'00:00')}" aria-label="${tr('补报时间')}"></div>`
+    +`<p class="collection-hint muted" aria-live="polite"></p><button type="button" class="ghost-btn hidden" id="collectionRetry">${tr('重试保存')}</button></div>`;
   const hint=box.querySelector('.collection-hint'),retry=box.querySelector('#collectionRetry'),dateInput=box.querySelector('#collectionDates'),timeInput=box.querySelector('#collectionTime');
   const editor=box.collectionEditor={owner:S.user.id,dirty:false,pending:0,revision:0,tail:Promise.resolve()};
   const current=()=>S.user?.id===editor.owner&&box.collectionEditor===editor;
@@ -3056,7 +3056,7 @@ function renderWeekStartSetting(){
   const box=$('#weekStartCard');if(!box)return;
   box.classList.toggle('hidden',!S.user?.admin);if(!S.user?.admin)return;
   const order=[1,2,3,4,5,6,0],day=weekStartDay();
-  box.innerHTML=`<div class="rule-seg week-start-seg" role="radiogroup" aria-label="${tr("每周开始日")}">${order.map(d=>`<button type="button" `
+  box.innerHTML=`<div class="rule-seg week-start-seg" role="radiogroup" aria-label="${tr('每周开始日')}">${order.map(d=>`<button type="button" `
     +`class="rule-opt${d===day?' is-on':''}" role="radio" aria-checked="${d===day}" data-day="${d}">${WEEKDAY_SHORT[d]}</button>`).join('')}</div>`;
   box.querySelectorAll('[data-day]').forEach(b=>b.onclick=async()=>{
     const next=Number(b.dataset.day);if(next===weekStartDay()||box.dataset.saving)return;
@@ -3088,7 +3088,7 @@ function renderCreationPolicy(){
     `${list.slice(0,RULE_ROW_FACES).map(u=>avatarHTML(u.id)).join('')}<span>${tr('{0} 人',list.length)}</span></div>`,
     `<span class="task-arrow">${icon('chevron-right')}</span></div>`,
   ].join('')};
-  box.innerHTML=`<div class="rule-list">${policy.groups.map(row).join('')}</div><button type="button" class="text-btn is-add rule-add" id="addCreationGroup">${tr("{0}新建规则组",icon('plus'))}</button>`;
+  box.innerHTML=`<div class="rule-list">${policy.groups.map(row).join('')}</div><button type="button" class="text-btn is-add rule-add" id="addCreationGroup">${tr('{0}新建规则组',icon('plus'))}</button>`;
   $$('#creationPolicy .rule-row').forEach(r=>{r.onclick=()=>editRuleGroup(r.dataset.group);r.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();editRuleGroup(r.dataset.group)}}});
   $('#addCreationGroup').onclick=()=>editRuleGroup(null);
 }
@@ -3133,13 +3133,13 @@ function editRuleGroup(gid){
     $('#rulePickNone').onclick=()=>{picked.clear();sync()};
   }
   $('#cancelAction').onclick=closeModal;
-  $('#deleteRuleGroup')?.addEventListener('click',async()=>{const count=members.filter(u=>groupOf(u)===draft.id).length;if(!confirm(tr("删除「{0}」？组里的 {1} 人会回到「{2}」。",ruleGroupName(current),count,fallback)))return;try{await saveCreationPolicy({groups:policy.groups.filter(x=>x.id!==draft.id),assign:Object.fromEntries(Object.entries(policy.assign||{}).filter(([,g])=>g!==draft.id))});closeModal();toast(tr('规则组已删除'))}catch(e){toast(e.message)}});
+  $('#deleteRuleGroup')?.addEventListener('click',async()=>{const count=members.filter(u=>groupOf(u)===draft.id).length;if(!confirm(tr('删除「{0}」？组里的 {1} 人会回到「{2}」。',ruleGroupName(current),count,fallback)))return;try{await saveCreationPolicy({groups:policy.groups.filter(x=>x.id!==draft.id),assign:Object.fromEntries(Object.entries(policy.assign||{}).filter(([,g])=>g!==draft.id))});closeModal();toast(tr('规则组已删除'))}catch(e){toast(e.message)}});
   $('#saveRuleGroup').onclick=async()=>{
     const label=$('#ruleGroupName').value.trim();if(!label){toast(tr('请填写规则组名称'));return}
     const group={...draft,name:label===ruleGroupName(draft)?draft.name:label},groups=isNew?[...policy.groups,group]:policy.groups.map(g=>g.id===group.id?group:g);
     const assign={...policy.assign};
     if(!isDefault){Object.keys(assign).forEach(id=>{if(assign[id]===group.id&&!picked.has(id))delete assign[id]});picked.forEach(id=>{assign[id]=group.id})}
-    try{await saveCreationPolicy({groups,assign});closeModal();toast(isNew?tr("已创建「{0}」",label):tr("「{0}」已保存",label))}catch(e){toast(e.message)}
+    try{await saveCreationPolicy({groups,assign});closeModal();toast(isNew?tr('已创建「{0}」',label):tr('「{0}」已保存',label))}catch(e){toast(e.message)}
   };
 }
 /* 账户管理 lists accounts by 权限组 and nothing else. superadmin drags a row to
@@ -3150,8 +3150,8 @@ const ACCOUNT_GROUPS=[['superadmin',tr('superadmin 权限组')],['admin',tr('adm
 function sortedAccounts(list){const order=S.accountOrder||[],at=(u,i)=>{const k=order.indexOf(u.id);return k<0?order.length+i:k};return list.map((u,i)=>[at(u,i),u]).sort((a,b)=>a[0]-b[0]).map(x=>x[1])}
 function renderAccountItem(x,owner,picking){
   const self=x.id===S.user.id,on=Boolean(UI.accountPicked?.has(x.id));
-  const grip=owner&&!picking?`<span class="account-grip" title="${tr("拖动调整顺序或权限组")}">${icon('grip')}</span>`:'';
-  const pick=picking?`<input type="checkbox" class="account-pick" value="${escapeHTML(x.id)}"${on?' checked':''}${self?' disabled':''} aria-label="${tr("选择 {0}",escapeHTML(x.displayName||x.id))}">`:'';
+  const grip=owner&&!picking?`<span class="account-grip" title="${tr('拖动调整顺序或权限组')}">${icon('grip')}</span>`:'';
+  const pick=picking?`<input type="checkbox" class="account-pick" value="${escapeHTML(x.id)}"${on?' checked':''}${self?' disabled':''} aria-label="${tr('选择 {0}',escapeHTML(x.displayName||x.id))}">`:'';
   const tags=(x.nickname?`<span class="name-tag nick">${escapeHTML(x.nickname)}</span>`:'')+(x.displayName?`<span class="name-tag code">${escapeHTML(x.id)}</span>`:'')+(self?tr('<span class="name-tag self">我</span>'):'')+(x.active?'':tr('<span class="name-tag off">已停用</span>'));
   return `<article class="account-item${self?' current-account':''}${on?' is-picked':''}${x.active?'':' is-off'}" data-user="${escapeHTML(x.id)}">${grip}${pick}${avatarHTML(x.id)}<div class="account-copy"><div class="account-name"><strong>${escapeHTML(x.displayName||x.id)}</strong>${tags}</div>${x.signature?`<em class="signature">${escapeHTML(x.signature)}</em>`:''}</div></article>`;
 }
@@ -3166,8 +3166,8 @@ function renderAccounts(){
     const list=sortedAccounts(S.users.filter(x=>roleOf(x)===role)),picking=UI.accountManage===role;
     const choosable=list.filter(u=>u.id!==S.user.id),picked=choosable.filter(u=>UI.accountPicked.has(u.id));
     const btn=(kind,label,ok,cls='ghost-btn')=>`<button class="${cls}" data-batch="${kind}"${ok?'':' disabled'}>${label}</button>`;
-    const tools=picking?`<div class="group-tools"><label class="group-all"><input type="checkbox" class="account-pick-all"${choosable.length&&picked.length===choosable.length?' checked':''}>${tr("全选")}</label><span class="group-picked">${tr("已选 {0}",picked.length)}</span>${btn('off',tr('停用'),picked.some(u=>u.active))}${btn('on',tr('启用'),picked.some(u=>!u.active))}${btn('password',tr('重置密码'),picked.length)}${btn('name',tr('设置中文名'),picked.length)}${btn('delete',tr('删除'),picked.length,'ghost-btn is-danger')}${btn('done',tr('完成'),true,'primary-btn')}</div>`:owner&&choosable.length?`<button class="ghost-btn group-manage" data-role="${role}">${tr("管理")}</button>`:'';
-    return `<div class="account-group${picking?' is-managing':''}" data-role="${role}"><div class="account-group-heading"><strong>${title}</strong><span>${list.length}</span>${tools}</div><div class="account-rows">${list.map(x=>renderAccountItem(x,owner,picking)).join('')}<p class="muted account-empty">${tr("暂无账户")}</p></div></div>`;
+    const tools=picking?`<div class="group-tools"><label class="group-all"><input type="checkbox" class="account-pick-all"${choosable.length&&picked.length===choosable.length?' checked':''}>${tr('全选')}</label><span class="group-picked">${tr('已选 {0}',picked.length)}</span>${btn('off',tr('停用'),picked.some(u=>u.active))}${btn('on',tr('启用'),picked.some(u=>!u.active))}${btn('password',tr('重置密码'),picked.length)}${btn('name',tr('设置中文名'),picked.length)}${btn('delete',tr('删除'),picked.length,'ghost-btn is-danger')}${btn('done',tr('完成'),true,'primary-btn')}</div>`:owner&&choosable.length?`<button class="ghost-btn group-manage" data-role="${role}">${tr('管理')}</button>`:'';
+    return `<div class="account-group${picking?' is-managing':''}" data-role="${role}"><div class="account-group-heading"><strong>${title}</strong><span>${list.length}</span>${tools}</div><div class="account-rows">${list.map(x=>renderAccountItem(x,owner,picking)).join('')}<p class="muted account-empty">${tr('暂无账户')}</p></div></div>`;
   };
   const box=$('#accountList');
   box.innerHTML=ACCOUNT_GROUPS.map(section).join('');
@@ -3182,12 +3182,12 @@ function renderAccounts(){
 }
 async function runAccountBatch(ids,label,run){
   const fails=[];
-  for(const id of ids){try{await run(id)}catch(e){fails.push(tr("{0}：{1}",nameOf(id),e?.message||tr('失败')))}}
+  for(const id of ids){try{await run(id)}catch(e){fails.push(tr('{0}：{1}',nameOf(id),e?.message||tr('失败')))}}
   try{await refresh()}catch(_){}
   /* The same people often need a second action, so the picks stay. */
   UI.accountPicked=new Set([...(UI.accountPicked||[])].filter(id=>userById(id)));
   renderAccounts();
-  toast(fails.length?tr("{0} {1} 个，{2} 个没成功：{3}",label,ids.length-fails.length,fails.length,fails.join('；')):tr("已{0} {1} 个账户",label,ids.length));
+  toast(fails.length?tr('{0} {1} 个，{2} 个没成功：{3}',label,ids.length-fails.length,fails.length,fails.join('；')):tr('已{0} {1} 个账户',label,ids.length));
 }
 async function batchAccountAction(kind){
   if(kind==='done'){UI.accountManage=null;UI.accountPicked=new Set();renderAccounts();return}
@@ -3195,14 +3195,14 @@ async function batchAccountAction(kind){
   if(kind==='name')return accountNamesDialog(ids);
   if(kind==='delete')return deleteAccounts(ids);
   if(kind==='password'){
-    if(!confirm(tr("把 {0} 个账户的密码重置为 {1}？",ids.length,RESET_PASSWORD)))return;
+    if(!confirm(tr('把 {0} 个账户的密码重置为 {1}？',ids.length,RESET_PASSWORD)))return;
     return runAccountBatch(ids,tr('重置密码'),id=>api('/api/password',{id,password:RESET_PASSWORD}));
   }
   const active=kind==='on';
   return runAccountBatch(ids.filter(id=>Boolean(userById(id).active)!==active),active?tr('启用'):tr('停用'),id=>api('/api/action',{action:'account.toggle',data:{id,active}}));
 }
 function accountNamesDialog(ids){
-  openModal(`<h2>${tr("设置中文名")}</h2><div class="account-name-list">${ids.map(id=>{const u=userById(id);return `<label class="account-name-row">${avatarHTML(id)}<span>${escapeHTML(id)}</span><input data-user="${escapeHTML(id)}" maxlength="12" value="${escapeHTML(u?.displayName||'')}" placeholder="${tr("中文名")}"></label>`}).join('')}</div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr("取消")}</button><button class="primary-btn" id="confirmNames">${tr("保存")}</button></div>`);
+  openModal(`<h2>${tr('设置中文名')}</h2><div class="account-name-list">${ids.map(id=>{const u=userById(id);return `<label class="account-name-row">${avatarHTML(id)}<span>${escapeHTML(id)}</span><input data-user="${escapeHTML(id)}" maxlength="12" value="${escapeHTML(u?.displayName||'')}" placeholder="${tr('中文名')}"></label>`}).join('')}</div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('取消')}</button><button class="primary-btn" id="confirmNames">${tr('保存')}</button></div>`);
   $('#modalContent .account-name-row input')?.focus();
   $('#cancelAction').onclick=closeModal;
   $('#confirmNames').onclick=async()=>{
@@ -3215,7 +3215,7 @@ function accountNamesDialog(ids){
 /* One account keeps the typed-name check; several are confirmed together. */
 function deleteAccounts(ids){
   if(ids.length===1){UI.accountPicked=new Set();return deleteAccount(ids[0])}
-  openModal(`<div class="eyebrow danger-eyebrow">${tr("不可撤销")}</div><h2>${tr("删除 {0} 个账户",ids.length)}</h2><div class="danger-panel"><ul class="danger-impact">${ids.map(id=>`<li><strong>${escapeHTML(nameOf(id))}</strong> ${escapeHTML(id)}</li>`).join('')}</ul></div><label class="danger-confirm">${tr("输入")} <code>${tr("删除")}</code> ${tr("以继续")}<input id="deleteAccountsConfirm" autocomplete="off" spellcheck="false"></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr("取消")}</button><button class="danger-btn" id="confirmDeleteAccounts" disabled>${tr("永久删除")}</button></div>`);
+  openModal(`<div class="eyebrow danger-eyebrow">${tr('不可撤销')}</div><h2>${tr('删除 {0} 个账户',ids.length)}</h2><div class="danger-panel"><ul class="danger-impact">${ids.map(id=>`<li><strong>${escapeHTML(nameOf(id))}</strong> ${escapeHTML(id)}</li>`).join('')}</ul></div><label class="danger-confirm">${tr('输入')} <code>${tr('删除')}</code> ${tr('以继续')}<input id="deleteAccountsConfirm" autocomplete="off" spellcheck="false"></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('取消')}</button><button class="danger-btn" id="confirmDeleteAccounts" disabled>${tr('永久删除')}</button></div>`);
   const text=$('#deleteAccountsConfirm'),btn=$('#confirmDeleteAccounts');
   text.oninput=()=>{btn.disabled=text.value.trim()!==tr('删除')};
   $('#cancelAction').onclick=closeModal;
@@ -3258,7 +3258,7 @@ function startAccountDrag(e,row){
     try{
       if(to!==from)await api('/api/action',{action:'account.role',data:{id,role:to}});
       await api('/api/action',{action:'account.order',data:{order}});
-      if(to!==from)toast(tr("{0} 已移到 {1}",nameOf(id),ACCOUNT_GROUPS.find(g=>g[0]===to)[1]));
+      if(to!==from)toast(tr('{0} 已移到 {1}',nameOf(id),ACCOUNT_GROUPS.find(g=>g[0]===to)[1]));
     }catch(err){toast(err?.message||tr('调整失败'))}
     try{await refresh()}catch(_){}
   };
@@ -3274,8 +3274,8 @@ function renderAccountMenu(){
   const head=`<div class="account-menu-head">${avatarHTML(S.user.id,'large')}<div class="account-menu-identity"><strong>${escapeHTML(me.displayName||S.user.id)}</strong>${me.nickname?`<span class="name-tag nick">${escapeHTML(me.nickname)}</span>`:''}<small>${escapeHTML(accountRoleLabel(S.user))}</small></div>${me.signature?`<em class="signature">${escapeHTML(me.signature)}</em>`:''}</div>`;
   const row=(action,label,hint)=>`<button class="account-menu-item" data-action="${action}" role="menuitem">${escapeHTML(label)}${hint?`<small>${escapeHTML(hint)}</small>`:''}</button>`;
   const mine=`<div class="account-menu-group">${row('profile',tr('我的资料'),tr('昵称 / 头像 / 签名'))}${row('password',tr('修改密码'))}${S.user?.admin?row('accounts',tr('账户管理'))+row('settings',tr('系统设置')):''}</div>`;
-  const switchGroup=`<div class="account-menu-group"><span class="account-menu-label">${tr("切换账户")}</span>${others.map(u=>`<button class="account-menu-item switch" data-user="${escapeHTML(u.id)}" role="menuitem">${avatarHTML(u.id)}<span>${escapeHTML(u.displayName||u.id)}${u.nickname?`<small>${escapeHTML(u.nickname)}</small>`:''}</span></button>`).join('')}<button class="account-menu-item switch" data-user="" role="menuitem">${tr("登录其他账户")}</button></div>`;
-  const foot=`<div class="account-menu-group"><button class="account-menu-item danger" data-action="logout" role="menuitem">${tr("退出登录")}</button></div>`;
+  const switchGroup=`<div class="account-menu-group"><span class="account-menu-label">${tr('切换账户')}</span>${others.map(u=>`<button class="account-menu-item switch" data-user="${escapeHTML(u.id)}" role="menuitem">${avatarHTML(u.id)}<span>${escapeHTML(u.displayName||u.id)}${u.nickname?`<small>${escapeHTML(u.nickname)}</small>`:''}</span></button>`).join('')}<button class="account-menu-item switch" data-user="" role="menuitem">${tr('登录其他账户')}</button></div>`;
+  const foot=`<div class="account-menu-group"><button class="account-menu-item danger" data-action="logout" role="menuitem">${tr('退出登录')}</button></div>`;
   menu.innerHTML=head+mine+languageChooserHTML('account-menu-group')+switchGroup+foot;
   bindLanguageChooser(menu);
   menu.querySelectorAll('.account-menu-item[data-action]').forEach(b=>b.onclick=()=>accountMenuAction(b.dataset.action));
@@ -3344,7 +3344,7 @@ function deleteAccount(id){
   if(x.id===S.user.id){toast(tr('不能删除当前登录账户'));return}
   if(x.id==='superadmin'){toast(tr('内置 superadmin 账户不能删除'));return}
   const role=roleOf(x),roleLabel=role==='superadmin'?'Super Admin':role==='admin'?'Admin':tr('普通用户');
-  openModal(`<div class="eyebrow danger-eyebrow">${tr("危险操作 · 不可撤销")}</div><h2>${tr("删除账户「{0}」",escapeHTML(x.id))}</h2><div class="danger-panel"><p>${tr("删除后无法恢复。")}</p><ul class="danger-impact"><li>${tr("权限组：")}<strong>${roleLabel}</strong></li><li>${tr("若该账户仍负责进行中的项目或有未完成任务，删除会被拒绝，请先转交职责")}</li><li>${tr("历史审计记录会保留")}</li></ul></div><label class="danger-check"><input type="checkbox" id="deleteAccountAck"> ${tr("我已了解该账户及其个人数据将被永久删除，且无法恢复")}</label><label class="danger-confirm">${tr("请输入账户名")} <code>${escapeHTML(x.id)}</code> ${tr("以继续")}<input id="deleteAccountConfirm" autocomplete="off" spellcheck="false" placeholder="${escapeHTML(x.id)}"></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr("取消")}</button><button class="danger-btn" id="confirmDeleteAccount" disabled>${tr("永久删除账户")}</button></div>`);
+  openModal(`<div class="eyebrow danger-eyebrow">${tr('危险操作 · 不可撤销')}</div><h2>${tr('删除账户「{0}」',escapeHTML(x.id))}</h2><div class="danger-panel"><p>${tr('删除后无法恢复。')}</p><ul class="danger-impact"><li>${tr('权限组：')}<strong>${roleLabel}</strong></li><li>${tr('若该账户仍负责进行中的项目或有未完成任务，删除会被拒绝，请先转交职责')}</li><li>${tr('历史审计记录会保留')}</li></ul></div><label class="danger-check"><input type="checkbox" id="deleteAccountAck"> ${tr('我已了解该账户及其个人数据将被永久删除，且无法恢复')}</label><label class="danger-confirm">${tr('请输入账户名')} <code>${escapeHTML(x.id)}</code> ${tr('以继续')}<input id="deleteAccountConfirm" autocomplete="off" spellcheck="false" placeholder="${escapeHTML(x.id)}"></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('取消')}</button><button class="danger-btn" id="confirmDeleteAccount" disabled>${tr('永久删除账户')}</button></div>`);
   const ack=$('#deleteAccountAck'),text=$('#deleteAccountConfirm'),btn=$('#confirmDeleteAccount');
   const sync=()=>{btn.disabled=!(ack.checked&&text.value.trim()===x.id)};
   ack.onchange=sync;text.oninput=sync;
@@ -3921,8 +3921,8 @@ function newTask(projectId,initialDate){
     if(users.some(u=>u.id===picked))$('#taskAssignee').value=picked;
     const who=$('#taskAssignee').value,mine=who?load(who,period):null,[start,end]=period;
     $('#taskAssigneeLoad').textContent=!users.length?tr('项目暂无成员'):known(who)?`${fmt(start)}`
-      +tr("{0} 已安排 {1}h · {2} 项",end!==start?' – '+fmt(end):'',hours(mine.mins),mine.count):`${tr("指派后")} `
-      +tr("{0} 会收到通知，进度会回到你这里",nameOf(who));
+      +tr('{0} 已安排 {1}h · {2} 项',end!==start?' – '+fmt(end):'',hours(mine.mins),mine.count):`${tr('指派后')} `
+      +tr('{0} 会收到通知，进度会回到你这里',nameOf(who));
     $('#confirmTask').disabled=!users.length;
     const asking=mode()==='approval';
     $('#taskDialogTitle').textContent=asking?tr('申请任务'):tr('新任务');$('#confirmTask').textContent=asking?tr('提交申请'):tr('创建任务');
@@ -3968,7 +3968,7 @@ function editTaskAssignment(id){
   const t=S.tasks.find(t=>t.id===id),p=S.projects.find(p=>p.id===t?.projectId);
   if(!canManageProject(p)||p.status!=='active'||!['todo','doing'].includes(t.status)){toast(tr('当前任务不可调整'));return}
   const users=projectAssignees(p);
-  openModal(`<div class="eyebrow">${escapeHTML(p.name)}</div><h2>${tr("调整任务指派")}</h2><p>${escapeHTML(t.name)}<br>${tr("当前负责人：{0}。调整后将通知原负责人及新负责人。",escapeHTML(nameOf(t.assignee)))}</p><label class="form-field">${tr("指派给")}<select id="assignmentUser">${users.map(u=>`<option value="${escapeHTML(u.id)}">${escapeHTML(nameOf(u.id))}${u.id===p.owner?' · Owner':''}</option>`).join('')}</select></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr("取消")}</button><button class="primary-btn" id="confirmAssignment" ${users.length?'':'disabled'}>${tr("保存指派并通知")}</button></div>`);
+  openModal(`<div class="eyebrow">${escapeHTML(p.name)}</div><h2>${tr('调整任务指派')}</h2><p>${escapeHTML(t.name)}<br>${tr('当前负责人：{0}。调整后将通知原负责人及新负责人。',escapeHTML(nameOf(t.assignee)))}</p><label class="form-field">${tr('指派给')}<select id="assignmentUser">${users.map(u=>`<option value="${escapeHTML(u.id)}">${escapeHTML(nameOf(u.id))}${u.id===p.owner?' · Owner':''}</option>`).join('')}</select></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('取消')}</button><button class="primary-btn" id="confirmAssignment" ${users.length?'':'disabled'}>${tr('保存指派并通知')}</button></div>`);
   if(users.some(u=>u.id===t.assignee))$('#assignmentUser').value=t.assignee;
   $('#cancelAction').onclick=closeModal;$('#confirmAssignment').onclick=async()=>{const assignee=$('#assignmentUser').value;if(assignee===t.assignee){toast(tr('负责人未变更'));return}try{await act('task.update',{id,assignee});closeModal();if(!$('#taskDrawer').classList.contains('hidden'))openDrawer(id)}catch(e){}};
 }
@@ -3976,12 +3976,12 @@ function newProject(){
   /* An admin names the Owner; anyone else owns what they start. Collaborators
      join at once (once approved, where the rule group asks for that) and can
      leave from inside the project. */
-  const admin=S.user?.admin,asking=projectMode()==='approval',ownerOptions=S.users.filter(u=>u.active&&!u.admin),owner=admin?`<label class="form-field">${tr("项目 Owner")}<select id="projectOwner">${ownerOptions.map(u=>`<option value="${escapeHTML(u.id)}">${escapeHTML(nameOf(u.id))}</option>`).join('')}</select></label>`:'';
+  const admin=S.user?.admin,asking=projectMode()==='approval',ownerOptions=S.users.filter(u=>u.active&&!u.admin),owner=admin?`<label class="form-field">${tr('项目 Owner')}<select id="projectOwner">${ownerOptions.map(u=>`<option value="${escapeHTML(u.id)}">${escapeHTML(nameOf(u.id))}</option>`).join('')}</select></label>`:'';
   const pool=admin?ownerOptions:ownerOptions.filter(u=>u.id!==S.user.id);
   const collaborators=pool.length?`<fieldset class="member-checkboxes"><legend>${asking?tr('协作者（审批通过后加入）'):tr('协作者（直接加入项目）')}`
     +`</legend>${pool.map(u=>`<label><input type="checkbox" name="projectMember" value="${escapeHTML(u.id)}"> <strong>`
     +`${escapeHTML(nameOf(u.id))}</strong></label>`).join('')}</fieldset>`:'';
-  openModal(`<div class="eyebrow">${tr("项目空间 · {0}",admin?tr('superadmin 创建'):asking?tr('成员申请'):tr('成员创建'))}</div><h2>${asking?tr('申请项目'):tr('新项目')}</h2><label class="form-field">${tr("项目名称")}<input id="projectName" maxlength="120"></label><label class="form-field">${tr("项目描述")}<textarea id="projectDesc"></textarea></label>${owner}<div class="project-date-fields"><label class="form-field">${tr("开始日期")}<input id="projectStart" type="date" max="${DATE_HORIZON}" value="${S.today}"></label><label class="form-field">${tr("截止日期（可留空）")}<input id="projectEnd" type="date" min="${S.today}" max="${DATE_HORIZON}"></label></div>${collaborators}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr("取消")}</button><button class="primary-btn" id="confirmProject">${asking?tr('提交申请'):tr('创建项目')}</button></div>`);
+  openModal(`<div class="eyebrow">${tr('项目空间 · {0}',admin?tr('superadmin 创建'):asking?tr('成员申请'):tr('成员创建'))}</div><h2>${asking?tr('申请项目'):tr('新项目')}</h2><label class="form-field">${tr('项目名称')}<input id="projectName" maxlength="120"></label><label class="form-field">${tr('项目描述')}<textarea id="projectDesc"></textarea></label>${owner}<div class="project-date-fields"><label class="form-field">${tr('开始日期')}<input id="projectStart" type="date" max="${DATE_HORIZON}" value="${S.today}"></label><label class="form-field">${tr('截止日期（可留空）')}<input id="projectEnd" type="date" min="${S.today}" max="${DATE_HORIZON}"></label></div>${collaborators}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('取消')}</button><button class="primary-btn" id="confirmProject">${asking?tr('提交申请'):tr('创建项目')}</button></div>`);
   draftForm('project.new', {title: asking ? tr('申请项目') : tr('新项目'), reopen: ['newProject'],
     submit: ['project.create']});
   $('#cancelAction').onclick=closeModal;$('#projectStart').onchange=()=>$('#projectEnd').min=$('#projectStart').value;
@@ -3992,23 +3992,23 @@ function newProject(){
 }
 function fixedTask(){
   const users=S.users.filter(u=>u.active&&!u.admin),days=[tr('周一'),tr('周二'),tr('周三'),tr('周四'),tr('周五'),tr('周六'),tr('周日')];
-  const monthOptions=Array.from({length:31},(_,i)=>i+1).map(n=>`<option value="${n}" ${n===1?'selected':''}>${tr("{0} 号",n)}</option>`).join('');
-  openModal(`<div class="eyebrow">${tr("Super Admin · 固定任务")}</div><h2>${tr("发布固定安排")}</h2>
-    <label class="form-field">${tr("任务名称")}<input id="repeatName" maxlength="120" required></label>
-    <label class="form-field">${tr("所属项目（可选）")}<select id="repeatProject"><option value="">${tr("不挂项目")}</option>${S.projects.filter(p=>p.status==='active').map(p=>`<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('')}</select></label>
-    <fieldset class="member-checkboxes" id="repeatUsers"><legend>${tr("安排给（可多选）")}</legend>${users.map(u=>`<label><input type="checkbox" name="repeatUser" value="${escapeHTML(u.id)}"> ${escapeHTML(u.id)}</label>`).join('')}</fieldset>
-    <label class="form-field">${tr("周期")}<select id="repeatFreq"><option value="daily">${tr("每天")}</option><option value="weekly" selected>${tr("每周")}</option><option value="monthly">${tr("每月")}</option><option value="workdays">${tr("工作日")}</option><option value="dates">${tr("指定日期")}</option></select></label>
-    <label class="form-field" id="repeatEveryField">${tr("间隔")}<select id="repeatEvery"><option value="1">${tr("每 1 周")}</option><option value="2">${tr("每 2 周（双周）")}</option><option value="3">${tr("每 3 周")}</option><option value="4">${tr("每 4 周")}</option></select></label>
-    <fieldset class="member-checkboxes" id="repeatWeekdayFields"><legend>${tr("每周几执行")}</legend>${days.map((d,i)=>`<label><input type="checkbox" name="repeatWeekday" value="${i}" ${i<5?'checked':''}> ${d}</label>`).join('')}</fieldset>
-    <label class="form-field hidden" id="repeatMonthField">${tr("每月执行日")}<select id="repeatMonthDay">${monthOptions}</select></label>
-    <label class="form-field hidden" id="repeatDatesField">${tr("指定日期（逗号分隔）")}<input id="repeatDates" placeholder="2026-09-20, 2026-10-01"></label>
-    <label class="form-field">${tr("持续天数")}<input id="repeatSpan" type="number" min="1" max="30" value="1"></label>
-    <label class="form-field">${tr("开始日期")}<input id="repeatStart" type="date" max="${DATE_HORIZON}" value="${S.today}"></label>
-    <label class="form-field">${tr("结束日期（可留空）")}<input id="repeatEnd" type="date" max="${DATE_HORIZON}"></label>
-    <label class="form-field">${tr("开始时间")}<input id="repeatTime" type="time" value="09:00"></label>
-    <label class="form-field">${tr("每次时长")}<input id="repeatDuration" type="number" min="1" max="1440" value="30"></label>
-    <label class="form-field">${tr("本次挖空日期（可留空）")}<input id="repeatSkipDates" placeholder="2026-10-01, 2026-10-02"></label>
-    <div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr("取消")}</button><button class="primary-btn" id="confirmRepeat">${tr("保存固定任务")}</button></div>`);
+  const monthOptions=Array.from({length:31},(_,i)=>i+1).map(n=>`<option value="${n}" ${n===1?'selected':''}>${tr('{0} 号',n)}</option>`).join('');
+  openModal(`<div class="eyebrow">${tr('Super Admin · 固定任务')}</div><h2>${tr('发布固定安排')}</h2>
+    <label class="form-field">${tr('任务名称')}<input id="repeatName" maxlength="120" required></label>
+    <label class="form-field">${tr('所属项目（可选）')}<select id="repeatProject"><option value="">${tr('不挂项目')}</option>${S.projects.filter(p=>p.status==='active').map(p=>`<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('')}</select></label>
+    <fieldset class="member-checkboxes" id="repeatUsers"><legend>${tr('安排给（可多选）')}</legend>${users.map(u=>`<label><input type="checkbox" name="repeatUser" value="${escapeHTML(u.id)}"> ${escapeHTML(u.id)}</label>`).join('')}</fieldset>
+    <label class="form-field">${tr('周期')}<select id="repeatFreq"><option value="daily">${tr('每天')}</option><option value="weekly" selected>${tr('每周')}</option><option value="monthly">${tr('每月')}</option><option value="workdays">${tr('工作日')}</option><option value="dates">${tr('指定日期')}</option></select></label>
+    <label class="form-field" id="repeatEveryField">${tr('间隔')}<select id="repeatEvery"><option value="1">${tr('每 1 周')}</option><option value="2">${tr('每 2 周（双周）')}</option><option value="3">${tr('每 3 周')}</option><option value="4">${tr('每 4 周')}</option></select></label>
+    <fieldset class="member-checkboxes" id="repeatWeekdayFields"><legend>${tr('每周几执行')}</legend>${days.map((d,i)=>`<label><input type="checkbox" name="repeatWeekday" value="${i}" ${i<5?'checked':''}> ${d}</label>`).join('')}</fieldset>
+    <label class="form-field hidden" id="repeatMonthField">${tr('每月执行日')}<select id="repeatMonthDay">${monthOptions}</select></label>
+    <label class="form-field hidden" id="repeatDatesField">${tr('指定日期（逗号分隔）')}<input id="repeatDates" placeholder="2026-09-20, 2026-10-01"></label>
+    <label class="form-field">${tr('持续天数')}<input id="repeatSpan" type="number" min="1" max="30" value="1"></label>
+    <label class="form-field">${tr('开始日期')}<input id="repeatStart" type="date" max="${DATE_HORIZON}" value="${S.today}"></label>
+    <label class="form-field">${tr('结束日期（可留空）')}<input id="repeatEnd" type="date" max="${DATE_HORIZON}"></label>
+    <label class="form-field">${tr('开始时间')}<input id="repeatTime" type="time" value="09:00"></label>
+    <label class="form-field">${tr('每次时长')}<input id="repeatDuration" type="number" min="1" max="1440" value="30"></label>
+    <label class="form-field">${tr('本次挖空日期（可留空）')}<input id="repeatSkipDates" placeholder="2026-10-01, 2026-10-02"></label>
+    <div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('取消')}</button><button class="primary-btn" id="confirmRepeat">${tr('保存固定任务')}</button></div>`);
   draftForm('repeat.new', {title: tr('发布固定安排'), reopen: ['fixedTask'], submit: ['repeat.create']});
   const sync=()=>{
     const freq=$('#repeatFreq').value;
@@ -4050,197 +4050,197 @@ const card=(prio,name,meta,state,attrs='',cls='')=>`<div class="dm-card${cls?' '
 const GUIDE_DEMOS={
   'login':{steps:[tr('输入账户名和密码'),tr('点「进入工作台」'),tr('进入后点左上角的头像'),tr('账户菜单里改资料、改密码或切换账户')],html:`
     <div class="dm-swap is-block">
-      <div class="dm-pane dm-dialog" data-out="2"><h6>${tr("登录工作台")}</h6>
-        <label>${tr("账户")}<i>linmo</i></label>
-        <label data-point="0">${tr("密码")}<i>••••••••</i></label>
-        <span class="dm-btn is-primary" data-point="1">${tr("进入工作台")}</span></div>
-      <div class="dm-pane" data-in="2"><h6><span class="dm-avatar" data-point="2">${tr("林")}</span>${tr("林默 · 成员工作区")}</h6>
-        <div class="dm-menu" data-in="3"><span data-point="3">${tr("个人资料")}</span><span>${tr("修改密码")}</span><span>${tr("登录其他账户")}</span><span class="is-muted">${tr("退出登录")}</span></div>
-        <div class="dm-min" data-in="3"><b>${tr("个人资料")}</b><span>${tr("昵称 · 头像 · 个性签名（中文名由 superadmin 设置）")}</span></div></div>
+      <div class="dm-pane dm-dialog" data-out="2"><h6>${tr('登录工作台')}</h6>
+        <label>${tr('账户')}<i>linmo</i></label>
+        <label data-point="0">${tr('密码')}<i>••••••••</i></label>
+        <span class="dm-btn is-primary" data-point="1">${tr('进入工作台')}</span></div>
+      <div class="dm-pane" data-in="2"><h6><span class="dm-avatar" data-point="2">${tr('林')}</span>${tr('林默 · 成员工作区')}</h6>
+        <div class="dm-menu" data-in="3"><span data-point="3">${tr('个人资料')}</span><span>${tr('修改密码')}</span><span>${tr('登录其他账户')}</span><span class="is-muted">${tr('退出登录')}</span></div>
+        <div class="dm-min" data-in="3"><b>${tr('个人资料')}</b><span>${tr('昵称 · 头像 · 个性签名（中文名由 superadmin 设置）')}</span></div></div>
     </div>`},
   'layout':{steps:[tr('左侧是主导航和快捷筛选，顶栏是常用入口'),tr('点「P0 重要任务」，今日任务只留下最紧急的'),tr('点导航顶部的箭头，导航收成只显示图标')],html:`
     <div class="dm-shell">
       <div class="dm-side" data-narrow="2" style="--narrow:44px">
         <span class="dm-collapse" data-point="2">${icon('chevron-left')}</span>
         ${[['calendar-check',tr('今日任务'),'3'],['layout-grid',tr('周视图'),''],['folder',tr('项目空间'),''],['inbox',tr('收件箱'),'2']].map(([i,l,n])=>`<span class="dm-nav">${icon(i)}<em data-out="2">${l}</em>${n?`<b data-out="2">${n}</b>`:''}</span>`).join('')}
-        <small data-out="2">${tr("快捷筛选")}</small>
-        <span class="dm-nav is-filter" data-point="1"><i class="dm-dot is-p0"></i><em data-out="2">${tr("P0 重要任务")}</em></span>
-        <span class="dm-nav is-filter"><i class="dm-dot is-doing"></i><em data-out="2">${tr("进行中")}</em></span></div>
-      <div class="dm-main"><div class="dm-top"><span>${icon('search')}</span><span>${icon('bell')}<i class="dm-badge">2</i></span><span class="dm-btn is-primary">${tr("{0}新任务",icon('plus'))}</span></div>
+        <small data-out="2">${tr('快捷筛选')}</small>
+        <span class="dm-nav is-filter" data-point="1"><i class="dm-dot is-p0"></i><em data-out="2">${tr('P0 重要任务')}</em></span>
+        <span class="dm-nav is-filter"><i class="dm-dot is-doing"></i><em data-out="2">${tr('进行中')}</em></span></div>
+      <div class="dm-main"><div class="dm-top"><span>${icon('search')}</span><span>${icon('bell')}<i class="dm-badge">2</i></span><span class="dm-btn is-primary">${tr('{0}新任务',icon('plus'))}</span></div>
         ${card('P0',tr('提交方案初稿'),tr('16:00 · 2 小时'),tr('进行中'))}
         ${card('P1',tr('晨会同步'),tr('09:30 · 15 分钟'),tr('已完成'),' data-out="1"')}
         ${card('P2',tr('整理参考资料'),tr('17:00 · 30 分钟'),tr('待开始'),' data-out="1"')}</div>
     </div>`},
   'timeline':{steps:[tr('每个项目一条横条，从开始日期画到截止日期'),tr('竖线是今天；没有截止日期的长期项目画到右边缘'),tr('日期有问题的项目标出「日期待修正」'),tr('左右箭头翻看前后时段')],html:`
-    <div class="dm-pane dm-wide dm-gantt"><h6>${tr("项目时间轴")} <span class="dm-arrows" data-point="3">${icon('chevron-left')}${icon('chevron-right')}</span></h6>
+    <div class="dm-pane dm-wide dm-gantt"><h6>${tr('项目时间轴')} <span class="dm-arrows" data-point="3">${icon('chevron-left')}${icon('chevron-right')}</span></h6>
       <div class="dm-gbody">
-        <div class="dm-gnames"><span></span><span>${tr("2027 战略规划")}</span><span>${tr("官网改版")}</span><span>${tr("团队周会")}</span><span>${tr("竞品月报")}</span></div>
+        <div class="dm-gnames"><span></span><span>${tr('2027 战略规划')}</span><span>${tr('官网改版')}</span><span>${tr('团队周会')}</span><span>${tr('竞品月报')}</span></div>
         <div class="dm-gcanvas"><div class="dm-gscroll" data-move="3" style="--to:translateX(-18%)">
-          <div class="dm-months"><span>${tr("10 月")}</span><span>${tr("11 月")}</span><span>${tr("12 月")}</span><span>${tr("1 月")}</span></div>
+          <div class="dm-months"><span>${tr('10 月')}</span><span>${tr('11 月')}</span><span>${tr('12 月')}</span><span>${tr('1 月')}</span></div>
           <div class="dm-lane"><i style="left:14%;width:30%"></i></div>
           <div class="dm-lane"><i style="left:29%;width:35%"></i></div>
           <div class="dm-lane"><i class="is-long" data-in="1" style="left:6%;right:0"></i></div>
-          <div class="dm-lane"><i class="is-bad" style="left:42%;width:5%"></i><em data-in="2" style="left:49%">${tr("日期待修正")}</em></div>
+          <div class="dm-lane"><i class="is-bad" style="left:42%;width:5%"></i><em data-in="2" style="left:49%">${tr('日期待修正')}</em></div>
           <b class="dm-today" data-in="1" style="left:35%"></b></div></div>
       </div></div>`},
   'achievements':{steps:[tr('已结项的项目都收在成果库里，顶部是总数'),tr('每张卡写着生命周期和任务完成情况'),tr('卡上有结项报告，还能进项目文件和沟通记录')],html:`
-    <div class="dm-kpis is-row"><span><b>8</b>${tr("已完成项目")}</span><span><b>214</b>${tr("累计完成子任务")}</span></div>
-    <div class="dm-pane dm-wide"><h6>${tr("官网改版")} <small>${tr("何雨 · 11月30日结项")}</small></h6>
+    <div class="dm-kpis is-row"><span><b>8</b>${tr('已完成项目')}</span><span><b>214</b>${tr('累计完成子任务')}</span></div>
+    <div class="dm-pane dm-wide"><h6>${tr('官网改版')} <small>${tr('何雨 · 11月30日结项')}</small></h6>
       <div class="dm-life is-dots" data-in="1">${[tr('创建'),tr('审批启动'),tr('提交结项'),tr('完成')].map(x=>`<span>${x}</span>`).join('<i></i>')}</div>
-      <div class="dm-meter"><span>${tr("任务")}</span><div class="dm-bar"><i class="is-full" data-fill="1" style="--w:100%"></i></div><b>24 / 24</b></div>
-      <div class="dm-min" data-in="2" data-point="2"><b>${tr("结项报告")}</b><span>${tr("首屏与信息架构已上线，转化提升 18%")}</span></div>
-      <div class="dm-links" data-in="2"><span>${tr("项目文件")}</span><span>${tr("沟通记录")}</span><span>${tr("查看项目详情")}</span></div></div>`},
+      <div class="dm-meter"><span>${tr('任务')}</span><div class="dm-bar"><i class="is-full" data-fill="1" style="--w:100%"></i></div><b>24 / 24</b></div>
+      <div class="dm-min" data-in="2" data-point="2"><b>${tr('结项报告')}</b><span>${tr('首屏与信息架构已上线，转化提升 18%')}</span></div>
+      <div class="dm-links" data-in="2"><span>${tr('项目文件')}</span><span>${tr('沟通记录')}</span><span>${tr('查看项目详情')}</span></div></div>`},
   'search':{steps:[tr('在任何页面按 /'),tr('输入关键词，任务和项目一起列出'),tr('按 N 直接新建任务'),tr('按 ? 查看全部快捷键')],html:`
     <div class="dm-keys"><kbd class="is-hit" data-out="1">/</kbd><kbd class="is-hit" data-in="2" data-out="3">N</kbd><kbd class="is-hit" data-in="3">?</kbd></div>
     <div class="dm-swap is-block">
-    <div class="dm-pane dm-wide dm-dialog" data-out="2"><h6>${tr("搜索任务与项目")}</h6><label>${tr("关键词")}<i><span data-type="1">${tr("报价")}</span></i></label>
-      <div class="dm-file" data-in="1"><b>${tr("任务")}</b><span>${tr("整理竞品报价")}</span><small>${tr("陈曦 · 2027 战略规划")}</small></div>
-      <div class="dm-file" data-in="1"><b>${tr("项目")}</b><span>${tr("竞品月报")}</span><small>${tr("Owner · 周一")}</small></div></div>
-    <div class="dm-pane dm-wide dm-dialog" data-in="2" data-out="3"><h6>${tr("新任务")}</h6><label>${tr("任务名称")}<i></i></label></div>
-    <div class="dm-pane dm-wide" data-in="3"><h6>${tr("快捷键")}</h6><div class="dm-shortcuts"><span><kbd>/</kbd>${tr("搜索")}</span><span><kbd>N</kbd>${tr("新建任务")}</span><span><kbd>T</kbd>${tr("今日任务")}</span><span><kbd>W</kbd>${tr("周视图")}</span><span><kbd>P</kbd>${tr("项目空间")}</span><span><kbd>I</kbd>${tr("收件箱")}</span><span><kbd>H</kbd>${tr("使用教程")}</span><span><kbd>Esc</kbd>${tr("关闭")}</span></div></div></div>`},
+    <div class="dm-pane dm-wide dm-dialog" data-out="2"><h6>${tr('搜索任务与项目')}</h6><label>${tr('关键词')}<i><span data-type="1">${tr('报价')}</span></i></label>
+      <div class="dm-file" data-in="1"><b>${tr('任务')}</b><span>${tr('整理竞品报价')}</span><small>${tr('陈曦 · 2027 战略规划')}</small></div>
+      <div class="dm-file" data-in="1"><b>${tr('项目')}</b><span>${tr('竞品月报')}</span><small>${tr('Owner · 周一')}</small></div></div>
+    <div class="dm-pane dm-wide dm-dialog" data-in="2" data-out="3"><h6>${tr('新任务')}</h6><label>${tr('任务名称')}<i></i></label></div>
+    <div class="dm-pane dm-wide" data-in="3"><h6>${tr('快捷键')}</h6><div class="dm-shortcuts"><span><kbd>/</kbd>${tr('搜索')}</span><span><kbd>N</kbd>${tr('新建任务')}</span><span><kbd>T</kbd>${tr('今日任务')}</span><span><kbd>W</kbd>${tr('周视图')}</span><span><kbd>P</kbd>${tr('项目空间')}</span><span><kbd>I</kbd>${tr('收件箱')}</span><span><kbd>H</kbd>${tr('使用教程')}</span><span><kbd>Esc</kbd>${tr('关闭')}</span></div></div></div>`},
   'accounts':{steps:[tr('点「添加账户」'),tr('填好账户名、中文名、初始密码和权限组'),tr('新账户出现在列表里'),tr('停用后账户还在，但不能再登录')],html:`
     <div class="dm-split">
-      <div class="dm-pane"><h6>${tr("账户管理")} <span class="dm-btn" data-point="0">${tr("{0}添加账户",icon('plus'))}</span></h6>
-        <div class="dm-acct"><span class="dm-avatar">${tr("林")}</span><b>${tr("林默")}</b><small>${tr("普通用户")}</small><em>${tr("启用")}</em></div>
-        <div class="dm-acct"><span class="dm-avatar">${tr("周")}</span><b>${tr("周一")}</b><small>${tr("普通用户")}</small><em>${tr("启用")}</em></div>
-        <div class="dm-acct" data-in="2"><span class="dm-avatar">${tr("赵")}</span><b>${tr("赵六")}</b><small>${tr("普通用户")}</small><span class="dm-swap"><em data-out="3">${tr("启用")}</em><em class="is-off" data-in="3" data-point="3">${tr("已停用")}</em></span></div></div>
-      <div class="dm-pane dm-dialog" data-in="1" data-out="2"><h6>${tr("添加账户")}</h6><label>${tr("账户名")}<i><span data-type="1">zhaoliu</span></i></label><label>${tr("中文名称")}<i><span data-in="1">${tr("赵六")}</span></i></label>
-        <label>${tr("初始密码")}<i><span data-in="1">••••••••</span></i></label><label>${tr("权限组")}<i><span data-in="1">${tr("普通用户")}</span></i></label><span class="dm-btn is-primary" data-point="1">${tr("创建账户")}</span></div>
+      <div class="dm-pane"><h6>${tr('账户管理')} <span class="dm-btn" data-point="0">${tr('{0}添加账户',icon('plus'))}</span></h6>
+        <div class="dm-acct"><span class="dm-avatar">${tr('林')}</span><b>${tr('林默')}</b><small>${tr('普通用户')}</small><em>${tr('启用')}</em></div>
+        <div class="dm-acct"><span class="dm-avatar">${tr('周')}</span><b>${tr('周一')}</b><small>${tr('普通用户')}</small><em>${tr('启用')}</em></div>
+        <div class="dm-acct" data-in="2"><span class="dm-avatar">${tr('赵')}</span><b>${tr('赵六')}</b><small>${tr('普通用户')}</small><span class="dm-swap"><em data-out="3">${tr('启用')}</em><em class="is-off" data-in="3" data-point="3">${tr('已停用')}</em></span></div></div>
+      <div class="dm-pane dm-dialog" data-in="1" data-out="2"><h6>${tr('添加账户')}</h6><label>${tr('账户名')}<i><span data-type="1">zhaoliu</span></i></label><label>${tr('中文名称')}<i><span data-in="1">${tr('赵六')}</span></i></label>
+        <label>${tr('初始密码')}<i><span data-in="1">••••••••</span></i></label><label>${tr('权限组')}<i><span data-in="1">${tr('普通用户')}</span></i></label><span class="dm-btn is-primary" data-point="1">${tr('创建账户')}</span></div>
     </div>`},
   'automation':{steps:[tr('09:30，到点的任务自动变成「进行中」'),tr('23:30，每个人的当天档案自动整理好'),tr('零点过后，没做完的任务递延到第二天'),tr('到补报时间，团队日报汇总完成')],html:`
     <div class="dm-clockline"><i class="dm-hand"></i>
       ${['09:30','23:30','00:00','00:30'].map((t,i)=>`<span class="dm-tick${i?'':' is-first'}"${i?` data-in="${i}"`:''}>${t}</span>`).join('')}</div>
     <div class="dm-week is-four">
-      <div class="dm-col"><h6>${tr("任务")}</h6><div class="dm-card"><b class="dm-prio is-p1">P1</b><span class="dm-name">${tr("晨会同步")}</span><small>09:30</small><em class="dm-state is-doing">${tr("进行中")}</em></div></div>
-      <div class="dm-col"><h6>${tr("档案")}</h6><div class="dm-min" data-in="1"><b>${tr("今日完成")}</b><span>${tr("✓ 晨会同步")}</span></div></div>
-      <div class="dm-col"><h6>${tr("递延")}</h6><div class="dm-card is-carried" data-in="2"><b class="dm-prio is-p0">P0</b><span class="dm-name">${tr("提交方案初稿")}</span><small>${tr("由周四递延")}</small></div></div>
-      <div class="dm-col"><h6>${tr("日报")}</h6><div class="dm-kpis" data-in="3"><span><b>12</b>${tr("完成")}</span><span><b>5</b>${tr("成员")}</span></div></div>
+      <div class="dm-col"><h6>${tr('任务')}</h6><div class="dm-card"><b class="dm-prio is-p1">P1</b><span class="dm-name">${tr('晨会同步')}</span><small>09:30</small><em class="dm-state is-doing">${tr('进行中')}</em></div></div>
+      <div class="dm-col"><h6>${tr('档案')}</h6><div class="dm-min" data-in="1"><b>${tr('今日完成')}</b><span>${tr('✓ 晨会同步')}</span></div></div>
+      <div class="dm-col"><h6>${tr('递延')}</h6><div class="dm-card is-carried" data-in="2"><b class="dm-prio is-p0">P0</b><span class="dm-name">${tr('提交方案初稿')}</span><small>${tr('由周四递延')}</small></div></div>
+      <div class="dm-col"><h6>${tr('日报')}</h6><div class="dm-kpis" data-in="3"><span><b>12</b>${tr('完成')}</span><span><b>5</b>${tr('成员')}</span></div></div>
     </div>`},
   'new-task':{steps:[tr('点「新建任务」打开表单'),tr('填好名称、负责人和时间'),tr('点「创建任务」'),tr('任务立刻出现在负责人的今日任务里'),tr('负责人收到指派通知')],html:`
     <div class="dm-split">
-      <div class="dm-pane dm-dialog" data-out="3"><h6>${tr("新任务")}</h6>
-        <label data-point="1">${tr("任务名称")}<i><span data-type="1">${tr("整理竞品报价")}</span></i></label>
-        <label>${tr("指派给")}<i><span data-in="1">${tr("陈曦")}</span></i></label>
-        <label>${tr("安排")}<i><span data-in="1">${tr("今天 14:00 · 60 分钟 · P1")}</span></i></label>
-        <span class="dm-btn is-primary" data-point="2">${tr("创建任务")}</span></div>
-      <div class="dm-pane"><h6>${tr("陈曦 · 今日任务")} <span class="dm-bell">${icon('bell')}<i data-in="4">1</i></span></h6>
+      <div class="dm-pane dm-dialog" data-out="3"><h6>${tr('新任务')}</h6>
+        <label data-point="1">${tr('任务名称')}<i><span data-type="1">${tr('整理竞品报价')}</span></i></label>
+        <label>${tr('指派给')}<i><span data-in="1">${tr('陈曦')}</span></i></label>
+        <label>${tr('安排')}<i><span data-in="1">${tr('今天 14:00 · 60 分钟 · P1')}</span></i></label>
+        <span class="dm-btn is-primary" data-point="2">${tr('创建任务')}</span></div>
+      <div class="dm-pane"><h6>${tr('陈曦 · 今日任务')} <span class="dm-bell">${icon('bell')}<i data-in="4">1</i></span></h6>
         ${card('P1',tr('晨会同步'),tr('09:30 · 15 分钟'),tr('进行中'))}
         ${card('P1',tr('整理竞品报价'),tr('14:00 · 60 分钟'),tr('待开始'),' data-in="3"')}</div>
     </div>`},
   'task-life':{steps:[tr('任务排在 14:00，还没到时间'),tr('到点自动变成「进行中」'),tr('做完点「记录完成」，写一句总结和实际耗时'),tr('任务完成，今日进度随之前进')],html:`
-    <div class="dm-pane dm-wide"><h6>${tr("今日任务")} <span class="dm-clock"><i data-out="1">13:58</i><i data-in="1">14:00</i></span></h6>
-      <div class="dm-card"><b class="dm-prio is-p1">P1</b><span class="dm-name">${tr("整理竞品报价")}</span><small>${tr("14:00 · 60 分钟")}</small>
-        <em class="dm-state" data-out="1">${tr("待开始")}</em><em class="dm-state is-doing" data-in="1" data-out="3">${tr("进行中")}</em><em class="dm-state is-done" data-in="3">${tr("{0}已完成",icon('check'))}</em></div>
-      <div class="dm-sheet" data-in="2" data-out="3"><span>${tr("完成总结")}</span><i><span data-type="2">${tr("已整理 6 家报价，见文件")}</span></i><span>${tr("实际耗时")} <b>${tr("75 分钟")}</b> ${tr("· 顺利")}</span></div>
-      <div class="dm-meter"><span>${tr("今日进度")}</span><div class="dm-bar"><i data-fill="3" style="--w:50%"></i></div><b><i data-out="3">0 / 2</i><i data-in="3">1 / 2</i></b></div>
+    <div class="dm-pane dm-wide"><h6>${tr('今日任务')} <span class="dm-clock"><i data-out="1">13:58</i><i data-in="1">14:00</i></span></h6>
+      <div class="dm-card"><b class="dm-prio is-p1">P1</b><span class="dm-name">${tr('整理竞品报价')}</span><small>${tr('14:00 · 60 分钟')}</small>
+        <em class="dm-state" data-out="1">${tr('待开始')}</em><em class="dm-state is-doing" data-in="1" data-out="3">${tr('进行中')}</em><em class="dm-state is-done" data-in="3">${tr('{0}已完成',icon('check'))}</em></div>
+      <div class="dm-sheet" data-in="2" data-out="3"><span>${tr('完成总结')}</span><i><span data-type="2">${tr('已整理 6 家报价，见文件')}</span></i><span>${tr('实际耗时')} <b>${tr('75 分钟')}</b> ${tr('· 顺利')}</span></div>
+      <div class="dm-meter"><span>${tr('今日进度')}</span><div class="dm-bar"><i data-fill="3" style="--w:50%"></i></div><b><i data-out="3">0 / 2</i><i data-in="3">1 / 2</i></b></div>
     </div>`},
   'defer':{steps:[tr('周四还有一项没做完'),tr('过了零点，系统把它递延到周五'),tr('周五的卡片写明「由周四递延 · 第 1 次」，周四那张留作记录')],html:`
     <div class="dm-week is-two">
-      <div class="dm-col"><h6>${tr("周四")}</h6>${card('P0',tr('提交方案初稿'),tr('16:00 · 2 小时'),tr('进行中'),' data-out="1"')}
+      <div class="dm-col"><h6>${tr('周四')}</h6>${card('P0',tr('提交方案初稿'),tr('16:00 · 2 小时'),tr('进行中'),' data-out="1"')}
         ${card('P0',tr('提交方案初稿'),tr('16:00 · 2 小时'),tr('已递延'),' data-in="1"','is-muted')}</div>
-      <div class="dm-col"><h6>${tr("周五")}</h6><div class="dm-ghost" data-move="1" data-out="2" style="--to:translateX(calc(100% + 12px))"></div>
-        <div class="dm-card is-carried" data-in="2"><b class="dm-prio is-p0">P0</b><span class="dm-name">${tr("提交方案初稿")}</span><small>${tr("由周四递延 · 第 1 次")}</small><em class="dm-state">${tr("待开始")}</em></div></div>
+      <div class="dm-col"><h6>${tr('周五')}</h6><div class="dm-ghost" data-move="1" data-out="2" style="--to:translateX(calc(100% + 12px))"></div>
+        <div class="dm-card is-carried" data-in="2"><b class="dm-prio is-p0">P0</b><span class="dm-name">${tr('提交方案初稿')}</span><small>${tr('由周四递延 · 第 1 次')}</small><em class="dm-state">${tr('待开始')}</em></div></div>
       <span class="dm-night" data-in="1" data-out="2">00:00</span>
     </div>`},
   'repeat':{steps:[tr('制定一条规则：每周一、三、五 09:30 晨会，15 分钟'),tr('保存后，系统按规则把之后的晨会排进每个人的日程'),tr('不需要的那一次，在规则里「挖空本次」')],html:`
-    <div class="dm-rule"><span>${tr("{0}晨会同步",icon('repeat'))}</span><b>${tr("每周 一 · 三 · 五")}</b><small>${tr("09:30 · 15 分钟 · 林默、周一")}</small></div>
-    <div class="dm-week">${[tr('一'),tr('二'),tr('三'),tr('四'),tr('五')].map((d,i)=>`<div class="dm-col"><h6>${tr("周{0}",d)}</h6>${i%2===0?`<div class="dm-mini" data-in="1"${i===4?' data-out="2" data-point="2"':''}>${tr("晨会")}</div>${i===4?tr('<div class="dm-mini is-skipped" data-in="2">已挖空</div>'):''}`:''}</div>`).join('')}</div>`},
+    <div class="dm-rule"><span>${tr('{0}晨会同步',icon('repeat'))}</span><b>${tr('每周 一 · 三 · 五')}</b><small>${tr('09:30 · 15 分钟 · 林默、周一')}</small></div>
+    <div class="dm-week">${[tr('一'),tr('二'),tr('三'),tr('四'),tr('五')].map((d,i)=>`<div class="dm-col"><h6>${tr('周{0}',d)}</h6>${i%2===0?`<div class="dm-mini" data-in="1"${i===4?' data-out="2" data-point="2"':''}>${tr('晨会')}</div>${i===4?tr('<div class="dm-mini is-skipped" data-in="2">已挖空</div>'):''}`:''}</div>`).join('')}</div>`},
   'stack':{steps:[tr('同一条固定任务，三期都没做完'),tr('开启「递延合并」后，它们合成一张卡，标着「3 期」'),tr('点一次「完成全部 3 期」就全部结清')],html:`
-    <div class="dm-pane dm-wide"><h6>${tr("今日任务")}</h6>
+    <div class="dm-pane dm-wide"><h6>${tr('今日任务')}</h6>
       <div class="dm-stack">
-        ${[tr('周一'),tr('周三'),tr('周五')].map((d,i)=>`<div class="dm-card" data-move="1" style="--to:translateY(${-i*44}px)" data-out="1"><b class="dm-prio is-p1">P1</b><span class="dm-name">${tr("周报汇总")}</span><small>${tr("{0} · 30 分钟",d)}</small><em class="dm-state">${tr("已递延")}</em></div>`).join('')}
-        <div class="dm-card is-stacked" data-in="1"><b class="dm-prio is-p1">P1</b><span class="dm-name">${tr("周报汇总")} <i class="dm-count">${tr("3 期")}</i></span><small>${tr("30 分钟")}</small>
-          <em class="dm-state" data-out="2">${tr("待开始")}</em><em class="dm-state is-done" data-in="2">${tr("{0}已完成",icon('check'))}</em></div>
-      </div><span class="dm-btn is-primary" data-in="1" data-out="2" data-point="1">${tr("完成全部 3 期")}</span></div>`},
+        ${[tr('周一'),tr('周三'),tr('周五')].map((d,i)=>`<div class="dm-card" data-move="1" style="--to:translateY(${-i*44}px)" data-out="1"><b class="dm-prio is-p1">P1</b><span class="dm-name">${tr('周报汇总')}</span><small>${tr('{0} · 30 分钟',d)}</small><em class="dm-state">${tr('已递延')}</em></div>`).join('')}
+        <div class="dm-card is-stacked" data-in="1"><b class="dm-prio is-p1">P1</b><span class="dm-name">${tr('周报汇总')} <i class="dm-count">${tr('3 期')}</i></span><small>${tr('30 分钟')}</small>
+          <em class="dm-state" data-out="2">${tr('待开始')}</em><em class="dm-state is-done" data-in="2">${tr('{0}已完成',icon('check'))}</em></div>
+      </div><span class="dm-btn is-primary" data-in="1" data-out="2" data-point="1">${tr('完成全部 3 期')}</span></div>`},
   'approval':{steps:[tr('所在规则组需要审批时，按钮显示「申请任务」'),tr('申请进入审批人的收件箱，上面直接有同意和驳回'),tr('同意后，任务出现在负责人的日程里，申请人收到结果')],html:`
     <div class="dm-split">
-      <div class="dm-pane"><h6>${tr("何雨")}</h6><span class="dm-btn" data-point="0">${tr("申请任务")}</span><div class="dm-swap is-block">
-        <div class="dm-card" data-in="1" data-out="2"><b class="dm-prio is-p1">P1</b><span class="dm-name">${tr("官网首屏改版")}</span><small>${tr("等待审批")}</small><em class="dm-state">${tr("申请中")}</em></div>
+      <div class="dm-pane"><h6>${tr('何雨')}</h6><span class="dm-btn" data-point="0">${tr('申请任务')}</span><div class="dm-swap is-block">
+        <div class="dm-card" data-in="1" data-out="2"><b class="dm-prio is-p1">P1</b><span class="dm-name">${tr('官网首屏改版')}</span><small>${tr('等待审批')}</small><em class="dm-state">${tr('申请中')}</em></div>
         ${card('P1',tr('官网首屏改版'),tr('周五 10:00 · 3 小时'),tr('待开始'),' data-in="2"')}</div></div>
-      <div class="dm-pane"><h6>${tr("收件箱 · 林默")}</h6>
-        <div class="dm-notice" data-in="1"><b>${tr("任务申请")}</b><span>${tr("何雨 申请「官网首屏改版」")}</span>
-          <div><span class="dm-btn is-primary" data-point="2">${tr("同意创建")}</span><span class="dm-btn">${tr("驳回申请")}</span></div></div></div>
+      <div class="dm-pane"><h6>${tr('收件箱 · 林默')}</h6>
+        <div class="dm-notice" data-in="1"><b>${tr('任务申请')}</b><span>${tr('何雨 申请「官网首屏改版」')}</span>
+          <div><span class="dm-btn is-primary" data-point="2">${tr('同意创建')}</span><span class="dm-btn">${tr('驳回申请')}</span></div></div></div>
     </div>`},
   'rework':{steps:[tr('任务已完成'),tr('Owner 觉得还缺东西，点「打回」并写明原因'),tr('任务回到负责人的待办，排到今天，原因写在卡上')],html:`
     <div class="dm-split">
-      <div class="dm-pane"><h6>${tr("周一 · 今日任务")}</h6>
+      <div class="dm-pane"><h6>${tr('周一 · 今日任务')}</h6>
         <div class="dm-swap is-block">${card('P1',tr('市场规模数据'),tr('昨天 · 2 小时'),tr('已完成'),' data-out="2"')}
-        <div class="dm-card is-returned" data-in="2"><b class="dm-prio is-p1">P1</b><span class="dm-name">${tr("市场规模数据")}</span><small>${tr("打回：补上数据来源")}</small><em class="dm-state">${tr("待开始")}</em></div></div></div>
-      <div class="dm-pane dm-dialog" data-in="1" data-out="2"><h6>${tr("打回「市场规模数据」")}</h6><label>${tr("打回原因")}<i><span data-type="1">${tr("补上数据来源")}</span></i></label><span class="dm-btn is-primary" data-point="1">${tr("打回并通知")}</span></div>
+        <div class="dm-card is-returned" data-in="2"><b class="dm-prio is-p1">P1</b><span class="dm-name">${tr('市场规模数据')}</span><small>${tr('打回：补上数据来源')}</small><em class="dm-state">${tr('待开始')}</em></div></div></div>
+      <div class="dm-pane dm-dialog" data-in="1" data-out="2"><h6>${tr('打回「市场规模数据」')}</h6><label>${tr('打回原因')}<i><span data-type="1">${tr('补上数据来源')}</span></i></label><span class="dm-btn is-primary" data-point="1">${tr('打回并通知')}</span></div>
     </div>`},
   'tree':{steps:[tr('目录：文件夹装着项目'),tr('点项目，选中块滑过去，项目在右边打开'),tr('项目下展开会议和文件，点会议直接进会议标签')],html:`
     <div class="dm-tree"><i class="dm-mark" data-move="1" style="--to:translateY(66px)"></i>
-      <div class="dm-tnode">${tr("{0}全部项目",icon('layout-grid'))}</div>
-      <div class="dm-tnode">${tr("{0}年度战略",icon('folder'))}</div>
-      <div class="dm-tbranch"><div class="dm-tnode" data-point="1">${tr("{0}2027 战略规划",icon('gantt'))}</div>
-        <div class="dm-tbranch" data-in="2"><div class="dm-tnode is-sub" data-point="2">${tr("{0}会议 2",icon('chat'))}</div><div class="dm-tnode is-sub">${tr("{0}文件 5",icon('folder'))}</div></div>
-        <div class="dm-tnode">${tr("{0}竞品月报",icon('gantt'))}</div></div>
+      <div class="dm-tnode">${tr('{0}全部项目',icon('layout-grid'))}</div>
+      <div class="dm-tnode">${tr('{0}年度战略',icon('folder'))}</div>
+      <div class="dm-tbranch"><div class="dm-tnode" data-point="1">${tr('{0}2027 战略规划',icon('gantt'))}</div>
+        <div class="dm-tbranch" data-in="2"><div class="dm-tnode is-sub" data-point="2">${tr('{0}会议 2',icon('chat'))}</div><div class="dm-tnode is-sub">${tr('{0}文件 5',icon('folder'))}</div></div>
+        <div class="dm-tnode">${tr('{0}竞品月报',icon('gantt'))}</div></div>
     </div>
-    <div class="dm-pane dm-page" data-in="1"><h6>${tr("2027 战略规划")}</h6><div class="dm-tabs"><b>${tr("任务")}</b><span>${tr("会议")}</span><span>${tr("文件")}</span><span>${tr("成员")}</span><span>${tr("概况")}</span></div>
+    <div class="dm-pane dm-page" data-in="1"><h6>${tr('2027 战略规划')}</h6><div class="dm-tabs"><b>${tr('任务')}</b><span>${tr('会议')}</span><span>${tr('文件')}</span><span>${tr('成员')}</span><span>${tr('概况')}</span></div>
       ${card('P0',tr('确定三大战略主题'),tr('林默 · 11月4日'),tr('进行中'))}</div>`},
   'upload':{steps:[tr('把文件从电脑拖到「文件」标签'),tr('松手就开始上传，单个文件不超过 20MB'),tr('上传完成，所有成员都能下载')],html:`
-    <div class="dm-pane dm-wide is-drop"><h6>${tr("文件")} <span class="dm-btn">${tr("新增文件")}</span></h6>
-      <div class="dm-file" data-in="1" data-point="1"><b>PDF</b><span>${tr("竞品格局一页纸.pdf")}</span><small><i data-out="2">${tr("上传中…")}</i><i data-in="2">${tr("1.8 MB · 你 · 刚刚")}</i></small></div>
-      <div class="dm-file"><b>XLSX</b><span>${tr("资源分配表.xlsx")}</span><small>${tr("94 KB · 周一 · 昨天")}</small></div>
-      <div class="dm-drag" data-move="1" data-out="1" data-point="0" style="--to:translate(-120px,26px)"><b>PDF</b>${tr("竞品格局一页纸.pdf")}</div>
+    <div class="dm-pane dm-wide is-drop"><h6>${tr('文件')} <span class="dm-btn">${tr('新增文件')}</span></h6>
+      <div class="dm-file" data-in="1" data-point="1"><b>PDF</b><span>${tr('竞品格局一页纸.pdf')}</span><small><i data-out="2">${tr('上传中…')}</i><i data-in="2">${tr('1.8 MB · 你 · 刚刚')}</i></small></div>
+      <div class="dm-file"><b>XLSX</b><span>${tr('资源分配表.xlsx')}</span><small>${tr('94 KB · 周一 · 昨天')}</small></div>
+      <div class="dm-drag" data-move="1" data-out="1" data-point="0" style="--to:translate(-120px,26px)"><b>PDF</b>${tr('竞品格局一页纸.pdf')}</div>
     </div>`},
   'meeting':{steps:[tr('会议开始，点「开始实时录入」'),tr('边说边转成文字，原稿自动保存'),tr('点「根据模板生成」'),tr('AI 整理出会议结论、待办和风险')],html:`
     <div class="dm-split">
-      <div class="dm-pane"><h6>${tr("原始转录")} <span class="dm-rec" data-in="1" data-out="2">${tr("● 录入中")}</span></h6>
-        <p class="dm-line" data-in="1">${tr("林默：先看方向，明年聚焦两条主线。")}</p><p class="dm-line" data-in="1">${tr("周一：资源表周五前补齐。")}</p><p class="dm-line" data-in="1">${tr("陈曦：竞品数据还差两家。")}</p>
-        <span class="dm-btn is-primary" data-point="2">${tr("根据模板生成")}</span></div>
-      <div class="dm-pane"><h6>${tr("会议纪要")}</h6>
-        <div class="dm-min" data-in="3"><b>${tr("会议结论")}</b><span>${tr("明年聚焦两条主线")}</span></div>
-        <div class="dm-min" data-in="3"><b>${tr("待办")}</b><span>${tr("周一 · 资源表 · 周五前")}</span><span>${tr("陈曦 · 补两家竞品")}</span></div>
-        <div class="dm-min" data-in="3"><b>${tr("风险与待确认")}</b><span>${tr("竞品数据不完整")}</span></div></div>
+      <div class="dm-pane"><h6>${tr('原始转录')} <span class="dm-rec" data-in="1" data-out="2">${tr('● 录入中')}</span></h6>
+        <p class="dm-line" data-in="1">${tr('林默：先看方向，明年聚焦两条主线。')}</p><p class="dm-line" data-in="1">${tr('周一：资源表周五前补齐。')}</p><p class="dm-line" data-in="1">${tr('陈曦：竞品数据还差两家。')}</p>
+        <span class="dm-btn is-primary" data-point="2">${tr('根据模板生成')}</span></div>
+      <div class="dm-pane"><h6>${tr('会议纪要')}</h6>
+        <div class="dm-min" data-in="3"><b>${tr('会议结论')}</b><span>${tr('明年聚焦两条主线')}</span></div>
+        <div class="dm-min" data-in="3"><b>${tr('待办')}</b><span>${tr('周一 · 资源表 · 周五前')}</span><span>${tr('陈曦 · 补两家竞品')}</span></div>
+        <div class="dm-min" data-in="3"><b>${tr('风险与待确认')}</b><span>${tr('竞品数据不完整')}</span></div></div>
     </div>`},
   'project-life':{steps:[tr('申请项目，管理员在收件箱审批'),tr('通过后项目开始，任务推进'),tr('Owner 点「完成项目」写结项报告'),tr('管理员同意，项目进入成果库')],html:`
     <div class="dm-life">${[tr('申请'),tr('执行'),tr('结项审批'),tr('成果库')].map((s,i)=>`<span class="dm-stage"${i?` data-in="${i}"`:''}>${s}</span>`).join('<i></i>')}</div>
-    <div class="dm-pane dm-wide"><h6>${tr("官网改版")} <span class="dm-swap"><em class="dm-state" data-out="1">${tr("待审批")}</em><em class="dm-state is-doing" data-in="1" data-out="3">${tr("进行中")}</em><em class="dm-state is-done" data-in="3">${tr("已完成")}</em></span></h6>
-      <div class="dm-meter"><span>${tr("任务")}</span><div class="dm-bar"><i data-fill="1" style="--w:62%"></i><i class="is-full" data-fill="2" style="--w:100%"></i></div></div>
-      <div class="dm-sheet" data-in="2" data-out="3"><span>${tr("结项报告")}</span><i><span data-type="2">${tr("首屏与信息架构已上线，转化提升 18%")}</span></i></div>
-      <div class="dm-trophy" data-in="3">${tr("{0}已归入成果库",icon('award'))}</div></div>`},
+    <div class="dm-pane dm-wide"><h6>${tr('官网改版')} <span class="dm-swap"><em class="dm-state" data-out="1">${tr('待审批')}</em><em class="dm-state is-doing" data-in="1" data-out="3">${tr('进行中')}</em><em class="dm-state is-done" data-in="3">${tr('已完成')}</em></span></h6>
+      <div class="dm-meter"><span>${tr('任务')}</span><div class="dm-bar"><i data-fill="1" style="--w:62%"></i><i class="is-full" data-fill="2" style="--w:100%"></i></div></div>
+      <div class="dm-sheet" data-in="2" data-out="3"><span>${tr('结项报告')}</span><i><span data-type="2">${tr('首屏与信息架构已上线，转化提升 18%')}</span></i></div>
+      <div class="dm-trophy" data-in="3">${tr('{0}已归入成果库',icon('award'))}</div></div>`},
   'inbox':{steps:[tr('收件箱是空的'),tr('新的指派和 @ 进来，红点显示几条没看'),tr('又来一条修改申请'),tr('「全部标为已读」一次清掉')],html:`
-    <div class="dm-pane dm-wide"><h6>${tr("收件箱")} <span class="dm-bell">${icon('bell')}<i data-in="1" data-out="3"><i data-out="2">2</i><i data-in="2">3</i></i></span></h6>
-      <div class="dm-notice is-unread" data-in="1"><b>${tr("任务指派")}</b><span>${tr("林默 把「整理竞品报价」指派给你")}</span></div>
-      <div class="dm-notice is-unread" data-in="1"><b>${tr("沟通区")}</b><span>${tr("周一 在「2027 战略规划」里 @ 了你")}</span></div>
-      <div class="dm-notice is-unread" data-in="2"><b>${tr("修改申请")}</b><span>${tr("何雨 申请把截止改到下周一")}</span></div>
-      <span class="dm-btn" data-point="3">${tr("全部标为已读")}</span></div>`},
+    <div class="dm-pane dm-wide"><h6>${tr('收件箱')} <span class="dm-bell">${icon('bell')}<i data-in="1" data-out="3"><i data-out="2">2</i><i data-in="2">3</i></i></span></h6>
+      <div class="dm-notice is-unread" data-in="1"><b>${tr('任务指派')}</b><span>${tr('林默 把「整理竞品报价」指派给你')}</span></div>
+      <div class="dm-notice is-unread" data-in="1"><b>${tr('沟通区')}</b><span>${tr('周一 在「2027 战略规划」里 @ 了你')}</span></div>
+      <div class="dm-notice is-unread" data-in="2"><b>${tr('修改申请')}</b><span>${tr('何雨 申请把截止改到下周一')}</span></div>
+      <span class="dm-btn" data-point="3">${tr('全部标为已读')}</span></div>`},
   'chat':{steps:[tr('在项目频道里输入 @'),tr('选中成员'),tr('发送后，对方收到通知，频道里也能看到')],html:`
-    <div class="dm-pane dm-wide"><h6>${tr("# 2027 战略规划")}</h6>
-      <div class="dm-msg"><b>${tr("林默")}</b><span>${tr("今天下午对一下资源表")}</span></div>
-      <div class="dm-msg is-mine" data-in="2"><b>${tr("你")}</b><span><mark>${tr("@陈曦")}</mark> ${tr("竞品还差两家，今天能补吗？")}</span></div>
-      <div class="dm-mention" data-out="2"><span class="is-on" data-point="1">${tr("陈曦")}</span><span>${tr("何雨")}</span><span>${tr("所有人")}</span></div>
-      <div class="dm-input" data-point="0 2"><i data-out="1">${tr("@陈")}</i><i data-in="1" data-out="2"><mark>${tr("@陈曦")}</mark> ${tr("竞品还差两家，今天能补吗？")}</i></div>
-      <span class="dm-ping" data-in="2">${tr("陈曦 {0}",icon('bell'))}</span></div>`},
+    <div class="dm-pane dm-wide"><h6>${tr('# 2027 战略规划')}</h6>
+      <div class="dm-msg"><b>${tr('林默')}</b><span>${tr('今天下午对一下资源表')}</span></div>
+      <div class="dm-msg is-mine" data-in="2"><b>${tr('你')}</b><span><mark>${tr('@陈曦')}</mark> ${tr('竞品还差两家，今天能补吗？')}</span></div>
+      <div class="dm-mention" data-out="2"><span class="is-on" data-point="1">${tr('陈曦')}</span><span>${tr('何雨')}</span><span>${tr('所有人')}</span></div>
+      <div class="dm-input" data-point="0 2"><i data-out="1">${tr('@陈')}</i><i data-in="1" data-out="2"><mark>${tr('@陈曦')}</mark> ${tr('竞品还差两家，今天能补吗？')}</i></div>
+      <span class="dm-ping" data-in="2">${tr('陈曦 {0}',icon('bell'))}</span></div>`},
   'archive':{steps:[tr('今天的档案还空着'),tr('系统先整理当天的完成和未完成'),tr('你补上明日计划和随记，点保存'),tr('第二天，团队日报汇总所有人和项目')],html:`
     <div class="dm-split">
-      <div class="dm-pane"><h6>${tr("我的档案 · 11月5日")}</h6>
-        <div class="dm-min"><b>${tr("今日完成")}</b><span data-in="1">${tr("✓ 整理竞品报价")}</span><span data-in="1">${tr("✓ 晨会同步")}</span></div>
-        <div class="dm-min"><b>${tr("未完成与阻塞")}</b><span data-in="1">${tr("提交方案初稿（递延到明天）")}</span></div>
-        <div class="dm-min" data-point="2"><b>${tr("明日计划")}</b><span><i data-type="2">${tr("先交方案初稿，再约评审")}</i></span></div></div>
-      <div class="dm-pane" data-in="3"><h6>${tr("团队日报 · 11月5日")}</h6>
-        <div class="dm-kpis"><span><b>12</b>${tr("完成任务")}</span><span><b>18.5h</b>${tr("完成工时")}</span><span><b>5</b>${tr("位成员")}</span></div>
-        <div class="dm-min"><b>${tr("项目进展")}</b><span>${tr("2027 战略规划 · 1/5 · Owner 汇报")}</span><span>${tr("官网改版 · 0/1 · 系统汇总")}</span></div></div>
+      <div class="dm-pane"><h6>${tr('我的档案 · 11月5日')}</h6>
+        <div class="dm-min"><b>${tr('今日完成')}</b><span data-in="1">${tr('✓ 整理竞品报价')}</span><span data-in="1">${tr('✓ 晨会同步')}</span></div>
+        <div class="dm-min"><b>${tr('未完成与阻塞')}</b><span data-in="1">${tr('提交方案初稿（递延到明天）')}</span></div>
+        <div class="dm-min" data-point="2"><b>${tr('明日计划')}</b><span><i data-type="2">${tr('先交方案初稿，再约评审')}</i></span></div></div>
+      <div class="dm-pane" data-in="3"><h6>${tr('团队日报 · 11月5日')}</h6>
+        <div class="dm-kpis"><span><b>12</b>${tr('完成任务')}</span><span><b>18.5h</b>${tr('完成工时')}</span><span><b>5</b>${tr('位成员')}</span></div>
+        <div class="dm-min"><b>${tr('项目进展')}</b><span>${tr('2027 战略规划 · 1/5 · Owner 汇报')}</span><span>${tr('官网改版 · 0/1 · 系统汇总')}</span></div></div>
     </div>`},
   'assistant':{steps:[tr('打开规划模式'),tr('用一句话说要安排的事'),tr('助手起草出几张卡片：谁、哪天、多久'),tr('你逐张检查、修改，确认后才真正创建')],html:`
-    <div class="dm-pane dm-wide"><h6>${tr("{0}AI 助手 · 规划",icon('sparkles'))}</h6>
-      <div class="dm-msg is-mine" data-in="1" data-point="1"><span><i data-type="1">${tr("下周把季度复盘做完：整理数据、出初稿、找林默评审")}</i></span></div>
+    <div class="dm-pane dm-wide"><h6>${tr('{0}AI 助手 · 规划',icon('sparkles'))}</h6>
+      <div class="dm-msg is-mine" data-in="1" data-point="1"><span><i data-type="1">${tr('下周把季度复盘做完：整理数据、出初稿、找林默评审')}</i></span></div>
       <div class="dm-drafts">${[[tr('整理复盘数据'),tr('周一 · 周一 · 2 小时')],[tr('写复盘初稿'),tr('周三 · 你 · 3 小时')],[tr('复盘评审'),tr('周五 · 林默 · 1 小时')]].map(([n,m],i)=>
-        `<div class="dm-card is-draft" data-in="2" style="transition-delay:${i*.18}s"><b class="dm-prio is-p1">P1</b><span class="dm-name">${n}</span><small>${m}</small><em class="dm-state" data-out="3">${tr("草稿")}</em><em class="dm-state is-done" data-in="3">${tr("{0}已创建",icon('check'))}</em></div>`).join('')}</div>
-      <span class="dm-btn is-primary" data-in="2" data-out="3" data-point="3">${tr("接受所选")}</span></div>`},
+        `<div class="dm-card is-draft" data-in="2" style="transition-delay:${i*.18}s"><b class="dm-prio is-p1">P1</b><span class="dm-name">${n}</span><small>${m}</small><em class="dm-state" data-out="3">${tr('草稿')}</em><em class="dm-state is-done" data-in="3">${tr('{0}已创建',icon('check'))}</em></div>`).join('')}</div>
+      <span class="dm-btn is-primary" data-in="2" data-out="3" data-point="3">${tr('接受所选')}</span></div>`},
   'widget':{steps:[tr('点顶栏的桌面小组件图标'),tr('小组件浮在所有窗口之上'),tr('开始一轮 25 分钟专注'),tr('勾选今天的任务，直接记为完成')],html:`
-    <div class="dm-pip" data-in="1"><h6>${tr("今日待办")} <small>${tr("还剩")} <span class="dm-num"><i data-out="3">2</i><i data-in="3">1</i></span> ${tr("项")}</small></h6>
-      <div class="dm-pomo" data-point="2"><b><i data-out="2">25:00</i><i data-in="2">24:13</i></b><span>${tr("专注 25 分钟")}</span><div class="dm-ring"><i data-fill="2" style="--w:4%"></i></div></div>
-      <label class="dm-check" data-point="3"><i class="dm-box"><b data-in="3">${icon('check')}</b></i>${tr("整理竞品报价")}</label>
-      <label class="dm-check"><i class="dm-box"></i>${tr("提交方案初稿")}</label></div>`},
+    <div class="dm-pip" data-in="1"><h6>${tr('今日待办')} <small>${tr('还剩')} <span class="dm-num"><i data-out="3">2</i><i data-in="3">1</i></span> ${tr('项')}</small></h6>
+      <div class="dm-pomo" data-point="2"><b><i data-out="2">25:00</i><i data-in="2">24:13</i></b><span>${tr('专注 25 分钟')}</span><div class="dm-ring"><i data-fill="2" style="--w:4%"></i></div></div>
+      <label class="dm-check" data-point="3"><i class="dm-box"><b data-in="3">${icon('check')}</b></i>${tr('整理竞品报价')}</label>
+      <label class="dm-check"><i class="dm-box"></i>${tr('提交方案初稿')}</label></div>`},
   'rules':{steps:[tr('默认规则：成员新建项目需要审批'),tr('管理员把它改成「直接创建」'),tr('成员那边的按钮立刻从「申请项目」变成「新建项目」')],html:`
     <div class="dm-split">
-      <div class="dm-pane"><h6>${tr("规则组 · 默认规则")}</h6>
-        <div class="dm-seg" data-point="1"><span>${tr("新项目")}</span><b data-out="1">${tr("需要审批")}</b><b class="is-ok" data-in="1">${tr("直接创建")}</b></div>
-        <div class="dm-seg"><span>${tr("临时任务")}</span><b class="is-ok">${tr("直接创建")}</b></div>
-        <div class="dm-seg"><span>${tr("AI 助手")}</span><b>${tr("查询与规划")}</b></div></div>
-      <div class="dm-pane"><h6>${tr("成员的顶栏")}</h6><span class="dm-swap is-block"><span class="dm-btn" data-out="2">${tr("{0}申请项目",icon('arrow-up-right'))}</span><span class="dm-btn is-primary" data-in="2">${tr("{0}新建项目",icon('plus'))}</span></span></div>
+      <div class="dm-pane"><h6>${tr('规则组 · 默认规则')}</h6>
+        <div class="dm-seg" data-point="1"><span>${tr('新项目')}</span><b data-out="1">${tr('需要审批')}</b><b class="is-ok" data-in="1">${tr('直接创建')}</b></div>
+        <div class="dm-seg"><span>${tr('临时任务')}</span><b class="is-ok">${tr('直接创建')}</b></div>
+        <div class="dm-seg"><span>${tr('AI 助手')}</span><b>${tr('查询与规划')}</b></div></div>
+      <div class="dm-pane"><h6>${tr('成员的顶栏')}</h6><span class="dm-swap is-block"><span class="dm-btn" data-out="2">${tr('{0}申请项目',icon('arrow-up-right'))}</span><span class="dm-btn is-primary" data-in="2">${tr('{0}新建项目',icon('plus'))}</span></span></div>
     </div>`},
 };
 /* Plays the demos that are on screen; each step holds for its share of the loop.
@@ -4314,8 +4314,8 @@ function bindGuideDemos(root){
 function guideDemoHTML(id){
   const d=GUIDE_DEMOS[id];if(!d)return '';
   return `<figure class="guide-demo" data-demo="${id}" data-step="0"><div class="demo-stage" aria-hidden="true">${d.html}<i class="demo-pointer"></i></div>`
-    +`<figcaption><span class="demo-caption" aria-live="polite"></span><span class="demo-dots">${d.steps.map((s,i)=>`<button type="button" class="demo-dot" aria-label="${tr("第 {0} 步：{1}",i+1,escapeHTML(s))}"></button>`).join('')}</span>`
-    +`<button type="button" class="text-btn demo-play">${tr("暂停")}</button></figcaption></figure>`;
+    +`<figcaption><span class="demo-caption" aria-live="polite"></span><span class="demo-dots">${d.steps.map((s,i)=>`<button type="button" class="demo-dot" aria-label="${tr('第 {0} 步：{1}',i+1,escapeHTML(s))}"></button>`).join('')}</span>`
+    +`<button type="button" class="text-btn demo-play">${tr('暂停')}</button></figcaption></figure>`;
 }
 /* 使用教程: every part of the workbench, one chapter each. A chapter opens with
    a short demo of what the feature does, then steps, an example, the people
@@ -4325,72 +4325,72 @@ const GUIDE=[
   {id:'start',title:tr('开始使用'),icon:'book-open',demo:'login',lead:tr('登录、三种角色和你自己的资料。'),parts:[
     [tr('登录'),[tr('打开工作台，输入账户名和密码，点「进入工作台」。'),tr('登录状态保留 7 天；在别的设备登录不会挤掉当前设备。'),tr('同一浏览器登录过的账户会列在左上角账户菜单中，切换时仍需验证该账户密码。')]],
     [tr('三种角色'),[tr('superadmin：系统所有者，负责系统配置、账户管理、审批与调度，不执行任务。'),tr('管理员：管理全部项目与任务、审批申请、查看成果库和账户列表，不执行任务。'),tr('普通成员：处理分给自己的任务，按所在规则组新建项目或任务，参与被加入的项目。')],'list'],
-    [tr("三种角色能做什么"),[[tr("操作"), "superadmin", tr("管理员"), tr("普通成员")], [tr("执行任务、记录完成"), tr("不执行任务"), tr("不执行任务"), tr("仅分给自己的任务")], [tr("新建项目 / 任务"), tr("直接创建"), tr("直接创建"), tr("按所在规则组")], [tr("审批申请"), tr("可以"), tr("可以"), tr("项目 Owner 审批自己项目的申请")], [tr("查看成果库、账户列表"), tr("可以"), tr("可以"), tr("看不到")], [tr("添加、停用账户或重置密码"), tr("可以"), tr("不可以"), tr("不可以")], [tr("规则组、删除账户"), tr("可以"), tr("不可以"), tr("看不到")]],"table"],
+    [tr('三种角色能做什么'),[[tr('操作'), "superadmin", tr('管理员'), tr('普通成员')], [tr('执行任务、记录完成'), tr('不执行任务'), tr('不执行任务'), tr('仅分给自己的任务')], [tr('新建项目 / 任务'), tr('直接创建'), tr('直接创建'), tr('按所在规则组')], [tr('审批申请'), tr('可以'), tr('可以'), tr('项目 Owner 审批自己项目的申请')], [tr('查看成果库、账户列表'), tr('可以'), tr('可以'), tr('看不到')], [tr('添加、停用账户或重置密码'), tr('可以'), tr('不可以'), tr('不可以')], [tr('规则组、删除账户'), tr('可以'), tr('不可以'), tr('看不到')]],"table"],
     [tr('你的资料'),[tr('点左上角的头像打开账户菜单。'),tr('「个人资料」里可以改昵称、头像（选择图片 / 移除）和个性签名；中文名由 superadmin 设置。'),tr('「修改密码」需要输入当前密码，新密码至少 6 位，改完后其他设备会退出登录。'),tr('「登录其他账户」切换到另一个账户；「退出登录」结束本设备的登录。')]],
     [tr('第一次进来'),[tr('第一次登录会自动开始约 3 分钟的导览，逐个点亮界面上的主要入口；标着「试一试」的步骤可以直接点一下看效果。'),tr('之后随时可以在「使用教程」页顶部点「开始导览」重看。')],'list'],
-    [tr("常见问题"),[[tr("忘记密码怎么办？"), tr("请 superadmin 在「账户管理」里为你重置密码，登录后再到「修改密码」换成自己的。")], [tr("为什么我的中文名改不了？"), tr("中文名用在日报、成员列表等正式场合，由 superadmin 统一设置；你可以改昵称。")], [tr("换了电脑要重新登录吗？"), tr("要。每台设备单独登录，登录状态保留 7 天；改密码后所有设备都需要重新登录。")]],"faq"],
+    [tr('常见问题'),[[tr('忘记密码怎么办？'), tr('请 superadmin 在「账户管理」里为你重置密码，登录后再到「修改密码」换成自己的。')], [tr('为什么我的中文名改不了？'), tr('中文名用在日报、成员列表等正式场合，由 superadmin 统一设置；你可以改昵称。')], [tr('换了电脑要重新登录吗？'), tr('要。每台设备单独登录，登录状态保留 7 天；改密码后所有设备都需要重新登录。')]],"faq"],
   ]},
   {id:'layout',title:tr('界面与导航'),icon:'layout-grid',demo:'layout',lead:tr('左侧导航、顶栏和常用入口在哪里。'),parts:[
     [tr('左侧主导航'),[tr('今日任务、周视图、档案室、项目空间、项目时间轴、收件箱、使用教程对所有人开放；成果库、账户管理、系统设置只对管理员显示。'),tr('导航右侧的数字是待处理数量，红点表示有新分到你的工作。'),tr('点导航顶部的箭头收成只显示图标；拖动导航右边缘调宽窄，双击边缘恢复默认宽度。')],'list'],
     [tr('快捷筛选'),[tr('点「P0 重要任务」「进行中」「已递延」会跳到今日任务，只列出对应的任务。'),tr('在今日任务里点「全部」回到完整列表。')]],
     [tr('今日安排'),[tr('左下角显示你今天所有任务的预计总时长，进度条随完成情况增长。')],'list'],
-    [tr("导航宽窄"),[[tr("宽度"), tr("显示什么")], [tr("默认"), tr("图标、名称、待处理数量和快捷筛选")], [tr("调窄"), tr("名称和数量，分组标题和底部的今日安排收起")], [tr("收起"), tr("只剩图标")]],"table"],
+    [tr('导航宽窄'),[[tr('宽度'), tr('显示什么')], [tr('默认'), tr('图标、名称、待处理数量和快捷筛选')], [tr('调窄'), tr('名称和数量，分组标题和底部的今日安排收起')], [tr('收起'), tr('只剩图标')]],"table"],
     [tr('顶栏'),[tr('搜索：找任务和项目，快捷键 /。'),tr('通知铃铛：打开收件箱，红点表示有未读。'),tr('桌面小组件：悬浮的今日待办和番茄钟。'),tr('AI 助手：打开右侧的助手面板。'),tr('新建项目 / 新建任务：按你所在规则组显示为「新建」或「申请」，不允许时不显示。'),tr('沟通区：顶栏左侧的对话图标，有未读消息时出现红点。')],'list'],
   ]},
   {id:'today',title:tr('今日任务'),icon:'calendar-check',demo:'task-life',lead:tr('一天要做的事，按项目分组；任务从待开始到完成都在这里推进。'),parts:[
     [tr('看今天'),[tr('页面顶部是日期卡和「今天做什么？」，右侧箭头可以前后翻一天。'),tr('「今日进度」显示已完成 / 全部和百分比。'),tr('「全部 / 待处理 / 已完成」切换下面列表的范围。')]],
     [tr('任务卡上有什么'),[tr('序号和优先级：P0 最高，P1、P2 依次降低。'),tr('名称、负责人、时间与时长、日期和状态（待开始、进行中、已完成、已递延…）。'),tr('「固定」标记：由固定任务规则生成。'),tr('「由某日递延 · 第 N 次」：前一天没做完自动挪过来的。'),tr('「N 期」：几期没做完的固定任务合成了一张卡。')],'list'],
-    [tr("任务状态"),[[tr("状态"), tr("什么时候出现"), tr("接下来")], [tr("待开始"), tr("刚创建，还没到安排的时间"), tr("到点自动开始，或在详情里点「开始任务」")], [tr("进行中"), tr("到了安排的时间，或手动开始"), tr("做完点「记录完成」")], [tr("已完成"), tr("记录了完成"), tr("可以「修改完成记录」；Owner 觉得不够可以打回")], [tr("待审批"), tr("按规则组需要审批的新任务"), tr("同意后变为待开始，驳回后变为已驳回")], [tr("已驳回"), tr("申请没有通过"), tr("只作记录，驳回原因写在任务里")], [tr("已递延"), tr("过了零点还没做完"), tr("第二天有一张新卡接着做，这张保留作记录")], [tr("已跳过"), tr("所属项目已结束时还没做完"), tr("不再处理，也不再递延")]],"table"],
+    [tr('任务状态'),[[tr('状态'), tr('什么时候出现'), tr('接下来')], [tr('待开始'), tr('刚创建，还没到安排的时间'), tr('到点自动开始，或在详情里点「开始任务」')], [tr('进行中'), tr('到了安排的时间，或手动开始'), tr('做完点「记录完成」')], [tr('已完成'), tr('记录了完成'), tr('可以「修改完成记录」；Owner 觉得不够可以打回')], [tr('待审批'), tr('按规则组需要审批的新任务'), tr('同意后变为待开始，驳回后变为已驳回')], [tr('已驳回'), tr('申请没有通过'), tr('只作记录，驳回原因写在任务里')], [tr('已递延'), tr('过了零点还没做完'), tr('第二天有一张新卡接着做，这张保留作记录')], [tr('已跳过'), tr('所属项目已结束时还没做完'), tr('不再处理，也不再递延')]],"table"],
     [tr('例子'),[tr('林默的「整理竞品报价」排在今天 14:00。13:59 它还是「待开始」，14:00 自动变成「进行中」；15:15 他点「记录完成」，写下「已整理 6 家报价，见文件」，实际耗时 75 分钟，今日进度从 0/2 走到 1/2。')],'example'],
-    [tr("常见问题"),[[tr("到了时间任务没有变成「进行中」？"), tr("系统每半分钟检查一次，最多晚半分钟；待审批的任务不会自动开始。")], [tr("今天的任务做不完怎么办？"), tr("不用处理，过了零点会自动递延到第二天；也可以在详情里主动递延，写明卡点、剩余工作和要挪到哪天。")], [tr("点「全部」和「待处理」有什么区别？"), tr("「待处理」只列还没完成的，「已完成」只列做完的，「全部」两者都列。")]],"faq"],
+    [tr('常见问题'),[[tr('到了时间任务没有变成「进行中」？'), tr('系统每半分钟检查一次，最多晚半分钟；待审批的任务不会自动开始。')], [tr('今天的任务做不完怎么办？'), tr('不用处理，过了零点会自动递延到第二天；也可以在详情里主动递延，写明卡点、剩余工作和要挪到哪天。')], [tr('点「全部」和「待处理」有什么区别？'), tr('「待处理」只列还没完成的，「已完成」只列做完的，「全部」两者都列。')]],"faq"],
   ]},
   {id:'calendar',title:tr('周视图'),icon:'layout-grid',demo:'defer',lead:tr('按周查看安排；没做完的任务会自己挪到下一天。'),parts:[
     [tr('翻周'),[tr('页面显示一周七天，左右箭头切到上一周或下一周，「本周」回到当前周。'),tr('每周从哪天开始由管理员在「系统设置 → 日程」里设定。')]],
     [tr('看某一天'),[tr('点某一天进入「日期详情」，列出这天所有任务；点「返回周视图」回来。'),tr('管理员可以在顶部切换只看某位成员。')]],
     [tr('自动递延'),[tr('当天没做完的任务，过了零点会在第二天生成一张新卡，原来那张标为「已递延」保留作记录。'),tr('新卡写明「由某日递延 · 第 N 次」，任务详情底部能看到整条递延链。'),tr('跨多天的任务只有过了结束日期才会递延；所属项目已结束的任务不再递延，标为已跳过。')],'list'],
-    [tr("例子"),[tr("周四 16:00 的「提交方案初稿」到晚上还没交。零点一过，周四那张变成「已递延」；周五多了一张同名卡片，写着「由周四递延 · 第 1 次」。周五仍没做完，周六那张就是「第 2 次」，详情底部能看到周四、周五、周六这条完整的链。")],"example"],
+    [tr('例子'),[tr('周四 16:00 的「提交方案初稿」到晚上还没交。零点一过，周四那张变成「已递延」；周五多了一张同名卡片，写着「由周四递延 · 第 1 次」。周五仍没做完，周六那张就是「第 2 次」，详情底部能看到周四、周五、周六这条完整的链。')],"example"],
     [tr('注意'),[tr('服务器停机几天后重新启动，会一次补上这些天的递延，不会漏。')],'note'],
   ]},
   {id:'tasks',title:tr('任务'),icon:'check',demo:'new-task',lead:tr('新建、执行、完成，以及修改、指派和打回。'),parts:[
     [tr('新建任务'),[tr('点顶栏「新建任务」（快捷键 N），或在项目页点「新建任务」。'),tr('选类型：项目任务（属于某个项目）、临时任务（不属于任何项目）、固定任务（按周期重复，见下一章）。'),tr('填写所属项目、任务名称、任务描述、指派给、安排日期、结束日期（跨多天时填写）、时间、预计时长和优先级。'),tr('规则组允许直接创建时按钮是「创建任务」，任务立即出现在对方日程里并通知对方；需要审批时按钮是「提交申请」，审批通过后才生效。')]],
-    [tr("新建任务的每一项"),[[tr("字段"), tr("说明")], [tr("类型"), tr("项目任务、临时任务或固定任务")], [tr("所属项目"), tr("项目任务必选，只列出你参与的项目")], [tr("任务名称"), tr("必填，最多 120 字")], [tr("任务描述"), tr("要交付什么、参考资料在哪里（可留空）")], [tr("指派给"), tr("谁来做这项任务，对方会收到通知")], [tr("安排日期 / 结束日期"), tr("哪天做；跨多天时填结束日期，过了结束日期才会递延")], [tr("时间 / 预计时长"), tr("几点开始、预计多少分钟；到点自动开始")], [tr("优先级"), tr("P0 最高，P1、P2 依次降低；P0 会出现在「P0 重要任务」筛选里")]],"table"],
+    [tr('新建任务的每一项'),[[tr('字段'), tr('说明')], [tr('类型'), tr('项目任务、临时任务或固定任务')], [tr('所属项目'), tr('项目任务必选，只列出你参与的项目')], [tr('任务名称'), tr('必填，最多 120 字')], [tr('任务描述'), tr('要交付什么、参考资料在哪里（可留空）')], [tr('指派给'), tr('谁来做这项任务，对方会收到通知')], [tr('安排日期 / 结束日期'), tr('哪天做；跨多天时填结束日期，过了结束日期才会递延')], [tr('时间 / 预计时长'), tr('几点开始、预计多少分钟；到点自动开始')], [tr('优先级'), tr('P0 最高，P1、P2 依次降低；P0 会出现在「P0 重要任务」筛选里')]],"table"],
     [tr('执行与完成'),[tr('到了安排的时间，任务自动从「待开始」变成「进行中」，也可以在详情里点「开始任务」。'),tr('做完后点「记录完成」，填写完成总结、实际耗时（分钟）和工作感受（顺利 / 一般 / 困难 / 阻塞）。'),tr('任务完成后直接结束，不需要审批；之后可以点「修改完成记录」更正。'),tr('合并了多期的固定任务，一次完成即可结清全部期次。')]],
     [tr('修改与指派'),[tr('管理员或有管理权限的任务安排人、项目 Owner 可以「直接调整任务」；执行人需要改时点「申请修改任务」，写明理由并等待审批。'),tr('有管理权限时，「调整任务指派」可以把任务换给别人，原负责人和新负责人都会收到通知。'),tr('项目 Owner 可以在项目任务列表里直接点「调整指派」。'),tr('「删除此任务」会把任务从日历移除，需要确认。')]],
     [tr('例子'),[tr('陈曦想把「官网首屏改版」的截止从周五改到下周一。她是执行人，于是点「申请修改任务」，写上「设计稿要等品牌确认」。审批人在收件箱里看到这条修改申请，点「同意修改」后，日期自动更新，陈曦收到通知。')],'example'],
     [tr('谁能用'),[tr('普通成员处理分给自己的任务；管理员和 superadmin 负责管理、审批与调度，不执行任务。'),tr('新建与修改是否需要审批，由「系统设置 → 成员与权限」里的规则组决定。')],'who'],
-    [tr("常见问题"),[[tr("为什么我看不到「新建任务」？"), tr("你所在规则组的临时任务和项目任务都设为「不允许」。项目 Owner 在自己的项目里始终可以新建。")], [tr("完成记录写错了能改吗？"), tr("能。打开任务详情点「修改完成记录」，总结、耗时和感受都可以改。")], [tr("任务被指派给了别人，我还能看到吗？"), tr("不在你的今日任务里了；如果你是项目 Owner，仍能在项目的任务标签里看到。")]],"faq"],
+    [tr('常见问题'),[[tr('为什么我看不到「新建任务」？'), tr('你所在规则组的临时任务和项目任务都设为「不允许」。项目 Owner 在自己的项目里始终可以新建。')], [tr('完成记录写错了能改吗？'), tr('能。打开任务详情点「修改完成记录」，总结、耗时和感受都可以改。')], [tr('任务被指派给了别人，我还能看到吗？'), tr('不在你的今日任务里了；如果你是项目 Owner，仍能在项目的任务标签里看到。')]],"faq"],
   ]},
   {id:'approval',title:tr('审批与打回'),icon:'inbox',demo:'approval',lead:tr('需要审批的申请怎么走，完成后的工作怎么退回补充。'),parts:[
     [tr('需要审批的事'),[tr('所在规则组设为「需要审批」时，新建项目、临时任务或项目任务都会先成为申请。'),tr('执行人修改任务（日期、内容等）需要审批人同意。'),tr('Owner 提交的结项需要管理员同意。'),tr('任务完成不需要审批。')],'list'],
-    [tr("三种创建方式"),[[tr("规则组设为"), tr("点按钮后")], [tr("直接创建"), tr("立刻生效，相关的人收到通知")], [tr("需要审批"), tr("先成为申请，审批人同意后才生效")], [tr("不允许"), tr("不显示对应的新建按钮")]],"table"],
+    [tr('三种创建方式'),[[tr('规则组设为'), tr('点按钮后')], [tr('直接创建'), tr('立刻生效，相关的人收到通知')], [tr('需要审批'), tr('先成为申请，审批人同意后才生效')], [tr('不允许'), tr('不显示对应的新建按钮')]],"table"],
     [tr('审批人怎么处理'),[tr('申请出现在审批人的收件箱，卡片上直接有「同意」「驳回」。'),tr('驳回时必须写原因，申请人会收到。'),tr('同意后，任务或项目立即生效，申请人收到结果通知。')]],
     [tr('打回'),[tr('Owner 对已完成的任务不满意时，在任务详情点「打回」，写明哪里还需要补充。'),tr('任务回到负责人的待办并排到今天，原因写在卡上，负责人收到通知。')],'steps'],
-    [tr("常见问题"),[[tr("申请被驳回了怎么办？"), tr("在收件箱里看驳回原因，按要求调整后重新提交一条新申请。")], [tr("谁可以打回？"), tr("项目任务由项目 Owner 或管理员打回；临时任务由派出它的人或管理员打回。")], [tr("什么时候不能打回？"), tr("项目已经结束或过了截止日期时不能打回；只有「已完成」的任务可以打回。")], [tr("没设置规则组时按什么来？"), tr("按「默认规则」：项目需要审批，临时任务直接创建，项目任务只有 Owner 能建。")]],"faq"],
+    [tr('常见问题'),[[tr('申请被驳回了怎么办？'), tr('在收件箱里看驳回原因，按要求调整后重新提交一条新申请。')], [tr('谁可以打回？'), tr('项目任务由项目 Owner 或管理员打回；临时任务由派出它的人或管理员打回。')], [tr('什么时候不能打回？'), tr('项目已经结束或过了截止日期时不能打回；只有「已完成」的任务可以打回。')], [tr('没设置规则组时按什么来？'), tr('按「默认规则」：项目需要审批，临时任务直接创建，项目任务只有 Owner 能建。')]],"faq"],
     [tr('注意'),[tr('审批和打回都会写进任务记录，任务详情底部可以看到谁在什么时候做了什么。')],'note'],
   ],extraDemo:'rework'},
   {id:'repeats',title:tr('固定任务'),icon:'repeat',demo:'repeat',lead:tr('每天、每周或每月都要做的事，定一次规则自动生成。'),parts:[
     [tr('制定规则'),[tr('在项目空间点「制定固定任务」，或新建任务时选「固定任务」。'),tr('所属项目可选，选「不挂项目」就是个人或团队的例行事项。'),tr('「安排给」可以多选，每人各生成一份。'),tr('周期可选：每天、工作日、每周（可设每 1–4 周一次和每周几执行）、每月（设执行日，月份天数不够时取最后一天）、指定日期。'),tr('再填时间、预计时长、优先级和可选的结束日期，点「保存固定任务」。')]],
-    [tr("周期怎么选"),[[tr("周期"), tr("适合"), tr("要再填")], [tr("每天"), tr("每日站会、日检"), tr("无")], [tr("工作日"), tr("只在周一到周五做的事"), tr("无")], [tr("每周"), tr("周会、周报"), tr("每 1–4 周一次，以及每周几")], [tr("每月"), tr("月报、对账"), tr("每月几号；当月没有这一天时取最后一天")], [tr("指定日期"), tr("不规律的几次"), tr("日期列表，用逗号分隔")]],"table"],
+    [tr('周期怎么选'),[[tr('周期'), tr('适合'), tr('要再填')], [tr('每天'), tr('每日站会、日检'), tr('无')], [tr('工作日'), tr('只在周一到周五做的事'), tr('无')], [tr('每周'), tr('周会、周报'), tr('每 1–4 周一次，以及每周几')], [tr('每月'), tr('月报、对账'), tr('每月几号；当月没有这一天时取最后一天')], [tr('指定日期'), tr('不规律的几次'), tr('日期列表，用逗号分隔')]],"table"],
     [tr('之后'),[tr('系统按规则预生成未来半年的任务，调度器每天继续补齐；可排期上限随今天滚动到两年后。'),tr('某一次不需要做时，在规则里点「挖空本次」跳过那一天。'),tr('停用规则后不再生成新的任务，已经生成的保留。')],'list'],
     [tr('递延合并'),[tr('「系统设置 → 日程 → 固定任务递延合并」开启时，同一条规则连续几期没做完会合成一张卡，标着「N 期」。'),tr('点一次「完成全部 N 期」即可全部结清；原始记录都保留。')],'list'],
     [tr('例子'),[tr('团队晨会定为每周一、三、五 09:30、15 分钟，安排给林默和周一。保存后两人的日程里都排上了之后半年的晨会；国庆那周的周三不开，就在规则里挖空那一天。')],'example'],
-    [tr("常见问题"),[[tr("「持续天数」是什么？"), tr("每一次任务跨几天，1 到 30。比如每月 1 号开始、持续 3 天的对账。")], [tr("挂在项目下有什么不同？"), tr("只能安排给项目成员，结束日期不会晚于项目截止日期。")], [tr("停用以后已有的任务会消失吗？"), tr("不会。停用只是不再生成新的任务。")]],"faq"],
+    [tr('常见问题'),[[tr('「持续天数」是什么？'), tr('每一次任务跨几天，1 到 30。比如每月 1 号开始、持续 3 天的对账。')], [tr('挂在项目下有什么不同？'), tr('只能安排给项目成员，结束日期不会晚于项目截止日期。')], [tr('停用以后已有的任务会消失吗？'), tr('不会。停用只是不再生成新的任务。')]],"faq"],
   ],extraDemo:'stack'},
   {id:'projects',title:tr('项目空间'),icon:'folder',demo:'tree',lead:tr('左边是目录，中间是项目，项目里是任务、会议和文件。'),parts:[
     [tr('目录'),[tr('「全部项目」列出你能看到的所有项目。'),tr('管理员可以点目录标题旁的 + 新建文件夹，点文件夹右侧的铅笔重命名或删除；删除文件夹不会删除里面的项目。'),tr('有权限的人可以拖动文件夹和项目调整顺序，把项目拖到文件夹上就放进去。'),tr('点项目左侧的箭头展开，能直接看到它的会议和文件；点会议打开会议，点文件下载。'),tr('选中的行有一块底色，换选时这块底色会滑到新的位置。目录调窄时只列文件夹和项目，收起时只剩图标。')],'list'],
     [tr('全部项目与文件夹页'),[tr('每个项目一张卡：状态、简介、任务完成进度、成员头像、截止日期和你在这个项目里的待办数。'),tr('右上角「排序」可以按目录顺序、名称、截止日期、完成度或最近创建排列。'),tr('点卡片进入项目。')],'list'],
     [tr('项目页'),[tr('顶部路径「全部项目 / 文件夹」可以点回上一层。'),tr('标题右侧是「新建任务」；「更多」里有项目设置、完成项目、退出项目和删除项目。'),tr('标题下面一行是状态、Owner、起止日期和完成进度。')],'list'],
     [tr('五个标签'),[tr('任务：项目的全部任务（协作者只看到分给自己的）；右上角选排序，选「手动」时 Owner 可以拖动调整顺序；下面单独列出固定任务规则。'),tr('会议：左边是会议列表，右边是打开的会议（见「会议」一章）。'),tr('文件：上传、下载、删除（见下）。'),tr('成员：Owner 和协作者各一行；Owner 可以填写每人的分工，离开输入框即保存；右侧是项目周期内每人进行中、已完成的任务数和工时；Owner 和管理员可以「添加协作者」或移出成员。'),tr('概况：立项、执行、结项三个阶段和日期，时间进度与任务进度，「放在文件夹」，以及项目背景。')],'list'],
-    [tr("在项目里谁能做什么"),[[tr("操作"), "Owner", tr("协作者"), tr("管理员")], [tr("看任务"), tr("全部"), tr("只看分给自己的"), tr("全部")], [tr("新建任务"), tr("可以"), tr("按所在规则组"), tr("可以")], [tr("新增会议"), tr("可以"), tr("只能查看"), tr("可以")], [tr("上传文件"), tr("可以"), tr("可以"), tr("可以")], [tr("删除文件"), tr("可以"), tr("只能删自己上传的"), tr("可以")], [tr("添加或移出协作者"), tr("可以"), tr("不可以"), tr("可以")], [tr("完成项目"), tr("提交结项报告"), tr("不可以"), tr("直接完成或审批")]],"table"],
+    [tr('在项目里谁能做什么'),[[tr('操作'), "Owner", tr('协作者'), tr('管理员')], [tr('看任务'), tr('全部'), tr('只看分给自己的'), tr('全部')], [tr('新建任务'), tr('可以'), tr('按所在规则组'), tr('可以')], [tr('新增会议'), tr('可以'), tr('只能查看'), tr('可以')], [tr('上传文件'), tr('可以'), tr('可以'), tr('可以')], [tr('删除文件'), tr('可以'), tr('只能删自己上传的'), tr('可以')], [tr('添加或移出协作者'), tr('可以'), tr('不可以'), tr('可以')], [tr('完成项目'), tr('提交结项报告'), tr('不可以'), tr('直接完成或审批')]],"table"],
     [tr('注意'),[tr('切到另一个项目时，停留在同一个标签：看完一个项目的文件，点下一个项目就直接是它的文件。')],'note'],
-    [tr("常见问题"),[[tr("为什么项目列表里少了一个项目？"), tr("已结项、已归档或过了截止日期的项目不在列表里；结项的项目在成果库和「归档文件」里。")], [tr("拖不动文件夹和项目？"), tr("只有管理员和有管理权限的人能调整目录顺序。")]],"faq"],
+    [tr('常见问题'),[[tr('为什么项目列表里少了一个项目？'), tr('已结项、已归档或过了截止日期的项目不在列表里；结项的项目在成果库和「归档文件」里。')], [tr('拖不动文件夹和项目？'), tr('只有管理员和有管理权限的人能调整目录顺序。')]],"faq"],
   ]},
   {id:'files',title:tr('项目文件'),icon:'file',demo:'upload',lead:tr('把项目资料放在项目里，所有成员都能取用。'),parts:[
     [tr('上传'),[tr('在项目的「文件」标签点「新增文件 → 上传文件」，或直接把文件从电脑拖到列表上。'),tr('单个文件不超过 20MB，可以一次选多个。')]],
-    [tr("预览"),[tr("图片、PDF、文本、CSV、JSON 和日志文件旁边有「预览」，在新标签页里直接打开，不用下载。"), tr("Markdown（.md）文件点开就是排版好的样子；上传者、项目 Owner 和管理员可以切到「编辑」修改后保存。")],"list"],
+    [tr('预览'),[tr('图片、PDF、文本、CSV、JSON 和日志文件旁边有「预览」，在新标签页里直接打开，不用下载。'), tr('Markdown（.md）文件点开就是排版好的样子；上传者、项目 Owner 和管理员可以切到「编辑」修改后保存。')],"list"],
     [tr('打开、下载与删除'),[tr('点文件名或左侧目录打开文件详情，Markdown 文件进入编辑器；点「下载」保存文件。'),tr('上传者、项目 Owner 和管理员可在列表右侧或详情底部删除文件；逾期项目仍可管理，结项和归档项目只读。删除前需确认，无法恢复。')],'list'],
     [tr('项目结束以后'),[tr('项目结项后，文件和会议仍能在项目目录的「归档文件」里只读查看和下载。')],'list'],
-    [tr("常见问题"),[[tr("文件太大传不上去？"), tr("单个文件上限 20MB，可以压缩或拆分后再传。")], [tr("误删了文件能找回吗？"), tr("不能，删除前请确认。")]],"faq"],
+    [tr('常见问题'),[[tr('文件太大传不上去？'), tr('单个文件上限 20MB，可以压缩或拆分后再传。')], [tr('误删了文件能找回吗？'), tr('不能，删除前请确认。')]],"faq"],
   ]},
   {id:'project-life',title:tr('项目的一生'),icon:'gantt',demo:'project-life',lead:tr('从申请、审批、协作到结项和归档。'),parts:[
     [tr('新建或申请'),[tr('点「新建项目」或「申请项目」，填写项目名称、项目描述、开始日期、截止日期（长期项目可留空）、Owner 和协作者。'),tr('规则组允许直接创建时项目立即生效；需要审批时提交给管理员，审批通过后才出现在项目空间。'),tr('添加协作者后会直接加入项目并收到通知，无需接受邀请。')]],
@@ -4402,44 +4402,44 @@ const GUIDE=[
     [tr('新增会议'),[tr('在项目页的「会议」标签点「新增会议」，或在「文件」标签的「新增文件」里选「新增会议」。'),tr('填写会议名称、安排时间、参会人（用逗号或顿号分隔）和议程。')]],
     [tr('记录原稿'),[tr('点「开始实时录入」用麦克风边说边转成文字，再点一次停止；浏览器不支持时可以直接粘贴转录原稿。'),tr('原稿会自动保存，离开前有未保存的修改会提醒你。')]],
     [tr('生成纪要'),[tr('原稿有内容后点「根据模板生成」，AI 按「系统设置 → 会议纪要提示词」整理出会议结论、待办和风险。'),tr('生成的纪要显示在原稿下方，随会议一起保存，之后可以重新生成。')]],
-    [tr("纪要编辑器"),[tr("纪要支持 Markdown：标题、加粗、斜体、列表、待办、引用、代码和链接，工具栏一键插入。"), tr("「编辑」和「预览」两个标签来回切换，保存会议时一起保存。项目背景也用同一个编辑器。")],"list"],
+    [tr('纪要编辑器'),[tr('纪要支持 Markdown：标题、加粗、斜体、列表、待办、引用、代码和链接，工具栏一键插入。'), tr('「编辑」和「预览」两个标签来回切换，保存会议时一起保存。项目背景也用同一个编辑器。')],"list"],
     [tr('删除会议'),[tr('会议创建者、项目 Owner 和管理员可点会议行右侧的「删除」，或打开会议后点底部的「删除会议」。'),tr('确认后原始转录和纪要一起删除；项目结项或归档后只读。')],'list'],
     [tr('谁能用'),[tr('只有项目 Owner 和管理员可以新增会议；项目成员都能查看。'),tr('生成纪要需要管理员先在「系统设置 → AI 接入与模型」配置模型。')],'who'],
-    [tr("常见问题"),[[tr("点了「开始实时录入」没反应？"), tr("浏览器需要允许使用麦克风；不支持时可以把别处的转录原稿直接粘贴进来。")], [tr("生成的纪要不满意？"), tr("可以直接在编辑器里改，或修改原稿后重新生成；整体格式由「会议纪要提示词」决定。")]],"faq"],
+    [tr('常见问题'),[[tr('点了「开始实时录入」没反应？'), tr('浏览器需要允许使用麦克风；不支持时可以把别处的转录原稿直接粘贴进来。')], [tr('生成的纪要不满意？'), tr('可以直接在编辑器里改，或修改原稿后重新生成；整体格式由「会议纪要提示词」决定。')]],"faq"],
   ]},
   {id:'timeline',title:tr('项目时间轴'),icon:'gantt',demo:'timeline',lead:tr('所有项目在时间上的排布。'),parts:[
     [tr('怎么看'),[tr('每个项目一条横条，从开始日期到截止日期；没有截止日期的显示为长期。'),tr('左右箭头翻看前后时段，「今天」回到当前。'),tr('日期有问题的项目会标出「日期待修正」，提醒 Owner 修改起止日期。'),tr('右上角可以直接新建项目。')],'list'],
-    [tr("横条的样子"),[[tr("样子"), tr("意思")], [tr("实心横条"), tr("有开始和截止日期的项目")], [tr("右端渐隐、画到边缘"), tr("没有截止日期的长期项目")], [tr("虚线框加「日期待修正」"), tr("起止日期有问题，需要 Owner 修改")], [tr("竖线"), tr("今天")]],"table"],
+    [tr('横条的样子'),[[tr('样子'), tr('意思')], [tr('实心横条'), tr('有开始和截止日期的项目')], [tr('右端渐隐、画到边缘'), tr('没有截止日期的长期项目')], [tr('虚线框加「日期待修正」'), tr('起止日期有问题，需要 Owner 修改')], [tr('竖线'), tr('今天')]],"table"],
   ]},
   {id:'inbox',title:tr('收件箱'),icon:'inbox',demo:'inbox',lead:tr('所有通知和待你处理的申请。'),parts:[
     [tr('会收到什么'),[tr('任务指派、任务自动开始、任务申请、修改申请、项目申请、协作者加入通知、项目完成审批、沟通区里 @ 到你的消息等。'),tr('需要你处理的申请上直接有按钮：同意创建 / 驳回申请、同意修改、同意完成、去沟通区。'),tr('驳回时要写原因，对方会收到。')],'list'],
     [tr('整理'),[tr('点「全部标为已读」清掉未读。'),tr('点「管理」进入选择模式，勾选后「删除所选」。')]],
-    [tr("常见问题"),[[tr("同意或驳回之后还能改吗？"), tr("不能，处理结果会通知对方；如需更改，请对方重新申请。")], [tr("删掉通知会影响任务吗？"), tr("不会，只是从收件箱里移除这条提醒。")]],"faq"],
+    [tr('常见问题'),[[tr('同意或驳回之后还能改吗？'), tr('不能，处理结果会通知对方；如需更改，请对方重新申请。')], [tr('删掉通知会影响任务吗？'), tr('不会，只是从收件箱里移除这条提醒。')]],"faq"],
     [tr('注意'),[tr('已读的普通通知只保留最近 200 条在页面里；未读和待处理的申请不受影响。')],'note'],
   ]},
   {id:'chat',title:tr('沟通区'),icon:'chat',demo:'chat',lead:tr('团队和各项目的聊天频道。'),parts:[
     [tr('频道'),[tr('左侧列出你能进入的频道：「沟通」「闲聊」两个团队频道，以及你参与的每个项目。'),tr('有未读消息的频道显示未读数；顶栏的沟通区图标出现红点。')],'list'],
     [tr('发消息'),[tr('在底部输入后点「发送」，单条不超过 1000 字。'),tr('输入 @ 选择成员，对方会收到通知；@所有人 会通知频道里的全体成员。')]],
     [tr('成员与在线'),[tr('右侧显示频道成员，以及谁在线、最后活跃时间。')],'list'],
-    [tr("历史消息"),[tr("频道先显示最近的消息，滚到最上面点「加载更早的消息」继续往前翻。")],"list"],
+    [tr('历史消息'),[tr('频道先显示最近的消息，滚到最上面点「加载更早的消息」继续往前翻。')],"list"],
     [tr('注意'),[tr('项目结项后，它的频道变为只读，沟通记录在成果库里查看；项目被删除时频道消息一并删除。')],'note'],
   ]},
   {id:'archive',title:tr('档案室'),icon:'archive',demo:'archive',lead:tr('每天的个人档案，以及团队日报和周报。'),parts:[
     [tr('我的档案'),[tr('普通成员点档案室右上角的今日按钮，打开今天的档案。'),tr('档案分四栏：今日完成、未完成与阻塞、明日计划和随记；系统会先把当天的工作日志整理进去，你补充后点「保存」。'),tr('档案只有你自己和管理员能看到。'),tr('按月份翻看以前的档案，已记录的日子有标记。')]],
     [tr('团队日报与周报'),[tr('系统每天自动汇总团队日报：完成任务数、完成工时、各项目进展（Owner 汇报或系统汇总）和成员总结。'),tr('管理员可以打开任意一天的日报修改，修改过的会标「已改」。'),tr('周报同时记录本周完成的项目和任务，任务带完成总结与反馈；项目未结项、没有所属项目的任务也会纳入。未完成部分按项目整理，临时待办单列。')]],
     [tr('自动补报'),[tr('开启「系统设置 → 日报与补报 → 自动补报」后，到点时前一天没交项目日报的项目会自动汇总成一份补报，交给 Owner 确认。')]],
-    [tr("常见问题"),[[tr("档案没有保存会丢吗？"), tr("系统整理的部分会保留；你补充的内容需要点「保存」。")], [tr("周报从哪天算到哪天？"), tr("按「系统设置 → 日程」里设的每周开始日计算。")]],"faq"],
+    [tr('常见问题'),[[tr('档案没有保存会丢吗？'), tr('系统整理的部分会保留；你补充的内容需要点「保存」。')], [tr('周报从哪天算到哪天？'), tr('按「系统设置 → 日程」里设的每周开始日计算。')]],"faq"],
   ]},
   {id:'achievements',title:tr('成果库'),icon:'award',demo:'achievements',lead:tr('已结项项目的完整档案，仅管理员可见。'),parts:[
     [tr('内容'),[tr('顶部统计已完成项目数和累计完成的子任务数。'),tr('每个项目一张卡：Owner、结项时间、任务完成情况、生命周期（创建、审批启动、提交结项、完成）和结项报告。'),tr('可以从卡片进入项目文件、沟通记录和项目详情。')],'list'],
-    [tr("常见问题"),[[tr("项目怎样进入成果库？"), tr("Owner 提交结项报告并经管理员同意，或管理员直接完成项目。")], [tr("成果库里的项目还能改吗？"), tr("项目、文件和沟通记录都只读，用于查阅和复盘。")]],"faq"],
+    [tr('常见问题'),[[tr('项目怎样进入成果库？'), tr('Owner 提交结项报告并经管理员同意，或管理员直接完成项目。')], [tr('成果库里的项目还能改吗？'), tr('项目、文件和沟通记录都只读，用于查阅和复盘。')]],"faq"],
   ]},
   {id:'assistant',title:tr('AI 助手'),icon:'sparkles',demo:'assistant',lead:tr('用自然语言查询、规划和安排工作。'),parts:[
     [tr('打开与提问'),[tr('点顶栏「AI 助手」打开右侧面板，直接输入问题，比如「今天有哪些任务要交」「团队这周的负载怎么样」。'),tr('点麦克风可以语音输入，再点一次结束并转成文字。'),tr('「对话记录」可以回到以前的对话；生成中可以点「停止」。')]],
     [tr('规划模式'),[tr('点输入框旁的规划按钮，用一句话说要安排的事，比如「下周把季度复盘做完：整理数据、出初稿、找人评审」。'),tr('助手会起草创建、修改或删除的卡片；你逐张检查、修改，接受或拒绝，确认前不会改动任何数据。')]],
     [tr('能做到哪一步'),[tr('每个人的助手权限由规则组决定：关闭、查询与规划，或可代为操作。'),tr('可代为操作时，助手会一步步执行并在每步后核对结果；遇到需要你确认的操作会停下来等「确认执行」。'),tr('面板顶部显示当前模型；管理员配置了多个可选模型时可以切换。还没配置时，管理员可以去「系统设置 → AI 接入与模型」配置。')],'list'],
     [tr('注意'),[tr('助手只能看到你本来就能看到的项目和任务；起草的卡片若缺少信息，会标出需要你补充的地方，不会擅自编造负责人。')],'note'],
-    [tr("常见问题"),[[tr("为什么助手说没有权限？"), tr("你所在规则组的助手权限是「关闭」或「查询与规划」，它不能替你改数据。")], [tr("规划的卡片会直接生效吗？"), tr("不会。每张卡片都要你点接受，拒绝的不会留下任何改动。")]],"faq"],
+    [tr('常见问题'),[[tr('为什么助手说没有权限？'), tr('你所在规则组的助手权限是「关闭」或「查询与规划」，它不能替你改数据。')], [tr('规划的卡片会直接生效吗？'), tr('不会。每张卡片都要你点接受，拒绝的不会留下任何改动。')]],"faq"],
   ]},
   {id:'widget',title:tr('桌面小组件'),icon:'clock',demo:'widget',lead:tr('悬浮在桌面上的今日待办和番茄钟。'),parts:[
     [tr('打开'),[tr('点顶栏的小组件图标，会弹出一个始终在最前的小窗口（需要较新版本的 Chrome 或 Edge）。')]],
@@ -4452,7 +4452,7 @@ const GUIDE=[
   {id:'accounts',title:tr('账户管理'),icon:'users',demo:'accounts',lead:tr('管理员可查看账户列表；添加和维护账户仅限 superadmin。'),parts:[
     [tr('添加账户'),[tr('superadmin 点「添加账户」，填写账户名、中文名（可留空）、初始密码和权限组。')]],
     [tr('维护'),[tr('superadmin 可以停用 / 启用账户、重置密码、设置中文名，或调整权限组（superadmin、管理员、普通用户）。'),tr('superadmin 点「管理」可以多选账户批量操作；管理员可查看账户列表，但不能维护账户。')],'list'],
-    [tr("三种权限组"),[[tr("权限组"), tr("适合")], ["superadmin", tr("系统所有者，通常只有一位")], [tr("管理员"), tr("负责审批和项目管理，可查看账户列表")], [tr("普通用户"), tr("团队成员，按规则组新建项目和任务")]],"table"],
+    [tr('三种权限组'),[[tr('权限组'), tr('适合')], ["superadmin", tr('系统所有者，通常只有一位')], [tr('管理员'), tr('负责审批和项目管理，可查看账户列表')], [tr('普通用户'), tr('团队成员，按规则组新建项目和任务')]],"table"],
     [tr('注意'),[tr('删除账户仅限 superadmin，且不可撤销，需要输入账户名确认；仍负责进行中项目或有未完成任务的账户不能删除，要先转交。')],'note'],
   ]},
   {id:'settings',title:tr('系统设置'),icon:'settings',demo:'rules',lead:tr('对全体成员生效的规则，仅管理员可见。'),parts:[
@@ -4466,7 +4466,7 @@ const GUIDE=[
   {id:'automation',title:tr('系统自动完成的事'),icon:'clock',demo:'automation',lead:tr('不需要操作，但值得知道的后台规则。'),parts:[
     [tr('每半分钟'),[tr('到点的任务自动开始，并通知项目 Owner。'),tr('按固定任务规则补齐之后的任务。')],'list'],
     [tr('每天'),[tr('没做完的任务递延到下一天，保留递延链。'),tr('23:30 为每位成员整理当天档案；到补报时间生成团队日报，开启自动补报时为没交日报的项目生成补报。')],'list'],
-    [tr("时间表"),[[tr("时间"), tr("系统做的事")], [tr("每半分钟"), tr("到点的任务开始；固定任务补齐")], ["23:30", tr("整理每位成员的当天档案")], [tr("零点过后"), tr("没做完的任务递延到第二天")], [tr("补报时间"), tr("汇总团队日报；开启自动补报时生成补报")]],"table"],
+    [tr('时间表'),[[tr('时间'), tr('系统做的事')], [tr('每半分钟'), tr('到点的任务开始；固定任务补齐')], ["23:30", tr('整理每位成员的当天档案')], [tr('零点过后'), tr('没做完的任务递延到第二天')], [tr('补报时间'), tr('汇总团队日报；开启自动补报时生成补报')]],"table"],
     [tr('停机之后'),[tr('服务器停了几天再启动，会一次补上这些天的递延、档案和日报，不会重复也不会漏。')],'note'],
   ]},
 ];
@@ -4509,7 +4509,7 @@ const TOUR=[
   {ch:tr('今天'),view:'today',target:'.quick-tabs [data-filter="open"]',done:()=>UI.filter==='open',try:tr('点「待处理」，列表只留下还没做完的'),title:tr('全部 · 待处理 · 已完成'),body:tr('这三个标签切换下面列表的范围，上面的今日进度按已完成的任务计算。')},
   {ch:tr('今天'),view:'today',prep:()=>{const t=myOpenTask();if(t&&$('#taskDrawer').classList.contains('hidden'))openDrawer(t.id)},leave:()=>closeDrawer(),
     target:'#taskDrawer .drawer-actions',demo:'task-life',title:tr('任务详情'),
-    body:()=>tr("点任何一张任务卡都会打开这样的详情，这是你的「{0}」。到点自动开始；做完点「记录完成」，写一句总结和实际耗时。完成不需要审批。",myOpenTask()?.name||tr('任务'))},
+    body:()=>tr('点任何一张任务卡都会打开这样的详情，这是你的「{0}」。到点自动开始；做完点「记录完成」，写一句总结和实际耗时。完成不需要审批。',myOpenTask()?.name||tr('任务'))},
   {ch:tr('今天'),target:'.sidebar-section [data-filter="inprogress"]',done:()=>UI.filter==='inprogress',try:tr('点「进行中」，只看正在做的任务'),title:tr('快捷筛选'),body:tr('P0 重要任务、进行中、已递延：点一下跳到今日任务，只列出这一类；再点一次回到全部。')},
   {ch:tr('周视图'),view:'calendar',target:'#weekCarousel',demo:'defer',title:tr('一周的安排'),body:tr('七天一列，点某一天看当天的全部任务。当天没做完的，过了零点自动递延到第二天，卡片上写着「由某日递延 · 第 N 次」。')},
   {ch:tr('周视图'),view:'calendar',target:'#nextWeekBtn',done:()=>UI.selectedWeek===tour.trialWeek+1,try:tr('点右边的箭头，翻到下一周'),title:tr('翻周'),body:tr('左右箭头前后翻一周，「本周」回到今天所在的这一周。')},
@@ -4648,7 +4648,7 @@ function tourShow(i,dir){
   card.innerHTML=`<div class="tour-chapters">${chapters.map(c=>`<button type="button" data-tour-ch="${escapeHTML(c)}"${c===step.ch?' class="is-on" aria-current="step"':''}>${escapeHTML(c)}</button>`).join('')}</div>`
     +`<div class="tour-progress" aria-hidden="true"><i style="width:${((i+1)/tour.steps.length*100).toFixed(1)}%"></i></div>`
     +`<h3 id="tourTitle">${escapeHTML(step.title)}</h3><p>${tourText(typeof step.body==='function'?step.body():step.body)}</p>`
-    +(tour.try?`<div class="tour-try">${icon('check')}<span><b>${tr("试一试")}</b>${escapeHTML(step.try)}</span></div>`:'')
+    +(tour.try?`<div class="tour-try">${icon('check')}<span><b>${tr('试一试')}</b>${escapeHTML(step.try)}</span></div>`:'')
     +(step.demo?guideDemoHTML(step.demo).replace(/<button type="button" class="text-btn demo-play">[^<]*<\/button>/,''):'')
     +`<div class="tour-foot"><span class="tour-count">${i+1} / ${tour.steps.length}</span>`
     +`${last?'':tr('<button type="button" class="text-btn tour-skip">跳过</button>')}<span class="tour-gap"></span>`
@@ -4758,7 +4758,7 @@ function scheduleTasks(includeHistory){
 /* 人力 numbers cover a project's own dates; one without an end counts only the
    last week and the coming one, not its whole open-ended history. */
 function loadWindow(p){return p?.end?[p.start||p.end,p.end]:[add(S.today,-6),add(S.today,7)]}
-function loadWindowLabel(p){const [start,end]=loadWindow(p);return p?.end?tr('项目周期内'):tr("近两周（{0}–{1}）",fmt(start),fmt(end))}
+function loadWindowLabel(p){const [start,end]=loadWindow(p);return p?.end?tr('项目周期内'):tr('近两周（{0}–{1}）',fmt(start),fmt(end))}
 /* What someone carries over [start, end]: every task touching those days, less
    what was skipped or handed on by a deferral. */
 function memberLoad(id,[start,end],tasks=S.tasks){
@@ -4777,11 +4777,11 @@ function renderScheduleScope(){
   select.value=UI.member;
   const dates=UI.view==='calendar'?week(UI.selectedWeek):[UI.view==='dayDetail'?UI.detailDate:displayDay()];
   const tasks=scheduleTasks().filter(t=>dates.some(d=>taskActiveOn(t,d)));
-  $('#scheduleScopeTitle').textContent=UI.member==='all'?tr('全部成员的安排'):tr("{0} 的安排",UI.member);
-  $('#scheduleScopeHint').textContent=tr("{0} {1} 项任务 · {2} 人有安排",UI.view==='calendar'?tr('当前周'):tr('当日'),tasks.length,new Set(tasks.map(t=>t.assignee)).size);
+  $('#scheduleScopeTitle').textContent=UI.member==='all'?tr('全部成员的安排'):tr('{0} 的安排',UI.member);
+  $('#scheduleScopeHint').textContent=tr('{0} {1} 项任务 · {2} 人有安排',UI.view==='calendar'?tr('当前周'):tr('当日'),tasks.length,new Set(tasks.map(t=>t.assignee)).size);
   select.onchange=()=>{UI.member=select.value;renderStats();switchView(UI.view)};
 }
-const projectStatus=p=>projectOverdue(p)?tr("已逾期 {0} 天",projectOverdue(p)):({active:tr('进行中'),pending:tr('待审批'),pending_completion:tr('完成待审批'),rejected:tr('已驳回'),paused:tr('已暂停'),done:tr('已完成'),archived:tr('已归档')}[p.status]||tr('未设置'));
+const projectStatus=p=>projectOverdue(p)?tr('已逾期 {0} 天',projectOverdue(p)):({active:tr('进行中'),pending:tr('待审批'),pending_completion:tr('完成待审批'),rejected:tr('已驳回'),paused:tr('已暂停'),done:tr('已完成'),archived:tr('已归档')}[p.status]||tr('未设置'));
 /* Passing the end date does not close a project; it shows as overdue until it is completed or moved. */
 const isProjectHidden=p=>Boolean(p&&(p.status==='done'||p.status==='archived'));
 const projectOverdue=p=>p?.status==='active'&&p.end&&S.today&&p.end<S.today?daysCount(p.end,S.today):0;
@@ -4809,12 +4809,12 @@ function renderAchievements(){
   const admin=Boolean(S.user?.admin),grid=$('#achievementGrid'),empty=$('#achievementEmpty'),stats=$('#achievementStats');
   if(!admin){if(grid)grid.innerHTML='';return}
   const projects=completedProjects();
-  if(stats){const totalTasks=projects.reduce((n,p)=>n+projectTasks(p).length,0),doneTasks=projects.reduce((n,p)=>n+projectTasks(p).filter(t=>t.status==='done').length,0);stats.innerHTML=`<div class="achievement-stat"><span>${tr("已完成项目")}</span><strong>${projects.length}</strong></div><div class="achievement-stat"><span>${tr("累计完成子任务")}</span><strong>${doneTasks}</strong><small>${tr("共 {0} 项",totalTasks)}</small></div><div class="achievement-stat"><span>${tr("最近结项")}</span><strong>${projects[0]?escapeHTML(String(projects[0].completedAt||projects[0].end||'').slice(0,10)):'—'}</strong>${projects[0]?`<small>${escapeHTML(projects[0].name)}</small>`:''}</div>`}
+  if(stats){const totalTasks=projects.reduce((n,p)=>n+projectTasks(p).length,0),doneTasks=projects.reduce((n,p)=>n+projectTasks(p).filter(t=>t.status==='done').length,0);stats.innerHTML=`<div class="achievement-stat"><span>${tr('已完成项目')}</span><strong>${projects.length}</strong></div><div class="achievement-stat"><span>${tr('累计完成子任务')}</span><strong>${doneTasks}</strong><small>${tr('共 {0} 项',totalTasks)}</small></div><div class="achievement-stat"><span>${tr('最近结项')}</span><strong>${projects[0]?escapeHTML(String(projects[0].completedAt||projects[0].end||'').slice(0,10)):'—'}</strong>${projects[0]?`<small>${escapeHTML(projects[0].name)}</small>`:''}</div>`}
   if(empty)empty.classList.toggle('hidden',projects.length>0);
   if(!grid)return;
   grid.innerHTML=projects.map(p=>{
     const tasks=sortTasks(projectTasks(p)),done=tasks.filter(t=>t.status==='done').length,stages=achievementLifecycle(p,tasks);
-    return `<article class="achievement-card" data-project="${escapeHTML(p.id)}"><div class="achievement-card-head"><div><span class="achievement-kicker">${tr("已归档成果")}</span><h2>${escapeHTML(p.name)}</h2><p>${escapeHTML(p.desc||tr('暂无项目描述'))}</p></div><span class="achievement-status">${projectStatus(p)}</span></div><div class="achievement-meta"><span>Owner · <b>${escapeHTML(p.owner?nameOf(p.owner):'—')}</b></span><span>${tr("任务完成 ·")} <b>${done}/${tasks.length}</b></span><span>${tr("完成于 ·")} <b>${escapeHTML(String(p.completedAt||p.end||'—').slice(0,10))}</b></span></div><div class="achievement-actions">${(S.fileArchives||[]).some(x=>x.id===p.id)?`<button class="ghost-btn achievement-files" data-project="${escapeHTML(p.id)}">${tr("项目文件")}</button>`:''}<button class="ghost-btn open-channel-archive" data-project="${escapeHTML(p.id)}" data-name="${escapeHTML(p.name)}">${tr("沟通记录")}</button></div><ol class="achievement-lifecycle">${stages.map((s,i)=>`<li class="${s.at?'is-complete':''}"><i></i><span><b>${escapeHTML(s.label)}</b><small>${escapeHTML(s.at||tr('未记录'))}${s.meta?` · ${escapeHTML(s.meta)}`:''}</small></span>${i<stages.length-1?'<em></em>':''}</li>`).join('')}</ol>${p.completionReport?`<div class="achievement-report"><span>${tr("结项报告")}</span><p>${escapeHTML(p.completionReport)}</p></div>`:''}<div class="achievement-actions"><button class="secondary-btn achievement-open" data-project="${escapeHTML(p.id)}">${tr("查看项目详情")}</button></div></article>`;
+    return `<article class="achievement-card" data-project="${escapeHTML(p.id)}"><div class="achievement-card-head"><div><span class="achievement-kicker">${tr('已归档成果')}</span><h2>${escapeHTML(p.name)}</h2><p>${escapeHTML(p.desc||tr('暂无项目描述'))}</p></div><span class="achievement-status">${projectStatus(p)}</span></div><div class="achievement-meta"><span>Owner · <b>${escapeHTML(p.owner?nameOf(p.owner):'—')}</b></span><span>${tr('任务完成 ·')} <b>${done}/${tasks.length}</b></span><span>${tr('完成于 ·')} <b>${escapeHTML(String(p.completedAt||p.end||'—').slice(0,10))}</b></span></div><div class="achievement-actions">${(S.fileArchives||[]).some(x=>x.id===p.id)?`<button class="ghost-btn achievement-files" data-project="${escapeHTML(p.id)}">${tr('项目文件')}</button>`:''}<button class="ghost-btn open-channel-archive" data-project="${escapeHTML(p.id)}" data-name="${escapeHTML(p.name)}">${tr('沟通记录')}</button></div><ol class="achievement-lifecycle">${stages.map((s,i)=>`<li class="${s.at?'is-complete':''}"><i></i><span><b>${escapeHTML(s.label)}</b><small>${escapeHTML(s.at||tr('未记录'))}${s.meta?` · ${escapeHTML(s.meta)}`:''}</small></span>${i<stages.length-1?'<em></em>':''}</li>`).join('')}</ol>${p.completionReport?`<div class="achievement-report"><span>${tr('结项报告')}</span><p>${escapeHTML(p.completionReport)}</p></div>`:''}<div class="achievement-actions"><button class="secondary-btn achievement-open" data-project="${escapeHTML(p.id)}">${tr('查看项目详情')}</button></div></article>`;
   }).join('');
   $$('#achievementGrid .achievement-open').forEach(b=>b.onclick=()=>openWorkLogDetail('',b.dataset.project,'project'));
   $$('#achievementGrid .achievement-files').forEach(b=>b.onclick=()=>openProjectSpace(b.dataset.project));
@@ -4831,13 +4831,13 @@ function openWorkLogDetail(taskId,projectId,kind){
   if(!p&&(S.fileArchives||[]).some(x=>x.id===projectId))return openProjectSpace(projectId);
   if(!p){toast(tr('这个项目已不在当前数据中'));return}
   const tasks=sortTasks(projectTasks(p)),done=tasks.filter(t=>t.status==='done').length;
-  openModal(`<div class="eyebrow">${tr("已归档成果")}</div><h2>${escapeHTML(p.name)}</h2>${p.desc?`<p>${escapeHTML(p.desc)}</p>`:''}`
-    +`<div class="detail-grid"><div><span>${tr("项目 Owner")}</span><strong>${escapeHTML(p.owner?nameOf(p.owner):'—')}</strong></div>`
-    +`<div><span>${tr("项目状态")}</span><strong>${projectStatus(p)}</strong></div><div><span>${tr("任务完成")}</span><strong>${done}/${tasks.length}</strong></div>`
-    +`<div><span>${tr("完成于")}</span><strong>${escapeHTML(String(p.completedAt||p.end||'—').slice(0,10))}</strong></div></div>`
-    +`${p.completionReport?`<div class="completion-summary"><span>${tr("结项报告")}</span><p>${escapeHTML(p.completionReport)}</p></div>`:''}`
+  openModal(`<div class="eyebrow">${tr('已归档成果')}</div><h2>${escapeHTML(p.name)}</h2>${p.desc?`<p>${escapeHTML(p.desc)}</p>`:''}`
+    +`<div class="detail-grid"><div><span>${tr('项目 Owner')}</span><strong>${escapeHTML(p.owner?nameOf(p.owner):'—')}</strong></div>`
+    +`<div><span>${tr('项目状态')}</span><strong>${projectStatus(p)}</strong></div><div><span>${tr('任务完成')}</span><strong>${done}/${tasks.length}</strong></div>`
+    +`<div><span>${tr('完成于')}</span><strong>${escapeHTML(String(p.completedAt||p.end||'—').slice(0,10))}</strong></div></div>`
+    +`${p.completionReport?`<div class="completion-summary"><span>${tr('结项报告')}</span><p>${escapeHTML(p.completionReport)}</p></div>`:''}`
     +`${tasks.length?`<div class="detail-grid">${tasks.map(t=>`<div><span>${escapeHTML(t.name)}</span><strong>${escapeHTML(t.assignee?nameOf(t.assignee):'—')} · ${status(t)[1]}</strong></div>`).join('')}</div>`:''}`
-    +`<div class="modal-footer"><button class="secondary-btn" id="closeWorkLogDetail">${tr("关闭")}</button></div>`);
+    +`<div class="modal-footer"><button class="secondary-btn" id="closeWorkLogDetail">${tr('关闭')}</button></div>`);
   const close=$('#closeWorkLogDetail');
   close.onclick=closeModal;
   close.focus?.();
@@ -4865,7 +4865,7 @@ function renderTimeline(){
   const model=timelineModel(S.projects,S.today),horizon=dateNumber(DATE_HORIZON);
   if(horizon!==null&&horizon>model.end){model.end=horizon;model.rows=model.rows.map(r=>r.openEnded?({...r,span:horizon-r.start+1}):r)}
   const dayWidth=32,scroll=$('#timelineScroll'),grid=$('#timelineGrid');
-  $('#timelineProjectCount').textContent=tr("{0} 个项目",model.rows.length);
+  $('#timelineProjectCount').textContent=tr('{0} 个项目',model.rows.length);
   $('#timelineEmpty').classList.toggle('hidden',model.rows.length>0);
   scroll.classList.toggle('hidden',model.rows.length===0);
   
@@ -4875,7 +4875,7 @@ function renderTimeline(){
   const months=[];
   for(const d of days){const last=months.at(-1);if(last?.month===d.month)last.count++;else months.push({month:d.month,offset:d.n-model.start,count:1})}
   const todayLine=`<i class="gantt-today-line" style="left:${(model.today-model.start+.5)*dayWidth}px" aria-hidden="true"></i>`;
-  grid.innerHTML=`<div class="gantt-header"><div class="gantt-corner"><strong>${tr("项目 / Owner")}</strong></div><div class="gantt-axis"><div class="gantt-months">${months.map(m=>`<span style="left:${m.offset*dayWidth}px;width:${m.count*dayWidth}px"><b>${monthLabel(m.month)}</b></span>`).join('')}</div><div class="gantt-dates">${days.map(d=>`<div class="gantt-date ${[0,6].includes(d.dow)?'weekend':''} ${d.n===model.today?'is-today':''}" title="${d.iso}"><strong>${d.day}</strong><small>${[tr('日'),tr('一'),tr('二'),tr('三'),tr('四'),tr('五'),tr('六')][d.dow]}</small></div>`).join('')}</div></div></div>${model.rows.map((r,i)=>{
+  grid.innerHTML=`<div class="gantt-header"><div class="gantt-corner"><strong>${tr('项目 / Owner')}</strong></div><div class="gantt-axis"><div class="gantt-months">${months.map(m=>`<span style="left:${m.offset*dayWidth}px;width:${m.count*dayWidth}px"><b>${monthLabel(m.month)}</b></span>`).join('')}</div><div class="gantt-dates">${days.map(d=>`<div class="gantt-date ${[0,6].includes(d.dow)?'weekend':''} ${d.n===model.today?'is-today':''}" title="${d.iso}"><strong>${d.day}</strong><small>${[tr('日'),tr('一'),tr('二'),tr('三'),tr('四'),tr('五'),tr('六')][d.dow]}</small></div>`).join('')}</div></div></div>${model.rows.map((r,i)=>{
     const p=r.project,palette=['blue','green','purple','gold','coral'][i%5],range=r.invalid?tr('日期待修正'):`${p.start} → ${p.end||tr('未设截止')}`;
     return `<div class="gantt-row" data-project="${escapeHTML(p.id)}"><div class="gantt-project"><div><i class="project-color ${palette}"></i><strong title="${escapeHTML(p.name)}">${escapeHTML(p.name)}</strong></div><small>${escapeHTML(nameOf(p.owner))} <span>· ${projectStatus(p)}</span></small><span class="gantt-range">${escapeHTML(range)}</span></div><div class="gantt-track">${todayLine}${r.invalid?tr('<span class="gantt-invalid">请修正项目起止日期</span>'):`<div class="gantt-bar ${palette} ${r.openEnded?'open-ended':''} ${['pending','rejected'].includes(p.status)?'awaiting':''}" style="left:${r.offset*dayWidth+3}px;width:${Math.max(26,r.span*dayWidth-6)}px" tabindex="0" aria-label="${escapeHTML(p.name)}，${escapeHTML(range)}，${projectStatus(p)}" title="${escapeHTML(p.name)} · ${escapeHTML(nameOf(p.owner))}\n${escapeHTML(range)} · ${projectStatus(p)}"><span>${escapeHTML(p.name)}${r.openEnded?tr(' · 未设截止 →'):''}</span></div>`}</div></div>`;
   }).join('')}`;
@@ -4958,8 +4958,8 @@ function renderPip(){
   const open=t=>['todo','doing'].includes(t.status);
   const tasks=sortTasks(scheduleTasks().filter(t=>taskActiveOn(t,S.today)&&!isArchivedTask(t))).sort((a,b)=>open(b)-open(a));
   const tickable=t=>!S.user.admin&&t.assignee===S.user.id&&open(t);
-  doc.querySelector('#pipSummary').textContent=tr("{0} · 还剩 {1} 项",fmt(S.today),tasks.filter(open).length);
-  doc.querySelector('#pipList').innerHTML=tasks.map(t=>`<li class="${open(t)?'':'closed'}"><label><input type="checkbox" data-id="${escapeHTML(t.id)}" ${open(t)?'':'checked'} ${tickable(t)?'':'disabled'}><span>${escapeHTML(t.name)}${t.stackCount>1?` ${tr("· {0} 期",t.stackCount)}`:''}</span></label><small>${escapeHTML([t.time,S.user.admin?nameOf(t.assignee):'',projectName(t),open(t)?'':status(t)[1]].filter(Boolean).join(' · '))}</small></li>`).join('')||tr('<li class="empty">今天没有待办</li>');
+  doc.querySelector('#pipSummary').textContent=tr('{0} · 还剩 {1} 项',fmt(S.today),tasks.filter(open).length);
+  doc.querySelector('#pipList').innerHTML=tasks.map(t=>`<li class="${open(t)?'':'closed'}"><label><input type="checkbox" data-id="${escapeHTML(t.id)}" ${open(t)?'':'checked'} ${tickable(t)?'':'disabled'}><span>${escapeHTML(t.name)}${t.stackCount>1?` ${tr('· {0} 期',t.stackCount)}`:''}</span></label><small>${escapeHTML([t.time,S.user.admin?nameOf(t.assignee):'',projectName(t),open(t)?'':status(t)[1]].filter(Boolean).join(' · '))}</small></li>`).join('')||tr('<li class="empty">今天没有待办</li>');
   doc.querySelectorAll('#pipList input[data-id]:not([disabled])').forEach(box=>box.onchange=()=>pipComplete(box));
 }
 async function pipComplete(box){
@@ -4967,13 +4967,13 @@ async function pipComplete(box){
   box.disabled=true;
   try{
     await api('/api/action',{action:'task.complete',data:{id:t.id,summary:tr('完成任务'),...(t.stackCount>1?{stackPeriods:t.stackPeriods}:{}),actual:Number(t.duration)||30,feeling:tr('顺利')}});
-    await refresh();pipNote(tr("「{0}」已完成",t.name));
+    await refresh();pipNote(tr('「{0}」已完成',t.name));
   }catch(e){box.checked=false;box.disabled=false;pipNote(e.message)}
 }
 async function openPip(){
   if(!pipSupported())return;
   if(pipWindow){pipWindow.focus();return}
-  try{pipWindow=await documentPictureInPicture.requestWindow({width:320,height:460})}catch(e){toast(tr("无法打开桌面小组件：{0}",e.message));return}
+  try{pipWindow=await documentPictureInPicture.requestWindow({width:320,height:460})}catch(e){toast(tr('无法打开桌面小组件：{0}',e.message));return}
   const doc=pipWindow.document;
   doc.title=tr('今日待办');
   const style=doc.createElement('style');style.textContent=PIP_CSS;doc.head.append(style);
@@ -5003,16 +5003,16 @@ function archiveDrawers(cards){
   return [...months].map(([month,files])=>({month,files}));
 }
 const hours=minutes=>(Number(minutes||0)/60).toFixed(1);
-const archiveDay=date=>{const d=new Date(`${date}T12:00:00`);return tr("{0}月{1}日 · {2}",d.getMonth()+1,d.getDate(),WEEKDAY_SHORT[d.getDay()])};
+const archiveDay=date=>{const d=new Date(`${date}T12:00:00`);return tr('{0}月{1}日 · {2}',d.getMonth()+1,d.getDate(),WEEKDAY_SHORT[d.getDay()])};
 function archiveFile(card,index,picked=false){
   const d=new Date(`${card.date}T12:00:00`),t=card.totals||{},mine=card.kind==='diary';
-  const body=mine?`<strong>${card.date===S.today?tr('今天'):tr('我的档案')} · ${archiveDay(card.date)}</strong><span>${tr("完成 {0}/{1} 项 · {2}h",t.completed||0,t.tasks||0,hours(t.load))}</span><span>${{manual:tr('已记录'),auto:tr('系统整理'),draft:tr('待记录')}[card.source]||''}</span>`
-    :`<strong>${tr("团队日报 · {0}",archiveDay(card.date))}</strong><span>${tr("完成 {0}/{1} 项 · {2}h",t.completed||0,t.tasks||0,hours(t.load))}</span><span>${tr("{0} 位成员 · {1} 个项目{2}",t.members||0,t.projects||0,card.riskCount?` ${tr("· {0} 条关注",card.riskCount)}`:'')}</span>`;
+  const body=mine?`<strong>${card.date===S.today?tr('今天'):tr('我的档案')} · ${archiveDay(card.date)}</strong><span>${tr('完成 {0}/{1} 项 · {2}h',t.completed||0,t.tasks||0,hours(t.load))}</span><span>${{manual:tr('已记录'),auto:tr('系统整理'),draft:tr('待记录')}[card.source]||''}</span>`
+    :`<strong>${tr('团队日报 · {0}',archiveDay(card.date))}</strong><span>${tr('完成 {0}/{1} 项 · {2}h',t.completed||0,t.tasks||0,hours(t.load))}</span><span>${tr('{0} 位成员 · {1} 个项目{2}',t.members||0,t.projects||0,card.riskCount?` ${tr('· {0} 条关注',card.riskCount)}`:'')}</span>`;
   return `<button class="archive-file${picked?' is-picked':''}" data-date="${escapeHTML(card.date)}" style="--i:${index};--tab:${index%4}" tabindex="-1" aria-label="${escapeHTML(card.date)} ${mine?tr('我的档案'):tr('团队日报')}"><span class="file-sheet" aria-hidden="true"><span class="file-tab"><b>${d.getDate()}</b>${WEEKDAY_SHORT[d.getDay()]}</span><span class="file-face"></span></span><span class="file-body" hidden>${body}</span></button>`;
 }
 function archiveBox(month,files,pick){
   const [year,mon]=month.split('-');
-  return `<div class="drawer-stage" style="--n:${files.length}"><div class="open-drawer"><span class="od-ground"></span><span class="od-floor"></span><span class="od-side is-left"></span><span class="od-side is-right"></span><span class="od-back"></span>${files.map((f,i)=>archiveFile(f,i,f.date===pick)).join('')}<span class="od-front"><span class="od-label"><b>${tr("{0} 月",Number(mon))}</b><small>${tr("{0} · {1} 份",escapeHTML(year),files.length)}</small></span><span class="od-pull"></span></span></div></div>`;
+  return `<div class="drawer-stage" style="--n:${files.length}"><div class="open-drawer"><span class="od-ground"></span><span class="od-floor"></span><span class="od-side is-left"></span><span class="od-side is-right"></span><span class="od-back"></span>${files.map((f,i)=>archiveFile(f,i,f.date===pick)).join('')}<span class="od-front"><span class="od-label"><b>${tr('{0} 月',Number(mon))}</b><small>${tr('{0} · {1} 份',escapeHTML(year),files.length)}</small></span><span class="od-pull"></span></span></div></div>`;
 }
 /* Ticks sit where their day falls in the month, so gaps in the record show.
    The pointer stands on the picked tick and carries its day. */
@@ -5023,7 +5023,7 @@ function archiveRuler(month,files,pick){
   at=date=>rulerAt(Number(String(date).slice(8,10)),days);
   const ticks=[...files].reverse().map((f,k)=>`<span class="ruler-tick${f.date===pick?' is-picked':''}" data-date="${escapeHTML(f.date)}" style="--at:${at(f.date)}%;--k:${k}"><b>${Number(String(f.date).slice(8,10))}</b></span>`).join('');
   const pointer=pick?`<span class="ruler-pointer" style="--at:${at(pick)}%"><b>${pointerText(pick)}</b></span>`:'';
-  return tr("<div class=\"archive-ruler\" role=\"slider\" tabindex=\"0\" aria-label=\"选择日期\" aria-valuemin=\"1\" aria-valuemax=\"")
+  return tr('<div class="archive-ruler" role="slider" tabindex="0" aria-label="选择日期" aria-valuemin="1" aria-valuemax="')
     +`${days}" aria-valuenow="${Number(String(pick||'').slice(8,10))||1}" aria-valuetext="${pick?archiveDay(pick):''}">`
     +`<span class="ruler-end">1</span><div class="ruler-track"><span class="ruler-week" aria-hidden="true"></span>`
     +`${ticks}${pointer}</div><span class="ruler-end">${days}</span></div>`;
@@ -5035,7 +5035,7 @@ function renderArchive(){
   if(!months.includes(UI.archiveMonth))UI.archiveMonth=months[0]||null;
   const files=drawers.find(x=>x.month===UI.archiveMonth)?.files||[];
   if(!files.some(f=>f.date===UI.archivePick))UI.archivePick=files[0]?.date||null;
-  $('#archiveEyebrow').textContent=tr("{0} · {1} 份",admin?tr('团队日报'):tr('我的档案'),cards.length);
+  $('#archiveEyebrow').textContent=tr('{0} · {1} 份',admin?tr('团队日报'):tr('我的档案'),cards.length);
   $('#archiveTodayBtn')?.classList.toggle('hidden',admin);
   $('#archiveExportBtn')?.classList.toggle('hidden',!admin);
   renderArchiveLedger(UI.archivePick);
@@ -5044,9 +5044,9 @@ function renderArchive(){
   const key=JSON.stringify([cards,UI.archiveMonth]);
   if(root.dataset.key===key)return;
   root.dataset.key=key;
-  if(!files.length){root.innerHTML=`<div class="archive-room is-empty"><div class="empty-state"><div class="empty-icon">${icon('archive')}</div><h3>${tr("档案室还是空的")}</h3></div></div>`;return}
+  if(!files.length){root.innerHTML=`<div class="archive-room is-empty"><div class="empty-state"><div class="empty-icon">${icon('archive')}</div><h3>${tr('档案室还是空的')}</h3></div></div>`;return}
   const at=months.indexOf(UI.archiveMonth),[year,mon]=UI.archiveMonth.split('-');
-  root.innerHTML=`<div class="archive-room"><header class="box-title"><strong>${tr("{0} 年 {1} 月",escapeHTML(year),Number(mon))}</strong><small>${tr("{0} 份",files.length)}</small></header><div class="box-stage">${archiveBox(UI.archiveMonth,files,UI.archivePick)}<button class="box-step is-prev" data-step="1"${at<months.length-1?'':' disabled'} aria-label="${tr("上一个月")}">${icon('chevron-left')}</button><button class="box-step is-next" data-step="-1"${at>0?'':' disabled'} aria-label="${tr("下一个月")}">${icon('chevron-right')}</button></div><footer class="box-foot"><div class="drawer-caption"><div class="caption-body" aria-live="polite"></div><button class="secondary-btn caption-open">${tr("打开")}</button></div>${archiveRuler(UI.archiveMonth,files,UI.archivePick)}</footer></div>`;
+  root.innerHTML=`<div class="archive-room"><header class="box-title"><strong>${tr('{0} 年 {1} 月',escapeHTML(year),Number(mon))}</strong><small>${tr('{0} 份',files.length)}</small></header><div class="box-stage">${archiveBox(UI.archiveMonth,files,UI.archivePick)}<button class="box-step is-prev" data-step="1"${at<months.length-1?'':' disabled'} aria-label="${tr('上一个月')}">${icon('chevron-left')}</button><button class="box-step is-next" data-step="-1"${at>0?'':' disabled'} aria-label="${tr('下一个月')}">${icon('chevron-right')}</button></div><footer class="box-foot"><div class="drawer-caption"><div class="caption-body" aria-live="polite"></div><button class="secondary-btn caption-open">${tr('打开')}</button></div>${archiveRuler(UI.archiveMonth,files,UI.archivePick)}</footer></div>`;
   bindArchive();
   fitArchiveDrawer(root.querySelector('.drawer-stage'));
   pickArchive(UI.archivePick,true);
@@ -5161,12 +5161,12 @@ function briefDocument(brief,editable=false){
   const entry=(title,meta,body,edited)=>`<div class="brief-entry"><div class="brief-entry-head"><strong>${escapeHTML(title)}</strong><span>${escapeHTML(meta)}</span>${editable&&edited?tr('<em class="doc-edited">已改</em>'):''}</div>${body}</div>`;
   const fields=(content,scope,id,keys)=>editable?editFields(content,scope,id,keys):briefFields(content);
   const memberKeys=m=>m.summary&&typeof m.summary!=='object'?['summary']:['done','risks','next'];
-  const risks=editable?`<section class="brief-section"><h3>${tr("需要关注")}</h3>${docEdit((c.risks||[]).join('\n'),'data-scope="risks"')}</section>`
-    :(c.risks?.length?`<section class="brief-section"><h3>${tr("需要关注")}</h3><ul class="brief-risks">${c.risks.map(r=>`<li>${escapeHTML(r)}</li>`).join('')}</ul></section>`:'');
-  return `<article class="brief-doc"><header class="brief-head"><div class="eyebrow">${tr("档案室 · 团队日报")}</div><h2>${tr("{0}年{1}月{2}日 · {3}",d.getFullYear(),d.getMonth()+1,d.getDate(),WEEKDAY_SHORT[d.getDay()])}</h2><div class="brief-stats"><div><b>${t.completed||0}/${t.tasks||0}</b><span>${tr("完成任务")}</span></div><div><b>${hours(t.load)}h</b><span>${tr("完成工时")}</span></div><div><b>${t.members||0}</b><span>${tr("位成员")}</span></div><div><b>${t.projects||0}</b><span>${tr("个项目")}</span></div></div></header>`
+  const risks=editable?`<section class="brief-section"><h3>${tr('需要关注')}</h3>${docEdit((c.risks||[]).join('\n'),'data-scope="risks"')}</section>`
+    :(c.risks?.length?`<section class="brief-section"><h3>${tr('需要关注')}</h3><ul class="brief-risks">${c.risks.map(r=>`<li>${escapeHTML(r)}</li>`).join('')}</ul></section>`:'');
+  return `<article class="brief-doc"><header class="brief-head"><div class="eyebrow">${tr('档案室 · 团队日报')}</div><h2>${tr('{0}年{1}月{2}日 · {3}',d.getFullYear(),d.getMonth()+1,d.getDate(),WEEKDAY_SHORT[d.getDay()])}</h2><div class="brief-stats"><div><b>${t.completed||0}/${t.tasks||0}</b><span>${tr('完成任务')}</span></div><div><b>${hours(t.load)}h</b><span>${tr('完成工时')}</span></div><div><b>${t.members||0}</b><span>${tr('位成员')}</span></div><div><b>${t.projects||0}</b><span>${tr('个项目')}</span></div></div></header>`
     +risks
-    +(c.projects?.length?`<section class="brief-section"><h3>${tr("项目进展")}</h3>${c.projects.map(p=>entry(p.name,tr("Owner · {0} · {1} · {2}/{3} 完成",p.ownerName||p.owner||'',p.source==='owner'?tr('Owner 汇报'):tr('系统汇总'),p.completed,p.tasks),fields(p.content,'projects',p.id,['done','progress','collaborators','risks','next']),p.edited)).join('')}</section>`:'')
-    +(c.members?.length?`<section class="brief-section"><h3>${tr("成员总结")}</h3>${c.members.map(m=>entry(m.name,tr("{0}/{1} 完成 · {2}h · {3}",m.completed,m.tasks,hours(m.load),m.source==='diary'?tr('本人日记'):tr('系统统计')),fields(m.summary,'members',m.id,memberKeys(m)),m.edited)).join('')}</section>`:'')
+    +(c.projects?.length?`<section class="brief-section"><h3>${tr('项目进展')}</h3>${c.projects.map(p=>entry(p.name,tr('Owner · {0} · {1} · {2}/{3} 完成',p.ownerName||p.owner||'',p.source==='owner'?tr('Owner 汇报'):tr('系统汇总'),p.completed,p.tasks),fields(p.content,'projects',p.id,['done','progress','collaborators','risks','next']),p.edited)).join('')}</section>`:'')
+    +(c.members?.length?`<section class="brief-section"><h3>${tr('成员总结')}</h3>${c.members.map(m=>entry(m.name,tr('{0}/{1} 完成 · {2}h · {3}',m.completed,m.tasks,hours(m.load),m.source==='diary'?tr('本人日记'):tr('系统统计')),fields(m.summary,'members',m.id,memberKeys(m)),m.edited)).join('')}</section>`:'')
     +'</article>';
 }
 /* Opened from the archive, the folder rises a little further while the brief
@@ -5232,7 +5232,7 @@ async function openBrief(date,folder=null){
   let brief;
   try{brief=await api('/api/action',{action:'brief.get',data:{date}})}catch(e){toast(e.message);return}
   finally{folder?.classList.remove('is-opening')}
-  openModal(`${briefDocument(brief,true)}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr("关闭")}</button><button class="primary-btn" id="saveArchiveDoc">${tr("保存")}</button></div>`);
+  openModal(`${briefDocument(brief,true)}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('关闭')}</button><button class="primary-btn" id="saveArchiveDoc">${tr('保存')}</button></div>`);
   bindArchiveDoc(async()=>{
     const doc=$('#modalContent'),data={date},risks=doc.querySelector('.doc-edit[data-scope="risks"]');
     if(risks)data.risks=docText(risks).split('\n').map(x=>x.trim()).filter(Boolean);
@@ -5291,17 +5291,17 @@ function diaryDocument(day){
   const me=S.user.id,c=diaryContent(me,day),s=diaryDayStats(me,day),r=diaryReport(me,day),d=new Date(`${day}T12:00:00`),logs=workLogEntries(day,me);
   const block=(k,label)=>`<section class="brief-section"><h3>${label}</h3>${docEdit(c[k],`data-field="${k}"`)}</section>`;
   const log=logs.length?`<ul class="doc-log">${logs.map(l=>`<li><button type="button" class="doc-log-item" data-task-id="${escapeHTML(l.taskId||'')}" data-project-id="${escapeHTML(l.projectId||'')}" data-log-kind="${escapeHTML(l.kind||'')}"><time>${escapeHTML(String(l.at||'').slice(11,16))}</time><span>${escapeHTML(l.label)}</span>${l.project?`<small>${escapeHTML(l.project)}</small>`:''}</button></li>`).join('')}</ul>`:'<p class="muted">—</p>';
-  return `<article class="brief-doc is-personal"><header class="brief-head"><div class="eyebrow">${tr("我的档案 ·")} `
-    +`${r?(r.auto?tr('系统整理'):tr('已记录')):tr('待记录')}</div><h2>${tr("{0}年{1}月{2}日 ·",d.getFullYear(),d.getMonth()+1,d.getDate())} `
-    +`${WEEKDAY_SHORT[d.getDay()]}</h2><div class="brief-stats"><div><b>${s.completed}/${s.total}</b><span>${tr("完成任务")}</span>`
-    +`</div><div><b>${hours(s.load)}h</b><span>${tr("完成工时")}</span></div><div><b>${Math.max(0,s.total-s.completed)}</b><span>${tr("未完成")}`
-    +`</span></div><div><b>${logs.length}</b><span>${tr("条日志")}</span></div></div></header>${block('done',tr('今日完成'))}`
-    +`${block('risks',tr('未完成与阻塞'))}${block('next',tr('明日计划'))}<section class="brief-section diary-note"><h3>${tr("随记")}</h3>`
+  return `<article class="brief-doc is-personal"><header class="brief-head"><div class="eyebrow">${tr('我的档案 ·')} `
+    +`${r?(r.auto?tr('系统整理'):tr('已记录')):tr('待记录')}</div><h2>${tr('{0}年{1}月{2}日 ·',d.getFullYear(),d.getMonth()+1,d.getDate())} `
+    +`${WEEKDAY_SHORT[d.getDay()]}</h2><div class="brief-stats"><div><b>${s.completed}/${s.total}</b><span>${tr('完成任务')}</span>`
+    +`</div><div><b>${hours(s.load)}h</b><span>${tr('完成工时')}</span></div><div><b>${Math.max(0,s.total-s.completed)}</b><span>${tr('未完成')}`
+    +`</span></div><div><b>${logs.length}</b><span>${tr('条日志')}</span></div></div></header>${block('done',tr('今日完成'))}`
+    +`${block('risks',tr('未完成与阻塞'))}${block('next',tr('明日计划'))}<section class="brief-section diary-note"><h3>${tr('随记')}</h3>`
     +`${docEdit(c.note,`data-field="note" data-placeholder="${DIARY_NOTE_HINT}"`)}</section>`
-    +`<section class="brief-section"><h3>${tr("工作日志")}</h3>${log}</section></article>`;
+    +`<section class="brief-section"><h3>${tr('工作日志')}</h3>${log}</section></article>`;
 }
 function openDiaryArchive(day,folder=null){
-  openModal(`${diaryDocument(day)}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr("关闭")}</button><button class="primary-btn" id="saveArchiveDoc">${tr("保存")}</button></div>`);
+  openModal(`${diaryDocument(day)}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('关闭')}</button><button class="primary-btn" id="saveArchiveDoc">${tr('保存')}</button></div>`);
   $$('#modalContent .doc-log-item').forEach(b=>b.onclick=()=>{closeModal();openWorkLogDetail(b.dataset.taskId,b.dataset.projectId,b.dataset.logKind)});
   /* A day nobody has saved yet is only a template, so it can be kept as it is. */
   bindArchiveDoc(async()=>{const content={};$$('#modalContent .doc-edit').forEach(el=>{content[el.dataset.field]=docText(el)});await api('/api/action',{action:'diary.save',data:{date:day,content}})},!diaryReport(S.user.id,day));
@@ -5320,8 +5320,8 @@ function weekReportDocument(week){
   const people=p=>`Owner · ${esc(p.ownerName||tr('未指派'))}${p.members?.length?tr(' · 参与人：')+esc(p.members.join('、')):''}`;
   const task=t=>`<li><div class="week-work-head"><strong>${esc(t.name)}</strong><span>${esc(t.assigneeName||tr('未指派'))}</span></div>`
     +`${text(tr('剩余事项：'),t.remaining)}${text(tr('原因：'),t.reason)}${text(tr('后续安排：'),t.scheduledOn>week.end?fmt(t.scheduledOn):tr('尚未安排到下周'))}${text(tr('截止日期：'),t.deadline?fmt(t.deadline):'')}</li>`;
-  const completedTask=t=>`<li><div class="week-work-head"><strong>${esc(t.name)}${t.stackCount>1?` ${tr("· {0} 期",esc(t.stackCount))}`:''}</strong><time>${esc(fmt(t.completedOn))}</time></div>`
-    +`<small>${esc(t.assigneeName||tr('未指派'))}${Number(t.actual)>0?` ${tr("· {0} 分钟",esc(t.actual))}`:''}</small>`
+  const completedTask=t=>`<li><div class="week-work-head"><strong>${esc(t.name)}${t.stackCount>1?` ${tr('· {0} 期',esc(t.stackCount))}`:''}</strong><time>${esc(fmt(t.completedOn))}</time></div>`
+    +`<small>${esc(t.assigneeName||tr('未指派'))}${Number(t.actual)>0?` ${tr('· {0} 分钟',esc(t.actual))}`:''}</small>`
     +`${text(tr('任务内容：'),t.description)}${text(tr('完成情况：'),t.summary||tr('未填写完成总结'))}${text(tr('反馈：'),[t.feeling&&tr(t.feeling),t.followup].filter(Boolean).join(' · '))}</li>`;
   const completedList=tasks=>tasks.length?`<ul class="week-remaining-list">${tasks.map(completedTask).join('')}</ul>`:'';
   const completedProjectIds=new Set(done.map(p=>p.projectId).filter(Boolean)),taskGroups=new Map();
@@ -5334,24 +5334,24 @@ function weekReportDocument(week){
   const completed=done.map(p=>`<li><div class="week-work-head"><strong>${esc(p.name)}</strong><time>${esc(fmt(p.completedOn))}</time></div>`
     +`<small>${people(p)}</small><p class="week-project-summary">${esc(p.summary||[p.description,p.completionReport].filter(Boolean).join('\n'))}</p>`
     +`${completedList(doneTasks.filter(t=>t.projectId&&t.projectId===p.projectId))}</li>`).join('')
-    +[...taskGroups.values()].map(g=>`<li><div class="week-work-head"><strong>${esc(g.name)}</strong><span>${tr("本周完成任务")}</span></div>`
+    +[...taskGroups.values()].map(g=>`<li><div class="week-work-head"><strong>${esc(g.name)}</strong><span>${tr('本周完成任务')}</span></div>`
       +`${text(tr('项目内容：'),g.description)}${completedList(g.tasks)}</li>`).join('');
   const unfinished=pending.map(p=>`<li><div class="week-work-head"><strong>${esc(p.name)}</strong><span>${p.status==='pending_completion'?tr('待结项审批'):tr('进行中')}</span></div>`
     +`<small>${people(p)}</small>${text(tr('项目内容：'),p.description)}`
     +`${p.status==='pending_completion'?tr('<p>已提交结项，等待审批</p>'):''}`
     +`${p.remaining?.length?`<ul class="week-remaining-list">${p.remaining.map(task).join('')}</ul>`:p.status==='pending_completion'?'':tr('<p class="muted">项目尚未结项，暂无已记录的未完成任务</p>')}</li>`).join('');
   const remainingCount=pending.reduce((n,p)=>n+(p.remaining||[]).length,other.length);
-  return `<article class="brief-doc week-report"><header class="brief-head"><div class="week-report-top"><div class="eyebrow">${tr("档案室 · 周报")}</div><div class="week-report-nav">`
-    +`<button type="button" class="icon-btn" data-week="-1" aria-label="${tr("上一周")}">${icon('chevron-left')}</button>`
-    +`<button type="button" class="icon-btn" data-week="1" ${week.end>=S.today?'disabled':''} aria-label="${tr("下一周")}">${icon('chevron-right')}</button></div></div>`
-    +`<h2>${esc(fmt(week.start))} — ${esc(fmt(week.end))}</h2><p class="muted">${tr("截至 {0}",esc(fmt(work.asOf||week.end)))}</p>`
-    +`<div class="brief-stats"><div><b data-count="${done.length}">${done.length}</b><span>${tr("本周完成项目")}</span></div>`
-    +`<div><b data-count="${doneTasks.length}">${doneTasks.length}</b><span>${tr("本周完成任务")}</span></div>`
-    +`<div><b data-count="${remainingCount}">${remainingCount}</b><span>${tr("剩余任务")}</span></div></div></header>`
-    +`<section class="brief-section"><h3>${tr("这周做了什么")}</h3>${completed?`<ul class="week-work-list">${completed}</ul>`:tr('<p class="muted">本周暂无已完成项目或任务</p>')}</section>`
-    +`<section class="brief-section"><h3>${tr("还有什么没做")}</h3>${unfinished?`<ul class="week-work-list">${unfinished}</ul>`:tr('<p class="muted">暂无待完成项目</p>')}`
-    +`${other.length?`<h4>${tr("其他待续事项")}</h4><ul class="week-work-list">${other.map(task).join('')}</ul>`:''}</section>`
-    +`<footer class="week-daily-links">${(week.briefs||[]).filter(b=>b.filed!==false).map(b=>`<button type="button" class="text-btn week-cell" data-date="${esc(b.date)}">${tr("{0} 日报",esc(fmt(b.date)))}</button>`).join('')}</footer></article>`;
+  return `<article class="brief-doc week-report"><header class="brief-head"><div class="week-report-top"><div class="eyebrow">${tr('档案室 · 周报')}</div><div class="week-report-nav">`
+    +`<button type="button" class="icon-btn" data-week="-1" aria-label="${tr('上一周')}">${icon('chevron-left')}</button>`
+    +`<button type="button" class="icon-btn" data-week="1" ${week.end>=S.today?'disabled':''} aria-label="${tr('下一周')}">${icon('chevron-right')}</button></div></div>`
+    +`<h2>${esc(fmt(week.start))} — ${esc(fmt(week.end))}</h2><p class="muted">${tr('截至 {0}',esc(fmt(work.asOf||week.end)))}</p>`
+    +`<div class="brief-stats"><div><b data-count="${done.length}">${done.length}</b><span>${tr('本周完成项目')}</span></div>`
+    +`<div><b data-count="${doneTasks.length}">${doneTasks.length}</b><span>${tr('本周完成任务')}</span></div>`
+    +`<div><b data-count="${remainingCount}">${remainingCount}</b><span>${tr('剩余任务')}</span></div></div></header>`
+    +`<section class="brief-section"><h3>${tr('这周做了什么')}</h3>${completed?`<ul class="week-work-list">${completed}</ul>`:tr('<p class="muted">本周暂无已完成项目或任务</p>')}</section>`
+    +`<section class="brief-section"><h3>${tr('还有什么没做')}</h3>${unfinished?`<ul class="week-work-list">${unfinished}</ul>`:tr('<p class="muted">暂无待完成项目</p>')}`
+    +`${other.length?`<h4>${tr('其他待续事项')}</h4><ul class="week-work-list">${other.map(task).join('')}</ul>`:''}</section>`
+    +`<footer class="week-daily-links">${(week.briefs||[]).filter(b=>b.filed!==false).map(b=>`<button type="button" class="text-btn week-cell" data-date="${esc(b.date)}">${tr('{0} 日报',esc(fmt(b.date)))}</button>`).join('')}</footer></article>`;
 }
 /* Numbers run up from zero as the report settles; a tap shows them at once. */
 function countUp(root){
@@ -5386,7 +5386,7 @@ async function openWeekReport(date=UI.archivePick||S.today,dir=0){
       +`${dir*-28}px)`}],{duration:160,easing:'ease-in'}).onfinish=swap;
     return;
   }
-  openModal(`${weekReportDocument(week)}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr("关闭")}`
+  openModal(`${weekReportDocument(week)}<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('关闭')}`
     +`</button></div>`);
   $('#modalBackdrop .modal')?.classList.add('is-wide');
   $('#cancelAction').onclick=closeModal;
@@ -5420,7 +5420,7 @@ async function deleteNotices(ids,read=false){
   try{
     const r=await api('/api/action',{action:'inbox.delete',data:read?{read:true}:{ids}});
     (ids||[]).forEach(id=>UI.inboxPicked?.delete(id));
-    await refresh();toast(r.deleted?tr("已删除 {0} 条通知",r.deleted):tr('没有可删除的通知'));
+    await refresh();toast(r.deleted?tr('已删除 {0} 条通知',r.deleted):tr('没有可删除的通知'));
   }catch(e){toast(e.message)}
 }
 function renderInboxToolbar(){
@@ -5431,12 +5431,12 @@ function renderInboxToolbar(){
   $('#manageInboxBtn').textContent=manage?tr('完成'):tr('管理');
   bar.classList.toggle('hidden',!manage);
   if(!manage)return;
-  bar.innerHTML=`<label class="inbox-pick-all"><input type="checkbox" id="inboxPickAll" ${ids.length&&picked===ids.length?'checked':''} ${ids.length?'':'disabled'}>${tr("全选")}</label><span class="inbox-picked">${tr("已选 {0} 条",picked)}</span><button class="secondary-btn" id="inboxDeletePicked" ${picked?'':'disabled'}>${tr("删除所选")}</button><button class="secondary-btn" id="inboxDeleteRead" ${(S.notifications||[]).some(n=>n.read)?'':'disabled'}>${tr("清除已读")}</button>`;
+  bar.innerHTML=`<label class="inbox-pick-all"><input type="checkbox" id="inboxPickAll" ${ids.length&&picked===ids.length?'checked':''} ${ids.length?'':'disabled'}>${tr('全选')}</label><span class="inbox-picked">${tr('已选 {0} 条',picked)}</span><button class="secondary-btn" id="inboxDeletePicked" ${picked?'':'disabled'}>${tr('删除所选')}</button><button class="secondary-btn" id="inboxDeleteRead" ${(S.notifications||[]).some(n=>n.read)?'':'disabled'}>${tr('清除已读')}</button>`;
   $('#inboxPickAll').onchange=e=>{UI.inboxPicked=new Set(e.target.checked?ids:[]);renderInbox()};
   $('#inboxDeletePicked').onclick=()=>deleteNotices([...UI.inboxPicked]);
   $('#inboxDeleteRead').onclick=()=>deleteNotices(null,true);
 }
-function openSearch(){openModal(`<div class="eyebrow">${tr("工作台搜索")}</div><h2>${tr("搜索任务与项目")}</h2><label class="form-field">${tr("关键词")}<input id="searchQuery" placeholder="${tr("搜索")}"></label><div id="searchResults" class="search-results"><span class="muted">${tr("输入关键词开始搜索")}</span></div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr("关闭")}</button></div>`);$('#cancelAction').onclick=closeModal;const input=$('#searchQuery'),results=$('#searchResults');input.oninput=()=>{const q=input.value.trim().toLowerCase();if(!q){results.innerHTML=tr('<span class="muted">输入关键词开始搜索</span>');return}const ts=(S.user?.admin?S.tasks.filter(t=>!isSuperseded(t)):scheduleTasks()).filter(t=>[t.name,t.assignee,nameOf(t.assignee),projectName(t)].some(v=>String(v||'').toLowerCase().includes(q)));const ps=S.projects.filter(p=>[p.name,p.owner,nameOf(p.owner),p.desc].some(v=>String(v||'').toLowerCase().includes(q)));results.innerHTML=ts.map(t=>`<button class="search-result" data-task="${escapeHTML(t.id)}"><strong>${escapeHTML(t.name)}</strong><small>${escapeHTML(nameOf(t.assignee))} · ${escapeHTML(projectName(t))}</small></button>`).join('')+ps.map(p=>`<button class="search-result" data-project="${escapeHTML(p.id)}"><strong>${escapeHTML(p.name)}</strong><small>Owner · ${escapeHTML(nameOf(p.owner))} · ${projectStatus(p)}</small></button>`).join('')||tr('<span class="muted">没有找到匹配项</span>');$$('.search-result').forEach(b=>b.onclick=()=>{if(b.dataset.task)openDrawer(b.dataset.task);else{closeModal();openWorkLogDetail('',b.dataset.project,'project')}})};input.focus()}
+function openSearch(){openModal(`<div class="eyebrow">${tr('工作台搜索')}</div><h2>${tr('搜索任务与项目')}</h2><label class="form-field">${tr('关键词')}<input id="searchQuery" placeholder="${tr('搜索')}"></label><div id="searchResults" class="search-results"><span class="muted">${tr('输入关键词开始搜索')}</span></div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('关闭')}</button></div>`);$('#cancelAction').onclick=closeModal;const input=$('#searchQuery'),results=$('#searchResults');input.oninput=()=>{const q=input.value.trim().toLowerCase();if(!q){results.innerHTML=tr('<span class="muted">输入关键词开始搜索</span>');return}const ts=(S.user?.admin?S.tasks.filter(t=>!isSuperseded(t)):scheduleTasks()).filter(t=>[t.name,t.assignee,nameOf(t.assignee),projectName(t)].some(v=>String(v||'').toLowerCase().includes(q)));const ps=S.projects.filter(p=>[p.name,p.owner,nameOf(p.owner),p.desc].some(v=>String(v||'').toLowerCase().includes(q)));results.innerHTML=ts.map(t=>`<button class="search-result" data-task="${escapeHTML(t.id)}"><strong>${escapeHTML(t.name)}</strong><small>${escapeHTML(nameOf(t.assignee))} · ${escapeHTML(projectName(t))}</small></button>`).join('')+ps.map(p=>`<button class="search-result" data-project="${escapeHTML(p.id)}"><strong>${escapeHTML(p.name)}</strong><small>Owner · ${escapeHTML(nameOf(p.owner))} · ${projectStatus(p)}</small></button>`).join('')||tr('<span class="muted">没有找到匹配项</span>');$$('.search-result').forEach(b=>b.onclick=()=>{if(b.dataset.task)openDrawer(b.dataset.task);else{closeModal();openWorkLogDetail('',b.dataset.project,'project')}})};input.focus()}
 $$('.nav-item').forEach(b=>b.onclick=()=>switchView(b.dataset.view));
 translateStatic(document.body);
 window.addEventListener('beforeunload',e=>{if(meetingLive.session||meetingLive.active||$('#meetingEditor')?.dataset?.dirty==='true'){e.preventDefault();e.returnValue=''}});
@@ -5459,15 +5459,15 @@ function syncFilterLinks(){$$('.filter-link').forEach(b=>{const on=UI.view==='to
   b.classList.toggle('is-on',on);b.setAttribute('aria-pressed',String(on))})}
 $$('.quick-tab').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;renderToday()});
 $('#prevDay').onclick=()=>{UI.dayOffset=(UI.dayOffset||0)-1;renderToday()};
-$('#nextDay').onclick=()=>{if(displayDay()>=DATE_HORIZON){toast(`${tr("日期范围目前只支持到")} `
+$('#nextDay').onclick=()=>{if(displayDay()>=DATE_HORIZON){toast(`${tr('日期范围目前只支持到')} `
   +`${DATE_HORIZON}`);return}UI.dayOffset=(UI.dayOffset||0)+1;renderToday()};
 $('#inboxBtn').onclick=()=>switchView('inbox');$('#searchBtn').onclick=openSearch;
 /* Single-key shortcuts, as the sidebar's 快捷键 hint promises. They never fire
    while typing, with a modifier held, or behind an open dialog or drawer. */
 const SHORTCUTS=[['?',tr('快捷键列表')],['H',tr('使用教程')],['/',tr('搜索任务与项目；在系统设置里搜索设置')],['N',tr('新建任务')],['T',tr('今日任务')],['W',tr('周视图')],['P',tr('项目空间')],['I',tr('收件箱')],['Esc',tr('关闭弹窗或面板')]];
 function openShortcuts(){
-  openModal(`<div class="eyebrow">${tr("键盘")}</div><h2>${tr("快捷键")}</h2><dl class="shortcut-list">${SHORTCUTS.map(([k,v])=>`<dt><kbd>${k}</kbd></dt><dd>${v}</dd>`).join('')}</dl>`
-    +`<div class="modal-footer"><button class="primary-btn" id="closeShortcuts">${tr("知道了")}</button></div>`);
+  openModal(`<div class="eyebrow">${tr('键盘')}</div><h2>${tr('快捷键')}</h2><dl class="shortcut-list">${SHORTCUTS.map(([k,v])=>`<dt><kbd>${k}</kbd></dt><dd>${v}</dd>`).join('')}</dl>`
+    +`<div class="modal-footer"><button class="primary-btn" id="closeShortcuts">${tr('知道了')}</button></div>`);
   $('#closeShortcuts').onclick=closeModal;
 }
 function shortcutKey(e){
@@ -5507,7 +5507,7 @@ $('#forceAssignBtn').onclick=()=>switchView('projects');/* 立即运行一次检
 $('#runAutomationBtn').onclick=async()=>{
   const b=$('#runAutomationBtn');if(b.disabled)return;b.disabled=true;
   try{const r=await api('/api/action',{action:'scheduler.run',data:{}});await refresh();
-    flashSaved(b,r?.created?tr("已完成 · 生成或发出 {0} 项",r.created):tr('已完成 · 没有需要处理的'))}catch(e){toast(e.message)}finally{b.disabled=false}
+    flashSaved(b,r?.created?tr('已完成 · 生成或发出 {0} 项',r.created):tr('已完成 · 没有需要处理的'))}catch(e){toast(e.message)}finally{b.disabled=false}
 };
 $('#settingsSearch')?.addEventListener('input',applySettingsFilter);
 $('#settingsSearch')?.addEventListener('keydown',e=>{if(e.key==='Escape'&&e.target.value){e.preventDefault();e.stopPropagation();e.target.value='';applySettingsFilter()}});
@@ -5601,7 +5601,7 @@ function agentSamples(context){
 function agentRenderEmptyState(list){
   const samples=agentSamples();
   if(!list)return;
-  if(agentServerConfig&&!agentServerConfig.configured){list.innerHTML=`<div class="agent-setup"><strong>${tr("先接入 AI 模型")}</strong>${S.user?.role==='superadmin'?'':tr('<p>请联系管理员配置模型。</p>')}${S.user?.role==='superadmin'?tr('<button type="button" class="secondary-btn" id="agentSetupBtn">配置模型</button>'):''}</div>`;$('#agentSetupBtn')?.addEventListener('click',()=>openSettingsPage('ai'));return}
+  if(agentServerConfig&&!agentServerConfig.configured){list.innerHTML=`<div class="agent-setup"><strong>${tr('先接入 AI 模型')}</strong>${S.user?.role==='superadmin'?'':tr('<p>请联系管理员配置模型。</p>')}${S.user?.role==='superadmin'?tr('<button type="button" class="secondary-btn" id="agentSetupBtn">配置模型</button>'):''}</div>`;$('#agentSetupBtn')?.addEventListener('click',()=>openSettingsPage('ai'));return}
   list.innerHTML='<div class="agent-samples">'
     +samples.map(s=>`<button type="button" class="agent-sample ${s.plan?'is-plan':''}" data-text="${escapeHTML(s.text)}"${s.plan?' data-plan="1"':''}>`
       +(s.plan?icon('sparkles'):'')+escapeHTML(s.text)+'</button>').join('')
@@ -5639,7 +5639,7 @@ function agentToolSummary(node,tools){
   if(!reads.length)return;
   const label=document.createElement('small');label.className='agent-query-summary';
   const errors=reads.filter(t=>!t.ok).length;
-  label.textContent=tr("查询资料 · {0} 次{1}",reads.length,errors?' · '+errors+tr(' 次未成功'):'');
+  label.textContent=tr('查询资料 · {0} 次{1}',reads.length,errors?' · '+errors+tr(' 次未成功'):'');
   label.title=tr('查询范围遵循当前账户权限');node.appendChild(label);
 }
 function agentMessageTools(node,message,index){
@@ -5704,7 +5704,7 @@ function agentFoldRun(nodes){
   const rest=nodes.slice(),last=rest[rest.length-1];
   const tail=last&&last.classList?.contains('agent-message')&&!isCard(last)?rest.pop():null;
   const box=document.createElement('details');box.className='agent-run';
-  const summary=document.createElement('summary');summary.textContent=tr("执行过程 · {0} 步",count);
+  const summary=document.createElement('summary');summary.textContent=tr('执行过程 · {0} 步',count);
   box.appendChild(summary);rest.forEach(n=>box.appendChild(n));
   return tail?[box,tail]:[box];
 }
@@ -5754,7 +5754,7 @@ function agentMessageNode(m,index=-1){
     const label=AGENT_ACTION_LABELS[m.action]||m.action||tr('操作');
     node.className='agent-message assistant agent-action-record';
     const managed=/^(project|task)\.(create|update|delete)$/.test(m.action)||m.action==='task.edit_request';
-    node.innerHTML=`<div class="agent-action-title">${tr("已提交 · {0}",escapeHTML(label))}</div>`+(managed?`<span>${escapeHTML(m.data?.name||m.content||label)}</span>`:agentActionHTML(m.action,m.data||{},true))+`<small class="agent-time">${escapeHTML(agentFormatTime(m.createdAt))}</small>`;
+    node.innerHTML=`<div class="agent-action-title">${tr('已提交 · {0}',escapeHTML(label))}</div>`+(managed?`<span>${escapeHTML(m.data?.name||m.content||label)}</span>`:agentActionHTML(m.action,m.data||{},true))+`<small class="agent-time">${escapeHTML(agentFormatTime(m.createdAt))}</small>`;
     return node;
   }
   node.className=`agent-message ${m.role==='user'?'user':'assistant'}`;
@@ -5765,7 +5765,7 @@ function agentMessageNode(m,index=-1){
   /* A stored draft reads as a one-line summary and can be opened again as cards. */
   if(m.role==='assistant'&&/<plan>/i.test(m.content||'')){
     const draft=agentSplitPlan(m.content);
-    text.textContent=(draft.clean?draft.clean+' ':'')+tr("（草稿：{0}{1} 个任务）",draft.projects.length?draft.projects.length+tr(' 个项目、'):'',draft.tasks.length);
+    text.textContent=(draft.clean?draft.clean+' ':'')+tr('（草稿：{0}{1} 个任务）',draft.projects.length?draft.projects.length+tr(' 个项目、'):'',draft.tasks.length);
     if((draft.projects.length||draft.tasks.length)&&!agentState.viewing){const btn=document.createElement('button');btn.type='button';btn.className='ghost-btn plan-reopen-history';btn.textContent=draft.draftId?tr('恢复这份草稿'):tr('复制为新草稿');btn.onclick=()=>agentRestoreBoard(draft);node.appendChild(btn)}
   }
   if(m.role==='assistant'&&/<action>/i.test(m.content||'')){const parsed=agentSplitActions(m.content);text.textContent=parsed.clean||parsed.actions.map(x=>tr('当时提议：')+(AGENT_ACTION_LABELS[x.action]||tr('业务操作'))).join('；')}
@@ -5804,7 +5804,7 @@ async function agentLoadOwnHistory(){
     if(!active())return;
     agentState.historyError=true;
     const list=$('#agentMessages');
-    if(list){list.innerHTML=`<p class="muted agent-sessions-empty">${tr("加载失败：{0}",escapeHTML(e.message||tr('请重试')))}</p><button type="button" class="ghost-btn" id="agentHistoryRetry">${tr("重试")}</button>`;
+    if(list){list.innerHTML=`<p class="muted agent-sessions-empty">${tr('加载失败：{0}',escapeHTML(e.message||tr('请重试')))}</p><button type="button" class="ghost-btn" id="agentHistoryRetry">${tr('重试')}</button>`;
       $('#agentHistoryRetry').onclick=()=>agentLoadOwnHistory()}
   }finally{if(active()){agentState.historyLoading=false;agentUpdateBusy()}}
 }
@@ -5884,7 +5884,7 @@ function agentSyncReview(){
   const who=agentState.viewing;
   agentSyncDraftLayout();agentUpdateBusy();
   $('#agentPanel')?.classList.toggle('is-reviewing',Boolean(who));
-  const banner=$('#agentReviewBanner');if(banner)banner.textContent=who?tr("正在查看 {0} 的对话，只读",nameOf(who)):'';
+  const banner=$('#agentReviewBanner');if(banner)banner.textContent=who?tr('正在查看 {0} 的对话，只读',nameOf(who)):'';
 }
 async function agentRenderSessions(){
   const box=$('#agentSessions');if(!box||!agentState.sessionsOpen)return;
@@ -5892,19 +5892,19 @@ async function agentRenderSessions(){
   const active=()=>version===agentState.sessionRender&&agentState.sessionsOpen&&S.user?.id===me&&(agentState.viewing||me)===target;
   let list=[];
   try{list=(await api('/api/action',{action:'agent.conversations',data:{userId:target}})).conversations||[]}
-  catch(e){if(active())box.innerHTML=`<p class="muted agent-sessions-empty">${tr("加载失败：{0}",escapeHTML(e.message||''))}</p>`;return}
+  catch(e){if(active())box.innerHTML=`<p class="muted agent-sessions-empty">${tr('加载失败：{0}',escapeHTML(e.message||''))}</p>`;return}
   if(!active())return;
   const current=mine?agentState.conversationId:agentState.viewConversation;
   /* A conversation just started has no lines yet, so it is listed by hand. */
   if(mine&&current&&!list.some(c=>c.id===current))list.unshift({id:current,title:tr('新对话'),count:0,updatedAt:''});
   const row=c=>`<div class="agent-session${c.id===current?' is-on':''}" data-conv="${escapeHTML(c.id)}"><button type="button" `
     +`class="agent-session-open"><span>${escapeHTML(c.title)}</span><small>${c.updatedAt?escapeHTML(relTime(c.updatedAt))+' · ':''}`
-    +`${tr("{0} 条",c.count)}</small></button>${mine?`${tr("<button type=\"button\" class=\"agent-session-act\" data-act=\"rename\" title=\"重命名\"")} `
-    +`${tr("aria-label=\"重命名「{0}」\">{1}",escapeHTML(c.title),icon('edit'))}</button>`:''}${`<button type="button" class="agent-session-act" `
-    +`${tr("data-act=\"delete\" title=\"删除\" aria-label=\"删除「{0}」\">{1}",escapeHTML(c.title),icon('x'))}</button>`}</div>`;
-  box.innerHTML=`<div class="agent-sessions-head"><strong>${tr("对话")}</strong>${mine?`<button type="button" class="agent-icon-btn" `
-    +`${tr("id=\"agentNewChat\" title=\"新对话\" aria-label=\"新对话\">{0}",icon('plus'))}</button>`:''}</div>`
-    +`${S.user?.admin?`<select id="agentSessionsUser" class="agent-sessions-user" aria-label="${tr("查看账户")}">${S.users.map(u=>`<option `
+    +`${tr('{0} 条',c.count)}</small></button>${mine?`${tr('<button type="button" class="agent-session-act" data-act="rename" title="重命名"')} `
+    +`${tr('aria-label="重命名「{0}」">{1}',escapeHTML(c.title),icon('edit'))}</button>`:''}${`<button type="button" class="agent-session-act" `
+    +`${tr('data-act="delete" title="删除" aria-label="删除「{0}」">{1}',escapeHTML(c.title),icon('x'))}</button>`}</div>`;
+  box.innerHTML=`<div class="agent-sessions-head"><strong>${tr('对话')}</strong>${mine?`<button type="button" class="agent-icon-btn" `
+    +`${tr('id="agentNewChat" title="新对话" aria-label="新对话">{0}',icon('plus'))}</button>`:''}</div>`
+    +`${S.user?.admin?`<select id="agentSessionsUser" class="agent-sessions-user" aria-label="${tr('查看账户')}">${S.users.map(u=>`<option `
     +`value="${escapeHTML(u.id)}"${u.id===target?' selected':''}>${escapeHTML(nameOf(u.id))}</option>`).join('')}</select>`:''}`
     +`<div class="agent-session-list">${list.map(row).join('')||tr('<p class="muted agent-sessions-empty">还没有对话</p>')}</div>`;
   $('#agentNewChat')?.addEventListener('click',agentNewChat);
@@ -6015,7 +6015,7 @@ function agentToggleModelMenu(open){
   menu.querySelectorAll('[data-model]').forEach(b=>b.onclick=async()=>{
     agentToggleModelMenu(false);if(b.dataset.model===cfg.model)return;
     try{agentServerConfig=await api('/api/action',{action:'agent.config.model',data:{model:b.dataset.model}});renderAgentModelChip();
-      toast(tr("已切换到 {0}",b.dataset.model))}catch(e){toast(e.message)}
+      toast(tr('已切换到 {0}',b.dataset.model))}catch(e){toast(e.message)}
   });
 }
 async function agentLoadServerConfig(){
@@ -6248,7 +6248,7 @@ function agentSummarize(result){
   if(result==null)return tr('已完成');
   if(typeof result!=='object')return String(result).slice(0,300);
   if(result.deleted)return tr('已删除');
-  if(result.id)return tr("记录 {0}",result.id);
+  if(result.id)return tr('记录 {0}',result.id);
   try{return JSON.stringify(result).slice(0,300)}catch(_){return tr('已完成')}
 }
 function agentSafeParams(value){
@@ -6264,7 +6264,7 @@ function agentActionHTML(action,payload,executed=false){
   const safe=agentSafeParams(payload),labels={stackPeriods:tr('合并期次'),id:tr('操作对象'),name:tr('名称'),username:tr('账户'),role:tr('权限组'),assignee:tr('执行人'),assignees:tr('执行人'),owner:tr('负责人'),projectId:tr('所属项目'),date:tr('日期'),start:tr('开始'),end:tr('结束'),time:tr('时间'),duration:tr('分钟'),priority:tr('优先级'),active:tr('启用'),accept:tr('同意'),reason:tr('原因'),frequency:tr('重复方式'),weekdays:tr('星期'),dates:tr('指定日期'),status:tr('状态'),summary:tr('总结'),actual:tr('实际用时'),report:tr('报告'),title:tr('标题'),content:tr('内容')};
   const display=(k,v)=>{if(k==='stackPeriods')return v.map(id=>{const t=S.tasks?.find(x=>x.id===id);return t?fmt(t.repeatDate||(t.id.startsWith('repeat:')?t.id.slice(-10):t.date)):id}).join('、');if(k==='id'){const task=S.tasks?.find(x=>x.id===v);if(task)return task.name+(task.stackCount>1?' · '+task.stackCount+tr(' 期'):'');return S.projects?.find(x=>x.id===v)?.name||S.repeats?.find(x=>x.id===v)?.name||nameOf(v)}if(['owner','assignee'].includes(k))return nameOf(v);if(k==='role')return ({member:tr('普通成员'),admin:tr('管理员'),superadmin:tr('超级管理员')}[v]||v);if(k==='projectId')return S.projects?.find(x=>x.id===v)?.name||tr('临时任务');if(Array.isArray(v))return v.map(x=>['assignees','members'].includes(k)?nameOf(x):String(x)).join('、');if(typeof v==='boolean')return v?tr('是'):tr('否');return typeof v==='object'?JSON.stringify(v):String(v??'—')};
   const entries=Object.entries(safe),known=entries.filter(([k])=>labels[k]);
-  return `<dl class="agent-action-fields">${known.map(([k,v])=>`<div><dt>${labels[k]}</dt><dd>${escapeHTML(display(k,v))}</dd></div>`).join('')}</dl>${!executed&&action==='account.delete'?tr('<p class="agent-action-impact">将移除该账户。</p>'):''}`+(entries.some(([k])=>!labels[k])?`<details class="agent-action-details"><summary>${tr("其他参数")}</summary><pre>${escapeHTML(JSON.stringify(safe,null,2))}</pre></details>`:'');
+  return `<dl class="agent-action-fields">${known.map(([k,v])=>`<div><dt>${labels[k]}</dt><dd>${escapeHTML(display(k,v))}</dd></div>`).join('')}</dl>${!executed&&action==='account.delete'?tr('<p class="agent-action-impact">将移除该账户。</p>'):''}`+(entries.some(([k])=>!labels[k])?`<details class="agent-action-details"><summary>${tr('其他参数')}</summary><pre>${escapeHTML(JSON.stringify(safe,null,2))}</pre></details>`:'');
 }
 /* A step line is replayed to the model as a user turn but rendered as a quiet
    receipt, so the transcript stays readable while the model keeps its context. */
@@ -6280,7 +6280,7 @@ function agentRecordStep(display,forModel){
 function agentUpdateBusy(){
   const send=$('#agentSendBtn'),stop=$('#agentStopBtn'),input=$('#agentInput');
   if(send){send.disabled=agentState.busy||agentState.historyLoading||agentState.historyError||Boolean(agentState.viewing);send.textContent=agentState.busy?'…':agentState.historyLoading?tr('加载中…'):tr('发送')}
-  if(stop){stop.classList.toggle('hidden',!agentState.busy);stop.textContent=agentState.steps?tr("停止（已执行 {0} 步）",agentState.steps):tr('停止')}
+  if(stop){stop.classList.toggle('hidden',!agentState.busy);stop.textContent=agentState.steps?tr('停止（已执行 {0} 步）',agentState.steps):tr('停止')}
   const pause=$('#agentPauseBtn');
   if(pause){pause.classList.toggle('hidden',!agentState.busy);pause.textContent=agentState.paused?tr('继续'):tr('暂停');pause.setAttribute('aria-pressed',String(agentState.paused))}
   const mic=$('#agentMicBtn');
@@ -6335,7 +6335,7 @@ function agentRunOne(proposal){
        only has to show what is about to happen. */
     const card=document.createElement('div');
     card.className='agent-message assistant agent-action';
-    card.innerHTML=`<div class="agent-action-title">${tr("待确认操作 · {0}",escapeHTML(label))}</div>`
+    card.innerHTML=`<div class="agent-action-title">${tr('待确认操作 · {0}',escapeHTML(label))}</div>`
       +agentActionHTML(proposal.action,payload)
       +(proposal.action==='account.create'?tr('<label class="agent-account-password">初始密码<input type="password" minlength="6" autocomplete="new-password" aria-label="新账户初始密码"></label>'):'')
       +'<div class="agent-action-buttons"></div>';
@@ -6376,8 +6376,8 @@ function agentRunOne(proposal){
         const diff=verificationWarning?[]:agentVerify(before,agentFingerprint());
         const summary=agentSummarize(result);
         buttons.innerHTML=tr('<span class="agent-action-done">已执行</span>');
-        toast(tr("已{0}",label));
-        agentRecordStep(tr("已{0} · {1}",label,summary),
+        toast(tr('已{0}',label));
+        agentRecordStep(tr('已{0} · {1}',label,summary),
           `【系统回执】${label} 执行成功，返回：${summary}。`
           +`数据核对：${verificationWarning|| (diff.length?diff.join('；'):'服务端已确认成功；当前可见列表没有可比较的变化，不要仅据此重复执行')}。`
           +`先核对这一步有没有达到预期：达到了再输出下一个动作；对不上或没生效，先修正它再继续。`);
@@ -6391,7 +6391,7 @@ function agentRunOne(proposal){
            The failure usually names the step that is missing, so the model can
            supply it and finish what the user actually asked for. */
         buttons.innerHTML=tr('<span class="agent-action-done">未执行</span>');
-        agentRecordStep(tr("执行未通过 · {0}",label),
+        agentRecordStep(tr('执行未通过 · {0}',label),
           `【系统回执·失败】${label} 没有执行。原因：${message}。`
           +`请判断能否再补一步达成用户的目标：能就输出那个补救动作，不能就用一句话说明原因并结束。`
           +`不要重复提交同一个动作。`);
@@ -6436,7 +6436,7 @@ async function agentLoop(context){
       if(key===agentState.lastActionKey){
         agentState.repeats+=1;
         if(agentState.repeats>AGENT_MAX_REPEATS){
-          agentAppend('assistant',tr("模型连续几次提出同一个「{0}」，看起来是卡住了，先停在这里。可以说一句换个做法。",AGENT_ACTION_LABELS[proposal.action]||proposal.action),'error');
+          agentAppend('assistant',tr('模型连续几次提出同一个「{0}」，看起来是卡住了，先停在这里。可以说一句换个做法。',AGENT_ACTION_LABELS[proposal.action]||proposal.action),'error');
           stalled=true;break;
         }
       }else{
@@ -6455,9 +6455,9 @@ async function agentLoop(context){
     if(stalled)break;
   }
   if(steps>=AGENT_MAX_STEPS)
-    agentAppend('assistant',tr("已连续执行 {0} 步，为安全起见先停在这里。你可以继续追问，我会接着往下做。",steps),'');
+    agentAppend('assistant',tr('已连续执行 {0} 步，为安全起见先停在这里。你可以继续追问，我会接着往下做。',steps),'');
   else if(stalled&&agentState.failures>=AGENT_MAX_FAILURES)
-    agentAppend('assistant',tr("连续 {0} 步没有通过校验，先停在这里。可以补充必要信息，或手动处理后让我接着做。",agentState.failures),'error');
+    agentAppend('assistant',tr('连续 {0} 步没有通过校验，先停在这里。可以补充必要信息，或手动处理后让我接着做。',agentState.failures),'error');
   return steps;
 }
 async function agentSubmit(){
@@ -6585,8 +6585,8 @@ function planTaskPath(board,t){
   }
   if(t.project.startsWith('id:')){
     const id=t.project.slice(3),p=S.projects.find(x=>x.id===id),path=taskProjects().find(x=>x.p.id===id);
-    if(path)return {mode:path.mode,assignees:projectAssignees(path.p).map(u=>u.id),note:path.mode==='approval'?tr("由「{0}」的 Owner 审批",path.p.name):''};
-    if(p?.status==='pending')return {mode:'wait',assignees:[t.assignee||S.user.id],note:tr("「{0}」通过审批后再建",p.name)};
+    if(path)return {mode:path.mode,assignees:projectAssignees(path.p).map(u=>u.id),note:path.mode==='approval'?tr('由「{0}」的 Owner 审批',path.p.name):''};
+    if(p?.status==='pending')return {mode:'wait',assignees:[t.assignee||S.user.id],note:tr('「{0}」通过审批后再建',p.name)};
     return {mode:'none',assignees:[],note:tr('这个项目现在不能新建任务')};
   }
   const mode=tempTaskMode();
@@ -6637,10 +6637,10 @@ function planUpdateSelection(board){
   const open=planOpenCards(board),selected=open.filter(x=>x.selected),el=board.el;
   const all=el.querySelector('.plan-select-all');
   if(all){all.checked=open.length>0&&selected.length===open.length;all.indeterminate=selected.length>0&&selected.length<open.length;all.disabled=Boolean(board.busy)||!open.length;}
-  const count=el.querySelector('.plan-select-count');if(count)count.textContent=selected.length?tr("已选 {0} 项",selected.length):tr("待处理 {0} 项",open.length);
+  const count=el.querySelector('.plan-select-count');if(count)count.textContent=selected.length?tr('已选 {0} 项',selected.length):tr('待处理 {0} 项',open.length);
   el.querySelectorAll('.plan-card').forEach(card=>{const x=card.dataset.ref!=null?board.projects.find(p=>p.ref===card.dataset.ref):board.tasks.find(t=>t.key===card.dataset.key);card.classList.toggle('is-selected',Boolean(x?.selected));const box=card.querySelector('[data-plan-select]');if(box)box.checked=Boolean(x?.selected)});
-  el.querySelectorAll('.plan-accept-selected,.plan-reject-selected').forEach(b=>{b.disabled=Boolean(board.busy)||!selected.length;if(b.classList.contains('plan-accept-selected'))b.textContent=selected.length?tr("接受所选 {0} 项",selected.length):tr('接受所选')});
-  const acceptAll=el.querySelector('.plan-confirm');if(acceptAll){acceptAll.classList.toggle('primary-btn',!selected.length);acceptAll.classList.toggle('secondary-btn',Boolean(selected.length));acceptAll.title=tr("处理全部 {0} 张待处理卡片，包含未勾选项",open.length);acceptAll.setAttribute('aria-label',tr("全部接受，共 {0} 项",open.length));}
+  el.querySelectorAll('.plan-accept-selected,.plan-reject-selected').forEach(b=>{b.disabled=Boolean(board.busy)||!selected.length;if(b.classList.contains('plan-accept-selected'))b.textContent=selected.length?tr('接受所选 {0} 项',selected.length):tr('接受所选')});
+  const acceptAll=el.querySelector('.plan-confirm');if(acceptAll){acceptAll.classList.toggle('primary-btn',!selected.length);acceptAll.classList.toggle('secondary-btn',Boolean(selected.length));acceptAll.title=tr('处理全部 {0} 张待处理卡片，包含未勾选项',open.length);acceptAll.setAttribute('aria-label',tr('全部接受，共 {0} 项',open.length));}
   planScheduleSave(board);
 }
 async function planRetire(board,x,state,result){
@@ -6658,7 +6658,7 @@ async function planReject(board,items){
   planCheckpoint(board);board.busy=true;planRender(board);
   try{for(const x of targets){await planRetire(board,x,'rejected',tr('已拒绝'));planRender(board)}}
   finally{board.busy=false;planRender(board)}
-  toast(tr("已拒绝 {0} 张卡片",targets.length));
+  toast(tr('已拒绝 {0} 张卡片',targets.length));
 }
 
 /* Persist reviewed cards separately from the model transcript. A receipt always
@@ -6753,7 +6753,7 @@ function planMutationPath(x,kind){
   if(['done','deferred','skipped','pending_approval','rejected'].includes(before.status))return {mode:'none',assignees,note:tr('已归档或待审批任务不可调整')};
   if(before.projectId&&p?.status!=='active')return {mode:'none',assignees,note:tr('只能调整进行中项目的任务')};
   const direct=admin||(before.projectId?p?.owner===S.user.id:before.creator===S.user.id||before.creator==null&&before.assignee===S.user.id);
-  return {mode:direct?'direct':before.assignee===S.user.id?'approval':'none',assignees:direct?assignees:[before.assignee],note:direct?'':tr("填写修改理由，提交给安排人审批")};
+  return {mode:direct?'direct':before.assignee===S.user.id?'approval':'none',assignees:direct?assignees:[before.assignee],note:direct?'':tr('填写修改理由，提交给安排人审批')};
 }
 function planMutationHTML(board,x,kind){
   const op=planOperation(x),path=planMutationPath(x,kind),project=kind==='project',attr=project?`data-ref="${escapeHTML(x.ref)}"`:`data-key="${escapeHTML(x.key)}"`;
@@ -6763,13 +6763,13 @@ function planMutationHTML(board,x,kind){
   const select=(key,title,values)=>`<label>${title}<select data-f="${key}">${values.map(([v,l])=>`<option value="${escapeHTML(v)}"${x[key]===v?' selected':''}>${escapeHTML(l)}</option>`).join('')}</select></label>`;
   const input=(key,title,type='date')=>`<label>${title}<input data-f="${key}" type="${type}" value="${escapeHTML(x[key]??'')}"${type==='date'?` max="${DATE_HORIZON}"`:type==='number'?' min="1" max="1440"':''}></label>`;
   const changes=Object.entries(planChanges(x,kind));
-  const diff=()=>`<div class="plan-diff" aria-label="${tr("修改前后")}">${changes.map(([k,v])=>`<div><span>${fieldLabels[k]||k}</span><del>${escapeHTML(display(k,x.before?.[k]))}</del><strong>${escapeHTML(display(k,v))}</strong></div>`).join('')||tr('<p>尚未修改字段</p>')}</div>`;
+  const diff=()=>`<div class="plan-diff" aria-label="${tr('修改前后')}">${changes.map(([k,v])=>`<div><span>${fieldLabels[k]||k}</span><del>${escapeHTML(display(k,x.before?.[k]))}</del><strong>${escapeHTML(display(k,v))}</strong></div>`).join('')||tr('<p>尚未修改字段</p>')}</div>`;
   let body='';
   if(op==='delete'){
-    const impact=project?tr("同时删除 {0} 项任务、{1} 个附件、{2} 条固定安排、{3} 场会议、{4} 条沟通记录及相关记录，删除后不可恢复。",Number(x.impact?.tasks)||0,Number(x.impact?.files)||0,Number(x.impact?.repeats)||0,Number(x.impact?.meetings)||0,Number(x.impact?.messages)||0):tr('任务将从日历移除；此操作不可撤销。');
-    body=`<strong class="plan-target">${escapeHTML(x.before?.name||x.name)}</strong><p class="plan-delete-impact">${impact}</p>`+(project?`<label class="plan-delete-confirm">${tr("输入完整项目名以确认")}<input data-f="confirm" autocomplete="off" value="${escapeHTML(x.confirm||'')}" placeholder="${escapeHTML(x.before?.name||tr('项目名称'))}"></label>`:`<label class="plan-delete-confirm"><input type="checkbox" data-f="deleteConfirmed"${x.deleteConfirmed?' checked':''}>${tr("我确认删除这项任务")}</label>`);
+    const impact=project?tr('同时删除 {0} 项任务、{1} 个附件、{2} 条固定安排、{3} 场会议、{4} 条沟通记录及相关记录，删除后不可恢复。',Number(x.impact?.tasks)||0,Number(x.impact?.files)||0,Number(x.impact?.repeats)||0,Number(x.impact?.meetings)||0,Number(x.impact?.messages)||0):tr('任务将从日历移除；此操作不可撤销。');
+    body=`<strong class="plan-target">${escapeHTML(x.before?.name||x.name)}</strong><p class="plan-delete-impact">${impact}</p>`+(project?`<label class="plan-delete-confirm">${tr('输入完整项目名以确认')}<input data-f="confirm" autocomplete="off" value="${escapeHTML(x.confirm||'')}" placeholder="${escapeHTML(x.before?.name||tr('项目名称'))}"></label>`:`<label class="plan-delete-confirm"><input type="checkbox" data-f="deleteConfirmed"${x.deleteConfirmed?' checked':''}>${tr('我确认删除这项任务')}</label>`);
   }else{
-    body=`<p class="plan-target">${tr("正在修改：{0}",escapeHTML(x.before?.name||''))}</p><input class="plan-title" data-f="name" value="${escapeHTML(x.name)}" maxlength="120" aria-label="${tr("{0}名称",project?tr('项目'):tr('任务'))}"><textarea class="plan-desc" data-f="desc" rows="2" aria-label="${tr("说明")}">${escapeHTML(x.desc)}</textarea><div class="plan-grid">`;
+    body=`<p class="plan-target">${tr('正在修改：{0}',escapeHTML(x.before?.name||''))}</p><input class="plan-title" data-f="name" value="${escapeHTML(x.name)}" maxlength="120" aria-label="${tr('{0}名称',project?tr('项目'):tr('任务'))}"><textarea class="plan-desc" data-f="desc" rows="2" aria-label="${tr('说明')}">${escapeHTML(x.desc)}</textarea><div class="plan-grid">`;
     if(project){
       if(S.user.admin)body+=select('owner','Owner',S.users.filter(u=>u.active&&!u.admin).map(u=>[u.id,nameOf(u.id)]));
       body+=input('start',tr('开始'))+input('end',tr('截止（可空）'))+select('priority',tr('优先级'),['P0','P1','P2'].map(v=>[v,v]))+select('status',tr('状态'),(S.user.admin?['active','paused','done','archived']:['active','paused']).map(v=>[v,display('status',v)]));
@@ -6777,11 +6777,11 @@ function planMutationHTML(board,x,kind){
       body+=select('assignee',tr('负责人'),path.assignees.map(id=>[id,nameOf(id)]))+input('date',tr('日期'))+input('deadline',tr('截止（可空）'))+input('time',tr('时间'),'time')+input('duration',tr('时长（分钟）'),'number')+select('priority',tr('优先级'),['P0','P1','P2'].map(v=>[v,v]))+select('status',tr('状态'),['todo','doing'].map(v=>[v,display('status',v)]));
     }
     body+='</div>';
-    if(project)body+=`<div class="plan-people"><span>${tr("协作者")}</span>${S.users.filter(u=>u.active&&!u.admin&&u.id!==x.owner).map(u=>`<button type="button" class="plan-person${x.members.includes(u.id)?' is-on':''}" data-user="${escapeHTML(u.id)}" aria-pressed="${x.members.includes(u.id)}">${escapeHTML(nameOf(u.id))}</button>`).join('')}</div>`;
+    if(project)body+=`<div class="plan-people"><span>${tr('协作者')}</span>${S.users.filter(u=>u.active&&!u.admin&&u.id!==x.owner).map(u=>`<button type="button" class="plan-person${x.members.includes(u.id)?' is-on':''}" data-user="${escapeHTML(u.id)}" aria-pressed="${x.members.includes(u.id)}">${escapeHTML(nameOf(u.id))}</button>`).join('')}</div>`;
     body+=diff();
-    if(path.mode==='approval')body+=`<label class="plan-change-reason">${tr("修改理由")}<textarea data-f="reason" rows="2">${escapeHTML(x.reason||'')}</textarea></label>`;
+    if(path.mode==='approval')body+=`<label class="plan-change-reason">${tr('修改理由')}<textarea data-f="reason" rows="2">${escapeHTML(x.reason||'')}</textarea></label>`;
   }
-  return `<article class="plan-card is-${op} is-${path.mode}${project?' is-project':''}" ${attr}><div class="plan-card-top"><span class="plan-kind">${icon(project?'folder':'calendar-check')}${label}</span><span class="plan-state is-${path.mode}">${path.mode==='approval'?tr('提交申请'):path.mode==='none'?tr('无权操作'):tr('待确认')}</span><button type="button" class="plan-remove" aria-label="${tr("移除这张卡")}" title="${tr("移除这张卡")}">${icon('x')}</button></div>${body}<p class="plan-note">${escapeHTML(path.mode==='none'||path.mode==='approval'?path.note:'')}</p><button type="button" class="ghost-btn plan-reload">${tr("重新读取")}</button>${x.error?`<p class="plan-error">${escapeHTML(x.error)}</p>`:''}</article>`;
+  return `<article class="plan-card is-${op} is-${path.mode}${project?' is-project':''}" ${attr}><div class="plan-card-top"><span class="plan-kind">${icon(project?'folder':'calendar-check')}${label}</span><span class="plan-state is-${path.mode}">${path.mode==='approval'?tr('提交申请'):path.mode==='none'?tr('无权操作'):tr('待确认')}</span><button type="button" class="plan-remove" aria-label="${tr('移除这张卡')}" title="${tr('移除这张卡')}">${icon('x')}</button></div>${body}<p class="plan-note">${escapeHTML(path.mode==='none'||path.mode==='approval'?path.note:'')}</p><button type="button" class="ghost-btn plan-reload">${tr('重新读取')}</button>${x.error?`<p class="plan-error">${escapeHTML(x.error)}</p>`:''}</article>`;
 }
 async function planReload(board,x){
   if(board.busy||agentState.busy||agentWriteBlocked())return;
@@ -6799,9 +6799,9 @@ function planCardsHTML(board){
   const admin=Boolean(S.user?.admin),people=S.users.filter(u=>u.active&&!u.admin),pm=projectMode();
   const opt=(v,l,cur)=>`<option value="${escapeHTML(v)}"${v===cur?' selected':''}>${escapeHTML(l)}</option>`;
   const chip=(mode,why='')=>`<span class="plan-state is-${mode}"${why?` title="${escapeHTML(why)}"`:''}>${PLAN_STATE[mode]}</span>`;
-  const top=(kind,label,mode,extra='',why='')=>`<div class="plan-card-top"><span class="plan-kind">${icon(kind)}${label}</span>${extra}${chip(mode,why)}<button type="button" class="plan-remove" title="${tr("移除这张卡")}" aria-label="${tr("移除这张卡")}">${icon('x')}</button></div>`;
+  const top=(kind,label,mode,extra='',why='')=>`<div class="plan-card-top"><span class="plan-kind">${icon(kind)}${label}</span>${extra}${chip(mode,why)}<button type="button" class="plan-remove" title="${tr('移除这张卡')}" aria-label="${tr('移除这张卡')}">${icon('x')}</button></div>`;
   const note=(text,cls='plan-note')=>text?`<p class="${cls}">${escapeHTML(text)}</p>`:'';
-  const projectCard=p=>planOperation(p)!=='create'?planMutationHTML(board,p,'project'):`<article class="plan-card is-project is-${pm}" data-ref="${escapeHTML(p.ref)}">${top('folder',tr('新项目'),pm,'',pm==='none'?tr('你的规则组不能新建项目'):pm==='approval'?tr('提交后由管理员审批'):'')}<input class="plan-title" data-f="name" value="${escapeHTML(p.name)}" maxlength="120" placeholder="${tr("项目名称")}" aria-label="${tr("项目名称")}"><textarea class="plan-desc" data-f="desc" rows="2" placeholder="${tr("项目描述（可选）")}" aria-label="${tr("项目描述")}">${escapeHTML(p.desc)}</textarea><div class="plan-grid">${admin?`<label class="is-wide">Owner<select data-f="owner">${opt('',tr('请选择负责人'),p.owner)}${people.map(u=>opt(u.id,nameOf(u.id),p.owner)).join('')}</select></label>`:''}<label>${tr("优先级")}<select data-f="priority">${['P0','P1','P2'].map(v=>opt(v,v,p.priority)).join('')}</select></label><label>${tr("开始")}<input type="date" data-f="start" value="${escapeHTML(p.start)}" min="${S.today}" max="${DATE_HORIZON}"></label><label>${tr("截止（可空）")}<input type="date" data-f="end" value="${escapeHTML(p.end)}" min="${escapeHTML(p.start)}" max="${DATE_HORIZON}"></label></div><div class="plan-people"><span>${admin?tr('协作者'):tr('邀请协作者')}</span>${people.filter(u=>u.id!==p.owner).map(u=>`<button type="button" class="plan-person${p.members.includes(u.id)?' is-on':''}" data-user="${escapeHTML(u.id)}" aria-pressed="${p.members.includes(u.id)}">${escapeHTML(nameOf(u.id))}</button>`).join('')||tr('<span class="muted">没有其他成员</span>')}</div>${note(p.error,'plan-error')}</article>`;
+  const projectCard=p=>planOperation(p)!=='create'?planMutationHTML(board,p,'project'):`<article class="plan-card is-project is-${pm}" data-ref="${escapeHTML(p.ref)}">${top('folder',tr('新项目'),pm,'',pm==='none'?tr('你的规则组不能新建项目'):pm==='approval'?tr('提交后由管理员审批'):'')}<input class="plan-title" data-f="name" value="${escapeHTML(p.name)}" maxlength="120" placeholder="${tr('项目名称')}" aria-label="${tr('项目名称')}"><textarea class="plan-desc" data-f="desc" rows="2" placeholder="${tr('项目描述（可选）')}" aria-label="${tr('项目描述')}">${escapeHTML(p.desc)}</textarea><div class="plan-grid">${admin?`<label class="is-wide">Owner<select data-f="owner">${opt('',tr('请选择负责人'),p.owner)}${people.map(u=>opt(u.id,nameOf(u.id),p.owner)).join('')}</select></label>`:''}<label>${tr('优先级')}<select data-f="priority">${['P0','P1','P2'].map(v=>opt(v,v,p.priority)).join('')}</select></label><label>${tr('开始')}<input type="date" data-f="start" value="${escapeHTML(p.start)}" min="${S.today}" max="${DATE_HORIZON}"></label><label>${tr('截止（可空）')}<input type="date" data-f="end" value="${escapeHTML(p.end)}" min="${escapeHTML(p.start)}" max="${DATE_HORIZON}"></label></div><div class="plan-people"><span>${admin?tr('协作者'):tr('邀请协作者')}</span>${people.filter(u=>u.id!==p.owner).map(u=>`<button type="button" class="plan-person${p.members.includes(u.id)?' is-on':''}" data-user="${escapeHTML(u.id)}" aria-pressed="${p.members.includes(u.id)}">${escapeHTML(nameOf(u.id))}</button>`).join('')||tr('<span class="muted">没有其他成员</span>')}</div>${note(p.error,'plan-error')}</article>`;
   const taskCard=t=>{
     if(planOperation(t)!=='create')return planMutationHTML(board,t,'task');
     const path=planTaskPath(board,t);
@@ -6809,15 +6809,15 @@ function planCardsHTML(board){
     if(t.project.startsWith('ref:')&&!board.projects.some(p=>'ref:'+p.ref===t.project&&planPending(p)))projects.push(opt(t.project,tr('原新项目已拒绝，请重新选择'),t.project));
     if(t.project.startsWith('missing:'))projects.push(opt(t.project,tr('请选择所属项目'),t.project));
     if(t.project.startsWith('id:')&&!open.some(x=>'id:'+x.p.id===t.project))projects.push(opt(t.project,S.projects.find(x=>'id:'+x.id===t.project)?.name||tr('已不存在的项目'),t.project));
-    const prio=`<span class="plan-prio" role="radiogroup" aria-label="${tr("优先级")}">${['P0','P1','P2'].map(v=>`<button type="button" class="priority ${v}${t.priority===v?' is-on':''}" data-prio="${v}" aria-checked="${t.priority===v}" role="radio">${v}</button>`).join('')}</span>`;
-    return `<article class="plan-card is-${path.mode}" data-key="${escapeHTML(t.key)}">${top('calendar-check',tr('任务'),path.mode,prio,path.note)}<input class="plan-title" data-f="name" value="${escapeHTML(t.name)}" maxlength="120" placeholder="${tr("任务名称")}" aria-label="${tr("任务名称")}"><div class="plan-grid"><label class="is-wide">${tr("放在")}<select data-f="project">${projects.join('')}</select></label><label>${tr("负责人")}<select data-f="assignee">${opt('',tr('请选择负责人'),t.assignee)}${path.assignees.map(id=>opt(id,nameOf(id),t.assignee)).join('')||opt('','—','')}</select></label><label>${tr("日期")}<input type="date" data-f="date" value="${escapeHTML(t.date)}" min="${S.today}" max="${DATE_HORIZON}"></label><label>${tr("时间")}<input type="time" data-f="time" value="${escapeHTML(t.time)}"></label><label>${tr("时长（分钟）")}<input type="number" data-f="duration" min="1" max="1440" value="${escapeHTML(t.duration)}"></label></div><textarea class="plan-desc" data-f="desc" rows="1" placeholder="${tr("补充说明（可选）")}" aria-label="${tr("任务说明")}">${escapeHTML(t.desc)}</textarea>${note(path.note)}${note(t.error,'plan-error')}</article>`;
+    const prio=`<span class="plan-prio" role="radiogroup" aria-label="${tr('优先级')}">${['P0','P1','P2'].map(v=>`<button type="button" class="priority ${v}${t.priority===v?' is-on':''}" data-prio="${v}" aria-checked="${t.priority===v}" role="radio">${v}</button>`).join('')}</span>`;
+    return `<article class="plan-card is-${path.mode}" data-key="${escapeHTML(t.key)}">${top('calendar-check',tr('任务'),path.mode,prio,path.note)}<input class="plan-title" data-f="name" value="${escapeHTML(t.name)}" maxlength="120" placeholder="${tr('任务名称')}" aria-label="${tr('任务名称')}"><div class="plan-grid"><label class="is-wide">${tr('放在')}<select data-f="project">${projects.join('')}</select></label><label>${tr('负责人')}<select data-f="assignee">${opt('',tr('请选择负责人'),t.assignee)}${path.assignees.map(id=>opt(id,nameOf(id),t.assignee)).join('')||opt('','—','')}</select></label><label>${tr('日期')}<input type="date" data-f="date" value="${escapeHTML(t.date)}" min="${S.today}" max="${DATE_HORIZON}"></label><label>${tr('时间')}<input type="time" data-f="time" value="${escapeHTML(t.time)}"></label><label>${tr('时长（分钟）')}<input type="number" data-f="duration" min="1" max="1440" value="${escapeHTML(t.duration)}"></label></div><textarea class="plan-desc" data-f="desc" rows="1" placeholder="${tr('补充说明（可选）')}" aria-label="${tr('任务说明')}">${escapeHTML(t.desc)}</textarea>${note(path.note)}${note(t.error,'plan-error')}</article>`;
   };
   const decorate=(html,x)=>{
     const working=x.state==='submitting',disabled=board.busy?' disabled':'';
     html=html.replace(/<button type="button" class="plan-remove"[\s\S]*?<\/button>/,'');
-    html=html.replace('<div class="plan-card-top">',`<div class="plan-card-top"><label class="plan-pick" title="${tr("选择这张卡片（不会立即执行）")}"><input type="checkbox" data-plan-select aria-label="${tr("选择{0}",escapeHTML(x.name||tr('这张卡片')))}"${x.selected?' checked':''}${disabled}></label>`);
+    html=html.replace('<div class="plan-card-top">',`<div class="plan-card-top"><label class="plan-pick" title="${tr('选择这张卡片（不会立即执行）')}"><input type="checkbox" data-plan-select aria-label="${tr('选择{0}',escapeHTML(x.name||tr('这张卡片')))}"${x.selected?' checked':''}${disabled}></label>`);
     if(working)html=html.replace(/(<span class="plan-state[^>]*>)[^<]*/, tr('$1接受中…'));
-    return html.replace('</article>',`<p class="plan-validation" role="status"></p><div class="plan-card-actions"><button type="button" class="ghost-btn plan-reject"${disabled}>${tr("拒绝")}</button><button type="button" class="primary-btn plan-accept"${disabled}>${working?tr('接受中…'):tr('接受')}</button></div></article>`);
+    return html.replace('</article>',`<p class="plan-validation" role="status"></p><div class="plan-card-actions"><button type="button" class="ghost-btn plan-reject"${disabled}>${tr('拒绝')}</button><button type="button" class="primary-btn plan-accept"${disabled}>${working?tr('接受中…'):tr('接受')}</button></div></article>`);
   };
   const visible=x=>planPending(x)||x.state==='submitting';
   return board.projects.filter(visible).map(x=>decorate(projectCard(x),x)).join('')+board.tasks.filter(visible).map(x=>decorate(taskCard(x),x)).join('');
@@ -6855,13 +6855,13 @@ function planActivate(board){
 function planRender(board,entering=false){
   const el=board.el,all=board.projects.concat(board.tasks),open=planOpenCards(board),accepted=all.filter(x=>x.state==='done').length,rejected=all.filter(x=>x.state==='rejected').length,working=all.filter(x=>x.state==='submitting').length;
   agentSyncDraftLayout();
-  const progress=[working?tr("接受中 {0}",working):'',accepted?tr("已接受 {0}",accepted):'',rejected?tr("已拒绝 {0}",rejected):''].filter(Boolean).join(' · ');
-  const head=`<div class="plan-board-head">${icon('sparkles')}<strong>${tr("待处理 · {0} 张卡片",open.length)}</strong><span>${escapeHTML(progress)}</span></div>`;
+  const progress=[working?tr('接受中 {0}',working):'',accepted?tr('已接受 {0}',accepted):'',rejected?tr('已拒绝 {0}',rejected):''].filter(Boolean).join(' · ');
+  const head=`<div class="plan-board-head">${icon('sparkles')}<strong>${tr('待处理 · {0} 张卡片',open.length)}</strong><span>${escapeHTML(progress)}</span></div>`;
   if(board.closed){
-    el.innerHTML=head+`<div class="plan-foot is-closed"><span class="plan-sum">${escapeHTML(board.closedNote||tr('未处理的卡片已保留'))}</span><button type="button" class="ghost-btn plan-reopen">${tr("重新打开")}</button></div>`;
+    el.innerHTML=head+`<div class="plan-foot is-closed"><span class="plan-sum">${escapeHTML(board.closedNote||tr('未处理的卡片已保留'))}</span><button type="button" class="ghost-btn plan-reopen">${tr('重新打开')}</button></div>`;
   }else{
-    const n=planTally(board),sum=[n.delete?tr("含 {0} 项删除",n.delete):'',n.wait?tr("{0} 项要等审批",n.wait):'',n.none?tr("{0} 项暂不能接受",n.none):''].filter(Boolean).join(' · ');
-    el.innerHTML=head+`<div class="plan-draft-tools"><button type="button" class="ghost-btn plan-undo"${board.history?.length&&!board.busy?'':' disabled'}>${tr("撤销修改")}</button><button type="button" class="ghost-btn plan-copy">${tr("复制草稿")}</button>${board.conflict?tr('<button type="button" class="ghost-btn plan-restore">重新加载草稿</button>'):''}<small class="plan-save-status" role="status">${escapeHTML(board.saveError||'')}</small></div><div class="plan-selection"><label class="plan-select-label"><input type="checkbox" class="plan-select-all">${tr("全选")}</label><span class="plan-select-count" role="status"></span><div class="plan-selection-actions"><button type="button" class="ghost-btn plan-reject-selected">${tr("拒绝所选")}</button><button type="button" class="primary-btn plan-accept-selected">${tr("接受所选")}</button></div></div><div class="plan-cards${entering?' is-entering':''}">${planCardsHTML(board)||'<div class="plan-empty">'+icon('check')+tr('<strong>本组卡片已处理完</strong></div>')}</div><div class="plan-foot"><button type="button" class="ghost-btn plan-add">${tr("{0}加一个任务",icon('plus'))}</button><span class="plan-sum">${tr("全部 {0} 项{1}{2}",open.length,sum?' · '+sum:'',board.saveError?' · '+escapeHTML(board.saveError):'')}</span><button type="button" class="ghost-btn plan-cancel">${open.length?tr('收起草稿'):tr('收起')}</button><button type="button" class="primary-btn plan-confirm"${open.length&&!board.busy?'':' disabled'}>${board.busy?tr('正在接受…'):planConfirmLabel()}</button></div>`;
+    const n=planTally(board),sum=[n.delete?tr('含 {0} 项删除',n.delete):'',n.wait?tr('{0} 项要等审批',n.wait):'',n.none?tr('{0} 项暂不能接受',n.none):''].filter(Boolean).join(' · ');
+    el.innerHTML=head+`<div class="plan-draft-tools"><button type="button" class="ghost-btn plan-undo"${board.history?.length&&!board.busy?'':' disabled'}>${tr('撤销修改')}</button><button type="button" class="ghost-btn plan-copy">${tr('复制草稿')}</button>${board.conflict?tr('<button type="button" class="ghost-btn plan-restore">重新加载草稿</button>'):''}<small class="plan-save-status" role="status">${escapeHTML(board.saveError||'')}</small></div><div class="plan-selection"><label class="plan-select-label"><input type="checkbox" class="plan-select-all">${tr('全选')}</label><span class="plan-select-count" role="status"></span><div class="plan-selection-actions"><button type="button" class="ghost-btn plan-reject-selected">${tr('拒绝所选')}</button><button type="button" class="primary-btn plan-accept-selected">${tr('接受所选')}</button></div></div><div class="plan-cards${entering?' is-entering':''}">${planCardsHTML(board)||'<div class="plan-empty">'+icon('check')+tr('<strong>本组卡片已处理完</strong></div>')}</div><div class="plan-foot"><button type="button" class="ghost-btn plan-add">${tr('{0}加一个任务',icon('plus'))}</button><span class="plan-sum">${tr('全部 {0} 项{1}{2}',open.length,sum?' · '+sum:'',board.saveError?' · '+escapeHTML(board.saveError):'')}</span><button type="button" class="ghost-btn plan-cancel">${open.length?tr('收起草稿'):tr('收起')}</button><button type="button" class="primary-btn plan-confirm"${open.length&&!board.busy?'':' disabled'}>${board.busy?tr('正在接受…'):planConfirmLabel()}</button></div>`;
     el.querySelectorAll('input,textarea,select,button').forEach(field=>{field.disabled=Boolean(board.busy)||field.disabled});
     planMarkFields(board);planUpdateSelection(board);
     if(entering)el.querySelectorAll('.plan-card').forEach((c,i)=>c.style.setProperty('--i',String(i)));
@@ -6955,7 +6955,7 @@ async function planSubmit(board,items=null){
     for(const p of board.projects.filter(p=>candidates.includes(p)&&planPending(p)&&planOperation(p)==='delete'))await submit(p,'project');
     try{await refresh()}catch(_){}
   }finally{board.busy=false;agentState.busy=false;agentUpdateBusy()}
-  const parts=[results.create?tr("创建了 {0} 项",results.create):'',results.update?tr("修改了 {0} 项",results.update):'',results.delete?tr("删除了 {0} 项",results.delete):'',results.approval?tr("提交了 {0} 个申请",results.approval):'',results.failed?tr("{0} 张卡片未接受，原因留在卡片上",results.failed):''].filter(Boolean);
+  const parts=[results.create?tr('创建了 {0} 项',results.create):'',results.update?tr('修改了 {0} 项',results.update):'',results.delete?tr('删除了 {0} 项',results.delete):'',results.approval?tr('提交了 {0} 个申请',results.approval):'',results.failed?tr('{0} 张卡片未接受，原因留在卡片上',results.failed):''].filter(Boolean);
   board.closedNote=parts.join('，');
   planRender(board);agentAppend('assistant',(board.closedNote||tr('没有提交新的改动'))+'。');
 }
@@ -6991,7 +6991,7 @@ function chatDayLabel(iso){
   if(key(d)===key(today))return tr('今天');
   const yesterday=new Date(today);yesterday.setDate(yesterday.getDate()-1);
   if(key(d)===key(yesterday))return tr('昨天');
-  return tr("{0} 月 {1} 日",d.getMonth()+1,d.getDate());
+  return tr('{0} 月 {1} 日',d.getMonth()+1,d.getDate());
 }
 function chatClock(iso){
   const d=new Date(iso);
@@ -7139,7 +7139,7 @@ async function loadChat(reset){
     if(data.previews)chatPreviews=data.previews;
   }catch(e){
     if(generation!==chatLoadGeneration||channel!==chatChannel||owner!==S.user?.id)return;
-    if(reset)log.innerHTML=`<p class="chat-empty">${tr("读不到消息：{0}",escapeHTML(e?.message||tr('加载失败')))}</p>`;
+    if(reset)log.innerHTML=`<p class="chat-empty">${tr('读不到消息：{0}',escapeHTML(e?.message||tr('加载失败')))}</p>`;
     return;
   }
   if(reset){log.innerHTML='';chatLastAt='';chatLastDay='';chatFirstAt='';chatFirstCursor=null;chatLastCursor=null}
@@ -7222,11 +7222,11 @@ function renderChatMembers(){
   });
   const online=ids.filter(id=>chatPresence[id].online).length;
   const shown=ids.slice(0,CHAT_PRESENCE_SHOWN),rest=ids.length-shown.length;
-  bar.innerHTML=`<span class="chat-online">${tr("{0}/{1} 在线",online,ids.length)}</span>`+shown.map(id=>{
+  bar.innerHTML=`<span class="chat-online">${tr('{0}/{1} 在线',online,ids.length)}</span>`+shown.map(id=>{
     const state=chatPresence[id];
-    const label=state.online?tr('在线'):(state.at?tr("最后活跃 {0}",chatClock(state.at)):tr('还没来过'));
+    const label=state.online?tr('在线'):(state.at?tr('最后活跃 {0}',chatClock(state.at)):tr('还没来过'));
     return `<span class="chat-presence ${state.online?'is-on':''}" title="${escapeHTML(nameOf(id))} · ${escapeHTML(label)}">${avatarHTML(id)}</span>`;
-  }).join('')+(rest>0?`<span class="chat-presence-more" title="${tr("还有 {0} 位成员",rest)}">+${rest}</span>`:'');
+  }).join('')+(rest>0?`<span class="chat-presence-more" title="${tr('还有 {0} 位成员',rest)}">+${rest}</span>`:'');
 }
 function startChatPolling(){
   stopChatPolling();
@@ -7323,10 +7323,10 @@ async function openChannelArchive(projectId,projectName){
     if(day)dayKey=day;
     return chatBubble(m,withDay);
   }).join('');
-  openModal(`<div class="eyebrow">${tr("归档 · {0}",escapeHTML(projectName||''))}</div><h2>${tr("沟通记录")}</h2>`
-    +`<p>${rows.length?tr("共 {0} 条消息",rows.length):tr('暂无沟通记录')}</p>`
+  openModal(`<div class="eyebrow">${tr('归档 · {0}',escapeHTML(projectName||''))}</div><h2>${tr('沟通记录')}</h2>`
+    +`<p>${rows.length?tr('共 {0} 条消息',rows.length):tr('暂无沟通记录')}</p>`
     +`<div class="chat-log chat-archive">${body}</div>`
-    +`<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr("关闭")}</button></div>`);
+    +`<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('关闭')}</button></div>`);
   $('#cancelAction').onclick=closeModal;
 }
 /* The Enter that confirms an IME candidate (pinyin, or letters typed while a
@@ -7717,7 +7717,7 @@ function ensureAccountCreateButton(){
 }
 function createAccountDialog(){
   const groups={superadmin:S.users.filter(u=>roleOf(u)==='superadmin').length,admin:S.users.filter(u=>roleOf(u)==='admin').length};
-  openModal(`<div class="eyebrow">${tr("账户管理 · 新建账户")}</div><h2>${tr("添加账户")}</h2><label class="form-field">${tr("账户名")}<input id="newAccountName" autocomplete="off" placeholder="zhangsan"></label><label class="form-field">${tr("中文名称（可留空）")}<input id="newAccountDisplayName" maxlength="12"></label><label class="form-field">${tr("初始密码")}<input id="newAccountPassword" type="password" autocomplete="new-password" placeholder="${tr("至少 6 位")}"></label><label class="form-field">${tr("权限组")}<select id="newAccountRole"><option value="member">${tr("普通用户")}</option><option value="admin">${tr("admin（{0}）",groups.admin)}</option><option value="superadmin">${tr("superadmin（{0}）",groups.superadmin)}</option></select></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr("取消")}</button><button class="primary-btn" id="confirmCreateAccount">${tr("创建账户")}</button></div>`);
+  openModal(`<div class="eyebrow">${tr('账户管理 · 新建账户')}</div><h2>${tr('添加账户')}</h2><label class="form-field">${tr('账户名')}<input id="newAccountName" autocomplete="off" placeholder="zhangsan"></label><label class="form-field">${tr('中文名称（可留空）')}<input id="newAccountDisplayName" maxlength="12"></label><label class="form-field">${tr('初始密码')}<input id="newAccountPassword" type="password" autocomplete="new-password" placeholder="${tr('至少 6 位')}"></label><label class="form-field">${tr('权限组')}<select id="newAccountRole"><option value="member">${tr('普通用户')}</option><option value="admin">${tr('admin（{0}）',groups.admin)}</option><option value="superadmin">${tr('superadmin（{0}）',groups.superadmin)}</option></select></label><div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('取消')}</button><button class="primary-btn" id="confirmCreateAccount">${tr('创建账户')}</button></div>`);
   $('#cancelAction').onclick=closeModal;
   $('#confirmCreateAccount').onclick=async()=>{
     const username=$('#newAccountName').value.trim(),password=$('#newAccountPassword').value,role=$('#newAccountRole').value,displayName=$('#newAccountDisplayName').value.trim();
