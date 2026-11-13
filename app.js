@@ -77,6 +77,7 @@ function syncAccountLanguage(user){
   let stored=null;
   try{localStorage.setItem(LANG_KEY,lang);stored=localStorage.getItem(LANG_KEY)}catch(_){}
   if(lang===LANG)return false;
+  UI.reloading=true;
   if(stored===lang&&!auto){location.reload();return true}
   /* Storage that does not keep the choice would bring the old language back on
      every reload, so the address carries it, marked langAuto so the next
@@ -481,7 +482,8 @@ function showAuth(){resetFormDraft();cancelTourOffer();endTour(false);meetingCan
   $('#loginForm').onsubmit=async e=>{e.preventDefault();
     try{await api('/api/login',{username:$('#loginUser').value,password:$('#loginPass').value});
       document.body.classList.remove('auth-locked');e.target.closest('#authScreen').remove();await refresh();
-      switchView('calendar')}catch(err){$('#loginError').textContent=err.message}}}
+      // The account's language may be reloading the page; the old one has no workspace to show.
+      if(!UI.reloading)switchView('calendar')}catch(err){const box=$('#loginError');if(box)box.textContent=err.message}}}
 /* Accounts that have signed in on this browser, newest first. The switcher
    offers only these, so it never lists the whole team to everyone. */
 const KNOWN_ACCOUNTS_KEY='wc-accounts';

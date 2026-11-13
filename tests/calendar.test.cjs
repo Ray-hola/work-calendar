@@ -3557,6 +3557,8 @@ test('the account’s saved language wins over the browser unless ?lang= is set'
   assert.equal(a.run("syncAccountLanguage({lang:'zh'})"), false);
   assert.equal(a.run("syncAccountLanguage({lang:'en'})"), true);
   assert.equal(reloaded, 1);
+  assert.equal(a.run('UI.reloading'), true, 'sign-in stops there instead of showing the old page');
+  assert.match(source, /await refresh\(\);\n[^\n]*\n\s*if\(!UI\.reloading\)switchView\('calendar'\)/);
   assert.deepEqual(writes.at(-1), ['hola-lang', 'en']);
   const pinned = appIn('zh', '?lang=zh');
   pinned.context.location.reload = () => { throw new Error('should not reload'); };
