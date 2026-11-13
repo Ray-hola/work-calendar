@@ -8,6 +8,8 @@ const vm = require('node:vm');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../app.js'), 'utf8');
 const definitions = source.slice(0, source.indexOf("$$('.nav-item').forEach(b=>b.onclick="));
+/* Source fragments lifted out on their own still call tr(); in Chinese it only fills {0}… */
+const tr = (text, ...args) => text.replace(/\{(\d+)\}/g, (m, i) => i < args.length ? String(args[i]) : m);
 
 function app() {
   const context = vm.createContext({});
@@ -235,8 +237,8 @@ test('entry points follow the rule group: new, request, or not offered', () => {
   // Your own project is always direct; a project you only collaborate on follows the group.
   assert.deepEqual(a.json('taskProjects().map(x=>[x.p.id,x.mode])'),[['q','direct']]);
   assert.equal(a.run('taskEntryMode()'),'direct');
-  assert.ok(a.run("entryLabel('approval','项目')").endsWith('申请项目'));
-  assert.ok(a.run("entryLabel('direct','任务')").endsWith('新任务'));
+  assert.ok(a.run("entryLabel('approval','project')").endsWith('申请项目'));
+  assert.ok(a.run("entryLabel('direct','task')").endsWith('新任务'));
   a.run(`S.projects=S.projects.filter(p=>p.id!=='q');S.creationRules={project:'none',tempTask:'approval',projectTask:'approval'}`);
   assert.deepEqual(a.json('taskProjects().map(x=>[x.p.id,x.mode])'),[['p','approval']]);
   assert.equal(a.run('taskEntryMode()'),'approval');
@@ -329,7 +331,7 @@ test('project summaries label collaborator progress as personal instead of proje
 test('project content tabs keep the dedicated meetings workspace and keyboard navigation',()=>{
   const a=app();
   const sourceText=source;
-  assert.match(sourceText,/const SPACE_TABS=\{[^}]*meetings:'会议'/);
+  assert.match(sourceText,/const SPACE_TABS=\{[^}]*meetings:tr\('会议'\)/);
   assert.match(sourceText,/panel\('meetings',projectMeetings\(p/);
   assert.match(sourceText,/function bindProjectContentTabs\(\)/);
   assert.match(sourceText,/archive\?\['files','meetings'\]/,'归档项目只留文件和会议两个标签');
@@ -646,9 +648,9 @@ function agentHarness(queue, verdicts) {
   };
   const loop = new Function(
     'agentState', 'agentAppend', 'agentUpdateBusy', 'agentNext', 'agentRunOne',
-    'AGENT_MAX_STEPS', 'AGENT_MAX_FAILURES', 'AGENT_MAX_REPEATS', 'AGENT_ACTION_LABELS',
+    'AGENT_MAX_STEPS', 'AGENT_MAX_FAILURES', 'AGENT_MAX_REPEATS', 'AGENT_ACTION_LABELS', 'tr',
     AGENT_LOOP_SOURCE + '\nreturn agentLoop;'
-  )(state, append, busy, next, runOne, AGENT_MAX_STEPS, AGENT_MAX_FAILURES, AGENT_MAX_REPEATS, {});
+  )(state, append, busy, next, runOne, AGENT_MAX_STEPS, AGENT_MAX_FAILURES, AGENT_MAX_REPEATS, {}, tr);
   return {
     loop,
     ran: () => trace.filter(x => x[0] === 'ran').map(x => x[1]),
@@ -766,9 +768,9 @@ const CHAT_BODY_SOURCE = ['CHAT_URL_RE', 'chatMentionName', 'chatParseMentions',
 function chatRoom(users) {
   const a = app();
   a.run(`S.user={id:'superadmin',admin:1};S.users=${JSON.stringify(users)}`);
-  const built = new Function('escapeHTML', 'nameOf', 'S', 'CHAT_EVERYONE',
+  const built = new Function('escapeHTML', 'nameOf', 'S', 'CHAT_EVERYONE', 'tr',
     CHAT_BODY_SOURCE + '\nreturn {chatBodyHTML, chatParseMentions};')(
-      a.run('escapeHTML'), a.run('nameOf'), a.run('S'), CHAT_EVERYONE);
+      a.run('escapeHTML'), a.run('nameOf'), a.run('S'), CHAT_EVERYONE, tr);
   return {render: built.chatBodyHTML, mentions: built.chatParseMentions};
 }
 
@@ -1127,7 +1129,7 @@ function voiceApp() {
     $: selector => (selector === '#agentInput' ? input : selector === '#agentVoiceBar' ? bar : null),
     agentSyncPlanButton() {}, agentUpdateBusy() {}, toast() {}, agentServerAsr: null,
     TRANSCRIBE_ENDPOINT: '/api/transcribe', apiBlob: async () => ({text: ''}),
-    navigator: {languages: ['zh-CN']},
+    navigator: {languages: ['zh-CN']}, tr,
     Blob: class { constructor(parts, options) { this.parts = parts; this.type = options.type; } },
   });
   vm.runInContext(section, context);
@@ -1715,7 +1717,7 @@ test('the week starts on the day the team picked', () => {
 test('the assistant keeps conversations in a side list and its message tools are icons', () => {
   const tools = source.match(/function agentMessageTools\([\s\S]*?\n\}/)[0];
   for (const [name, label] of [['copy','复制'],['edit','修改重发'],['undo','回退到这里']])
-    assert.ok(tools.includes(`button('${name}','${label}'`), label);
+    assert.ok(tools.includes(`button('${name}',tr('${label}')`), label);
   assert.ok(!/agentShowHistory/.test(source), '不再弹出单独的工作记录卡片');
   assert.ok(/agentHistoryBtn'\)\?\.addEventListener\('click',\(\)=>agentToggleSessions\(\)\)/.test(source));
   const use = source.match(/function agentUseConversation\(id\)\{[\s\S]*?\n\}/)[0];
@@ -3448,6 +3450,183 @@ test('meeting modal binds save and deletion to its own controls instead of a hid
   assert.equal(calls.at(-1).data.title,'modal title');assert.equal(nodes['#meetingEditor'].innerHTML,'background');
 });
 
+/* Interface language: 简体中文 stays the source text, English comes from i18n.js. */
+const i18nSource = fs.readFileSync(path.join(__dirname, '../i18n.js'), 'utf8');
+function appIn(lang, search = '') {
+  const context = vm.createContext({
+    localStorage: {getItem: key => (key === 'hola-lang' ? lang : null), setItem() {}},
+    location: {search}, URLSearchParams,
+  });
+  vm.runInContext(i18nSource, context);
+  vm.runInContext(definitions, context);
+  return {context, run: code => vm.runInContext(code, context)};
+}
+
+test('the interface language defaults to Chinese and follows the saved choice or ?lang=', () => {
+  assert.equal(app().run('LANG'), 'zh', 'no storage at all means Chinese');
+  assert.equal(appIn(null).run('LANG'), 'zh');
+  assert.equal(appIn('fr').run('LANG'), 'zh', 'an unknown value is ignored');
+  assert.equal(appIn('en').run('LANG'), 'en');
+  assert.equal(appIn('zh', '?lang=en').run('LANG'), 'en', 'the address overrides storage for one page');
+  assert.equal(appIn('en', '?lang=zh').run('LANG'), 'zh');
+});
+
+test('Chinese mode renders the source text unchanged, including placeholders', () => {
+  const a = appIn('zh');
+  assert.equal(a.run("tr('今日任务')"), '今日任务');
+  assert.equal(a.run("tr('{0} 分钟前',5)"), '5 分钟前');
+  assert.equal(a.run("fmt('2026-11-09')"), '11月9日');
+  assert.equal(a.run("wd('2026-11-09')"), '周一');
+  assert.equal(a.run("status({status:'doing'})[1]"), '进行中');
+});
+
+test('English mode translates labels, dates, weekdays and relative times', () => {
+  const a = appIn('en');
+  assert.equal(a.run("tr('今日任务')"), 'Today');
+  assert.equal(a.run("fmt('2026-11-09')"), 'Nov 9');
+  assert.equal(a.run("wd('2026-11-09')"), 'Mon');
+  assert.equal(a.run("monthLabel('2026-11')"), 'Nov 2026');
+  assert.equal(a.run("archiveDay('2026-11-09')"), 'Nov 9 · Mon');
+  assert.equal(a.run("tr('{0} 分钟前',5)"), '5 min ago');
+  assert.equal(a.run("status({status:'doing'})[1]"), 'In progress');
+  assert.equal(a.run("status({status:'done'})[1]"), 'Done');
+  assert.equal(a.run("tr('{0} 个项目',1)"), '1 project', 'a count of one reads singular');
+  assert.equal(a.run("tr('{0} 个项目',3)"), '3 projects');
+  assert.equal(a.run("tr('哗啦！')"), 'Hola!');
+  assert.equal(a.run("tr('没有这句')"), '没有这句', 'a missing entry falls back to Chinese');
+});
+
+test('English labels built from pieces keep their spaces and button labels read as actions', () => {
+  const a = appIn('en');
+  assert.equal(a.run("tr('{0}完成 · {1}',tr('任务'),'整理竞品报价')"), 'Task completed · 整理竞品报价');
+  assert.equal(a.run("tr('{0}递延至 {1}{2}','',fmt('2026-11-10'),'')"), 'Deferred to Nov 10');
+  assert.equal(a.run("tr('{0}递延至 {1}{2}',tr('合并 {0} 期',3),fmt('2026-11-10'),'')"),
+    '3 periods merged, deferred to Nov 10');
+  for (const [key, label] of [['{0}开始任务','Start'],['{0}记录完成','Record completion'],['{0}未完成，递延','Not done, defer'],
+                              ['{0}修改完成记录','Edit completion record'],['{0}打回','Send back'],['{0}同意修改','Approve change']])
+    assert.equal(a.run(`tr(${JSON.stringify(key)},'<i></i>')`), `<i></i>${label}`);
+  const css = fs.readFileSync(path.join(__dirname, '../styles.css'), 'utf8');
+  const block = selector => {
+    const found = css.match(new RegExp(`${selector} \\{([^}]*)\\}`));
+    assert.ok(found, `styles.css 缺少 ${selector}`);
+    return found[1];
+  };
+  const zh = block('(?:^|\\n)\\.task-card'), en = block('html:lang\\(en\\) \\.task-card');
+  const px = (rules, name) => Number(rules.match(new RegExp(`--${name}: (\\d+)px`))?.[1]);
+  assert.ok(px(en, 'task-status-col') > px(zh, 'task-status-col'),
+    'English status labels get a wider column than Chinese');
+  assert.ok(px(en, 'task-when-col') < px(zh, 'task-when-col'), 'which the shorter English dates pay for');
+  // A task row is the grid with the 72px priority column and the 16px arrow.
+  const layouts = css.match(/grid-template-columns:[^;]* 72px [^;]* 16px;/g) ?? [];
+  assert.ok(layouts.length > 1);
+  assert.ok(layouts.every(l => l.includes('var(--task-status-col) 16px')),
+    'every task-row layout uses the shared status width');
+  assert.match(css, /html:lang\(en\) \.task-card \.task-status \{\s*white-space: normal;/, 'Pending approval wraps instead of clipping');
+  assert.match(css, /@container \(max-width: 800px\)[\s\S]*?html:lang\(en\) \.task-card \.fixed-badge \.badge-label \{[^}]*clip-path/, 'narrow English rows keep only the recurring icon');
+  assert.match(source, /class="fixed-badge"\$\{LANG==='en'\?` title="\$\{tr\('固定'\)\}"`:''\}>/, 'and its title still says recurring');
+  assert.equal(a.run("tr('固定')"), 'recurring');
+});
+
+test('user data is never looked up: names stay as typed inside translated sentences', () => {
+  const a = appIn('en');
+  assert.equal(a.run("tr('确认删除「{0}」？删除后将从日历移除。','周报')"), 'Delete “周报”? It will be removed from the calendar.');
+  assert.equal(a.run("tr('{0}','今日任务')"), '今日任务');
+});
+
+test('the account menu offers both languages and marks the current one', () => {
+  const html = appIn('en').run("languageChooserHTML('account-menu-group')");
+  assert.match(html, /data-lang="zh"[^>]*>简体中文</);
+  assert.match(html, /class="language-option is-active" data-lang="en"[^>]*aria-pressed="true">English</);
+  assert.match(html, /aria-label="Language"/);
+  assert.match(source, /menu\.innerHTML=`\$\{head\}\$\{mine\}\$\{languageChooserHTML\('account-menu-group'\)\}/);
+});
+
+test('the account’s saved language wins over the browser unless ?lang= is set', () => {
+  const a = appIn('zh');
+  let reloaded = 0;
+  const writes = [], kept = {};
+  a.context.location.reload = () => {
+    reloaded++;
+  };
+  a.context.localStorage.setItem = (k, v) => {
+    writes.push([k, v]);
+    kept[k] = v;
+  };
+  a.context.localStorage.getItem = k => kept[k] ?? null;
+  assert.equal(a.run("syncAccountLanguage({lang:''})"), false, 'no saved choice keeps the browser’s');
+  assert.equal(a.run("syncAccountLanguage({lang:'zh'})"), false);
+  assert.equal(a.run("syncAccountLanguage({lang:'en'})"), true);
+  assert.equal(reloaded, 1);
+  assert.equal(a.run('UI.reloading'), true, 'sign-in stops there instead of showing the old page');
+  assert.match(source, /await refresh\(\);\n[^\n]*\n\s*if\(!UI\.reloading\)switchView\('calendar'\)/);
+  assert.deepEqual(writes.at(-1), ['hola-lang', 'en']);
+  const pinned = appIn('zh', '?lang=zh');
+  pinned.context.location.reload = () => { throw new Error('should not reload'); };
+  assert.equal(pinned.run("syncAccountLanguage({lang:'en'})"), false);
+  // A browser that keeps nothing moves to ?lang= once instead of reloading for ever.
+  const forgetful = appIn('zh');
+  const moves = [];
+  forgetful.context.location.href = 'https://work.example/';
+  forgetful.context.URL = URL;
+  forgetful.context.location.reload = () => {
+    throw new Error('should not reload');
+  };
+  forgetful.context.location.replace = href => moves.push(href);
+  forgetful.context.localStorage.setItem = () => {
+    throw new Error('blocked');
+  };
+  assert.equal(forgetful.run("syncAccountLanguage({lang:'en'})"), true);
+  assert.deepEqual(moves, ['https://work.example/?lang=en&langAuto=1']);
+  // That mark does not pin the language for the next account to sign in on the page.
+  const next = appIn('zh', '?lang=en&langAuto=1');
+  next.context.location.href = 'https://work.example/?lang=en&langAuto=1';
+  next.context.URL = URL;
+  next.context.location.replace = href => moves.push(href);
+  next.context.localStorage.setItem = () => {
+    throw new Error('blocked');
+  };
+  assert.equal(next.run('LANG'), 'en');
+  assert.equal(next.run("syncAccountLanguage({lang:'zh'})"), true);
+  assert.equal(moves.at(-1), 'https://work.example/?lang=zh&langAuto=1');
+  assert.equal(next.run("syncAccountLanguage({lang:'en'})"), false, 'the language already shown stays');
+});
+
+test('server messages follow the language while keeping the names they carry', () => {
+  const en = appIn('en'), zh = appIn('zh');
+  assert.equal(en.run("trServer('账户或密码错误')"), 'Wrong account or password');
+  assert.equal(en.run("trServer('收到任务指派')"), 'New task assigned');
+  assert.equal(en.run("trServer('林默 指派「整理竞品报价」，安排日期 2026-11-09。')"),
+    '林默 assigned “整理竞品报价”, scheduled for 2026-11-09.');
+  assert.equal(en.run("trServer('「官网改版」被 陈曦 打回，请继续处理。\\n原因：补上数据')"),
+    '陈曦 sent “官网改版” back for more work.\nReason: 补上数据');
+  assert.equal(en.run("trServer('一条没见过的消息')"), '一条没见过的消息');
+  assert.equal(zh.run("trServer('账户或密码错误')"), '账户或密码错误');
+});
+
+test('every string app.js and index.html translate has an English entry with the same placeholders', () => {
+  const a = appIn('en'), dict = a.run('I18N_EN');
+  const keys = new Set();
+  for (const m of source.matchAll(/\btr\((['"])((?:\\.|(?!\1).)*)\1/g)) keys.add(vm.runInNewContext(`${m[1]}${m[2]}${m[1]}`));
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8').replace(/<script[\s\S]*?<\/script>/g, '');
+  for (const m of html.matchAll(/>([^<>]*[一-鿿][^<>]*)</g)) keys.add(m[1].trim());
+  for (const m of html.matchAll(/\s(?:title|aria-label|placeholder|data-keywords|data-nav)="([^"]*[一-鿿][^"]*)"/g)) keys.add(m[1].trim());
+  const missing = [...keys].filter(k => /[一-鿿]/.test(k) && !Object.prototype.hasOwnProperty.call(dict, k));
+  assert.deepEqual(missing, []);
+  const holes = s => [...new Set(String(s).match(/\{\d+\}/g) || [])].sort().join();
+  const mismatched = Object.entries(dict).filter(([k, v]) => typeof v === 'string' && holes(k) !== holes(v)).map(([k]) => k);
+  assert.deepEqual(mismatched, []);
+  const quoted = Object.entries(dict).filter(([k, v]) => typeof v === 'string' && v.includes('"') && !k.includes('"')).map(([k]) => k);
+  assert.deepEqual(quoted, [], 'English must not add ASCII double quotes: translations sit inside HTML attributes');
+});
+
+test('the built-in rule group shows translated but saves back as stored', () => {
+  const a = appIn('en');
+  assert.equal(a.run("ruleGroupName({id:'default',name:'默认规则'})"), 'Default rules');
+  assert.equal(a.run("ruleGroupName({id:'default',name:'市场部'})"), '市场部');
+  assert.equal(a.run("ruleGroupName({id:'g2',name:'默认规则'})"), '默认规则');
+  assert.match(source, /name:label===ruleGroupName\(draft\)\?draft\.name:label/);
+});
+
 function draftHarness() {
   const a = app(), calls = [], toasts = [];
   const fields = [{id: 'taskName', value: ''}, {id: 'taskDesc', value: ''}];
@@ -3747,6 +3926,64 @@ test('a submit that fails keeps the draft and lets the form submit again', async
   assert.equal(h.a.run('S.formDrafts.length'), 1);
   assert.equal(h.a.run('UI.formDraft.submitting'), false);
   assert.ok(!h.calls.some(c => c.action === 'formdraft.delete'));
+});
+
+test('a refused request keeps its status and the server’s own words under the translation', async () => {
+  const a = appIn('en');
+  a.context.fetch = async () => ({ok: false, status: 409,
+    text: async () => JSON.stringify({error: '草稿已在其他页面更新，请重新打开后继续'})});
+  const e = await a.run("api('/api/action',{action:'agent.draft.save',data:{}}).catch(e=>e)");
+  assert.equal(e.status, 409);
+  assert.equal(e.raw, '草稿已在其他页面更新，请重新打开后继续');
+  assert.equal(e.message, 'The draft was updated on another page. Reopen it to continue');
+  assert.match(source, /board\.conflict=\/其他页面\|已删除\/\.test\(raw\)/,
+    'the plan board checks the words, not the message');
+});
+
+test('a language the account could not save is not switched to', async () => {
+  const a = appIn('zh');
+  const writes = [];
+  a.context.localStorage.setItem = (k, v) => writes.push([k, v]);
+  a.context.location.reload = () => {
+    throw new Error('should not reload');
+  };
+  a.context.toasts = [];
+  a.run("S.user={id:'u'};toast=m=>toasts.push(m);api=async()=>{throw new Error('offline')}");
+  await a.run("setLanguage('en')");
+  assert.deepEqual(writes, []);
+  assert.deepEqual([...a.context.toasts], ['offline']);
+});
+
+test('a count of one reads singular without touching the names put into a sentence', () => {
+  const a = appIn('en');
+  assert.equal(a.run("tr('{0} 个项目',1)"), '1 project');
+  assert.equal(a.run("tr('已退出「{0}」','Top 1 tasks')"), 'Left “Top 1 tasks”');
+});
+
+test('what the interface fills in is sent in Chinese and read in the viewer’s language', () => {
+  assert.match(source, /summary:\$\('#doneText'\)\.value\|\|'完成任务'/);
+  assert.match(source, /remaining:\$\('#remainText'\)\.value\|\|'继续完成原任务'/);
+  assert.match(source, /reason:\$\('#projectRejectReason'\)\.value\|\|'申请信息需要补充'/);
+  assert.match(source, /summary:'完成任务',[\s\S]{0,120}feeling:'顺利'/);
+  assert.match(source, /DEFER_REASONS\.map\(r=>`<option value="\$\{r\}">\$\{tr\(r\)\}<\/option>`\)/);
+  const a = appIn('en');
+  assert.deepEqual(JSON.parse(a.run('JSON.stringify(DEFER_REASONS)')), ['时间不足', '等待他人', '需求变化', '遇到阻塞', '其他']);
+  assert.equal(a.run("tr(DEFER_REASONS[0])"), a.run("I18N_EN['时间不足']"));
+  assert.ok(a.run("logLine({kind:'complete',summary:'完成任务'})").endsWith(a.run("I18N_EN['完成任务']")));
+});
+
+test('a plan typed with either language’s marker is still a plan', () => {
+  assert.match(source, /const AGENT_PLAN_ALIASES=\[AGENT_PLAN_MARK,'\/plan','\[规划\]','\[Plan\]'\];/);
+});
+
+test('every fixed message the server sends has an English entry', () => {
+  const a = appIn('en');
+  const dict = a.run('I18N_EN'), patterns = a.run('I18N_EN_PATTERNS');
+  const server = fs.readFileSync(path.join(__dirname, '../server.py'), 'utf8');
+  const sent = [...server.matchAll(/Problem\(\d+,\s*'([^'{]*[\u4e00-\u9fff][^'{]*)'\)/g)].map(m => m[1]);
+  assert.ok(sent.length > 100);
+  const known = k => Object.prototype.hasOwnProperty.call(dict, k) || patterns.some(([re]) => re.test(k));
+  assert.deepEqual(sent.filter(k => !known(k)), []);
 });
 
 test('a stash is weighed by when its text was typed, not when the server stamped a copy', () => {
