@@ -407,12 +407,23 @@ let S={user:null,users:[],tasks:[],projects:[],folders:[],files:[],fileArchives:
    Safari reports parsing that as "The string did not match the expected
    pattern", so anything that is not JSON becomes a readable message here. */
 const readJSON=async r=>{const text=await r.text();try{return text?JSON.parse(text):{}}catch(_){throw new Error([504,524].includes(r.status)?tr('服务响应超时，请稍后再试；给 AI 助手的需求可以拆短一点'):tr('服务暂时不可用（HTTP {0}），请稍后再试',r.status))}};
+const SUBMIT_HOLD_MS = 5000;
 function api(path, body, options = {}) {
   // The form open when a request leaves; its draft is settled once the request lands.
   const draft = UI.formDraft;
   const submitting = Boolean(draft && path === '/api/action' && draft.submit?.includes(body?.action));
+  /* The form's own buttons are held from the click until the form closes, so a
+     second click on a slow connection cannot send the same thing twice. They
+     come back at once if the request fails and the form stays open to be
+     fixed, and after SUBMIT_HOLD_MS if it went through yet the form is still
+     there, so nothing leaves a form that cannot be used. */
+  const held = submitting ? $$('#modalContent .modal-footer button').filter(b => !b.disabled
+    && (b.classList?.contains('primary-btn') || b.classList?.contains('danger-btn'))) : [];
   if (submitting) {
     draft.submitting = true;
+    held.forEach(b => {
+      b.disabled = true;
+    });
   }
   return fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Work-Calendar': '1'},
     credentials: 'same-origin', body: JSON.stringify(body), ...options})
@@ -426,7 +437,18 @@ function api(path, body, options = {}) {
         throw e;
       }
       await draftSubmitted(path, body, draft);
+      if (held.length) {
+        setTimeout(() => held.forEach(b => {
+          b.disabled = false;
+        }), SUBMIT_HOLD_MS);
+      }
       return x;
+    })
+    .catch(e => {
+      held.forEach(b => {
+        b.disabled = false;
+      });
+      throw e;
     })
     .finally(() => {
       if (submitting) {
@@ -501,9 +523,35 @@ async function refresh(){
   /* updateChatDot is defined further down the file than the unit-test sandbox
      loads, so guard the call rather than assume it is in scope. */
   if(syncAccountLanguage(next.user))return;
-  S=next;restorePendingFormDrafts();if(S.dateHorizon)DATE_HORIZON=S.dateHorizon;rememberAccount(S.user.id);renderAll();
+  S=next;lastStateAt=Date.now();restorePendingFormDrafts();if(S.dateHorizon)DATE_HORIZON=S.dateHorizon;rememberAccount(S.user.id);renderAll();
   if(typeof offerTour==='function')offerTour();renderPip();if(typeof loadSpeechStatus==='function')loadSpeechStatus();
   if(typeof updateChatDot==='function')updateChatDot();
+}
+/* Coming back to the page brings it up to date: work handed over meanwhile, the
+   inbox count, a new day. The schedule pages are redrawn; anywhere else, and
+   under anyone in the middle of something, only the counts are refreshed, so
+   nothing half typed is lost. */
+const RETURN_REFRESH_MS=30000;
+const RETURN_REDRAW_VIEWS=['today','calendar','dayDetail','timeline','drafts'];
+let lastStateAt=0,returnRefreshPromise=null;
+function refreshOnReturn(){
+  if(!S.user||document.body.classList.contains('auth-locked'))return;
+  if(UI.view==='inbox')return refreshInboxState();
+  if(returnRefreshPromise||Date.now()-lastStateAt<RETURN_REFRESH_MS)return returnRefreshPromise;
+  const typing=Boolean(document.activeElement?.closest?.('input,textarea,select,[contenteditable]'));
+  const calm=RETURN_REDRAW_VIEWS.includes(UI.view)&&!tour&&!tourBusy()&&!typing;
+  returnRefreshPromise=(async()=>{
+    try{
+      if(calm){await refresh();return}
+      const next=await getState();
+      if(next.user?.id!==S.user?.id)return;
+      lastStateAt=Date.now();
+      Object.assign(S,{notifications:next.notifications,requests:next.requests,chat:next.chat});
+      renderInbox();if(typeof updateChatDot==='function')updateChatDot();
+    }catch(e){}
+    finally{returnRefreshPromise=null}
+  })();
+  return returnRefreshPromise;
 }
 let inboxRefreshPromise=null;
 async function refreshInboxState(){
@@ -521,6 +569,8 @@ async function refreshInboxState(){
   })();
   return inboxRefreshPromise;
 }
+/* 今日任务 in the sidebar means today, whichever day the page was last turned to. */
+function openToday(){UI.dayOffset=0;switchView('today')}
 function switchView(view){
   if(UI.view==='projects'&&view!=='projects'&&(meetingLive.session||meetingLive.active))return meetingStopLive().then(()=>switchView(view)).catch(e=>toast(e.message));
   if(UI.view==='projects'&&view!=='projects'&&$('#meetingEditor')?.dataset?.dirty==='true'&&!confirm(tr('会议修改尚未保存，确定离开？')))return;
@@ -627,17 +677,20 @@ function ddlText(t){
   if(left===0)return tr('{0} · 今天到期',fmt(end));
   return tr('{0} · 还剩 {1} 天',fmt(end),left);
 }
-function renderStats(day=displayDay()){renderFreshDot();const d=scheduleTasks().filter(t=>taskActiveOn(t,day)),
+function renderStats(day=displayDay()){renderFreshDot();const on=iso=>scheduleTasks().filter(t=>taskActiveOn(t,iso)),d=on(day),
   current=d.filter(t=>!isArchivedTask(t)),done=current.filter(t=>t.status==='done').length;
-  $('#todayCount').textContent=current.filter(t=>t.status!=='done').length;
-  $('#p0Count').textContent=current.filter(t=>t.priority==='P0'&&t.status!=='done').length;
+  /* The sidebar always counts today; only the page itself follows the day it is turned to. */
+  const today=day===S.today?current:on(S.today).filter(t=>!isArchivedTask(t)),todayDone=today.filter(t=>t.status==='done').length;
+  $('#todayCount').textContent=today.length-todayDone;
+  $('#p0Count').textContent=today.filter(t=>t.priority==='P0'&&t.status!=='done').length;
   $('#doingCount').textContent=scheduleTasks().filter(t=>t.status==='doing').length;
   $('#deferredCount').textContent=scheduleTasks().filter(isDeferredTask).length;$('#allTabCount').textContent=d.length;
   $('#openTabCount').textContent=current.length-done;$('#doneTabCount').textContent=done;
   $('#progressText').textContent=tr('{0} / {1} 已完成',done,current.length);const pct=current.length?done/current.length*100:0;
   $('#dayProgress').style.width=`${pct}%`;$('#progressPercent').textContent=`${Math.round(pct)}%`;
-  $('#focusTime').textContent=`${String(Math.floor(current.reduce((n,t)=>n+t.duration,0)/60)).padStart(2,'0')}:`
-  +`${String(current.reduce((n,t)=>n+t.duration,0)%60).padStart(2,'0')}`;$('#focusProgress').style.width=`${pct}%`}
+  const minutes=today.reduce((n,t)=>n+t.duration,0);
+  $('#focusTime').textContent=`${String(Math.floor(minutes/60)).padStart(2,'0')}:${String(minutes%60).padStart(2,'0')}`;
+  $('#focusProgress').style.width=`${today.length?todayDone/today.length*100:0}%`}
 function taskCard(t){
   const [c,l]=status(t),deferLog=t.status==='deferred'?S.logs.find(x=>x.taskId===t.id&&x.kind==='defer'):null,carriedFrom=!isSuperseded(t)&&t.originId?S.logs.find(x=>x.nextTaskId===t.id&&x.kind==='defer'):null;
   /* The log is dated when the carry ran, which for the overnight rollover is
@@ -675,6 +728,9 @@ function renderDayTab(day){const tab=$('#dayTab');if(!tab)return;const d=new Dat
 function renderToday(){if(typeof syncFilterLinks==='function')syncFilterLinks();const day=displayDay(),deferredView=UI.filter==='deferred';renderStats(day);renderDayTab(day);
   $('#todayLabel').textContent=deferredView?tr('递延任务'):`${wd(day)} · `
   +`${fmt(day)}`;$('#dateChip').textContent=deferredView?tr('全部日期'):fmt(day);
+  /* Turned to another day, the date itself is the way back to today. */
+  const chip=$('#dateChip'),away=!deferredView&&day!==S.today;
+  chip.classList?.toggle('is-away',away);chip.title=away?tr('回到今天'):'';chip.tabIndex=away?0:-1;
   $$('.quick-tab').forEach(b=>b.classList.toggle('active',b.dataset.filter===UI.filter));
   let ts=(deferredView?scheduleTasks():scheduleTasks().filter(t=>taskActiveOn(t,day)));
   if(UI.filter==='open')ts=ts.filter(t=>!isArchivedTask(t)&&t.status!=='done');
@@ -860,7 +916,7 @@ function editApprover(t){
   return giver?.active&&!giver.admin?t.creator:'superadmin';
 }
 function taskEditPending(t){const r=taskEditRequest(t);return Boolean(r&&(r.status==='pending'||r.state==='pending'))}
-function renderEditRequestSummary(t){const r=taskEditRequest(t);if(!r)return '';const c=r.changes||r.requested||{};const labels={name:tr('名称'),desc:tr('描述'),date:tr('日期'),deadline:tr('期限'),duration:tr('时长'),priority:tr('优先级'),assignee:tr('负责人')};const rows=Object.entries(labels).filter(([k])=>c[k]!==undefined&&String(c[k])!==String(t[k]??'')).map(([k,label])=>`<li><b>${label}</b><span>${escapeHTML(String(c[k]))}</span></li>`).join('');const state=r.status==='approved'?tr('修改已通过'):r.status==='rejected'?tr('修改申请已驳回'):tr('待审批的修改申请');return `<div class="edit-request-summary"><strong>${state}</strong><small>${tr('申请人：{0}{1}{2}',escapeHTML(r.requester||r.requestedBy||t.assignee),r.reason?` ${tr('· 理由：{0}',escapeHTML(r.reason))}`:'',r.rejection?` ${tr('· 驳回建议：{0}',escapeHTML(r.rejection))}`:'')}</small>${rows?`<ul>${rows}</ul>`:''}</div>`}
+function renderEditRequestSummary(t){const r=taskEditRequest(t);if(!r)return '';const c=r.changes||r.requested||{};const labels={name:tr('名称'),desc:tr('描述'),date:tr('日期'),deadline:tr('期限'),time:tr('时间'),duration:tr('时长'),priority:tr('优先级'),assignee:tr('负责人')};const rows=Object.entries(labels).filter(([k])=>c[k]!==undefined&&String(c[k]??'')!==String(t[k]??'')).map(([k,label])=>`<li><b>${label}</b><span>${escapeHTML(String(c[k]??'')||'—')}</span></li>`).join('');const state=r.status==='approved'?tr('修改已通过'):r.status==='rejected'?tr('修改申请已驳回'):tr('待审批的修改申请');return `<div class="edit-request-summary"><strong>${state}</strong><small>${tr('申请人：{0}{1}{2}',escapeHTML(r.requester||r.requestedBy||t.assignee),r.reason?` ${tr('· 理由：{0}',escapeHTML(r.reason))}`:'',r.rejection?` ${tr('· 驳回建议：{0}',escapeHTML(r.rejection))}`:'')}</small>${rows?`<ul>${rows}</ul>`:''}</div>`}
 /* Stored in Chinese whatever the interface language; shown through tr(). */
 const FEELINGS=['顺利','一般','困难','阻塞'];
 function completionFields(summary='',actual=30,feeling='顺利'){return `<label class="form-field">${tr('完成总结')}<textarea id="doneText">${escapeHTML(summary)}</textarea></label><label class="form-field">${tr('实际耗时（分钟）')}<input id="actualMins" type="number" min="1" max="1440" value="${Number(actual)||30}"></label><label class="form-field">${tr('工作感受')}<select id="feeling">${FEELINGS.map(f=>`<option value="${f}" ${f===feeling?'selected':''}>${tr(f)}</option>`).join('')}</select></label>`}
@@ -913,7 +969,8 @@ function editTaskRequest(id,direct=false){
     +`<label class="form-field">${tr('安排日期')}<input id="editTaskDate" type="date" min="${escapeHTML(minDate)}" ${maxDate?`max="`
     +`${escapeHTML(maxDate)}"`:''} value="${escapeHTML(t.date||S.today)}"></label><label class="form-field">${tr('截止时间')}`
     +`<input id="editTaskDeadline" type="date" min="${escapeHTML(minDate)}" ${maxDate?`max="`
-    +`${escapeHTML(maxDate)}"`:''} value="${escapeHTML(t.deadline||t.date||'')}"></label><label class="form-field">${tr('预计时长')}`
+    +`${escapeHTML(maxDate)}"`:''} value="${escapeHTML(isMultiDay(t)?t.deadline:'')}"></label><label class="form-field">${tr('时间')}`
+    +`<input id="editTaskTime" type="time" value="${escapeHTML(t.time||'09:00')}"></label><label class="form-field">${tr('预计时长')}`
     +`<input id="editTaskDuration" type="number" min="1" max="1440" value="${Number(t.duration)||30}"></label>`
     +`<label class="form-field">${tr('优先级')}<select id="editTaskPriority"><option ${t.priority==='P0'?'selected':''}>P0</option>`
     +`<option ${t.priority==='P1'?'selected':''}>P1</option><option ${t.priority==='P2'?'selected':''}>P2</option>`
@@ -927,7 +984,11 @@ function editTaskRequest(id,direct=false){
   draftForm(`task.edit:${id}${direct ? ':direct' : ''}`, {title: direct ? tr('直接调整任务') : tr('申请修改任务'),
     label: t.name, reopen: ['editTaskRequest', id, direct], submit: ['task.update', 'task.edit_request']});
   $('#cancelAction').onclick=closeModal;
-  $('#confirmTaskEdit').onclick=async()=>{const reason=$('#editTaskReason')?.value.trim()||'',name=$('#editTaskName').value.trim(),date=$('#editTaskDate').value,deadline=$('#editTaskDeadline').value;if(!name){toast(tr('请填写任务名称'));return}if(!direct&&!reason){toast(tr('请填写修改理由'));return}if(deadline&&date&&deadline<date){toast(tr('截止时间不能早于安排日期'));return}const changes={name,desc:$('#editTaskDesc').value,date,deadline,duration:Number($('#editTaskDuration').value),priority:$('#editTaskPriority').value,assignee:$('#editTaskAssignee').value};try{if(direct){await act('task.update',{id,...changes});closeModal();closeDrawer();toast(tr('任务已直接调整'))}else{await act('task.edit_request',{id,changes,reason});closeModal();closeDrawer();toast(tr('修改申请已发送，等待审批'))}}catch(e){}};
+  /* A task for one day has no 截止时间: the box stays empty, so moving the day
+     neither trips over it nor stretches the task across several days. */
+  const startField=$('#editTaskDate'),endField=$('#editTaskDeadline');
+  startField.onchange=()=>{endField.min=startField.value||minDate;if(endField.value&&endField.value<endField.min)endField.value=''};
+  $('#confirmTaskEdit').onclick=async()=>{const reason=$('#editTaskReason')?.value.trim()||'',name=$('#editTaskName').value.trim(),date=$('#editTaskDate').value,deadline=$('#editTaskDeadline').value;if(!name){toast(tr('请填写任务名称'));return}if(!direct&&!reason){toast(tr('请填写修改理由'));return}if(deadline&&date&&deadline<date){toast(tr('截止时间不能早于安排日期'));return}const changes={name,desc:$('#editTaskDesc').value,date,deadline:deadline||null,time:$('#editTaskTime').value||t.time||'09:00',duration:Number($('#editTaskDuration').value),priority:$('#editTaskPriority').value,assignee:$('#editTaskAssignee').value};try{if(direct){await act('task.update',{id,...changes});closeModal();closeDrawer();toast(tr('任务已直接调整'))}else{await act('task.edit_request',{id,changes,reason});closeModal();closeDrawer();toast(tr('修改申请已发送，等待审批'))}}catch(e){}};
 }
 function reviewTaskEdit(id,accept,notificationId){
   const r=(S.editRequests||[]).find(x=>x.id===id)||S.editRequests?.find(x=>x.taskId===id&&x.status==='pending'),t=S.tasks.find(x=>x.id===r?.taskId);if(!t||!r)return;
@@ -962,7 +1023,7 @@ function defer(t){
     `<label class="form-field">${tr('递延到')}`,
     `<input id="deferDate" type="date" min="${t.date<S.today?S.today:add(t.date,1)}" max="${DATE_HORIZON}" value="${target}"></label>`,
     `<label class="form-field">${tr('剩余时长')}<input id="remainMins" type="number" value="${remain}"></label>`,
-    `<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('返回修改')}</button>`,
+    `<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('取消')}</button>`,
     `<button class="primary-btn" id="confirmDefer">${tr('确认递延')}</button></div>`,
   ].join(''));
   draftForm(`task.defer:${t.id}`, {title: tr('递延任务'), label: t.name, reopen: ['defer', t.id], submit: ['task.defer']});
@@ -2365,7 +2426,7 @@ function inviteCollaborators(projectId){
     +`<button type="button" class="ghost-btn remove-member" data-member="${escapeHTML(id)}">${tr('移出')}</button>`
     +`</div>`).join('')||tr('<p class="muted">还没有协作者</p>')}</fieldset><div class="member-checkboxes">`
     +`${candidates.map(u=>`<label><input type="checkbox" name="inviteMember" value="${escapeHTML(u.id)}"> <strong>`
-    +`${escapeHTML(u.id)}</strong><small>${tr('成员 · {0}',escapeHTML(loadWindowLabel(p)))} <b data-member-load="${escapeHTML(u.id)}">`
+    +`${escapeHTML(nameOf(u.id))}</strong><small>${escapeHTML(u.id)} · ${escapeHTML(loadWindowLabel(p))} <b data-member-load="${escapeHTML(u.id)}">`
     +`${memberTaskCount(u.id,p)}</b> ${tr('项任务')}</small></label>`).join('')||tr('<p class="muted">暂无可添加成员</p>')}</div>`
     +`<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('取消')}</button>`
     +`<button class="primary-btn" id="confirmInvite" ${candidates.length?'':'disabled'}>${tr('添加并通知')}</button></div>`);
@@ -2549,7 +2610,22 @@ function renderRepeats(){
     const project=r.projectId&&S.projects.find(x=>x.id===r.projectId),projectText=r.projectId?` ${tr('· 项目 {0}',escapeHTML(project?.name||tr('已结束')))}`:'';
     return `<article class="repeat-admin-item"><div><strong>${escapeHTML(r.name)}</strong><span>${escapeHTML(patternOf(r))} · ${escapeHTML(r.time||'09:00')} · ${escapeHTML((r.assignees||[]).join('、'))}</span><small>${state}${projectText}${spanText}${untilText}${r.skipDates?.length?` ${tr('· 已挖空 {0} 天',r.skipDates.length)}`:''}</small></div><div class="repeat-admin-actions"><button class="ghost-btn repeat-project" data-id="${escapeHTML(r.id)}">${r.projectId?tr('调整项目'):tr('挂载到项目')}</button><button class="ghost-btn skip-repeat" data-id="${escapeHTML(r.id)}">${tr('挖空本次')}</button></div></article>`}).join('')||tr('<p class="muted">还没有固定任务规则。</p>');
   $$('.repeat-project').forEach(b=>b.onclick=()=>repeatProjectDialog(b.dataset.id));
-  $$('.skip-repeat').forEach(b=>b.onclick=()=>{const date=prompt(tr('请输入本次不执行的日期（YYYY-MM-DD）'),S.today);if(!date)return;act('repeat.skip',{id:b.dataset.id,date,skip:true}).catch(()=>{})});
+  $$('.skip-repeat').forEach(b=>b.onclick=()=>skipRepeatDialog(b.dataset.id));
+}
+/* 挖空本次: the day is picked from a calendar rather than typed out. */
+function skipRepeatDialog(id){
+  const r=(S.repeats||[]).find(x=>x.id===id);if(!r)return;
+  openModal(`<div class="eyebrow">${tr('固定任务')} · ${escapeHTML(r.name)}</div><h2>${tr('挖空本次')}</h2>`
+    +`<label class="form-field">${tr('本次不执行的日期')}<input id="skipRepeatDate" type="date" min="${escapeHTML(S.today)}" max="${DATE_HORIZON}" value="${escapeHTML(S.today)}"></label>`
+    +`<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('取消')}</button>`
+    +`<button class="primary-btn" id="confirmSkipRepeat">${tr('挖空这一天')}</button></div>`);
+  $('#cancelAction').onclick=closeModal;
+  $('#confirmSkipRepeat').onclick=async()=>{
+    const button=$('#confirmSkipRepeat'),date=$('#skipRepeatDate').value;
+    if(!date){toast(tr('请选择日期'));return}
+    button.disabled=true;
+    try{await act('repeat.skip',{id,date,skip:true});closeModal()}catch(e){button.disabled=false}
+  };
 }
 /* Identity is only the 权限组: superadmin, admin or 普通用户. Owning or joining
    a project is not an identity. */
@@ -3346,11 +3422,25 @@ function accountMenuAction(action){
   else if(action==='settings')switchView('settings');
   else if(action==='logout')signOutTo('');
 }
+/* Passwords are typed into masked boxes, the new one twice: a slip nobody
+   could see would otherwise only show at the next sign-in. */
 function changeOwnPassword(){
-  const current=prompt(tr('请输入当前密码'));if(current===null)return;
-  const next=prompt(tr('请输入新密码（至少 6 位）'));if(!next)return;
-  if(next.length<6){toast(tr('密码至少 6 位'));return}
-  api('/api/password',{id:S.user.id,current,password:next}).then(()=>toast(tr('密码已更新'))).catch(e=>toast(e?.message||tr('修改失败')));
+  const field=(id,label,autocomplete)=>`<label class="form-field">${label}<input id="${id}" type="password" autocomplete="${autocomplete}"></label>`;
+  openModal(`<div class="eyebrow">${escapeHTML(nameOf(S.user.id))}</div><h2>${tr('修改密码')}</h2>`
+    +field('passwordCurrent',tr('当前密码'),'current-password')+field('passwordNext',tr('新密码（至少 6 位）'),'new-password')
+    +field('passwordAgain',tr('再输入一次新密码'),'new-password')
+    +`<div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('取消')}</button>`
+    +`<button class="primary-btn" id="confirmPassword">${tr('保存新密码')}</button></div>`);
+  $('#cancelAction').onclick=closeModal;
+  $('#confirmPassword').onclick=async()=>{
+    const button=$('#confirmPassword'),current=$('#passwordCurrent').value,next=$('#passwordNext').value;
+    if(!current){toast(tr('请输入当前密码'));return}
+    if(next.length<6){toast(tr('密码至少 6 位'));return}
+    if(next!==$('#passwordAgain').value){toast(tr('两次输入的新密码不一致'));return}
+    button.disabled=true;
+    try{await api('/api/password',{id:S.user.id,current,password:next});closeModal();toast(tr('密码已更新'))}
+    catch(e){button.disabled=false;toast(e?.message||tr('修改失败'))}
+  };
 }
 async function signOutTo(userId){
   if(typeof agentIsBusy==='function'&&agentIsBusy()){toast(tr('请先停止助手，等待正在执行的操作结束后再切换账户'));return}
@@ -3411,6 +3501,12 @@ function closeModal(){if(UI.docDirty&&!confirm(tr('修改还没保存，确定�
   meetingStopLive().catch(e=>toast(e.message));UI.docDirty=false;if(typeof foldBrief==='function'&&foldBrief())return;
   $('#modalBackdrop')?.classList.add('hidden');restorePanelFocus(UI.modalReturnFocus)};
 function closeDrawer(){$('#taskDrawer').classList.add('hidden');restorePanelFocus(UI.drawerReturnFocus)}
+/* A click closes a dialog or the drawer only when it both starts and ends on
+   the backdrop: selecting text and letting go outside the box is not one. */
+function backdropClicked(e){
+  const pressed=UI.pressedOn;UI.pressedOn=null;
+  return e.target===e.currentTarget&&(!pressed||pressed===e.target);
+}
 /* Form text boxes grow and shrink with what is typed, up to the max-height that
    styles.css gives them, and 展开 opens one up to most of the screen for reading
    a long description through. */
@@ -5517,7 +5613,7 @@ function renderInboxToolbar(){
   $('#inboxDeleteRead').onclick=()=>deleteNotices(null,true);
 }
 function openSearch(){openModal(`<div class="eyebrow">${tr('工作台搜索')}</div><h2>${tr('搜索任务与项目')}</h2><label class="form-field">${tr('关键词')}<input id="searchQuery" placeholder="${tr('搜索')}"></label><div id="searchResults" class="search-results"><span class="muted">${tr('输入关键词开始搜索')}</span></div><div class="modal-footer"><button class="secondary-btn" id="cancelAction">${tr('关闭')}</button></div>`);$('#cancelAction').onclick=closeModal;const input=$('#searchQuery'),results=$('#searchResults');input.oninput=()=>{const q=input.value.trim().toLowerCase();if(!q){results.innerHTML=tr('<span class="muted">输入关键词开始搜索</span>');return}const ts=(S.user?.admin?S.tasks.filter(t=>!isSuperseded(t)):scheduleTasks()).filter(t=>[t.name,t.assignee,nameOf(t.assignee),projectName(t)].some(v=>String(v||'').toLowerCase().includes(q)));const ps=S.projects.filter(p=>[p.name,p.owner,nameOf(p.owner),p.desc].some(v=>String(v||'').toLowerCase().includes(q)));results.innerHTML=ts.map(t=>`<button class="search-result" data-task="${escapeHTML(t.id)}"><strong>${escapeHTML(t.name)}</strong><small>${escapeHTML(nameOf(t.assignee))} · ${escapeHTML(projectName(t))}</small></button>`).join('')+ps.map(p=>`<button class="search-result" data-project="${escapeHTML(p.id)}"><strong>${escapeHTML(p.name)}</strong><small>Owner · ${escapeHTML(nameOf(p.owner))} · ${projectStatus(p)}</small></button>`).join('')||tr('<span class="muted">没有找到匹配项</span>');$$('.search-result').forEach(b=>b.onclick=()=>{if(b.dataset.task)openDrawer(b.dataset.task);else{closeModal();openWorkLogDetail('',b.dataset.project,'project')}})};input.focus()}
-$$('.nav-item').forEach(b=>b.onclick=()=>switchView(b.dataset.view));
+$$('.nav-item').forEach(b=>b.onclick=()=>b.dataset.view==='today'?openToday():switchView(b.dataset.view));
 translateStatic(document.body);
 window.addEventListener('beforeunload',e=>{if(meetingLive.session||meetingLive.active||$('#meetingEditor')?.dataset?.dirty==='true'){e.preventDefault();e.returnValue=''}});
 $('#workspaceSwitcher')?.addEventListener('click',()=>toggleAccountMenu());
@@ -5534,11 +5630,13 @@ document.addEventListener('keydown',e=>{
   if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();stepArchive(e.key==='ArrowLeft'?1:-1)}});
 addEventListener('resize',()=>{if(UI.view==='archive')fitArchiveDrawer($('#archiveCabinet .drawer-stage'))});
 /* A quick filter narrows 今日任务; picking the one already on goes back to 全部. */
-$$('.filter-link').forEach(b=>b.onclick=()=>{UI.filter=UI.view==='today'&&UI.filter===b.dataset.filter?'all':b.dataset.filter;switchView('today')});
+$$('.filter-link').forEach(b=>b.onclick=()=>{UI.filter=UI.view==='today'&&UI.filter===b.dataset.filter?'all':b.dataset.filter;UI.dayOffset=0;switchView('today')});
 function syncFilterLinks(){$$('.filter-link').forEach(b=>{const on=UI.view==='today'&&UI.filter===b.dataset.filter;
   b.classList.toggle('is-on',on);b.setAttribute('aria-pressed',String(on))})}
 $$('.quick-tab').forEach(b=>b.onclick=()=>{UI.filter=b.dataset.filter;renderToday()});
 $('#prevDay').onclick=()=>{UI.dayOffset=(UI.dayOffset||0)-1;renderToday()};
+$('#dateChip').onclick=()=>{if(UI.dayOffset){UI.dayOffset=0;renderToday()}};
+$('#dateChip').onkeydown=e=>{if((e.key==='Enter'||e.key===' ')&&UI.dayOffset){e.preventDefault();UI.dayOffset=0;renderToday()}};
 $('#nextDay').onclick=()=>{if(displayDay()>=DATE_HORIZON){toast(`${tr('日期范围目前只支持到')} `
   +`${DATE_HORIZON}`);return}UI.dayOffset=(UI.dayOffset||0)+1;renderToday()};
 $('#inboxBtn').onclick=()=>switchView('inbox');$('#searchBtn').onclick=openSearch;
@@ -5560,15 +5658,16 @@ function shortcutKey(e){
   if(!$('#modalBackdrop').classList.contains('hidden')||!$('#taskDrawer').classList.contains('hidden'))return;
   const key=e.key.length===1?e.key.toLowerCase():e.key;
   const run={'?':openShortcuts,'/':()=>UI.view==='settings'&&$('#settingsSearch')?$('#settingsSearch').focus():openSearch(),n:()=>{if(!$('#addTaskBtn').classList.contains('hidden'))newTask()},
-    t:()=>switchView('today'),h:()=>switchView('guide'),w:()=>switchView('calendar'),p:()=>switchView('projects'),i:()=>switchView('inbox')}[key];
+    t:openToday,h:()=>switchView('guide'),w:()=>switchView('calendar'),p:()=>switchView('projects'),i:()=>switchView('inbox')}[key];
   if(run){e.preventDefault();run()}
 }
 document.addEventListener('keydown',shortcutKey);
 $('#shortcutHelp').onclick=openShortcuts;
 
 $('#closeDrawer').onclick=closeDrawer;$('#closeModal').onclick=closeModal;
-$('#modalBackdrop').onclick=e=>{if(e.target.id==='modalBackdrop')closeModal()};
-$('#taskDrawer').onclick=e=>{if(e.target.id==='taskDrawer')closeDrawer()};
+document.addEventListener('pointerdown',e=>{UI.pressedOn=e.target},true);
+$('#modalBackdrop').onclick=e=>{if(backdropClicked(e))closeModal()};
+$('#taskDrawer').onclick=e=>{if(backdropClicked(e))closeDrawer()};
 $('#backWeekBtn').onclick=()=>switchView('calendar');
 $('#backTodayBtn').onclick=()=>{if(UI.selectedWeek)UI.weekDir=UI.selectedWeek>0?'prev':'next';UI.selectedWeek=0;
   UI.dayOffset=0;switchView('calendar');renderCalendar()};$('#prevWeekBtn').onclick=()=>turnWeek(-1);
@@ -5606,8 +5705,16 @@ $('#archiveTodayBtn').onclick=openTodayArchive;
 $('#archiveExportBtn').onclick=()=>{markArchiveWeek(false);openWeekReport()};
 ['pointerenter','focus'].forEach(e=>$('#archiveExportBtn').addEventListener(e,()=>markArchiveWeek(true)));
 ['pointerleave','blur'].forEach(e=>$('#archiveExportBtn').addEventListener(e,()=>markArchiveWeek(false)));
-window.addEventListener('focus',()=>{if(UI.view==='inbox')refreshInboxState()});
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&UI.view==='inbox')refreshInboxState()});
+/* A page left open over midnight moves on to the new day by itself; the team's
+   day is Asia/Shanghai's, eight hours ahead of UTC all year. */
+let dayChecked='';
+setInterval(()=>{
+  const day=new Date(Date.now()+8*3600000).toISOString().slice(0,10);
+  if(!S.today||day===S.today||day===dayChecked||document.visibilityState!=='visible')return;
+  dayChecked=day;lastStateAt=0;refreshOnReturn();
+},60000);
+window.addEventListener('focus',()=>{refreshOnReturn()});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')refreshOnReturn()});
 $('#pipBtn').classList.toggle('hidden',!pipSupported());$('#pipBtn').onclick=openPip;
 hydrateIcons();
 if(location.protocol==='file:'){showAuth()}else{refresh().catch(e=>toast(e.message||tr('连接工作台失败，请刷新重试')))}

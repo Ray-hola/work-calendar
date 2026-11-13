@@ -2465,7 +2465,7 @@ class Store:
         if 'date' in changes:
             result['date'] = valid_date(changes['date'])
         if 'time' in changes:
-            result['time'] = str(changes['time']).strip() or task.get('time', '09:00')
+            result['time'] = valid_clock(str(changes['time'] or '').strip() or task.get('time') or '09:00')
         if 'duration' in changes:
             result['duration'] = duration(changes['duration'])
         if 'assignee' in changes:
@@ -2769,12 +2769,13 @@ class Store:
             p=self.get('projects',pid)
             if not collaborator:self.project_owner(user,p)
             if p['status']!='active':raise Problem(409,'项目「%s」还不是进行中状态，先用 project.review（data:{"id":"%s","accept":true}）审批通过，再安排任务'%(p['name'],p['id']))
+            if p.get('start') and day<p['start']:raise Problem(400,'任务日期不能早于项目开始日期')
             if p.get('end') and day>p['end']:raise Problem(400,'任务日期不能晚于项目截止日期')
             blocked=self.member_gate(p,assignee)
             if blocked:raise Problem(400,blocked)
         priority=data.get('priority','P1')
         if priority not in ('P0','P1','P2'):raise Problem(400,'优先级无效')
-        return {'name':name,'desc':str(data.get('desc','')),'priority':priority,'projectId':pid,'duration':duration(data.get('duration',30)), 'date':day,'time':str(data.get('time','09:00')),'deadline':data.get('deadline') or None,'assignee':assignee,'creator':user['id'],'status':'todo','fixed':False,'type':data.get('type') or ('临时' if not pid else '通用'),'createdAt':timestamp()}
+        return {'name':name,'desc':str(data.get('desc','')),'priority':priority,'projectId':pid,'duration':duration(data.get('duration',30)), 'date':day,'time':valid_clock(data.get('time') or '09:00'),'deadline':data.get('deadline') or None,'assignee':assignee,'creator':user['id'],'status':'todo','fixed':False,'type':data.get('type') or ('临时' if not pid else '通用'),'createdAt':timestamp()}
 
     def make_task(self, user, data, collaborator=False, announce=True):
         task=self.put('tasks',self.build_task(user,data,collaborator))
@@ -2870,7 +2871,7 @@ class Store:
                 project = projects[task['projectId']]
                 if project.get('owner') and project['owner'] != task.get('assignee'):
                     self.notify(project['owner'], '项目任务自动开始',
-                                f'{task.get("assignee")} 的「{task.get("name", "") }」已到开始时间，状态自动更新为进行中。',
+                                f'{self.display_name(task.get("assignee"))} 的「{task.get("name", "") }」已到开始时间，状态自动更新为进行中。',
                                 'progress', task['id'])
             changed += 1
         return changed
@@ -4271,6 +4272,8 @@ class Store:
             for k in ('name','desc','date','time','duration','assignee','priority','deadline','status'):
                 if k in d:t[k]=d[k]
             t['name']=required(t,'name')
+            if 'time' in d:t['time']=valid_clock(d['time'] or '09:00')
+            if 'desc' in d:t['desc']=str(d['desc'] or '')
             t['date']=valid_date(t['date']);t['duration']=duration(t['duration']);self.user(t['assignee'])
             if t.get('deadline'):
                 t['deadline']=valid_date(t['deadline'])

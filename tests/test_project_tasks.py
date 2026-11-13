@@ -22,7 +22,7 @@ class ProjectTaskTests(unittest.TestCase):
 
     def task(self, name, date, user=None):
         return self.store.action(user or self.owner, 'task.create', {'name': name, 'projectId': self.project['id'], 'assignee': 'mate',
-                                                                      'date': date, 'time': '09:00', 'duration': 30})
+                                                                      'date': date, 'time': '00:00', 'duration': 30})
 
     def live(self, user=None):
         return sorted((t['name'], t['status']) for t in self.store.snapshot(user or self.owner)['tasks']
@@ -50,6 +50,32 @@ class ProjectTaskTests(unittest.TestCase):
         self.assertEqual(self.live(), [])
         notice = [n for n in self.store.all('notifications') if n.get('to') == 'mate' and n.get('title') == '任务已删除']
         self.assertTrue(notice and notice[-1]['body'].startswith('owner'))
+
+    def test_a_task_time_is_a_clock_and_its_description_is_text(self):
+        with self.assertRaises(Problem):
+            self.store.action(self.owner, 'task.create', {'name': '周报', 'projectId': self.project['id'], 'assignee': 'mate',
+                                                          'date': self.day(0), 'time': 'banana'})
+        t = self.task('周报', self.day(1))
+        with self.assertRaises(Problem):
+            self.store.action(self.owner, 'task.update', {'id': t['id'], 'time': 'banana'})
+        with self.assertRaises(Problem):
+            self.store.action(self.mate, 'task.edit_request', {'id': t['id'], 'time': '25:99', 'reason': '改时间'})
+        moved = self.store.action(self.owner, 'task.update', {'id': t['id'], 'time': '14:30:00', 'desc': None})
+        self.assertEqual((moved['time'], moved['desc']), ('14:30', ''))
+        asked = self.store.action(self.mate, 'task.edit_request', {'id': t['id'], 'time': '16:00', 'reason': '改时间'})
+        self.assertEqual(asked['changes'], {'time': '16:00'})
+
+    def test_a_task_cannot_be_created_before_its_project_starts(self):
+        with self.assertRaises(Problem) as refused:
+            self.task('太早', self.day(-11))
+        self.assertEqual(refused.exception.message, '任务日期不能早于项目开始日期')
+        self.assertEqual(self.task('首日', self.day(-10))['date'], self.day(-10))
+
+    def test_the_automatic_start_notice_names_the_person_not_the_account(self):
+        self.store.db.execute("UPDATE users SET display_name='小梅' WHERE id='mate'")
+        self.task('周报', self.day(-1)); self.store.snapshot(self.owner)
+        notice = next(n for n in self.store.all('notifications') if n['title'] == '项目任务自动开始')
+        self.assertTrue(notice['body'].startswith('小梅 的「周报」'), notice['body'])
 
     def test_only_the_owner_or_superadmin_may_delete_project_tasks(self):
         t = self.task('周报', self.day(1))

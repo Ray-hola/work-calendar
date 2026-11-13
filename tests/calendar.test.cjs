@@ -2352,7 +2352,7 @@ test('the shortcut hint opens a real list and single keys stay out of the way wh
   const key = source.match(/function shortcutKey\(e\)\{[\s\S]*?\n\}/)[0];
   assert.ok(/closest\?\.\('input,textarea,select,\[contenteditable\]/.test(key), '输入框里打字不触发');
   assert.ok(/e\.ctrlKey\|\|e\.metaKey\|\|e\.altKey/.test(key), '带修饰键时不抢浏览器快捷键');
-  for (const k of ["'?':openShortcuts", "'/':()=>UI.view==='settings'", "t:()=>switchView('today')", "w:()=>switchView('calendar')", "p:()=>switchView('projects')", "i:()=>switchView('inbox')"])
+  for (const k of ["'?':openShortcuts", "'/':()=>UI.view==='settings'", "t:openToday", "w:()=>switchView('calendar')", "p:()=>switchView('projects')", "i:()=>switchView('inbox')"])
     assert.ok(key.includes(k), k);
   assert.ok(/\$\('#shortcutHelp'\)\.onclick=openShortcuts/.test(source));
 });
@@ -4083,4 +4083,178 @@ test('deleting notices says how many open approvals were kept', async () => {
     a.context.reply=reply;a.run('reply=globalThis.reply');await a.run("deleteNotices(['n1'])");
   }
   assert.deepEqual(a.json('toasts'),['已删除 2 条通知，1 条待审批的已保留','已删除 0 条通知，1 条待审批的已保留','已删除 3 条通知','没有可删除的通知']);
+});
+
+/* Interaction fixes from the code review. */
+const pageElements = () => {
+  const make = () => ({value: '', style: {}, dataset: {}, classList: {add() {}, remove() {}, toggle() {}, contains: () => false}, closest: () => null});
+  // Every selector answers with one lasting element, whoever asks for it first.
+  const elements = new Proxy({}, {get: (found, s) => found[s] || (found[s] = make())});
+  return {elements, document: {body: make(), activeElement: null, querySelector: s => elements[s], querySelectorAll: () => []}};
+};
+
+test('a form holds its submit buttons while the request is out, and frees them when it fails', async () => {
+  const a = app(), button = kind => ({disabled: false, classList: {contains: c => c === kind}});
+  const submit = button('primary-btn'), cancel = button('secondary-btn'), timers = [];
+  let settle;
+  a.context.document = {querySelector: () => null, querySelectorAll: s => (s === '#modalContent .modal-footer button' ? [submit, cancel] : [])};
+  a.context.setTimeout = (f, ms) => timers.push([f, ms]);
+  a.context.fetch = () => new Promise((resolve, reject) => {
+    settle = {resolve, reject};
+  });
+  a.run("S.user={id:'me'};UI.formDraft={owner:'someone-else',submit:['task.create']}");
+  const failing = a.run("api('/api/action',{action:'task.create',data:{}})");
+  assert.deepEqual([submit.disabled, cancel.disabled], [true, false], '请求在路上时不能再点一次，取消仍可用');
+  settle.reject(new Error('offline'));
+  await assert.rejects(failing);
+  assert.equal(submit.disabled, false, '失败后表单还在，按钮要还回来');
+  const passing = a.run("api('/api/action',{action:'task.create',data:{}})");
+  settle.resolve({ok: true, status: 200, text: async () => '{}'});
+  await passing;
+  assert.equal(submit.disabled, true, '成功后到弹窗关闭前仍然不能再点');
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0][1], a.run('SUBMIT_HOLD_MS'));
+  timers[0][0]();
+  assert.equal(submit.disabled, false, '弹窗若没关，过一会儿按钮恢复');
+  a.run("api('/api/action',{action:'project.member_loads',data:{}})");
+  assert.equal(submit.disabled, false, '表单里顺带发出的查询不占用提交按钮');
+});
+
+test('coming back to the page redraws the schedule, and only the counts under someone at work', async () => {
+  const a = app(), page = pageElements();
+  a.context.document = page.document;
+  const next = {user: {id: 'me'}, notifications: [{id: 'n'}], requests: [{id: 'r'}], chat: {unread: 2}, tasks: [{id: 'new'}]};
+  a.context.fetch = () => Promise.resolve({ok: true, status: 200, text: async () => JSON.stringify(next)});
+  a.run(`var seen=[];refresh=async()=>{seen.push('refresh')};renderInbox=()=>seen.push('inbox');updateChatDot=()=>seen.push('chat');
+    refreshInboxState=async()=>{seen.push('inboxState')};var busy=false;tourBusy=()=>busy;
+    S.user={id:'me'};S.tasks=[];S.notifications=[];UI.view='today';lastStateAt=0`);
+  await a.run('refreshOnReturn()');
+  assert.deepEqual(a.json('seen'), ['refresh'], '日程页面直接重画');
+  a.run('seen=[];busy=true;lastStateAt=0');
+  await a.run('refreshOnReturn()');
+  assert.deepEqual(a.json('seen'), ['inbox', 'chat']);
+  assert.deepEqual(a.json('[S.notifications,S.requests,S.chat,S.tasks]'), [[{id: 'n'}], [{id: 'r'}], {unread: 2}, []], '弹窗开着时只更新角标，不动页面');
+  a.run("seen=[];busy=false;UI.view='settings';lastStateAt=0");
+  await a.run('refreshOnReturn()');
+  assert.deepEqual(a.json('seen'), ['inbox', 'chat'], '有内嵌表单的页面不重画');
+  a.run("seen=[];UI.view='today'");
+  await a.run('refreshOnReturn()');
+  assert.deepEqual(a.json('seen'), [], '刚取过状态就不再取');
+  a.run("seen=[];lastStateAt=0;UI.view='today'");
+  page.document.activeElement = {closest: () => ({})};
+  await a.run('refreshOnReturn()');
+  assert.deepEqual(a.json('seen'), ['inbox', 'chat'], '正在输入时不重画');
+  a.run("seen=[];UI.view='inbox'");
+  await a.run('refreshOnReturn()');
+  assert.deepEqual(a.json('seen'), ['inboxState']);
+});
+
+test('the sidebar counts today while 今日任务 is turned to another day, and the way back resets it', () => {
+  const a = app(), page = pageElements();
+  a.context.document = page.document;
+  a.run(`renderFreshDot=()=>{};S.today='2026-11-13';S.user={id:'me',admin:0};S.projects=[];UI.dayOffset=1;
+    S.tasks=[{id:'a',assignee:'me',date:'2026-11-13',status:'todo',priority:'P0',duration:90},
+      {id:'b',assignee:'me',date:'2026-11-13',status:'done',priority:'P1',duration:30},
+      {id:'c',assignee:'me',date:'2026-11-14',status:'todo',priority:'P1',duration:45},
+      {id:'d',assignee:'me',date:'2026-11-14',status:'todo',priority:'P0',duration:15},
+      {id:'e',assignee:'me',date:'2026-11-14',status:'todo',priority:'P0',duration:15}];renderStats()`);
+  const text = id => page.elements[id].textContent;
+  assert.deepEqual([text('#todayCount'), text('#p0Count'), text('#focusTime')], [1, 1, '02:00'], '侧栏数的是今天');
+  assert.equal(page.elements['#focusProgress'].style.width, '50%');
+  assert.deepEqual([text('#openTabCount'), text('#allTabCount'), text('#progressText')], [3, 3, '0 / 3 已完成'], '页面里数的是翻到的那一天');
+  a.run("var went=[];switchView=v=>went.push(v);openToday()");
+  assert.deepEqual([a.run('UI.dayOffset'), a.json('went')], [0, ['today']]);
+});
+
+test('editing a one-day task leaves 截止时间 empty and can change the time', async () => {
+  const a = app(), page = pageElements(), sent = [];
+  a.context.document = page.document;
+  a.context.sent = sent;
+  a.run(`draftForm=()=>{};closeModal=()=>{};closeDrawer=()=>{};toast=()=>{};act=async(action,data)=>{sent.push({action,data})};
+    S.today='2026-11-13';S.users=[{id:'me',active:1}];S.projects=[];S.user={id:'me',admin:0};
+    S.tasks=[{id:'t',name:'周报',assignee:'me',creator:'me',date:'2026-11-13',deadline:'2026-11-13',time:'14:30',duration:30,priority:'P1'},
+      {id:'m',name:'多天',assignee:'me',creator:'me',date:'2026-11-13',deadline:'2026-11-15',time:'09:00',duration:30,priority:'P1'}];
+    editTaskRequest('m',true)`);
+  assert.match(page.elements['#modalContent'].innerHTML, /id="editTaskDeadline"[^>]*value="2026-11-15"/, '多天任务仍带出截止时间');
+  a.run("editTaskRequest('t',true)");
+  const html = page.elements['#modalContent'].innerHTML;
+  assert.match(html, /id="editTaskDeadline"[^>]*value=""/, '单日任务不再预填成安排日期');
+  assert.match(html, /id="editTaskTime" type="time" value="14:30"/);
+  Object.assign(page.elements['#editTaskName'], {value: '周报'});
+  Object.assign(page.elements['#editTaskDate'], {value: '2026-11-16'});
+  Object.assign(page.elements['#editTaskDeadline'], {value: ''});
+  Object.assign(page.elements['#editTaskTime'], {value: '16:00'});
+  Object.assign(page.elements['#editTaskDuration'], {value: '30'});
+  await page.elements['#confirmTaskEdit'].onclick();
+  assert.deepEqual(sent.map(x => [x.action, x.data.date, x.data.deadline, x.data.time]), [['task.update', '2026-11-16', null, '16:00']], '往后挪一天不被截止时间拦住');
+  Object.assign(page.elements['#editTaskDate'], {value: '2026-11-20'});
+  Object.assign(page.elements['#editTaskDeadline'], {value: '2026-11-18', min: ''});
+  page.elements['#editTaskDate'].onchange();
+  assert.deepEqual([page.elements['#editTaskDeadline'].value, page.elements['#editTaskDeadline'].min], ['', '2026-11-20'], '改了安排日期，早于它的截止时间清空');
+  a.run("S.editRequests=[{id:'r',taskId:'t',status:'pending',requester:'me',changes:{deadline:null,time:'16:00',date:'2026-11-13'}}]");
+  const summary = a.run('renderEditRequestSummary(S.tasks[0])');
+  assert.ok(summary.includes('16:00') && summary.includes('—') && !summary.includes('null'), summary);
+});
+
+test('a dialog closes on a click that starts and ends on its backdrop, not on a drag out of it', () => {
+  const a = app(), backdrop = {id: 'modalBackdrop'}, field = {id: 'taskDesc'};
+  a.context.backdrop = backdrop;
+  a.context.field = field;
+  const clicked = (pressed, target) => a.run(`UI.pressedOn=${pressed};backdropClicked({target:${target},currentTarget:backdrop})`);
+  assert.equal(clicked('backdrop', 'backdrop'), true);
+  assert.equal(clicked('field', 'backdrop'), false, '在输入框里拖选、松在弹窗外，不算点了背景');
+  assert.equal(clicked('backdrop', 'field'), false);
+  assert.equal(clicked('null', 'backdrop'), true, '没有按下记录的点击照常关闭');
+  assert.equal(a.run('UI.pressedOn'), null);
+});
+
+test('changing a password asks in masked boxes and for the new one twice', async () => {
+  const a = app(), page = pageElements(), sent = [], toasts = [];
+  a.context.document = page.document;
+  a.context.sent = sent;
+  a.context.toasts = toasts;
+  a.context.prompt = () => {
+    throw new Error('密码不再用浏览器的 prompt 输入');
+  };
+  a.run(`closeModal=()=>{};toast=m=>toasts.push(m);api=async(path,body)=>{sent.push([path,body])};
+    S.user={id:'me'};S.users=[{id:'me',displayName:'小明'}];changeOwnPassword()`);
+  const html = page.elements['#modalContent'].innerHTML;
+  assert.equal((html.match(/type="password"/g) || []).length, 3);
+  assert.ok(html.includes('小明'));
+  const fill = (current, next, again) => {
+    page.elements['#passwordCurrent'].value = current;
+    page.elements['#passwordNext'].value = next;
+    page.elements['#passwordAgain'].value = again;
+    return page.elements['#confirmPassword'].onclick();
+  };
+  await fill('old-secret', 'short', 'short');
+  await fill('old-secret', 'new-secret', 'new-secert');
+  await fill('', 'new-secret', 'new-secret');
+  assert.deepEqual([sent.length, toasts], [0, ['密码至少 6 位', '两次输入的新密码不一致', '请输入当前密码']]);
+  await fill('old-secret', 'new-secret', 'new-secret');
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [['/api/password', {id: 'me', current: 'old-secret', password: 'new-secret'}]]);
+  assert.equal(toasts.at(-1), '密码已更新');
+});
+
+test('挖空本次 picks the day from a calendar', async () => {
+  const a = app(), page = pageElements(), sent = [];
+  a.context.document = page.document;
+  a.context.sent = sent;
+  a.run(`closeModal=()=>{};toast=()=>{};act=async(action,data)=>{sent.push([action,data])};
+    S.today='2026-11-13';DATE_HORIZON='2028-11-12';S.repeats=[{id:'r',name:'<周会>'}];skipRepeatDialog('r')`);
+  const html = page.elements['#modalContent'].innerHTML;
+  assert.match(html, /id="skipRepeatDate" type="date" min="2026-11-13" max="2028-11-12" value="2026-11-13"/);
+  assert.ok(html.includes('&lt;周会&gt;'));
+  page.elements['#skipRepeatDate'].value = '2026-11-20';
+  await page.elements['#confirmSkipRepeat'].onclick();
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [['repeat.skip', {id: 'r', date: '2026-11-20', skip: true}]]);
+});
+
+test('people to add to a project are listed by name, like those already on it', () => {
+  const a = app(), page = pageElements();
+  a.context.document = page.document;
+  a.run(`fetch=()=>Promise.reject(new Error('offline'));S.today='2026-11-13';S.user={id:'boss',admin:1};S.tasks=[];
+    S.users=[{id:'chenxi',displayName:'陈曦',active:1},{id:'wang00',displayName:'王零',active:1}];
+    S.projects=[{id:'p',name:'项目',owner:'chenxi',status:'active',start:'2026-11-01',members:{chenxi:'accepted'}}];inviteCollaborators('p')`);
+  assert.match(page.elements['#modalContent'].innerHTML, /value="wang00"> <strong>王零<\/strong><small>wang00 · /);
 });
