@@ -990,7 +990,7 @@ function projectCardHTML(p){
 /* The eyebrow above a folder or project names the levels above it; each opens. */
 const crumb=(label,folder)=>`<button type="button" class="space-crumb" data-crumb="${escapeHTML(folder)}">${escapeHTML(label)}</button>`;
 function bindCrumbs(){
-  $$('#projectsView .space-crumb').forEach(b=>b.onclick=()=>b.dataset.crumb?openFolderView(b.dataset.crumb):openProjectSpace(''));
+  $$('#projectsView .space-crumb').forEach(b=>b.onclick=()=>b.dataset.crumb==='@shelf'?openAchievements():b.dataset.crumb?openFolderView(b.dataset.crumb):openProjectSpace(''));
 }
 function bindProjectCards(){
   $$('.project-title-link').forEach(button=>button.onclick=()=>openProjectSpace(button.dataset.openProject));
@@ -1062,12 +1062,13 @@ const navClickBlocked=()=>Date.now()-(UI.navDropAt||0)<350;
 function renderProjectNav(){
   const nav=$('#projectNav');if(!nav||UI.navDrag)return;
   const tree=projectTree(),closed=closedFolders(),fresh=freshRefs(),admin=Boolean(S.user?.admin);
+  const inShelf=Boolean(UI.space&&(S.fileArchives||[]).some(p=>p.id===UI.space));
   const drag=(kind,item)=>canDragNav(kind,item)?' data-drag="1"':'';
-  const project=(n,level,parent='',archived=false)=>{
+  const project=(n,level,parent='')=>{
     const p=n.item,on=UI.space===p.id,open=UI.collapsedProjectNode!==p.id&&((UI.openProjectNodes||[]).includes(p.id)||on);
     return `<div class="nav-node"><div class="project-nav-project${on?' is-on':''}" data-node-level="${level}"><button type="button" class="project-node-caret" data-project-expand="${escapeHTML(p.id)}" aria-expanded="${open}" aria-label="${open?'收起':'展开'}「${escapeHTML(p.name)}」的内容">${icon('chevron-right')}</button>`
-      +`<button class="project-nav-item${archived?'':' nav-row'}${on?' is-on':''}" data-kind="project" data-id="${escapeHTML(p.id)}" `
-      +`data-level="${level}" data-parent="${escapeHTML(parent)}" data-space="${escapeHTML(p.id)}"${archived?'':drag('project',p)}`
+      +`<button class="project-nav-item nav-row${on?' is-on':''}" data-kind="project" data-id="${escapeHTML(p.id)}" `
+      +`data-level="${level}" data-parent="${escapeHTML(parent)}" data-space="${escapeHTML(p.id)}"${drag('project',p)}`
       +` title="${escapeHTML(p.name)}" aria-label="${escapeHTML(p.name)}"${on?' aria-current="page"':''}>${icon('gantt')}`
       +`<span class="nav-text">${escapeHTML(p.name)}</span>${fresh.has(p.id)?'<em class="new-chip">新</em>':''}</button></div>`
       +(open?projectNavContents(p):'')+'</div>';
@@ -1089,9 +1090,9 @@ function renderProjectNav(){
     +`<button class="project-nav-item project-nav-all${UI.space||UI.folder||UI.shelf?'':' is-on'}" data-space="" title="全部项目" aria-label="全部项目">${icon('layout-grid')}`
     +`<span class="nav-text">全部项目</span><b>${visibleProjects().length}</b></button>`
     +`<div class="project-nav-tree" id="projectNavTree">${tree.map(n=>n.kind==='folder'?folder(n):project(n,0)).join('')}</div>`
-    +(admin||(S.fileArchives||[]).length?`<div class="project-nav-shelf"><button class="project-nav-item project-nav-all${UI.shelf==='achievements'&&!UI.space?' is-on':''}" data-shelf="achievements" title="成果库" aria-label="成果库">${icon('award')}`
-    +`<span class="nav-text">成果库</span><b>${shelfProjects().length}</b></button>`
-    +`<div class="project-nav-tree">${(S.fileArchives||[]).map(p=>project({item:p},0,'',true)).join('')}</div></div>`:'')
+    /* Finished projects live in 成果库; it stays lit while one of them is open. */
+    +(admin||(S.fileArchives||[]).length?`<div class="project-nav-shelf"><button class="project-nav-item project-nav-all${(UI.shelf==='achievements'&&!UI.space)||inShelf?' is-on':''}" data-shelf="achievements" title="成果库" aria-label="成果库">${icon('award')}`
+    +`<span class="nav-text">成果库</span><b>${shelfProjects().length}</b></button></div>`:'')
     +navigationHandle('project');
   $$('#projectNav [data-space]').forEach(b=>b.onclick=()=>{if(!navClickBlocked())openProjectSpace(b.dataset.space)});
   $$('#projectNav [data-shelf]').forEach(b=>b.onclick=()=>{if(!navClickBlocked())openAchievements()});
@@ -1661,7 +1662,7 @@ function renderProjectSpace(id){
   const keys=archive?['files','meetings']:Object.keys(SPACE_TABS);
   let tab=spaceTabNow();if(!keys.includes(tab)){tab=keys[0];setSpaceTab(tab)}
   const folder=(S.folders||[]).find(f=>f.id===p.folderId),eyebrow=$('#projectsView .eyebrow');
-  if(eyebrow){eyebrow.innerHTML=`${crumb('全部项目','')}${folder?` / ${crumb(folder.name,folder.id)}`:''}${archive?' / 归档':''}`;bindCrumbs()}
+  if(eyebrow){eyebrow.innerHTML=`${crumb('全部项目','')} / ${archive?crumb('成果库','@shelf'):folder?crumb(folder.name,folder.id):''}`.replace(/ \/ $/,'');bindCrumbs()}
   $('#projectsView h1').textContent=p.name;
   const actions=$('#projectActions');
   if(actions){actions.innerHTML=archive?'':projectActionsHTML(p);actions.classList?.toggle('hidden',!actions.innerHTML)}

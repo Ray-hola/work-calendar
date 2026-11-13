@@ -1584,7 +1584,7 @@ test('archived attachments have a read-only navigation and achievements entry wi
   for(const action of ['spaceFileInput','file-delete','spaceBackground','spaceFolder','request-project-completion'])assert.ok(!html.includes(action),action);
   assert.equal(a.run('visibleProjects().length'),0,'归档项目不回到进行中列表');
   a.run("S.user={id:'superadmin',admin:1};S.achievements=[{id:'old',name:'已交付项目',status:'done',tasks:[]}];renderAchievements()");
-  assert.ok(elements['#achievementGrid'].innerHTML.includes('achievement-files'),'管理员可从成果库进入归档附件');
+  assert.ok(elements['#achievementGrid'].innerHTML.includes('achievement-files'),'管理员可从成果库进入已结项项目的文件');
 });
 
 test('成果库 is a shelf in the project directory for admins and for members with finished projects',()=>{

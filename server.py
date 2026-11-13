@@ -3917,7 +3917,7 @@ class Store:
             return self.put('projects',p)
         if action=='file.delete':
             f=self.get('files',d.get('id'));p=self.get('projects',f['projectId'])
-            if not self.can_view_project(user,p):raise Problem(403,'归档文件仅供读取，或你已无权访问该项目')
+            if not self.can_view_project(user,p):raise Problem(403,'成果库中的项目仅供读取，或你已无权访问该项目')
             if not (user['admin'] or p['owner']==user['id'] or f.get('uploader')==user['id']):
                 raise Problem(403,'只有上传者、项目 Owner 或管理员可以删除文件')
             self.drop_file(f['id'])
