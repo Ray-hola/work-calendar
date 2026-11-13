@@ -131,10 +131,12 @@ class TempAssignRuleTests(unittest.TestCase):
     def test_no_edit_request_can_hand_a_temp_task_on(self):
         # So approving one never gets round the 只给自己 rule either.
         task = self.hand('test002')
-        with self.assertRaises(Problem):
+        with self.assertRaises(Problem) as refused:
             self.store.action(self.store.user('test002'), 'task.edit_request', {
                 'id': task['id'], 'changes': {'assignee': 'test003'}, 'reason': '交给更合适的人',
             })
+        self.assertEqual(refused.exception.status, 400)
+        self.assertEqual(refused.exception.message, '无项目任务不能申请调整负责人')
 
     def test_an_unknown_assign_rule_is_refused(self):
         with self.assertRaises(Problem):

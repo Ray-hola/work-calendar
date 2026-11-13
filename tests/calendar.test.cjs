@@ -3597,13 +3597,17 @@ test('a draft also keeps the choices around the text, and 丢弃 puts them back'
 test('a draft reopens only while its work can still take it', () => {
   const a = app(), opened = [];
   a.context.opened = opened;
-  a.run("S.tasks=[{id:'t',status:'done'}];S.taskRequests=[{id:'r',status:'approved'}];");
-  a.run("S.projects=[{id:'p',status:'active'}];");
+  a.run("S.user={id:'u',admin:0};S.tasks=[{id:'t',status:'done'}];");
+  a.run("S.taskRequests=[{id:'r',status:'approved',projectId:'p'}];");
+  a.run("S.projects=[{id:'p',status:'active',owner:'u'}];");
   a.run('complete=t=>opened.push(t.id);reviewTaskRequest=id=>opened.push(id);reviewProject=id=>opened.push(id)');
   a.run("DRAFT_OPENERS.complete('t');DRAFT_OPENERS.reviewTaskRequest('r');DRAFT_OPENERS.reviewProject('p')");
   assert.deepEqual(opened, []);
   a.run("S.tasks[0].status='doing';S.taskRequests[0].status='pending';S.projects[0].status='pending'");
   a.run("DRAFT_OPENERS.complete('t');DRAFT_OPENERS.reviewTaskRequest('r');DRAFT_OPENERS.reviewProject('p')");
+  assert.deepEqual(opened, ['t', 'r', 'p']);
+  // Someone who can no longer review the request cannot reopen its rejection.
+  a.run("S.projects[0].owner='v';DRAFT_OPENERS.reviewTaskRequest('r')");
   assert.deepEqual(opened, ['t', 'r', 'p']);
 });
 
@@ -3616,4 +3620,130 @@ test('a rule group can keep its members temp tasks to themselves', () => {
   assert.equal(a.run('tempSelfOnly()'), false);
   a.run("S.user={id:'superadmin',admin:1};S.creationRules.tempAssign='self'");
   assert.equal(a.run('tempSelfOnly()'), false, '管理员不受这条限制');
+});
+
+const tick = () => new Promise(resolve => setImmediate(resolve));
+
+test('a stashed draft waits for its own account and gives way to a newer copy', async () => {
+  const h = draftHarness(), store = {};
+  h.a.context.localStorage = {
+    getItem: k => store[k] ?? null,
+    setItem: (k, v) => {
+      store[k] = String(v);
+    },
+    removeItem: k => {
+      delete store[k];
+    },
+  };
+  const row = {key: 'task.new', title: '新任务', label: '', fields: {taskName: '长稿'},
+    reopen: {fn: 'newTask', args: [null]}, updatedAt: '2026-11-13T10:00:00Z'};
+  const stash = JSON.stringify({owner: 'writer', row});
+  store['hola-form-draft-stash'] = stash;
+  h.a.run("S.user={id:'other'};S.formDrafts=[];sendStashedFormDraft()");
+  assert.equal(store['hola-form-draft-stash'], stash, '别的账户登录不动这份暂存');
+  h.a.run("S.user={id:'writer'};sendStashedFormDraft()");
+  await h.settle();
+  assert.equal(store['hola-form-draft-stash'], undefined);
+  assert.ok(h.calls.some(c => c.action === 'formdraft.save' && c.data.fields.taskName === '长稿'));
+  // A copy saved after the stash was written wins.
+  store['hola-form-draft-stash'] = stash;
+  h.a.run("UI.draftStashChecked=null;S.formDrafts=[{key:'task.new',updatedAt:'2026-11-13T11:00:00Z',fields:{}}]");
+  const sent = h.calls.length;
+  h.a.run('sendStashedFormDraft()');
+  assert.equal(h.calls.length, sent);
+  assert.equal(store['hola-form-draft-stash'], undefined);
+});
+
+test('a closing page sends its draft without waiting for the save before it', () => {
+  const h = draftHarness();
+  const fetch = h.a.context.fetch;
+  let hold = true;
+  h.a.context.fetch = (path, options) => {
+    if (!hold) {
+      return fetch(path, options);
+    }
+    hold = false;
+    h.calls.push(JSON.parse(options.body));
+    return new Promise(() => {});
+  };
+  h.open();
+  h.type(0, '第一段');
+  h.fields[0].value = '第一段，第二段';
+  h.state.listener({target: h.fields[0]});
+  h.a.run('saveFormDraft({keepalive:true})');
+  const saves = h.calls.filter(c => c.action === 'formdraft.save');
+  assert.deepEqual(saves.map(c => c.data.fields.taskName), ['第一段', '第一段，第二段']);
+});
+
+test('a 丢弃 that does not reach the server puts the draft back', async () => {
+  const h = draftHarness();
+  h.open();
+  await h.type(0, '要留下的');
+  h.a.context.fetch = async () => {
+    throw new Error('offline');
+  };
+  h.fields[0].value = '';
+  h.open();
+  h.a.run('discardRestoredDraft(UI.formDraft)');
+  await tick();
+  assert.equal(h.a.run('S.formDrafts.length'), 1);
+  assert.ok(h.toasts.includes('offline'));
+});
+
+test('a form opened again but left alone loses the draft its earlier submit used', async () => {
+  const h = draftHarness();
+  let finish;
+  const fetch = h.a.context.fetch;
+  h.a.context.fetch = (path, options) => (JSON.parse(options.body).action === 'task.create'
+    ? new Promise(resolve => {
+      finish = resolve;
+    })
+    : fetch(path, options));
+  h.open();
+  await h.type(0, '第一项');
+  const submitting = h.a.run("api('/api/action',{action:'task.create'})");
+  await h.a.run('flushFormDraft()');
+  h.fields[0].value = '';
+  h.open();
+  assert.ok(h.state.banner.includes('已恢复草稿'));
+  finish({ok: true, text: async () => '{}'});
+  await submitting;
+  await h.settle();
+  assert.equal(h.a.run('S.formDrafts.length'), 0);
+  assert.equal(h.a.run('UI.formDraft.saved'), false);
+});
+
+test('closing right after 丢弃 does not say the draft was kept', async () => {
+  const h = draftHarness();
+  h.open();
+  await h.type(0, '先写着');
+  h.fields[0].value = '';
+  h.open();
+  let finish;
+  h.a.context.fetch = (path, options) => {
+    h.calls.push(JSON.parse(options.body));
+    return new Promise(resolve => {
+      finish = resolve;
+    });
+  };
+  h.a.run('discardRestoredDraft(UI.formDraft)');
+  const closing = h.a.run('flushFormDraft(true)');
+  finish({ok: true, status: 200, text: async () => '{}'});
+  await closing;
+  assert.ok(h.calls.some(c => c.action === 'formdraft.delete'));
+  assert.ok(!h.toasts.some(m => m.startsWith('已存为草稿')));
+});
+
+test('a submit that fails keeps the draft and lets the form submit again', async () => {
+  const h = draftHarness();
+  h.open();
+  await h.type(0, '会失败的提交');
+  const fetch = h.a.context.fetch;
+  h.a.context.fetch = (path, options) => (JSON.parse(options.body).action === 'task.create'
+    ? Promise.resolve({ok: false, status: 400, text: async () => JSON.stringify({error: '名称重复'})})
+    : fetch(path, options));
+  await assert.rejects(h.a.run("api('/api/action',{action:'task.create',data:{}})"), /名称重复/);
+  assert.equal(h.a.run('S.formDrafts.length'), 1);
+  assert.equal(h.a.run('UI.formDraft.submitting'), false);
+  assert.ok(!h.calls.some(c => c.action === 'formdraft.delete'));
 });

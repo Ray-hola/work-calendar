@@ -147,7 +147,8 @@ TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notific
           'folders', 'files', 'agent_conversations', 'agent_drafts', 'agent_receipts', 'meetings', 'form_drafts')
 # 草稿箱: text typed into a form is kept per account as it is typed, so closing
 # the form by accident loses nothing. Drafts are private and capped; the text cap
-# keeps one draft inside the 64 KB a browser sends while a page is closing.
+# keeps most drafts inside the 64 KB a browser sends while a page is closing, and
+# the client keeps a bigger one in the browser until the next visit.
 FORM_DRAFT_LIMIT = 30
 FORM_DRAFT_CHARS = 20_000
 FORM_DRAFT_KEY = r'[A-Za-z0-9_.:-]{1,120}'
@@ -2677,7 +2678,7 @@ class Store:
             return {'group': None, **{k: 'direct' for k in CREATION_KINDS}, 'agent': 'operate', 'tempAssign': 'anyone'}
         policy=self.creation_policy();groups={g['id']:g for g in policy['groups']}
         group=groups.get(policy['assign'].get(user['id'])) or groups['default']
-        return {'group': group['id'], **{k: group.get(k, DEFAULT_GROUP[k]) for k in CREATION_KINDS},
+        return {'group': group.get('id', 'default'), **{k: group.get(k, DEFAULT_GROUP[k]) for k in CREATION_KINDS},
                 'agent': group.get('agent', DEFAULT_GROUP['agent']),
                 'tempAssign': group.get('tempAssign', DEFAULT_GROUP['tempAssign'])}
 
@@ -2902,7 +2903,7 @@ class Store:
                 'collectionSettings':automation,
                 'automation':automation,
                 'agentCapabilities':self.agent_capabilities(user),
-                'formDrafts': self.form_drafts(user['id']),
+                'formDrafts':self.form_drafts(user['id']),
                 'audit':self.recent_audit(60) if user['admin'] else []}
 
     def diary_statistics(self, viewer, start=None, end=None):
@@ -3117,14 +3118,14 @@ class Store:
             raise Problem(400, '请选择要删除的草稿')
         if any(not isinstance(key, str) or not re.fullmatch(FORM_DRAFT_KEY, key) for key in keys):
             raise Problem(400, '请选择要删除的草稿')
-        deleted = 0
-        for key in keys:
-            deleted += self.db.execute('DELETE FROM form_drafts WHERE id = ?', (f'{user["id"]}:{key}',)).rowcount
-        return {'deleted': deleted}
+        owner = user.get('id', '')
+        cur = self.db.executemany('DELETE FROM form_drafts WHERE id = ?', [(f'{owner}:{key}',) for key in keys])
+        return {'deleted': cur.rowcount}
 
     def refuse_handing_out(self, user: dict, assignee: str) -> None:
         """A rule group set to 只给自己 keeps its members' 临时任务 to themselves."""
-        if assignee != user['id'] and self.creation_rules(user)['tempAssign'] == 'self':
+        rule = self.creation_rules(user).get('tempAssign', DEFAULT_GROUP['tempAssign'])
+        if assignee != user.get('id') and rule == 'self':
             raise Problem(403, '你所在的规则组只能给自己建临时任务')
 
     def display_name(self, account):
