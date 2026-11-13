@@ -65,22 +65,26 @@ async function setLanguage(lang){
   if(S.user){try{await api('/api/action',{action:'profile.language',data:{lang}})}catch(e){toast(e.message);return}}
   try{localStorage.setItem(LANG_KEY,lang)}catch(_){}
   if(lang!==LANG){
-    const url=new URL(location.href);url.searchParams.delete('lang');
+    const url=new URL(location.href);url.searchParams.delete('lang');url.searchParams.delete('langAuto');
     if(url.href!==location.href)location.replace(url.href);else location.reload();
   }
 }
 /* The account's saved language wins over this browser's, except while ?lang= is in the address. */
+function autoLang(){try{return new URLSearchParams(location.search).has('langAuto')}catch(_){return false}}
 function syncAccountLanguage(user){
-  const lang=user?.lang;
-  if(!LANGS[lang]||urlLang())return false;
+  const lang=user?.lang,auto=autoLang();
+  if(!LANGS[lang]||urlLang()&&!auto)return false;
   let stored=null;
   try{localStorage.setItem(LANG_KEY,lang);stored=localStorage.getItem(LANG_KEY)}catch(_){}
   if(lang===LANG)return false;
-  // Storage that does not keep the choice would bring the old language back on every reload.
-  if(stored!==lang){
-    const url=new URL(location.href);url.searchParams.set('lang',lang);location.replace(url.href);return true;
-  }
-  location.reload();return true;
+  if(stored===lang&&!auto){location.reload();return true}
+  /* Storage that does not keep the choice would bring the old language back on
+     every reload, so the address carries it, marked langAuto so the next
+     account's choice still applies; once storage keeps it the mark goes. */
+  const url=new URL(location.href);
+  if(stored===lang){url.searchParams.delete('lang');url.searchParams.delete('langAuto')}
+  else{url.searchParams.set('lang',lang);url.searchParams.set('langAuto','1')}
+  location.replace(url.href);return true;
 }
 /* One stroked 24px icon set. Everything the UI used to draw with text glyphs
    (◷ ▦ ✦ ◇ ＋ › ↻ ▶ …) now comes from here, so stroke weight, optical size and

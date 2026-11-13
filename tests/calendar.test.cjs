@@ -3574,7 +3574,19 @@ test('the account’s saved language wins over the browser unless ?lang= is set'
     throw new Error('blocked');
   };
   assert.equal(forgetful.run("syncAccountLanguage({lang:'en'})"), true);
-  assert.deepEqual(moves, ['https://work.example/?lang=en']);
+  assert.deepEqual(moves, ['https://work.example/?lang=en&langAuto=1']);
+  // That mark does not pin the language for the next account to sign in on the page.
+  const next = appIn('zh', '?lang=en&langAuto=1');
+  next.context.location.href = 'https://work.example/?lang=en&langAuto=1';
+  next.context.URL = URL;
+  next.context.location.replace = href => moves.push(href);
+  next.context.localStorage.setItem = () => {
+    throw new Error('blocked');
+  };
+  assert.equal(next.run('LANG'), 'en');
+  assert.equal(next.run("syncAccountLanguage({lang:'zh'})"), true);
+  assert.equal(moves.at(-1), 'https://work.example/?lang=zh&langAuto=1');
+  assert.equal(next.run("syncAccountLanguage({lang:'en'})"), false, 'the language already shown stays');
 });
 
 test('server messages follow the language while keeping the names they carry', () => {
